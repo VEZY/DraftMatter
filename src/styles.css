@@ -1797,6 +1797,30 @@ kbd {
 
 .picker-footer span { align-items: center; display: flex; gap: 4px; }
 
+.picker-footer button {
+  align-items: center;
+  background: transparent;
+  color: var(--sage);
+  display: flex;
+  font-size: 8px;
+  gap: 4px;
+  margin-left: auto;
+  padding: 0;
+}
+
+.citation-empty {
+  align-items: center;
+  color: #9aa39e;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  min-height: 170px;
+  text-align: center;
+}
+
+.citation-empty strong { color: #69746e; font-size: 10px; margin-top: 8px; }
+.citation-empty p { font-size: 8px; margin: 5px 0 0; }
+
 .source-drawer-backdrop {
   align-items: stretch;
   justify-content: flex-end;

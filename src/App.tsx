@@ -1,19 +1,31 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { formatCitationCluster, mergeCitationRecords, parseBibliographyFile, searchCitations } from './bibliography'
 import { parsePortableDocument } from './document'
 import { Icon } from './Icon'
 import { cleanProjection, downloadText, reviewedProjection } from './projections'
+import { sampleCitations } from './sampleCitations'
 import { initialDraft } from './sampleDraft'
 import { readRecoverySnapshots, saveRecoverySnapshot, type RecoverySnapshot } from './storage'
-import type { DocumentDiagnostic, DraftState, MarkupView, SuggestionStatus } from './types'
+import type { CitationRecord, DocumentDiagnostic, DraftState, MarkupView, SuggestionStatus } from './types'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
+const CITATIONS_KEY = 'draftmatter.citations.v1'
 
 function getInitialProjectMeta() {
   try {
     return { filename: 'canopy-drought.qmd', projectName: 'Canopy drought study', ...JSON.parse(localStorage.getItem(PROJECT_META_KEY) ?? '{}') }
   } catch {
     return { filename: 'canopy-drought.qmd', projectName: 'Canopy drought study' }
+  }
+}
+
+function getInitialCitations(): CitationRecord[] {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CITATIONS_KEY) ?? '[]')
+    return Array.isArray(saved) && saved.length ? mergeCitationRecords(sampleCitations, saved) : sampleCitations
+  } catch {
+    return sampleCitations
   }
 }
 
@@ -64,10 +76,10 @@ function Editable({
   )
 }
 
-function CitationChip({ onClick, expanded = false }: { onClick: () => void; expanded?: boolean }) {
+function CitationChip({ onClick, label }: { onClick: () => void; label: string }) {
   return (
     <button className="citation-chip" onClick={onClick} aria-label="Open citation details">
-      (Vezy et al., 2024{expanded ? '; Martin & Chen, 2023' : ''})
+      {label}
     </button>
   )
 }
@@ -98,13 +110,21 @@ function App() {
   const [filename, setFilename] = useState(initialProjectMeta.filename)
   const [projectName, setProjectName] = useState(initialProjectMeta.projectName)
   const [diagnostics, setDiagnostics] = useState<DocumentDiagnostic[]>([])
+  const [bibliographyDiagnostics, setBibliographyDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>(() => readRecoverySnapshots(localStorage))
+  const [citations, setCitations] = useState<CitationRecord[]>(getInitialCitations)
+  const [citationQuery, setCitationQuery] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const bibliographyInputRef = useRef<HTMLInputElement>(null)
 
   const activeStatus = draft.activeProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
   const activeReplacement = draft.activeProposal === 'alice'
     ? 'reduced leaf area by 18%'
     : 'lowered leaf expansion during the treatment period'
+  const citationResults = useMemo(() => searchCitations(citations, citationQuery).slice(0, 8), [citations, citationQuery])
+  const citationLabel = useMemo(() => formatCitationCluster(citations, draft.citationKeys), [citations, draft.citationKeys])
+  const primaryCitation = citations.find((record) => record.citekey === draft.citationKeys[0]) ?? citations[0]
+  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics]
 
   const updateDraft = (patch: Partial<DraftState>) => {
     setSaveState('saving')
@@ -131,6 +151,10 @@ function App() {
   useEffect(() => {
     localStorage.setItem(PROJECT_META_KEY, JSON.stringify({ filename, projectName }))
   }, [filename, projectName])
+
+  useEffect(() => {
+    localStorage.setItem(CITATIONS_KEY, JSON.stringify(citations))
+  }, [citations])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -257,6 +281,41 @@ function App() {
     setToast('Recovered local manuscript version')
   }
 
+  const addCitation = (record: CitationRecord) => {
+    if (draft.citationKeys.includes(record.citekey)) {
+      setToast(`${record.citekey} is already cited here`)
+      setCitationSearchOpen(false)
+      return
+    }
+    const citationKeys = [...draft.citationKeys, record.citekey]
+    updateDraft({ citationKeys, citationInserted: citationKeys.length > 1 })
+    setCitationSearchOpen(false)
+    setCitationQuery('')
+    setToast(`Citation inserted · @${record.citekey}`)
+  }
+
+  const onBibliographySelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (!file) return
+    if (!/\.(bib|bibtex|json)$/i.test(file.name)) {
+      setToast('Choose a BibTeX or CSL JSON bibliography')
+      return
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setToast('This prototype indexes bibliography files up to 10 MB')
+      return
+    }
+    const parsed = parseBibliographyFile(file.name, await file.text())
+    const next = mergeCitationRecords(citations, parsed.records)
+    const added = next.length - citations.length
+    setCitations(next)
+    setBibliographyDiagnostics(parsed.diagnostics)
+    setProjectMenuOpen(false)
+    setCitationSearchOpen(true)
+    setToast(`Indexed ${added} new source${added === 1 ? '' : 's'} from ${file.name}`)
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -283,14 +342,15 @@ function App() {
                 </div>
                 <div className="project-menu-actions">
                   <button onClick={() => fileInputRef.current?.click()}><Icon name="document" size={16} /><span><strong>Open manuscript…</strong><small>Markdown or Quarto, up to 5 MB</small></span></button>
+                  <button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={16} /><span><strong>Attach bibliography…</strong><small>BibTeX or CSL JSON · {citations.length} indexed</small></span></button>
                   <button onClick={createSnapshot}><Icon name="clock" size={16} /><span><strong>Save recovery snapshot</strong><small>Keep a local version in this browser</small></span></button>
                   <button onClick={() => { setRecoveryOpen(true); setProjectMenuOpen(false) }}><Icon name="history" size={16} /><span><strong>Recovery history</strong><small>{recoveries.length ? `${recoveries.length} local version${recoveries.length === 1 ? '' : 's'}` : 'No local versions yet'}</small></span><span className="menu-count">{recoveries.length}</span></button>
                   <button onClick={() => download('reviewed')}><Icon name="download" size={16} /><span><strong>Download portable source</strong><small>Save {filename} to this computer</small></span></button>
                 </div>
-                {diagnostics.length > 0 && (
+                {allDiagnostics.length > 0 && (
                   <div className="project-diagnostics">
                     <span>Import checks</span>
-                    {diagnostics.slice(0, 3).map((item) => <div className={`diagnostic-${item.level}`} key={item.code}><i />{item.message}</div>)}
+                    {allDiagnostics.slice(0, 3).map((item) => <div className={`diagnostic-${item.level}`} key={item.code}><i />{item.message}</div>)}
                   </div>
                 )}
               </div>
@@ -335,13 +395,14 @@ function App() {
         </div>
       </header>
       <input ref={fileInputRef} className="visually-hidden" type="file" accept=".md,.qmd,text/markdown" onChange={onFileSelected} aria-label="Open portable manuscript" />
+      <input ref={bibliographyInputRef} className="visually-hidden" type="file" accept=".bib,.bibtex,.json,application/json" onChange={onBibliographySelected} aria-label="Attach bibliography" />
 
       <div className="workspace">
         <nav className="app-rail" aria-label="Workspace navigation">
           <div className="rail-items">
             <button className={activeNav === 'manuscript' ? 'active' : ''} onClick={() => setActiveNav('manuscript')} data-label="Manuscript"><Icon name="document" /></button>
             <button className={activeNav === 'review' ? 'active' : ''} onClick={showReviewPanel} data-label="Review"><Icon name="message" /><span className="rail-notice">3</span></button>
-            <button className={activeNav === 'sources' ? 'active' : ''} onClick={() => setActiveNav('sources')} data-label="Sources"><Icon name="book" /></button>
+            <button className={activeNav === 'sources' ? 'active' : ''} onClick={() => { setActiveNav('sources'); setCitationSearchOpen(true) }} data-label="Sources"><Icon name="book" /></button>
             <button className={activeNav === 'history' ? 'active' : ''} onClick={() => setActiveNav('history')} data-label="History"><Icon name="history" /></button>
           </div>
           <button data-label="Settings"><Icon name="settings" /></button>
@@ -372,9 +433,9 @@ function App() {
 
             <div className="project-health">
               <div className="project-health-title"><Icon name="spark" size={16} /> Project health</div>
-              <div><span><i className="health-dot okay" /> Citations</span><small>{draft.citationInserted ? '13 linked' : '12 linked'}</small></div>
+              <div><span><i className="health-dot okay" /> Citations</span><small>{draft.citationKeys.length} cited · {citations.length} indexed</small></div>
               <div><span><i className={`health-dot ${draft.cellStatus === 'current' ? 'okay' : 'warning'}`} /> Figures</span><small>{draft.cellStatus === 'current' ? 'Up to date' : draft.cellStatus}</small></div>
-              <div><span><i className={`health-dot ${diagnostics.some((item) => item.level === 'error') ? 'warning' : 'okay'}`} /> Source</span><small>{diagnostics.length ? `${diagnostics.length} check${diagnostics.length === 1 ? '' : 's'}` : 'Portable'}</small></div>
+              <div><span><i className={`health-dot ${allDiagnostics.some((item) => item.level === 'error') ? 'warning' : 'okay'}`} /> Source</span><small>{allDiagnostics.length ? `${allDiagnostics.length} check${allDiagnostics.length === 1 ? '' : 's'}` : 'Portable'}</small></div>
             </div>
 
             <div className="panel-footer">
@@ -421,16 +482,16 @@ function App() {
               <h2><span>1</span> Introduction</h2>
               <p className="editable" contentEditable suppressContentEditableWarning spellCheck onBlur={(event) => updateDraft({ introduction: event.currentTarget.innerText.replace(/\s*\(Vezy.*$/, '').trim() })}>
                 {draft.introduction}{' '}
-                <CitationChip onClick={() => setCitationOpen((open) => !open)} expanded={draft.citationInserted} />
+                <CitationChip onClick={() => setCitationOpen((open) => !open)} label={citationLabel} />
               </p>
               {citationOpen && (
                 <div className="citation-detail popover">
                   <div className="citation-detail-top">
                     <span className="source-icon">Z</span>
-                    <div><strong>Vezy, R. et al. (2024)</strong><p>Modelling plant architecture across scales</p></div>
+                    <div><strong>{primaryCitation ? `${primaryCitation.authors[0] ?? primaryCitation.citekey}${primaryCitation.authors.length > 1 ? ' et al.' : ''}${primaryCitation.year ? ` (${primaryCitation.year})` : ''}` : 'Missing citation'}</strong><p>{primaryCitation?.title ?? draft.citationKeys[0]}</p></div>
                     <button className="icon-button subtle" onClick={() => setCitationOpen(false)}><Icon name="close" size={15} /></button>
                   </div>
-                  <dl><div><dt>Journal</dt><dd>in silico Plants</dd></div><div><dt>DOI</dt><dd>10.1093/insilicoplants/diae012</dd></div></dl>
+                  <dl><div><dt>Source</dt><dd>{primaryCitation?.container ?? primaryCitation?.source ?? 'Not available'}</dd></div><div><dt>DOI</dt><dd>{primaryCitation?.doi ?? 'Not available'}</dd></div></dl>
                   <div className="citation-actions"><button>Edit citation</button><button onClick={() => { setCitationSearchOpen(true); setCitationOpen(false) }}>Add another source</button></div>
                 </div>
               )}
@@ -593,16 +654,21 @@ function App() {
       {citationSearchOpen && (
         <div className="modal-backdrop" onMouseDown={() => setCitationSearchOpen(false)}>
           <div className="citation-picker" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Insert citation">
-            <div className="picker-search"><Icon name="search" /><input autoFocus placeholder="Search Zotero and references.bib…" /><kbd>esc</kbd></div>
+            <div className="picker-search"><Icon name="search" /><input autoFocus value={citationQuery} onChange={(event) => setCitationQuery(event.target.value)} placeholder="Search authors, titles, years, or DOI…" /><kbd>esc</kbd></div>
             <div className="picker-body">
-              <div className="picker-filter"><span>Suggested sources</span><button>All libraries <Icon name="chevronDown" size={13} /></button></div>
-              <button className="source-result selected" onClick={() => { updateDraft({ citationInserted: true }); setCitationSearchOpen(false); setToast('Citation inserted and linked') }}>
-                <span className="source-icon">Z</span><span><strong>Growth coordination under fluctuating water availability</strong><small>Martin, A. & Chen, M. · 2023 · New Phytologist</small><em>10.1111/nph.19208</em></span><Icon name="plus" />
-              </button>
-              <button className="source-result"><span className="source-icon bib">B</span><span><strong>Plant modelling as a reproducible research practice</strong><small>Vezy, R. et al. · 2024 · in silico Plants</small><em>references.bib</em></span><Icon name="plus" /></button>
-              <button className="source-result"><span className="source-icon">Z</span><span><strong>Architectural plasticity mediates drought response</strong><small>Coutellier, L. et al. · 2022 · Plant Methods</small><em>10.1186/s13007-022-00891-3</em></span><Icon name="plus" /></button>
+              <div className="picker-filter"><span>{citationResults.length} matching source{citationResults.length === 1 ? '' : 's'}</span><button onClick={() => bibliographyInputRef.current?.click()}>Import bibliography <Icon name="plus" size={13} /></button></div>
+              {citationResults.length ? citationResults.map((record) => {
+                const isCited = draft.citationKeys.includes(record.citekey)
+                return (
+                  <button className={`source-result ${isCited ? 'selected' : ''}`} key={record.citekey} onClick={() => addCitation(record)}>
+                    <span className={`source-icon ${record.source === 'bibtex' ? 'bib' : ''}`}>{record.source === 'bibtex' ? 'B' : record.source === 'csl-json' ? 'C' : 'L'}</span>
+                    <span><strong>{record.title}</strong><small>{record.authors.length ? record.authors.slice(0, 2).join(' & ') : record.citekey}{record.year ? ` · ${record.year}` : ''}{record.container ? ` · ${record.container}` : ''}</small><em>{record.doi ?? `@${record.citekey}`}</em></span>
+                    {isCited ? <Icon name="check" /> : <Icon name="plus" />}
+                  </button>
+                )
+              }) : <div className="citation-empty"><Icon name="search" size={21} /><strong>No matching sources</strong><p>Try fewer terms or import a BibTeX/CSL JSON file.</p></div>}
             </div>
-            <div className="picker-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Add citation</span></div>
+            <div className="picker-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Add citation</span><button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={12} /> Import .bib / CSL JSON</button></div>
           </div>
         </div>
       )}

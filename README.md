@@ -21,6 +21,6 @@ npm test
 npm run build
 ```
 
-The current vertical slice supports opening `.md`/`.qmd` manuscripts, deterministic review parsing and projection, preservation of unsupported top-level sections, semantic citation UI, mocked explicit code execution, overlapping proposal decisions, comments, recovery history, and reviewed/original/final downloads.
+The current vertical slice supports opening `.md`/`.qmd` manuscripts, deterministic review parsing and projection, preservation of unsupported top-level sections, searchable BibTeX/CSL JSON import, semantic citation UI, mocked explicit code execution, overlapping proposal decisions, comments, recovery history, and reviewed/original/final downloads.
 
 The live Zotero API, filesystem-backed desktop projects, real Python/R/Julia execution, Git host commands, and Tauri shell remain subsequent implementation milestones described in [the product and architecture brief](./draftmatter-app-design.md).
