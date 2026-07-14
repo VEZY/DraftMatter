@@ -20,11 +20,15 @@ describe('desktop host adapter', () => {
     await expect(host.openProject('/research/canopy')).resolves.toEqual(project)
     await host.readDocument('/research/canopy', 'paper.qmd')
     await host.saveDocument({ root: '/research/canopy', path: 'paper.qmd', content: '# Paper', expectedHash: 'old' })
+    await host.documentStatus('/research/canopy', 'paper.qmd', 'next')
+    await host.setMainDocument('/research/canopy', 'renamed.qmd')
 
     expect(calls).toEqual([
       ['open_project', { root: '/research/canopy' }],
       ['read_document', { root: '/research/canopy', path: 'paper.qmd' }],
       ['save_document', { request: { root: '/research/canopy', path: 'paper.qmd', content: '# Paper', expectedHash: 'old' } }],
+      ['document_status', { root: '/research/canopy', path: 'paper.qmd', expectedHash: 'next' }],
+      ['set_main_document', { root: '/research/canopy', path: 'renamed.qmd' }],
     ])
   })
 

@@ -19,6 +19,7 @@ interface DesktopSession {
   root: string
   path: string
   hash: string
+  savedRevision: number
 }
 
 function getInitialProjectMeta() {
@@ -146,6 +147,7 @@ function App() {
   const draftRevisionRef = useRef(0)
   const desktopSaveBlockedRef = useRef(false)
   const desktopSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const externalCheckRunningRef = useRef(false)
   const reopenAttemptedRef = useRef(false)
 
   const activeStatus = draft.activeProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
@@ -218,7 +220,7 @@ function App() {
         if (!current || current.root !== root || current.path !== path || desktopSaveBlockedRef.current) return
         try {
           const result = await desktopHost.saveDocument({ root, path, content, expectedHash: current.hash })
-          const next = { ...current, hash: result.hash }
+          const next = { ...current, hash: result.hash, savedRevision: revision }
           replaceDesktopSession(next)
           if (draftRevisionRef.current === revision) setSaveState('saved')
         } catch (error) {
@@ -235,6 +237,78 @@ function App() {
     }, 900)
     return () => window.clearTimeout(timeout)
   }, [draft, draftRevision, desktopSession?.path, desktopSession?.root])
+
+  useEffect(() => {
+    if (!desktopSession) return
+    let disposed = false
+
+    const preserveConflict = (message: string) => {
+      desktopSaveBlockedRef.current = true
+      setSaveProblem(message)
+      setSaveState('conflict')
+    }
+
+    const checkExternalStatus = async () => {
+      if (disposed || externalCheckRunningRef.current || desktopSaveBlockedRef.current) return
+      externalCheckRunningRef.current = true
+      try {
+        const expected = desktopSessionRef.current
+        if (!expected) return
+        const status = await desktopHost.documentStatus(expected.root, expected.path, expected.hash)
+        if (disposed) return
+        const current = desktopSessionRef.current
+        if (!current || current.root !== expected.root || current.path !== expected.path || current.hash !== expected.hash) return
+
+        if (status.kind === 'current') return
+        if (status.kind === 'renamed') {
+          const next = { ...current, path: status.path, hash: status.hash }
+          replaceDesktopSession(next)
+          setFilename(status.path.split('/').at(-1) ?? status.path)
+          setToast(`Manuscript moved in the project · ${status.path}`)
+          void desktopHost.setMainDocument(current.root, status.path).catch((error) => {
+            setToast(normaliseHostFailure(error).message)
+          })
+          return
+        }
+        if (status.kind === 'deleted') {
+          preserveConflict(`${current.path} was deleted outside DraftMatter. Your editor copy has not been overwritten.`)
+          return
+        }
+
+        const dirty = draftRevisionRef.current !== current.savedRevision
+        if (dirty) {
+          preserveConflict(`${current.path} changed outside DraftMatter while you had unsaved edits.`)
+          return
+        }
+
+        const document = await desktopHost.readDocument(current.root, current.path)
+        if (disposed || draftRevisionRef.current !== current.savedRevision) {
+          preserveConflict(`${current.path} changed outside DraftMatter while you were editing.`)
+          return
+        }
+        const parsed = parsePortableDocument(document.content, initialDraft)
+        resetDraftHistory(parsed.draft)
+        resetDraftRevision()
+        replaceDesktopSession({ ...current, hash: document.hash, savedRevision: 0 })
+        setDiagnostics(parsed.diagnostics)
+        setSaveProblem('')
+        setSaveState('saved')
+        setToast(`Reloaded external changes · ${current.path}`)
+      } catch (error) {
+        if (!disposed) setToast(normaliseHostFailure(error).message)
+      } finally {
+        externalCheckRunningRef.current = false
+      }
+    }
+
+    const firstCheck = window.setTimeout(() => void checkExternalStatus(), 1200)
+    const interval = window.setInterval(() => void checkExternalStatus(), 2200)
+    return () => {
+      disposed = true
+      window.clearTimeout(firstCheck)
+      window.clearInterval(interval)
+    }
+  }, [desktopSession?.hash, desktopSession?.path, desktopSession?.root])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -376,12 +450,13 @@ function App() {
     if (!mainPath) throw new Error('This folder does not contain a Markdown or Quarto manuscript.')
 
     const document = await desktopHost.readDocument(project.root, mainPath)
+    if (mainPath !== project.config.mainDocument) await desktopHost.setMainDocument(project.root, mainPath)
     const parsed = parsePortableDocument(document.content, initialDraft)
     const displayName = mainPath.split('/').at(-1) ?? mainPath
     desktopSaveBlockedRef.current = false
     setSaveProblem('')
     resetDraftRevision()
-    replaceDesktopSession({ root: project.root, path: mainPath, hash: document.hash })
+    replaceDesktopSession({ root: project.root, path: mainPath, hash: document.hash, savedRevision: 0 })
     resetDraftHistory(parsed.draft)
     setFilename(displayName)
     setProjectName(project.config.name)

@@ -71,6 +71,29 @@ pub struct SaveDocumentResult {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(
+    tag = "kind",
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase"
+)]
+pub enum DocumentStatus {
+    Current {
+        hash: String,
+        modified_ms: u64,
+    },
+    Modified {
+        hash: String,
+        modified_ms: u64,
+    },
+    Renamed {
+        path: String,
+        hash: String,
+        modified_ms: u64,
+    },
+    Deleted,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", content = "message", rename_all = "camelCase")]
 pub enum HostError {
     InvalidPath(String),
@@ -472,6 +495,59 @@ fn save_document_impl(request: SaveDocumentRequest) -> Result<SaveDocumentResult
     })
 }
 
+fn document_status_impl(
+    raw_root: &str,
+    relative: &str,
+    expected_hash: &str,
+) -> Result<DocumentStatus, HostError> {
+    let root = canonical_root(raw_root)?;
+    let path = contained_path(&root, relative)?;
+    if path.exists() {
+        let document = read_document_impl(raw_root, relative)?;
+        return if document.hash == expected_hash {
+            Ok(DocumentStatus::Current {
+                hash: document.hash,
+                modified_ms: document.modified_ms,
+            })
+        } else {
+            Ok(DocumentStatus::Modified {
+                hash: document.hash,
+                modified_ms: document.modified_ms,
+            })
+        };
+    }
+
+    let mut documents = Vec::new();
+    let mut bibliographies = Vec::new();
+    discover_entries(&root, &root, 0, &mut documents, &mut bibliographies)?;
+    if let Some(entry) = documents
+        .into_iter()
+        .find(|entry| entry.hash == expected_hash)
+    {
+        return Ok(DocumentStatus::Renamed {
+            path: entry.path,
+            hash: entry.hash,
+            modified_ms: entry.modified_ms,
+        });
+    }
+    Ok(DocumentStatus::Deleted)
+}
+
+fn set_main_document_impl(raw_root: &str, relative: &str) -> Result<ProjectSnapshot, HostError> {
+    let root = canonical_root(raw_root)?;
+    let path = contained_path(&root, relative)?;
+    if !path.is_file() || !manuscript_extension(&path) {
+        return Err(HostError::NotFound(format!(
+            "The main manuscript was not found: {relative}"
+        )));
+    }
+    let snapshot = open_project_impl(raw_root)?;
+    let mut config = snapshot.config;
+    config.main_document = relative.to_string();
+    persist_config(&root, &config)?;
+    open_project_impl(raw_root)
+}
+
 #[tauri::command]
 fn open_project(root: String) -> Result<ProjectSnapshot, HostError> {
     open_project_impl(&root)
@@ -516,6 +592,20 @@ fn save_document(request: SaveDocumentRequest) -> Result<SaveDocumentResult, Hos
     save_document_impl(request)
 }
 
+#[tauri::command]
+fn document_status(
+    root: String,
+    path: String,
+    expected_hash: String,
+) -> Result<DocumentStatus, HostError> {
+    document_status_impl(&root, &path, &expected_hash)
+}
+
+#[tauri::command]
+fn set_main_document(root: String, path: String) -> Result<ProjectSnapshot, HostError> {
+    set_main_document_impl(&root, &path)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -524,7 +614,9 @@ pub fn run() {
             open_project,
             create_project,
             read_document,
-            save_document
+            save_document,
+            document_status,
+            set_main_document
         ])
         .run(tauri::generate_context!())
         .expect("error while running DraftMatter");
@@ -618,6 +710,35 @@ mod tests {
         assert_eq!(
             fs::read_to_string(root.join("paper.qmd")).unwrap(),
             "external edit"
+        );
+    }
+
+    #[test]
+    fn reports_external_edits_renames_and_deletions() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("project");
+        create_project(root.to_string_lossy().into_owned(), "Test".into()).unwrap();
+        let before = read_document_impl(root.to_str().unwrap(), "paper.qmd").unwrap();
+
+        fs::write(root.join("paper.qmd"), "external edit").unwrap();
+        assert!(matches!(
+            document_status_impl(root.to_str().unwrap(), "paper.qmd", &before.hash).unwrap(),
+            DocumentStatus::Modified { .. }
+        ));
+
+        fs::write(root.join("paper.qmd"), &before.content).unwrap();
+        fs::rename(root.join("paper.qmd"), root.join("renamed.qmd")).unwrap();
+        assert!(matches!(
+            document_status_impl(root.to_str().unwrap(), "paper.qmd", &before.hash).unwrap(),
+            DocumentStatus::Renamed { path, .. } if path == "renamed.qmd"
+        ));
+        let updated = set_main_document_impl(root.to_str().unwrap(), "renamed.qmd").unwrap();
+        assert_eq!(updated.config.main_document, "renamed.qmd");
+
+        fs::remove_file(root.join("renamed.qmd")).unwrap();
+        assert_eq!(
+            document_status_impl(root.to_str().unwrap(), "paper.qmd", &before.hash).unwrap(),
+            DocumentStatus::Deleted
         );
     }
 

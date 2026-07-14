@@ -43,6 +43,12 @@ export interface SaveDocumentResult {
   recoveryPath: string | null
 }
 
+export type DocumentStatus =
+  | { kind: 'current'; hash: string; modifiedMs: number }
+  | { kind: 'modified'; hash: string; modifiedMs: number }
+  | { kind: 'renamed'; path: string; hash: string; modifiedMs: number }
+  | { kind: 'deleted' }
+
 export interface HostFailure {
   kind: 'invalidPath' | 'notFound' | 'unsupportedFile' | 'conflict' | 'io' | 'invalidProject' | 'unknown'
   message: string
@@ -85,6 +91,12 @@ export function createDesktopHost(
     },
     saveDocument(request: SaveDocumentRequest) {
       return invokeBridge<SaveDocumentResult>('save_document', { request })
+    },
+    documentStatus(root: string, path: string, expectedHash: string) {
+      return invokeBridge<DocumentStatus>('document_status', { root, path, expectedHash })
+    },
+    setMainDocument(root: string, path: string) {
+      return invokeBridge<ProjectSnapshot>('set_main_document', { root, path })
     },
   }
 }
