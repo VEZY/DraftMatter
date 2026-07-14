@@ -88,6 +88,7 @@ function parseFields(body: string) {
 export function parseBibTeX(source: string): BibliographyResult {
   const records: CitationRecord[] = []
   const diagnostics: DocumentDiagnostic[] = []
+  const seenKeys = new Set<string>()
   let cursor = 0
 
   while (cursor < source.length) {
@@ -117,6 +118,16 @@ export function parseBibTeX(source: string): BibliographyResult {
       continue
     }
     const citekey = entry.slice(0, comma).trim()
+    if (!citekey) {
+      diagnostics.push({ code: 'bibtex-key-empty', level: 'warning', message: `Skipped an @${entryType} entry with an empty citation key.` })
+      continue
+    }
+    const normalizedKey = citekey.toLowerCase()
+    if (seenKeys.has(normalizedKey)) {
+      diagnostics.push({ code: `bibtex-key-duplicate-${normalizedKey}`, level: 'warning', message: `Skipped duplicate citation key ${citekey}.` })
+      continue
+    }
+    seenKeys.add(normalizedKey)
     const fields = parseFields(entry.slice(comma + 1))
     if (!fields.title) diagnostics.push({ code: `bibtex-title-${citekey}`, level: 'warning', message: `${citekey} has no title.` })
     records.push({
@@ -151,10 +162,19 @@ export function parseCslJson(source: string): BibliographyResult {
   try {
     const parsed = JSON.parse(source)
     const items = Array.isArray(parsed) ? parsed : [parsed]
+    const seenKeys = new Set<string>()
     const records = items.flatMap<CitationRecord>((item, index) => {
       if (!item || typeof item !== 'object') return []
       const value = item as Record<string, unknown>
       const citekey = String(value.id ?? `item-${index + 1}`)
+      const normalizedKey = citekey.toLowerCase()
+      if (seenKeys.has(normalizedKey)) {
+        diagnostics.push({ code: `csl-key-duplicate-${normalizedKey}`, level: 'warning', message: `Skipped duplicate citation key ${citekey}.` })
+        return []
+      }
+      seenKeys.add(normalizedKey)
+      if (value.id === undefined) diagnostics.push({ code: `csl-id-missing-${index + 1}`, level: 'warning', message: `CSL item ${index + 1} has no id; using ${citekey}.` })
+      if (value.title === undefined) diagnostics.push({ code: `csl-title-missing-${citekey}`, level: 'warning', message: `${citekey} has no title.` })
       const issued = value.issued as { 'date-parts'?: Array<Array<number | string>> } | undefined
       const authors = Array.isArray(value.author) ? value.author.map((author) => cslAuthorName(author as Record<string, unknown>)).filter(Boolean) : []
       return [{
@@ -176,8 +196,19 @@ export function parseCslJson(source: string): BibliographyResult {
   }
 }
 
-export function parseBibliographyFile(filename: string, source: string) {
-  return /\.json$/i.test(filename) ? parseCslJson(source) : parseBibTeX(source)
+export function parseBibliographyFile(
+  filename: string,
+  source: string,
+  origin: NonNullable<CitationRecord['provenance']>['origin'] = 'manual-import',
+) {
+  const parsed = /\.json$/i.test(filename) ? parseCslJson(source) : parseBibTeX(source)
+  return {
+    ...parsed,
+    records: parsed.records.map((record) => ({
+      ...record,
+      provenance: { origin, locator: filename },
+    })),
+  }
 }
 
 export async function loadProjectBibliographies(
@@ -186,7 +217,7 @@ export async function loadProjectBibliographies(
 ): Promise<BibliographyResult> {
   const results = await Promise.all(paths.map(async (path, index) => {
     try {
-      const parsed = parseBibliographyFile(path, await read(path))
+      const parsed = parseBibliographyFile(path, await read(path), 'project-file')
       return {
         records: parsed.records,
         diagnostics: parsed.diagnostics.map((diagnostic) => ({

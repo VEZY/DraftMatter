@@ -38,6 +38,10 @@ export interface CitationRecord {
   doi?: string
   url?: string
   source: 'bibtex' | 'csl-json' | 'sample'
+  provenance?: {
+    origin: 'project-file' | 'manual-import' | 'sample'
+    locator?: string
+  }
 }
 
 export interface BibliographyResult {

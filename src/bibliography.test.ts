@@ -56,8 +56,40 @@ describe('local bibliography', () => {
     )
 
     expect(result.records.map((record) => record.citekey)).toEqual(['vezy2024', 'martin2023'])
+    expect(result.records[0].provenance).toEqual({ origin: 'project-file', locator: 'references.bib' })
     expect(result.diagnostics).toEqual([
       expect.objectContaining({ code: 'project-bibliography-1-unreadable', level: 'error', message: 'missing.bib: File disappeared' }),
+    ])
+  })
+
+  it('diagnoses missing fields and duplicate keys deterministically', () => {
+    const bibtex = parseBibTeX(`
+@article{same, title={First}}
+@article{SAME, author={Martin, Alice}}
+@article{, title={No key}}
+`)
+    expect(bibtex.records.map((record) => record.citekey)).toEqual(['same'])
+    expect(bibtex.diagnostics).toEqual([
+      expect.objectContaining({ code: 'bibtex-key-duplicate-same', level: 'warning' }),
+      expect.objectContaining({ code: 'bibtex-key-empty', level: 'warning' }),
+    ])
+
+    const csl = parseCslJson(JSON.stringify([{ author: [{ literal: 'Research group' }] }, { id: 'known' }, { id: 'known', title: 'Duplicate' }]))
+    expect(csl.records.map((record) => record.citekey)).toEqual(['item-1', 'known'])
+    expect(csl.diagnostics.map((diagnostic) => diagnostic.code)).toEqual([
+      'csl-id-missing-1',
+      'csl-title-missing-item-1',
+      'csl-title-missing-known',
+      'csl-key-duplicate-known',
+    ])
+  })
+
+  it('reports malformed BibTeX and malformed CSL JSON', () => {
+    expect(parseBibTeX('@article{broken, title={Never closed}').diagnostics).toEqual([
+      expect.objectContaining({ code: 'bibtex-entry-unclosed', level: 'error' }),
+    ])
+    expect(parseCslJson('{"id":').diagnostics).toEqual([
+      expect.objectContaining({ code: 'csl-invalid', level: 'error' }),
     ])
   })
 })
