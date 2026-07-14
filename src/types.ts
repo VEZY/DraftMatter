@@ -16,6 +16,7 @@ export interface DraftState {
   code: string
   conclusion: string
   citationInserted: boolean
+  citationKeys: string[]
   activeProposal: 'alice' | 'marcus'
   aliceStatus: SuggestionStatus
   marcusStatus: SuggestionStatus
@@ -25,6 +26,23 @@ export interface DraftState {
   lastSavedAt: string
   frontmatterSource?: string
   preservedSections?: PreservedSection[]
+}
+
+export interface CitationRecord {
+  citekey: string
+  type: string
+  title: string
+  authors: string[]
+  year?: string
+  container?: string
+  doi?: string
+  url?: string
+  source: 'bibtex' | 'csl-json' | 'sample'
+}
+
+export interface BibliographyResult {
+  records: CitationRecord[]
+  diagnostics: DocumentDiagnostic[]
 }
 
 export interface DocumentDiagnostic {

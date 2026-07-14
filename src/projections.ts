@@ -41,7 +41,8 @@ function preservedAfter(state: DraftState, section: SectionKey) {
 
 export function cleanProjection(state: DraftState, view: 'original' | 'final') {
   const result = proposalSentence(state, view)
-  const citation = state.citationInserted ? ' [@vezy2024; @martin2023]' : ' [@vezy2024]'
+  const citationKeys = state.citationKeys?.length ? state.citationKeys : state.citationInserted ? ['vezy2024', 'martin2023'] : ['vezy2024']
+  const citation = ` [${citationKeys.map((key) => `@${key}`).join('; ')}]`
 
   return `${frontmatter(state)}${preservedAfter(state, 'frontmatter')}
 
@@ -77,7 +78,8 @@ ${state.conclusion}${preservedAfter(state, 'conclusion')}
 }
 
 export function reviewedProjection(state: DraftState) {
-  const citation = state.citationInserted ? ' [@vezy2024; @martin2023]' : ' [@vezy2024]'
+  const citationKeys = state.citationKeys?.length ? state.citationKeys : state.citationInserted ? ['vezy2024', 'martin2023'] : ['vezy2024']
+  const citation = ` [${citationKeys.map((key) => `@${key}`).join('; ')}]`
   const replyBlocks = state.commentReplies
     .map((reply, index) => `~~~{.dm-message data-author="dm-a01" data-index="${index + 1}"}\n${reply}\n~~~`)
     .join('\n')

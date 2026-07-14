@@ -1,0 +1,230 @@
+import type { BibliographyResult, CitationRecord, DocumentDiagnostic } from './types'
+
+function cleanLatex(value: string) {
+  return value
+    .replace(/\\&/g, '&')
+    .replace(/\\textit\{([^}]*)\}/g, '$1')
+    .replace(/[{}]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim()
+}
+
+function normalizeAuthor(author: string) {
+  const cleaned = cleanLatex(author)
+  if (!cleaned.includes(',')) return cleaned
+  const [family, given] = cleaned.split(',').map((part) => part.trim())
+  return [given, family].filter(Boolean).join(' ')
+}
+
+function findBalancedEnd(source: string, start: number, open: string, close: string) {
+  let depth = 0
+  let quoted = false
+  let escaped = false
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index]
+    if (escaped) {
+      escaped = false
+      continue
+    }
+    if (character === '\\') {
+      escaped = true
+      continue
+    }
+    if (character === '"') quoted = !quoted
+    if (quoted) continue
+    if (character === open) depth += 1
+    if (character === close) {
+      depth -= 1
+      if (depth === 0) return index
+    }
+  }
+  return -1
+}
+
+function parseFields(body: string) {
+  const fields: Record<string, string> = {}
+  let cursor = 0
+  while (cursor < body.length) {
+    while (cursor < body.length && /[\s,]/.test(body[cursor])) cursor += 1
+    const nameStart = cursor
+    while (cursor < body.length && /[\w-]/.test(body[cursor])) cursor += 1
+    const name = body.slice(nameStart, cursor).toLowerCase()
+    while (cursor < body.length && /\s/.test(body[cursor])) cursor += 1
+    if (!name || body[cursor] !== '=') {
+      cursor += 1
+      continue
+    }
+    cursor += 1
+    while (cursor < body.length && /\s/.test(body[cursor])) cursor += 1
+
+    let value = ''
+    if (body[cursor] === '{') {
+      const end = findBalancedEnd(body, cursor, '{', '}')
+      if (end < 0) break
+      value = body.slice(cursor + 1, end)
+      cursor = end + 1
+    } else if (body[cursor] === '"') {
+      const start = cursor + 1
+      cursor += 1
+      let escaped = false
+      while (cursor < body.length) {
+        if (!escaped && body[cursor] === '"') break
+        escaped = !escaped && body[cursor] === '\\'
+        if (body[cursor] !== '\\') escaped = false
+        cursor += 1
+      }
+      value = body.slice(start, cursor)
+      cursor += 1
+    } else {
+      const end = body.indexOf(',', cursor)
+      value = body.slice(cursor, end < 0 ? body.length : end)
+      cursor = end < 0 ? body.length : end + 1
+    }
+    fields[name] = cleanLatex(value)
+  }
+  return fields
+}
+
+export function parseBibTeX(source: string): BibliographyResult {
+  const records: CitationRecord[] = []
+  const diagnostics: DocumentDiagnostic[] = []
+  let cursor = 0
+
+  while (cursor < source.length) {
+    const at = source.indexOf('@', cursor)
+    if (at < 0) break
+    const typeMatch = source.slice(at + 1).match(/^([a-zA-Z]+)\s*([({])/)
+    if (!typeMatch) {
+      cursor = at + 1
+      continue
+    }
+    const entryType = typeMatch[1].toLowerCase()
+    const open = typeMatch[2]
+    const close = open === '{' ? '}' : ')'
+    const openIndex = at + 1 + (typeMatch.index ?? 0) + typeMatch[0].lastIndexOf(open)
+    const end = findBalancedEnd(source, openIndex, open, close)
+    if (end < 0) {
+      diagnostics.push({ code: 'bibtex-entry-unclosed', level: 'error', message: `An @${entryType} entry is not closed.` })
+      break
+    }
+    cursor = end + 1
+    if (entryType === 'comment' || entryType === 'preamble' || entryType === 'string') continue
+
+    const entry = source.slice(openIndex + 1, end)
+    const comma = entry.indexOf(',')
+    if (comma < 0) {
+      diagnostics.push({ code: 'bibtex-key-missing', level: 'warning', message: `Skipped an @${entryType} entry without a citation key.` })
+      continue
+    }
+    const citekey = entry.slice(0, comma).trim()
+    const fields = parseFields(entry.slice(comma + 1))
+    if (!fields.title) diagnostics.push({ code: `bibtex-title-${citekey}`, level: 'warning', message: `${citekey} has no title.` })
+    records.push({
+      citekey,
+      type: entryType,
+      title: fields.title || 'Untitled reference',
+      authors: fields.author ? fields.author.split(/\s+and\s+/i).map(normalizeAuthor) : [],
+      year: fields.year || fields.date?.slice(0, 4),
+      container: fields.journal || fields.booktitle || fields.publisher,
+      doi: fields.doi?.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, ''),
+      url: fields.url,
+      source: 'bibtex',
+    })
+  }
+
+  if (!records.length && !diagnostics.some((item) => item.level === 'error')) {
+    diagnostics.push({ code: 'bibtex-empty', level: 'warning', message: 'No bibliography entries were found.' })
+  }
+  return { records, diagnostics }
+}
+
+function cslAuthorName(author: Record<string, unknown>) {
+  const literal = typeof author.literal === 'string' ? author.literal : ''
+  if (literal) return literal
+  const given = typeof author.given === 'string' ? author.given : ''
+  const family = typeof author.family === 'string' ? author.family : ''
+  return [given, family].filter(Boolean).join(' ')
+}
+
+export function parseCslJson(source: string): BibliographyResult {
+  const diagnostics: DocumentDiagnostic[] = []
+  try {
+    const parsed = JSON.parse(source)
+    const items = Array.isArray(parsed) ? parsed : [parsed]
+    const records = items.flatMap<CitationRecord>((item, index) => {
+      if (!item || typeof item !== 'object') return []
+      const value = item as Record<string, unknown>
+      const citekey = String(value.id ?? `item-${index + 1}`)
+      const issued = value.issued as { 'date-parts'?: Array<Array<number | string>> } | undefined
+      const authors = Array.isArray(value.author) ? value.author.map((author) => cslAuthorName(author as Record<string, unknown>)).filter(Boolean) : []
+      return [{
+        citekey,
+        type: String(value.type ?? 'article'),
+        title: String(value.title ?? 'Untitled reference'),
+        authors,
+        year: issued?.['date-parts']?.[0]?.[0]?.toString(),
+        container: typeof value['container-title'] === 'string' ? value['container-title'] : undefined,
+        doi: typeof value.DOI === 'string' ? value.DOI : undefined,
+        url: typeof value.URL === 'string' ? value.URL : undefined,
+        source: 'csl-json',
+      }]
+    })
+    if (!records.length) diagnostics.push({ code: 'csl-empty', level: 'warning', message: 'No CSL JSON records were found.' })
+    return { records, diagnostics }
+  } catch {
+    return { records: [], diagnostics: [{ code: 'csl-invalid', level: 'error', message: 'The CSL JSON file is not valid JSON.' }] }
+  }
+}
+
+export function parseBibliographyFile(filename: string, source: string) {
+  return /\.json$/i.test(filename) ? parseCslJson(source) : parseBibTeX(source)
+}
+
+export function mergeCitationRecords(existing: CitationRecord[], incoming: CitationRecord[]) {
+  const byKey = new Map(existing.map((record) => [record.citekey.toLowerCase(), record]))
+  const dois = new Set(existing.map((record) => record.doi?.toLowerCase()).filter(Boolean))
+  for (const record of incoming) {
+    const key = record.citekey.toLowerCase()
+    const doi = record.doi?.toLowerCase()
+    if (byKey.has(key) || (doi && dois.has(doi))) continue
+    byKey.set(key, record)
+    if (doi) dois.add(doi)
+  }
+  return [...byKey.values()]
+}
+
+function familyName(author: string) {
+  return author.trim().split(/\s+/).at(-1) ?? author
+}
+
+export function formatCitationCluster(records: CitationRecord[], citekeys: string[]) {
+  const labels = citekeys.flatMap((key) => {
+    const record = records.find((candidate) => candidate.citekey === key)
+    if (!record) return []
+    const author = record.authors.length > 2
+      ? `${familyName(record.authors[0])} et al.`
+      : record.authors.length === 2
+        ? `${familyName(record.authors[0])} & ${familyName(record.authors[1])}`
+        : record.authors.length === 1
+          ? familyName(record.authors[0])
+          : record.citekey
+    return [`${author}${record.year ? `, ${record.year}` : ''}`]
+  })
+  return `(${labels.join('; ')})`
+}
+
+export function searchCitations(records: CitationRecord[], query: string) {
+  const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean)
+  if (!terms.length) return records
+  return records
+    .map((record) => {
+      const title = record.title.toLowerCase()
+      const authors = record.authors.join(' ').toLowerCase()
+      const rest = [record.citekey, record.year, record.container, record.doi].filter(Boolean).join(' ').toLowerCase()
+      const termScores = terms.map((term) => (title.includes(term) ? 5 : 0) + (authors.includes(term) ? 3 : 0) + (rest.includes(term) ? 2 : 0))
+      return { record, score: termScores.reduce((total, score) => total + score, 0), matchesAll: termScores.every((score) => score > 0) }
+    })
+    .filter((item) => item.matchesAll)
+    .sort((a, b) => b.score - a.score || a.record.title.localeCompare(b.record.title))
+    .map((item) => item.record)
+}

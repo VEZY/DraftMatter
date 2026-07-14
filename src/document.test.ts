@@ -8,6 +8,7 @@ describe('portable document core', () => {
     const source = reviewedProjection({
       ...initialDraft,
       citationInserted: true,
+      citationKeys: ['vezy2024', 'martin2023'],
       aliceStatus: 'accepted',
       marcusStatus: 'needs-rebase',
       commentResolved: true,
@@ -20,6 +21,7 @@ describe('portable document core', () => {
     expect(result.draft.abstract).toBe(initialDraft.abstract)
     expect(result.draft.code).toBe(initialDraft.code)
     expect(result.draft.citationInserted).toBe(true)
+    expect(result.draft.citationKeys).toEqual(['vezy2024', 'martin2023'])
     expect(result.draft.aliceStatus).toBe('accepted')
     expect(result.draft.marcusStatus).toBe('needs-rebase')
     expect(result.draft.commentResolved).toBe(true)

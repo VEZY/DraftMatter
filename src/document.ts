@@ -87,9 +87,10 @@ function parseStatus(review: string, id: string, fallback: SuggestionStatus): Su
 
 function cleanCitation(section: string) {
   const citationGroups = [...section.matchAll(/\[([^\]]*@[a-zA-Z0-9_:.+-]+[^\]]*)\]/g)]
-  const citationInserted = citationGroups.some((match) => match[1].includes('@martin2023'))
+  const citationKeys = citationGroups.flatMap((match) => [...match[1].matchAll(/@([a-zA-Z0-9_:.+-]+)/g)].map((keyMatch) => keyMatch[1]))
+  const citationInserted = citationKeys.length > 1
   const introduction = section.replace(/\s+\[(?:[^\]]*@[a-zA-Z0-9_:.+-]+[^\]]*)\]\s*$/, '').trim()
-  return { introduction, citationInserted }
+  return { introduction, citationInserted, citationKeys }
 }
 
 function parseMethods(section: string, fallback: DraftState, diagnostics: DocumentDiagnostic[]) {
@@ -150,6 +151,7 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
     abstract: sectionContent(sections, 'abstract', fallback.abstract, diagnostics),
     introduction: intro.introduction,
     citationInserted: intro.citationInserted,
+    citationKeys: intro.citationKeys.length ? intro.citationKeys : fallback.citationKeys,
     methods: methods.methods,
     code: methods.code,
     resultsLead: parseResults(sectionContent(sections, 'results', fallback.resultsLead, diagnostics), fallback.resultsLead),
