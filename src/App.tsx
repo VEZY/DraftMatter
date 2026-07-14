@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatCitationCluster, mergeCitationRecords, parseBibliographyFile, searchCitations } from './bibliography'
+import { desktopHost, normaliseHostFailure, type ProjectSnapshot } from './desktopHost'
 import { parsePortableDocument } from './document'
 import { Icon } from './Icon'
 import { cleanProjection, downloadText, reviewedProjection } from './projections'
@@ -11,6 +12,13 @@ import type { CitationRecord, DocumentDiagnostic, DraftState, MarkupView, Sugges
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
 const CITATIONS_KEY = 'draftmatter.citations.v1'
+const LAST_PROJECT_ROOT_KEY = 'draftmatter.last-project-root.v1'
+
+interface DesktopSession {
+  root: string
+  path: string
+  hash: string
+}
 
 function getInitialProjectMeta() {
   try {
@@ -103,7 +111,8 @@ function App() {
   const [sourceTab, setSourceTab] = useState<'reviewed' | 'final' | 'original'>('reviewed')
   const [commandOpen, setCommandOpen] = useState(false)
   const [reply, setReply] = useState('')
-  const [saveState, setSaveState] = useState<'saved' | 'saving'>('saved')
+  const [saveState, setSaveState] = useState<'saved' | 'saving' | 'conflict' | 'error'>('saved')
+  const [saveProblem, setSaveProblem] = useState('')
   const [toast, setToast] = useState('')
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
   const [recoveryOpen, setRecoveryOpen] = useState(false)
@@ -114,8 +123,19 @@ function App() {
   const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>(() => readRecoverySnapshots(localStorage))
   const [citations, setCitations] = useState<CitationRecord[]>(getInitialCitations)
   const [citationQuery, setCitationQuery] = useState('')
+  const [desktopSession, setDesktopSession] = useState<DesktopSession | null>(null)
+  const [draftRevision, setDraftRevision] = useState(0)
+  const [projectBusy, setProjectBusy] = useState(false)
+  const [createProjectOpen, setCreateProjectOpen] = useState(false)
+  const [newProjectRoot, setNewProjectRoot] = useState('')
+  const [newProjectName, setNewProjectName] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bibliographyInputRef = useRef<HTMLInputElement>(null)
+  const desktopSessionRef = useRef<DesktopSession | null>(null)
+  const draftRevisionRef = useRef(0)
+  const desktopSaveBlockedRef = useRef(false)
+  const desktopSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const reopenAttemptedRef = useRef(false)
 
   const activeStatus = draft.activeProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
   const activeReplacement = draft.activeProposal === 'alice'
@@ -126,8 +146,26 @@ function App() {
   const primaryCitation = citations.find((record) => record.citekey === draft.citationKeys[0]) ?? citations[0]
   const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics]
 
+  const replaceDesktopSession = (next: DesktopSession | null) => {
+    desktopSessionRef.current = next
+    setDesktopSession(next)
+  }
+
+  const resetDraftRevision = () => {
+    draftRevisionRef.current = 0
+    setDraftRevision(0)
+  }
+
   const updateDraft = (patch: Partial<DraftState>) => {
-    setSaveState('saving')
+    if (!desktopSaveBlockedRef.current) {
+      setSaveState('saving')
+      setSaveProblem('')
+    }
+    setDraftRevision((current) => {
+      const next = current + 1
+      draftRevisionRef.current = next
+      return next
+    })
     setDraft((current) => ({ ...current, ...patch }))
   }
 
@@ -135,10 +173,41 @@ function App() {
     const timeout = window.setTimeout(() => {
       const next = { ...draft, lastSavedAt: new Date().toISOString() }
       localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-      setSaveState('saved')
+      if (!desktopSession) setSaveState('saved')
     }, 380)
     return () => window.clearTimeout(timeout)
-  }, [draft])
+  }, [draft, desktopSession])
+
+  useEffect(() => {
+    if (!desktopSession || draftRevision === 0 || desktopSaveBlockedRef.current) return
+    const revision = draftRevision
+    const content = reviewedProjection(draft)
+    const root = desktopSession.root
+    const path = desktopSession.path
+    const timeout = window.setTimeout(() => {
+      setSaveState('saving')
+      desktopSaveQueueRef.current = desktopSaveQueueRef.current.then(async () => {
+        const current = desktopSessionRef.current
+        if (!current || current.root !== root || current.path !== path || desktopSaveBlockedRef.current) return
+        try {
+          const result = await desktopHost.saveDocument({ root, path, content, expectedHash: current.hash })
+          const next = { ...current, hash: result.hash }
+          replaceDesktopSession(next)
+          if (draftRevisionRef.current === revision) setSaveState('saved')
+        } catch (error) {
+          const failure = normaliseHostFailure(error)
+          setSaveProblem(failure.message)
+          if (failure.kind === 'conflict') {
+            desktopSaveBlockedRef.current = true
+            setSaveState('conflict')
+          } else {
+            setSaveState('error')
+          }
+        }
+      })
+    }, 900)
+    return () => window.clearTimeout(timeout)
+  }, [draft, draftRevision, desktopSession?.path, desktopSession?.root])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -247,6 +316,9 @@ function App() {
 
     const parsed = parsePortableDocument(await file.text(), initialDraft)
     const nextName = file.name.replace(/\.(qmd|md)$/i, '')
+    replaceDesktopSession(null)
+    desktopSaveBlockedRef.current = false
+    resetDraftRevision()
     setDraft(parsed.draft)
     setFilename(file.name)
     setProjectName(nextName.replaceAll(/[-_]+/g, ' '))
@@ -257,6 +329,97 @@ function App() {
     setRecoveries(nextRecoveries)
     const warnings = parsed.diagnostics.filter((item) => item.level !== 'info').length
     setToast(warnings ? `Opened ${file.name} · ${warnings} check${warnings === 1 ? '' : 's'} to review` : `Opened ${file.name}`)
+  }
+
+  const applyDesktopProject = async (project: ProjectSnapshot, announce = true) => {
+    const mainPath = project.documents.some((entry) => entry.path === project.config.mainDocument)
+      ? project.config.mainDocument
+      : project.documents[0]?.path
+    if (!mainPath) throw new Error('This folder does not contain a Markdown or Quarto manuscript.')
+
+    const document = await desktopHost.readDocument(project.root, mainPath)
+    const parsed = parsePortableDocument(document.content, initialDraft)
+    const displayName = mainPath.split('/').at(-1) ?? mainPath
+    desktopSaveBlockedRef.current = false
+    setSaveProblem('')
+    resetDraftRevision()
+    replaceDesktopSession({ root: project.root, path: mainPath, hash: document.hash })
+    setDraft(parsed.draft)
+    setFilename(displayName)
+    setProjectName(project.config.name)
+    setDiagnostics(parsed.diagnostics)
+    setBibliographyDiagnostics([])
+    setProjectMenuOpen(false)
+    setSaveState('saved')
+    localStorage.setItem(LAST_PROJECT_ROOT_KEY, project.root)
+    const nextRecoveries = saveRecoverySnapshot(localStorage, parsed.draft, displayName, document.content)
+    setRecoveries(nextRecoveries)
+    if (announce) setToast(`Opened ${project.config.name} · ${mainPath}`)
+  }
+
+  const openDesktopProject = async (knownRoot?: string, announce = true) => {
+    if (!desktopHost.available || projectBusy) return
+    setProjectBusy(true)
+    try {
+      const root = knownRoot ?? await desktopHost.pickProjectFolder()
+      if (!root) return
+      await applyDesktopProject(await desktopHost.openProject(root), announce)
+    } catch (error) {
+      const failure = normaliseHostFailure(error)
+      if (knownRoot) localStorage.removeItem(LAST_PROJECT_ROOT_KEY)
+      setToast(failure.message)
+    } finally {
+      setProjectBusy(false)
+    }
+  }
+
+  const beginCreateDesktopProject = async () => {
+    if (!desktopHost.available || projectBusy) return
+    setProjectBusy(true)
+    try {
+      const root = await desktopHost.pickProjectFolder('Choose an empty folder for the new project')
+      if (!root) return
+      const suggestedName = root.split(/[\\/]/).filter(Boolean).at(-1)?.replaceAll(/[-_]+/g, ' ') ?? 'Untitled research project'
+      setNewProjectRoot(root)
+      setNewProjectName(suggestedName)
+      setProjectMenuOpen(false)
+      setCreateProjectOpen(true)
+    } catch (error) {
+      setToast(normaliseHostFailure(error).message)
+    } finally {
+      setProjectBusy(false)
+    }
+  }
+
+  const confirmCreateDesktopProject = async () => {
+    const name = newProjectName.trim()
+    if (!name || !newProjectRoot || projectBusy) return
+    setProjectBusy(true)
+    try {
+      const project = await desktopHost.createProject(newProjectRoot, name)
+      await applyDesktopProject(project)
+      setCreateProjectOpen(false)
+    } catch (error) {
+      setToast(normaliseHostFailure(error).message)
+    } finally {
+      setProjectBusy(false)
+    }
+  }
+
+  const reloadDesktopProject = async () => {
+    if (!desktopSession) return
+    await openDesktopProject(desktopSession.root)
+  }
+
+  const retryDesktopSave = () => {
+    if (!desktopSession || saveState === 'conflict') return
+    setSaveProblem('')
+    setSaveState('saving')
+    setDraftRevision((current) => {
+      const next = current + 1
+      draftRevisionRef.current = next
+      return next
+    })
   }
 
   const onFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -274,8 +437,18 @@ function App() {
 
   const restoreSnapshot = (snapshot: RecoverySnapshot) => {
     setDraft(snapshot.draft)
-    setFilename(snapshot.filename)
-    setProjectName(snapshot.filename.replace(/\.(qmd|md)$/i, '').replaceAll(/[-_]+/g, ' '))
+    if (desktopSession) {
+      setDraftRevision((current) => {
+        const next = current + 1
+        draftRevisionRef.current = next
+        return next
+      })
+      if (!desktopSaveBlockedRef.current) setSaveState('saving')
+    } else {
+      setFilename(snapshot.filename)
+      setProjectName(snapshot.filename.replace(/\.(qmd|md)$/i, '').replaceAll(/[-_]+/g, ' '))
+      setSaveState('saving')
+    }
     setDiagnostics([{ code: 'recovery-restored', level: 'info', message: `Recovered the local version saved ${new Date(snapshot.savedAt).toLocaleString()}.` }])
     setRecoveryOpen(false)
     setToast('Recovered local manuscript version')
@@ -316,6 +489,13 @@ function App() {
     setToast(`Indexed ${added} new source${added === 1 ? '' : 's'} from ${file.name}`)
   }
 
+  useEffect(() => {
+    if (!desktopHost.available || reopenAttemptedRef.current) return
+    reopenAttemptedRef.current = true
+    const root = localStorage.getItem(LAST_PROJECT_ROOT_KEY)
+    if (root) void openDesktopProject(root, false)
+  }, [])
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -338,12 +518,19 @@ function App() {
               <div className="project-menu popover">
                 <div className="project-menu-current">
                   <span className="project-file-icon"><Icon name="document" size={17} /></span>
-                  <span><strong>{filename}</strong><small>Portable manuscript · saved locally</small></span>
+                  <span><strong>{desktopSession?.path ?? filename}</strong><small title={desktopSession?.root}>{desktopSession ? 'Project folder · saved on disk' : 'Portable manuscript · saved in this browser'}</small></span>
                 </div>
                 <div className="project-menu-actions">
-                  <button onClick={() => fileInputRef.current?.click()}><Icon name="document" size={16} /><span><strong>Open manuscript…</strong><small>Markdown or Quarto, up to 5 MB</small></span></button>
+                  {desktopHost.available ? (
+                    <>
+                      <button onClick={() => void openDesktopProject()} disabled={projectBusy}><Icon name="folder" size={16} /><span><strong>{projectBusy ? 'Opening project…' : 'Open project folder…'}</strong><small>Local Markdown, Quarto, and bibliography files</small></span></button>
+                      <button onClick={() => void beginCreateDesktopProject()} disabled={projectBusy}><Icon name="plus" size={16} /><span><strong>Create project…</strong><small>Start safely in an empty folder</small></span></button>
+                    </>
+                  ) : (
+                    <button onClick={() => fileInputRef.current?.click()}><Icon name="document" size={16} /><span><strong>Open manuscript…</strong><small>Markdown or Quarto, up to 5 MB</small></span></button>
+                  )}
                   <button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={16} /><span><strong>Attach bibliography…</strong><small>BibTeX or CSL JSON · {citations.length} indexed</small></span></button>
-                  <button onClick={createSnapshot}><Icon name="clock" size={16} /><span><strong>Save recovery snapshot</strong><small>Keep a local version in this browser</small></span></button>
+                  <button onClick={createSnapshot}><Icon name="clock" size={16} /><span><strong>Save recovery snapshot</strong><small>Keep a private safety copy on this device</small></span></button>
                   <button onClick={() => { setRecoveryOpen(true); setProjectMenuOpen(false) }}><Icon name="history" size={16} /><span><strong>Recovery history</strong><small>{recoveries.length ? `${recoveries.length} local version${recoveries.length === 1 ? '' : 's'}` : 'No local versions yet'}</small></span><span className="menu-count">{recoveries.length}</span></button>
                   <button onClick={() => download('reviewed')}><Icon name="download" size={16} /><span><strong>Download portable source</strong><small>Save {filename} to this computer</small></span></button>
                 </div>
@@ -360,7 +547,13 @@ function App() {
 
         <div className="document-state" aria-live="polite">
           <span className={`save-indicator ${saveState}`} />
-          {saveState === 'saving' ? 'Saving locally…' : 'Saved locally'}
+          {saveState === 'saving'
+            ? desktopSession ? 'Saving to project…' : 'Saving locally…'
+            : saveState === 'conflict'
+              ? 'External change detected'
+              : saveState === 'error'
+                ? 'Save paused'
+                : desktopSession ? 'Saved to project' : 'Saved locally'}
         </div>
 
         <div className="topbar-actions">
@@ -394,6 +587,21 @@ function App() {
           </button>
         </div>
       </header>
+      {desktopSession && (saveState === 'conflict' || saveState === 'error') && (
+        <div className={`save-alert ${saveState}`} role="alert">
+          <Icon name={saveState === 'conflict' ? 'branch' : 'clock'} size={17} />
+          <span>
+            <strong>{saveState === 'conflict' ? 'The manuscript changed outside DraftMatter.' : 'DraftMatter could not save to the project.'}</strong>
+            <small>{saveProblem || 'Your current edits remain available in the local recovery journal.'}</small>
+          </span>
+          {saveState === 'conflict' ? (
+            <button onClick={() => void reloadDesktopProject()}>Reload disk version</button>
+          ) : (
+            <button onClick={retryDesktopSave}>Try again</button>
+          )}
+          <button onClick={() => download('reviewed')}>Download my copy</button>
+        </div>
+      )}
       <input ref={fileInputRef} className="visually-hidden" type="file" accept=".md,.qmd,text/markdown" onChange={onFileSelected} aria-label="Open portable manuscript" />
       <input ref={bibliographyInputRef} className="visually-hidden" type="file" accept=".bib,.bibtex,.json,application/json" onChange={onBibliographySelected} aria-label="Attach bibliography" />
 
@@ -651,6 +859,21 @@ function App() {
         )}
       </div>
 
+      {createProjectOpen && (
+        <div className="modal-backdrop create-project-backdrop" onMouseDown={() => setCreateProjectOpen(false)}>
+          <form className="create-project-dialog" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); void confirmCreateDesktopProject() }}>
+            <div className="create-project-head">
+              <span className="project-file-icon"><Icon name="folder" size={18} /></span>
+              <div><span className="eyebrow">New local project</span><h2>Name this research project</h2><p>DraftMatter will create <strong>paper.qmd</strong> and private recovery metadata in the selected empty folder.</p></div>
+              <button className="icon-button" type="button" onClick={() => setCreateProjectOpen(false)} aria-label="Close create project dialog"><Icon name="close" /></button>
+            </div>
+            <label className="create-project-field"><span>Project name</span><input autoFocus value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="My research project" /></label>
+            <div className="create-project-location"><Icon name="folder" size={15} /><span title={newProjectRoot}>{newProjectRoot}</span></div>
+            <div className="create-project-actions"><button type="button" onClick={() => setCreateProjectOpen(false)}>Cancel</button><button className="primary-button" type="submit" disabled={!newProjectName.trim() || projectBusy}>{projectBusy ? 'Creating…' : 'Create project'}</button></div>
+          </form>
+        </div>
+      )}
+
       {citationSearchOpen && (
         <div className="modal-backdrop" onMouseDown={() => setCitationSearchOpen(false)}>
           <div className="citation-picker" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Insert citation">
@@ -676,7 +899,7 @@ function App() {
       {recoveryOpen && (
         <div className="modal-backdrop recovery-backdrop" onMouseDown={() => setRecoveryOpen(false)}>
           <div className="recovery-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Recovery history">
-            <div className="recovery-head"><div><span className="eyebrow">Local safety net</span><h2>Recovery history</h2><p>DraftMatter keeps a small, private journal in this browser. Restoring creates a new autosaved state; it does not delete newer versions.</p></div><button className="icon-button" onClick={() => setRecoveryOpen(false)} aria-label="Close recovery history"><Icon name="close" /></button></div>
+            <div className="recovery-head"><div><span className="eyebrow">Local safety net</span><h2>Recovery history</h2><p>DraftMatter keeps a small, private journal on this device. Restoring creates a new autosaved state; it does not delete newer versions.</p></div><button className="icon-button" onClick={() => setRecoveryOpen(false)} aria-label="Close recovery history"><Icon name="close" /></button></div>
             <div className="recovery-list">
               {recoveries.length === 0 ? (
                 <div className="recovery-empty"><Icon name="history" size={24} /><strong>No recovery versions yet</strong><p>Continue writing or save a snapshot from the project menu.</p></div>

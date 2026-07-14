@@ -480,6 +480,12 @@ fn open_project(root: String) -> Result<ProjectSnapshot, HostError> {
 #[tauri::command]
 fn create_project(root: String, name: String) -> Result<ProjectSnapshot, HostError> {
     let root_path = PathBuf::from(&root);
+    if root_path.exists() && fs::read_dir(&root_path)?.next().is_some() {
+        return Err(HostError::InvalidProject(format!(
+            "Choose an empty folder for a new DraftMatter project: {}",
+            root_path.display()
+        )));
+    }
     fs::create_dir_all(&root_path)?;
     let canonical = canonical_root(&root)?;
     let main_document = "paper.qmd".to_string();
@@ -555,6 +561,22 @@ mod tests {
         assert_eq!(snapshot.documents.len(), 1);
         assert_eq!(snapshot.documents[0].path, "paper.qmd");
         assert!(root.join(".draftmatter/project.json").is_file());
+    }
+
+    #[test]
+    fn refuses_to_create_a_project_over_existing_files() {
+        let temporary = tempdir().unwrap();
+        fs::write(temporary.path().join("notes.txt"), "keep me").unwrap();
+        let error = create_project(
+            temporary.path().to_string_lossy().into_owned(),
+            "Unsafe".into(),
+        )
+        .unwrap_err();
+        assert!(matches!(error, HostError::InvalidProject(_)));
+        assert_eq!(
+            fs::read_to_string(temporary.path().join("notes.txt")).unwrap(),
+            "keep me"
+        );
     }
 
     #[test]
