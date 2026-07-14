@@ -121,6 +121,8 @@ function App() {
   const [exportOpen, setExportOpen] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
   const [sourceTab, setSourceTab] = useState<'reviewed' | 'final' | 'original'>('reviewed')
+  const [sourceEditing, setSourceEditing] = useState(false)
+  const [sourceBuffer, setSourceBuffer] = useState('')
   const [commandOpen, setCommandOpen] = useState(false)
   const [reply, setReply] = useState('')
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'conflict' | 'error'>('saved')
@@ -352,6 +354,8 @@ function App() {
         setProjectMenuOpen(false)
         setCreateProjectOpen(false)
         setPendingProject(null)
+        setSourceOpen(false)
+        setSourceEditing(false)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -372,6 +376,41 @@ function App() {
   const source = sourceTab === 'reviewed'
     ? reviewedProjection(draft)
     : cleanProjection(draft, sourceTab)
+  const displayedSource = sourceEditing ? sourceBuffer : source
+
+  const openSourceInspector = () => {
+    setSourceTab('reviewed')
+    setSourceBuffer(reviewedProjection(draft))
+    setSourceEditing(false)
+    setSourceOpen(true)
+  }
+
+  const closeSourceInspector = () => {
+    setSourceEditing(false)
+    setSourceOpen(false)
+  }
+
+  const startSourceEditing = () => {
+    setSourceTab('reviewed')
+    setSourceBuffer(reviewedProjection(draft))
+    setSourceEditing(true)
+  }
+
+  const cancelSourceEditing = () => {
+    setSourceBuffer(reviewedProjection(draft))
+    setSourceEditing(false)
+  }
+
+  const applySourceEditing = () => {
+    const parsed = parsePortableDocument(sourceBuffer, initialDraft)
+    markDraftChanged()
+    commitDraftHistory(parsed.draft)
+    setDiagnostics(parsed.diagnostics)
+    setSourceEditing(false)
+    setToast(parsed.diagnostics.some((diagnostic) => diagnostic.level === 'error')
+      ? 'Source applied with diagnostics to review'
+      : 'Portable source applied · undo is available')
+  }
 
   const scrollTo = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
@@ -792,7 +831,7 @@ function App() {
 
             <div className="panel-footer">
               <span>{words} words</span>
-              <button onClick={() => setSourceOpen(true)}><Icon name="code" size={15} /> View source</button>
+              <button onClick={openSourceInspector}><Icon name="code" size={15} /> View source</button>
             </div>
           </aside>
         )}
@@ -1083,20 +1122,32 @@ function App() {
       )}
 
       {sourceOpen && (
-        <div className="source-drawer-backdrop" onMouseDown={() => setSourceOpen(false)}>
-          <div className="source-drawer" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="source-drawer-head"><div><span className="eyebrow">Portable source</span><h2>Projection inspector</h2></div><button className="icon-button" onClick={() => setSourceOpen(false)} aria-label="Close source inspector"><Icon name="close" /></button></div>
-            <div className="source-tabs">
-              <button className={sourceTab === 'reviewed' ? 'active' : ''} onClick={() => setSourceTab('reviewed')}>Reviewed .qmd</button>
-              <button className={sourceTab === 'final' ? 'active' : ''} onClick={() => setSourceTab('final')}>Clean final</button>
-              <button className={sourceTab === 'original' ? 'active' : ''} onClick={() => setSourceTab('original')}>Original</button>
+        <div className="source-drawer-backdrop" onMouseDown={closeSourceInspector}>
+          <div className="source-drawer" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Portable source inspector">
+            <div className="source-drawer-head"><div><span className="eyebrow">Portable source</span><h2>{sourceEditing ? 'Edit reviewed source' : 'Projection inspector'}</h2></div><button className="icon-button" onClick={closeSourceInspector} aria-label="Close source inspector"><Icon name="close" /></button></div>
+            <div className="source-tabs" role="tablist" aria-label="Source projection">
+              <button role="tab" aria-selected={sourceTab === 'reviewed'} className={sourceTab === 'reviewed' ? 'active' : ''} onClick={() => setSourceTab('reviewed')} disabled={sourceEditing}>Reviewed .qmd</button>
+              <button role="tab" aria-selected={sourceTab === 'final'} className={sourceTab === 'final' ? 'active' : ''} onClick={() => setSourceTab('final')} disabled={sourceEditing}>Clean final</button>
+              <button role="tab" aria-selected={sourceTab === 'original'} className={sourceTab === 'original' ? 'active' : ''} onClick={() => setSourceTab('original')} disabled={sourceEditing}>Original</button>
             </div>
             <div className="projection-note">
               <Icon name={sourceTab === 'reviewed' ? 'branch' : 'check'} size={16} />
-              {sourceTab === 'reviewed' ? 'Portable source includes stable anchors and review records.' : 'Clean projection contains no DraftMatter review structures.'}
+              <span>{sourceEditing ? 'Editing is explicit and reversible. Unsupported blocks remain portable.' : sourceTab === 'reviewed' ? 'Portable source includes stable anchors and review records.' : 'Clean projection contains no DraftMatter review structures.'}</span>
+              {sourceTab === 'reviewed' && !sourceEditing && <button onClick={startSourceEditing}><Icon name="code" size={13} /> Edit source</button>}
             </div>
-            <pre>{source}</pre>
-            <div className="source-drawer-footer"><span>{source.split('\n').length} lines · UTF-8</span><button onClick={() => download(sourceTab)}><Icon name="download" size={15} /> Download projection</button></div>
+            {sourceEditing ? (
+              <textarea className="source-editor" value={sourceBuffer} onChange={(event) => setSourceBuffer(event.target.value)} spellCheck={false} aria-label="Reviewed portable source" />
+            ) : (
+              <pre>{source}</pre>
+            )}
+            <div className="source-drawer-footer">
+              <span>{displayedSource.split('\n').length} lines · UTF-8{sourceEditing ? ' · edit mode' : ''}</span>
+              {sourceEditing ? (
+                <div className="source-editor-actions"><button className="secondary" onClick={cancelSourceEditing}>Cancel</button><button onClick={applySourceEditing} disabled={!sourceBuffer.trim()}><Icon name="check" size={15} /> Apply source</button></div>
+              ) : (
+                <button onClick={() => download(sourceTab)}><Icon name="download" size={15} /> Download projection</button>
+              )}
+            </div>
           </div>
         </div>
       )}
@@ -1109,7 +1160,7 @@ function App() {
             <button onClick={() => { setCommandOpen(false); setCitationSearchOpen(true) }}><span className="command-icon">@</span><span><strong>Insert citation</strong><small>Search Zotero and project bibliography</small></span><kbd>⌘ ⇧ C</kbd></button>
             <button onClick={() => { setCommandOpen(false); showReviewPanel() }}><span className="command-icon"><Icon name="message" size={17} /></span><span><strong>Add comment</strong><small>Attach a note to selected text</small></span></button>
             <button onClick={() => { setCommandOpen(false); runCell() }}><span className="command-icon"><Icon name="play" size={17} /></span><span><strong>Run code cell</strong><small>Execute the current cell explicitly</small></span><kbd>⌘ ↵</kbd></button>
-            <button onClick={() => { setCommandOpen(false); setSourceOpen(true) }}><span className="command-icon"><Icon name="code" size={17} /></span><span><strong>Inspect portable source</strong><small>Compare reviewed and clean projections</small></span></button>
+            <button onClick={() => { setCommandOpen(false); openSourceInspector() }}><span className="command-icon"><Icon name="code" size={17} /></span><span><strong>Inspect portable source</strong><small>Compare reviewed and clean projections</small></span></button>
           </div>
         </div>
       )}

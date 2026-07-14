@@ -2070,7 +2070,24 @@ kbd {
   padding: 8px 9px;
 }
 
-.source-drawer pre {
+.projection-note > span { flex: 1; }
+
+.projection-note > button {
+  align-items: center;
+  background: white;
+  border: 1px solid #cfddd5;
+  border-radius: 4px;
+  color: var(--sage-dark);
+  display: flex;
+  flex: 0 0 auto;
+  font-size: 8px;
+  font-weight: 700;
+  gap: 4px;
+  padding: 5px 7px;
+}
+
+.source-drawer pre,
+.source-editor {
   background: #f6f8f6;
   border: 1px solid var(--line);
   border-radius: 6px;
@@ -2084,6 +2101,17 @@ kbd {
   overflow: auto;
   padding: 14px;
   white-space: pre-wrap;
+}
+
+.source-editor {
+  outline: none;
+  resize: none;
+  width: calc(100% - 30px);
+}
+
+.source-editor:focus {
+  border-color: #9eb6aa;
+  box-shadow: 0 0 0 2px rgba(63, 104, 89, 0.12);
 }
 
 .source-drawer-footer {
@@ -2109,6 +2137,9 @@ kbd {
   gap: 5px;
   padding: 8px 10px;
 }
+
+.source-editor-actions { display: flex; gap: 7px; }
+.source-drawer-footer .secondary { background: transparent; border: 1px solid var(--line-strong); color: #65716b; }
 
 .command-backdrop { padding-top: 18vh; }
 .command-menu { padding-bottom: 7px; width: 510px; }
