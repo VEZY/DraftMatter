@@ -180,6 +180,39 @@ export function parseBibliographyFile(filename: string, source: string) {
   return /\.json$/i.test(filename) ? parseCslJson(source) : parseBibTeX(source)
 }
 
+export async function loadProjectBibliographies(
+  paths: string[],
+  read: (path: string) => Promise<string>,
+): Promise<BibliographyResult> {
+  const results = await Promise.all(paths.map(async (path, index) => {
+    try {
+      const parsed = parseBibliographyFile(path, await read(path))
+      return {
+        records: parsed.records,
+        diagnostics: parsed.diagnostics.map((diagnostic) => ({
+          ...diagnostic,
+          code: `project-bibliography-${index}-${diagnostic.code}`,
+          message: `${path}: ${diagnostic.message}`,
+        })),
+      }
+    } catch (error) {
+      return {
+        records: [],
+        diagnostics: [{
+          code: `project-bibliography-${index}-unreadable`,
+          level: 'error' as const,
+          message: `${path}: ${error instanceof Error ? error.message : String(error)}`,
+        }],
+      }
+    }
+  }))
+
+  return results.reduce<BibliographyResult>((combined, result) => ({
+    records: mergeCitationRecords(combined.records, result.records),
+    diagnostics: [...combined.diagnostics, ...result.diagnostics],
+  }), { records: [], diagnostics: [] })
+}
+
 export function mergeCitationRecords(existing: CitationRecord[], incoming: CitationRecord[]) {
   const byKey = new Map(existing.map((record) => [record.citekey.toLowerCase(), record]))
   const dois = new Set(existing.map((record) => record.doi?.toLowerCase()).filter(Boolean))

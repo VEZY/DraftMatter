@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { formatCitationCluster, mergeCitationRecords, parseBibliographyFile, searchCitations } from './bibliography'
+import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, parseBibliographyFile, searchCitations } from './bibliography'
 import { desktopHost, normaliseHostFailure, type ProjectSnapshot } from './desktopHost'
 import { parsePortableDocument } from './document'
 import { useDraftHistory } from './draftHistory'
@@ -449,7 +449,13 @@ function App() {
       : project.documents[0]?.path
     if (!mainPath) throw new Error('This folder does not contain a Markdown or Quarto manuscript.')
 
-    const document = await desktopHost.readDocument(project.root, mainPath)
+    const [document, projectBibliography] = await Promise.all([
+      desktopHost.readDocument(project.root, mainPath),
+      loadProjectBibliographies(
+        project.bibliographies.map((entry) => entry.path),
+        async (path) => (await desktopHost.readBibliography(project.root, path)).content,
+      ),
+    ])
     if (mainPath !== project.config.mainDocument) await desktopHost.setMainDocument(project.root, mainPath)
     const parsed = parsePortableDocument(document.content, initialDraft)
     const displayName = mainPath.split('/').at(-1) ?? mainPath
@@ -461,13 +467,17 @@ function App() {
     setFilename(displayName)
     setProjectName(project.config.name)
     setDiagnostics(parsed.diagnostics)
-    setBibliographyDiagnostics([])
+    setCitations(mergeCitationRecords(sampleCitations, projectBibliography.records))
+    setBibliographyDiagnostics(projectBibliography.diagnostics)
     setProjectMenuOpen(false)
     setSaveState('saved')
     localStorage.setItem(LAST_PROJECT_ROOT_KEY, project.root)
     const nextRecoveries = saveRecoverySnapshot(localStorage, parsed.draft, displayName, document.content)
     setRecoveries(nextRecoveries)
-    if (announce) setToast(`Opened ${project.config.name} · ${mainPath}`)
+    if (announce) {
+      const sourceCount = projectBibliography.records.length
+      setToast(`Opened ${project.config.name} · ${mainPath}${sourceCount ? ` · ${sourceCount} project source${sourceCount === 1 ? '' : 's'}` : ''}`)
+    }
   }
 
   const openDesktopProject = async (knownRoot?: string, announce = true) => {

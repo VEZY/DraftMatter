@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { formatCitationCluster, mergeCitationRecords, parseBibTeX, parseCslJson, searchCitations } from './bibliography'
+import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, parseBibTeX, parseCslJson, searchCitations } from './bibliography'
 import { sampleCitations } from './sampleCitations'
 
 describe('local bibliography', () => {
@@ -40,5 +40,24 @@ describe('local bibliography', () => {
 
   it('formats compact author-year clusters', () => {
     expect(formatCitationCluster(sampleCitations, ['vezy2024', 'martin2023'])).toBe('(Vezy et al., 2024; Martin & Chen, 2023)')
+  })
+
+  it('loads every discovered project bibliography without making one bad file fatal', async () => {
+    const sources: Record<string, string> = {
+      'references.bib': '@article{vezy2024, title={Portable research}, author={Vezy, Remi}, year={2024}}',
+      'library.json': JSON.stringify([{ id: 'martin2023', title: 'Canopy response', author: [{ family: 'Martin' }] }]),
+    }
+    const result = await loadProjectBibliographies(
+      ['references.bib', 'missing.bib', 'library.json'],
+      async (path) => {
+        if (!(path in sources)) throw new Error('File disappeared')
+        return sources[path]
+      },
+    )
+
+    expect(result.records.map((record) => record.citekey)).toEqual(['vezy2024', 'martin2023'])
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: 'project-bibliography-1-unreadable', level: 'error', message: 'missing.bib: File disappeared' }),
+    ])
   })
 })

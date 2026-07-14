@@ -8,6 +8,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 const PROJECT_SCHEMA: u32 = 1;
 const MAX_RECOVERY_FILES: usize = 8;
+const MAX_BIBLIOGRAPHY_BYTES: u64 = 10 * 1024 * 1024;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -323,6 +324,17 @@ fn manuscript_extension(path: &Path) -> bool {
     )
 }
 
+fn bibliography_extension(path: &Path) -> bool {
+    matches!(
+        path.extension()
+            .and_then(OsStr::to_str)
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .as_str(),
+        "bib" | "bibtex" | "json"
+    )
+}
+
 fn read_document_impl(raw_root: &str, relative: &str) -> Result<DocumentSnapshot, HostError> {
     let root = canonical_root(raw_root)?;
     let path = contained_path(&root, relative)?;
@@ -334,6 +346,34 @@ fn read_document_impl(raw_root: &str, relative: &str) -> Result<DocumentSnapshot
     let content = fs::read_to_string(&path)
         .map_err(|_| HostError::NotFound(format!("The manuscript was not found: {relative}")))?;
     let metadata = fs::metadata(&path)?;
+    Ok(DocumentSnapshot {
+        path: relative.to_string(),
+        hash: source_hash(content.as_bytes()),
+        content,
+        modified_ms: modified_ms(&metadata),
+    })
+}
+
+fn read_bibliography_impl(raw_root: &str, relative: &str) -> Result<DocumentSnapshot, HostError> {
+    let root = canonical_root(raw_root)?;
+    let path = contained_path(&root, relative)?;
+    if !bibliography_extension(&path) {
+        return Err(HostError::UnsupportedFile(format!(
+            "Only .bib, .bibtex, and .json bibliography files can be read: {relative}"
+        )));
+    }
+    let metadata = fs::metadata(&path)
+        .map_err(|_| HostError::NotFound(format!("The bibliography was not found: {relative}")))?;
+    if metadata.len() > MAX_BIBLIOGRAPHY_BYTES {
+        return Err(HostError::UnsupportedFile(format!(
+            "The bibliography exceeds the 10 MB project limit: {relative}"
+        )));
+    }
+    let content = fs::read_to_string(&path).map_err(|error| {
+        HostError::UnsupportedFile(format!(
+            "The bibliography must be valid UTF-8 text ({relative}): {error}"
+        ))
+    })?;
     Ok(DocumentSnapshot {
         path: relative.to_string(),
         hash: source_hash(content.as_bytes()),
@@ -588,6 +628,11 @@ fn read_document(root: String, path: String) -> Result<DocumentSnapshot, HostErr
 }
 
 #[tauri::command]
+fn read_bibliography(root: String, path: String) -> Result<DocumentSnapshot, HostError> {
+    read_bibliography_impl(&root, &path)
+}
+
+#[tauri::command]
 fn save_document(request: SaveDocumentRequest) -> Result<SaveDocumentResult, HostError> {
     save_document_impl(request)
 }
@@ -614,6 +659,7 @@ pub fn run() {
             open_project,
             create_project,
             read_document,
+            read_bibliography,
             save_document,
             document_status,
             set_main_document
@@ -690,6 +736,30 @@ mod tests {
         );
         assert!(result.recovery_path.is_some());
         assert!(root.join(result.recovery_path.unwrap()).is_file());
+    }
+
+    #[test]
+    fn reads_only_bibliography_text_inside_the_project() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("project");
+        create_project(root.to_string_lossy().into_owned(), "Test".into()).unwrap();
+        fs::write(
+            root.join("references.bib"),
+            "@article{vezy2024, title={Portable research}}",
+        )
+        .unwrap();
+
+        let bibliography =
+            read_bibliography_impl(root.to_str().unwrap(), "references.bib").unwrap();
+        assert!(bibliography.content.contains("vezy2024"));
+        assert!(matches!(
+            read_bibliography_impl(root.to_str().unwrap(), "paper.qmd"),
+            Err(HostError::UnsupportedFile(_))
+        ));
+        assert!(matches!(
+            read_bibliography_impl(root.to_str().unwrap(), "../references.bib"),
+            Err(HostError::InvalidPath(_))
+        ));
     }
 
     #[test]

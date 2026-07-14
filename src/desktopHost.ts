@@ -89,6 +89,9 @@ export function createDesktopHost(
     readDocument(root: string, path: string) {
       return invokeBridge<DocumentSnapshot>('read_document', { root, path })
     },
+    readBibliography(root: string, path: string) {
+      return invokeBridge<DocumentSnapshot>('read_bibliography', { root, path })
+    },
     saveDocument(request: SaveDocumentRequest) {
       return invokeBridge<SaveDocumentResult>('save_document', { request })
     },
