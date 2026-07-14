@@ -1,4 +1,4 @@
-import type { DraftState } from './types'
+import type { DraftState, SectionKey } from './types'
 
 const REVIEW_START = '::::: {.draftmatter-reviews .hidden data-schema="1"}'
 const REVIEW_END = ':::::'
@@ -14,26 +14,44 @@ function proposalSentence(state: DraftState, view: 'original' | 'final') {
   return 'did not substantially alter leaf expansion'
 }
 
+function frontmatter(state: DraftState) {
+  if (state.frontmatterSource) {
+    const replaced = state.frontmatterSource.replace(
+      /^(title\s*:\s*)(?:"(?:[^"\\]|\\.)*"|'[^']*'|.+)$/m,
+      `$1"${state.title.replaceAll('"', '\\"')}"`,
+    )
+    if (/^title\s*:/m.test(replaced)) return replaced.trim()
+    return replaced.replace(/^---\s*$/m, `---\ntitle: "${state.title.replaceAll('"', '\\"')}"` ).trim()
+  }
+
+  return `---
+title: "${state.title.replaceAll('"', '\\"')}"
+author:
+  - Remi Vezy
+  - Alice Martin
+bibliography: references.bib
+format: html
+---`
+}
+
+function preservedAfter(state: DraftState, section: SectionKey) {
+  const blocks = state.preservedSections?.filter((item) => item.after === section) ?? []
+  return blocks.length ? `\n\n${blocks.map((item) => item.markdown.trim()).join('\n\n')}` : ''
+}
+
 export function cleanProjection(state: DraftState, view: 'original' | 'final') {
   const result = proposalSentence(state, view)
   const citation = state.citationInserted ? ' [@vezy2024; @martin2023]' : ' [@vezy2024]'
 
-  return `---
-title: "${state.title.replaceAll('"', '\\"')}"
-author:
-  - Remi Vezy
-  - Alice Martin
-bibliography: references.bib
-format: html
----
+  return `${frontmatter(state)}${preservedAfter(state, 'frontmatter')}
 
 ## Abstract
 
-${state.abstract}
+${state.abstract}${preservedAfter(state, 'abstract')}
 
 ## Introduction
 
-${state.introduction}${citation}
+${state.introduction}${citation}${preservedAfter(state, 'introduction')}
 
 ## Methods
 
@@ -46,38 +64,33 @@ ${state.code}
 <!-- dm-output:start cell="fig-canopy" run="sha256:6f42f1a" -->
 ![Leaf area response over twelve weeks](figures/generated/fig-canopy.svg){#fig-canopy-result}
 <!-- dm-output:end -->
+${preservedAfter(state, 'methods')}
 
 ## Results
 
-${state.resultsLead} The drought treatment ${result}, while root allocation increased modestly [@coutellier2022].
+${state.resultsLead} The drought treatment ${result}, while root allocation increased modestly [@coutellier2022].${preservedAfter(state, 'results')}
 
 ## Conclusion
 
-${state.conclusion}
+${state.conclusion}${preservedAfter(state, 'conclusion')}
 `
 }
 
 export function reviewedProjection(state: DraftState) {
+  const citation = state.citationInserted ? ' [@vezy2024; @martin2023]' : ' [@vezy2024]'
   const replyBlocks = state.commentReplies
     .map((reply, index) => `~~~{.dm-message data-author="dm-a01" data-index="${index + 1}"}\n${reply}\n~~~`)
     .join('\n')
 
-  return `---
-title: "${state.title.replaceAll('"', '\\"')}"
-author:
-  - Remi Vezy
-  - Alice Martin
-bibliography: references.bib
-format: html
----
+  return `${frontmatter(state)}${preservedAfter(state, 'frontmatter')}
 
 ## Abstract
 
-${state.abstract}
+${state.abstract}${preservedAfter(state, 'abstract')}
 
 ## Introduction
 
-${state.introduction} [@vezy2024]
+${state.introduction}${citation}${preservedAfter(state, 'introduction')}
 
 ## Methods
 
@@ -90,14 +103,15 @@ ${state.code}
 <!-- dm-output:start cell="fig-canopy" run="sha256:6f42f1a" -->
 ![Leaf area response over twelve weeks](figures/generated/fig-canopy.svg){#fig-canopy-result}
 <!-- dm-output:end -->
+${preservedAfter(state, 'methods')}
 
 ## Results
 
-${state.resultsLead} The drought treatment []{#dm-m01 .dm-anchor data-anchor="dm-r01" data-edge="start" data-affinity="after"}did not substantially alter leaf expansion[]{#dm-m02 .dm-anchor data-anchor="dm-r01" data-edge="end" data-affinity="before"}, while root allocation []{#dm-cm01 .dm-anchor data-anchor="dm-comment-01" data-edge="start" data-affinity="after"}increased modestly[]{#dm-cm02 .dm-anchor data-anchor="dm-comment-01" data-edge="end" data-affinity="before"} [@coutellier2022].
+${state.resultsLead} The drought treatment []{#dm-m01 .dm-anchor data-anchor="dm-r01" data-edge="start" data-affinity="after"}did not substantially alter leaf expansion[]{#dm-m02 .dm-anchor data-anchor="dm-r01" data-edge="end" data-affinity="before"}, while root allocation []{#dm-cm01 .dm-anchor data-anchor="dm-comment-01" data-edge="start" data-affinity="after"}increased modestly[]{#dm-cm02 .dm-anchor data-anchor="dm-comment-01" data-edge="end" data-affinity="before"} [@coutellier2022].${preservedAfter(state, 'results')}
 
 ## Conclusion
 
-${state.conclusion}
+${state.conclusion}${preservedAfter(state, 'conclusion')}
 
 ${REVIEW_START}
 :::: {#dm-c01 .dm-change data-anchor="dm-r01" data-kind="replace" data-author="dm-a01" data-status="${state.aliceStatus}"}
