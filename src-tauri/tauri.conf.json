@@ -27,10 +27,13 @@
     }
   },
   "bundle": {
-    "active": false,
+    "active": true,
     "targets": "all",
     "category": "Productivity",
     "shortDescription": "A living manuscript for research",
-    "longDescription": "Local-first scientific writing, citations, executable results, review, and explicit versioning."
+    "longDescription": "Local-first scientific writing, citations, executable results, review, and explicit versioning.",
+    "macOS": {
+      "signingIdentity": "-"
+    }
   }
 }
