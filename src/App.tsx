@@ -1,10 +1,21 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { parsePortableDocument } from './document'
 import { Icon } from './Icon'
 import { cleanProjection, downloadText, reviewedProjection } from './projections'
 import { initialDraft } from './sampleDraft'
-import type { DraftState, MarkupView, SuggestionStatus } from './types'
+import { readRecoverySnapshots, saveRecoverySnapshot, type RecoverySnapshot } from './storage'
+import type { DocumentDiagnostic, DraftState, MarkupView, SuggestionStatus } from './types'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
+const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
+
+function getInitialProjectMeta() {
+  try {
+    return { filename: 'canopy-drought.qmd', projectName: 'Canopy drought study', ...JSON.parse(localStorage.getItem(PROJECT_META_KEY) ?? '{}') }
+  } catch {
+    return { filename: 'canopy-drought.qmd', projectName: 'Canopy drought study' }
+  }
+}
 
 function getInitialDraft(): DraftState {
   try {
@@ -67,6 +78,7 @@ function StatusPill({ status }: { status: SuggestionStatus }) {
 }
 
 function App() {
+  const initialProjectMeta = useMemo(getInitialProjectMeta, [])
   const [draft, setDraft] = useState<DraftState>(getInitialDraft)
   const [markupView, setMarkupView] = useState<MarkupView>('all')
   const [activeNav, setActiveNav] = useState<'manuscript' | 'review' | 'sources' | 'history'>('manuscript')
@@ -81,6 +93,13 @@ function App() {
   const [reply, setReply] = useState('')
   const [saveState, setSaveState] = useState<'saved' | 'saving'>('saved')
   const [toast, setToast] = useState('')
+  const [projectMenuOpen, setProjectMenuOpen] = useState(false)
+  const [recoveryOpen, setRecoveryOpen] = useState(false)
+  const [filename, setFilename] = useState(initialProjectMeta.filename)
+  const [projectName, setProjectName] = useState(initialProjectMeta.projectName)
+  const [diagnostics, setDiagnostics] = useState<DocumentDiagnostic[]>([])
+  const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>(() => readRecoverySnapshots(localStorage))
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const activeStatus = draft.activeProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
   const activeReplacement = draft.activeProposal === 'alice'
@@ -102,6 +121,18 @@ function App() {
   }, [draft])
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      const next = saveRecoverySnapshot(localStorage, draft, filename, reviewedProjection(draft))
+      setRecoveries(next)
+    }, 1800)
+    return () => window.clearTimeout(timeout)
+  }, [draft, filename])
+
+  useEffect(() => {
+    localStorage.setItem(PROJECT_META_KEY, JSON.stringify({ filename, projectName }))
+  }, [filename, projectName])
+
+  useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
@@ -112,6 +143,7 @@ function App() {
         setCitationOpen(false)
         setCitationSearchOpen(false)
         setExportOpen(false)
+        setProjectMenuOpen(false)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -168,7 +200,8 @@ function App() {
 
   const download = (kind: 'reviewed' | 'final' | 'original') => {
     const content = kind === 'reviewed' ? reviewedProjection(draft) : cleanProjection(draft, kind)
-    downloadText(kind === 'reviewed' ? 'canopy-drought.qmd' : `canopy-drought.${kind}.qmd`, content)
+    const base = filename.replace(/\.(qmd|md)$/i, '')
+    downloadText(kind === 'reviewed' ? filename : `${base}.${kind}.qmd`, content)
     setExportOpen(false)
     setToast(kind === 'reviewed' ? 'Portable project source exported' : `Clean ${kind} projection exported`)
   }
@@ -176,6 +209,52 @@ function App() {
   const showReviewPanel = () => {
     setActiveNav('review')
     setRightPanelOpen(true)
+  }
+
+  const openPortableFile = async (file: File) => {
+    if (!/\.(qmd|md)$/i.test(file.name)) {
+      setToast('Choose a Markdown or Quarto manuscript (.md or .qmd)')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setToast('This prototype opens manuscripts up to 5 MB')
+      return
+    }
+
+    const parsed = parsePortableDocument(await file.text(), initialDraft)
+    const nextName = file.name.replace(/\.(qmd|md)$/i, '')
+    setDraft(parsed.draft)
+    setFilename(file.name)
+    setProjectName(nextName.replaceAll(/[-_]+/g, ' '))
+    setDiagnostics(parsed.diagnostics)
+    setProjectMenuOpen(false)
+    setSaveState('saved')
+    const nextRecoveries = saveRecoverySnapshot(localStorage, parsed.draft, file.name, reviewedProjection(parsed.draft))
+    setRecoveries(nextRecoveries)
+    const warnings = parsed.diagnostics.filter((item) => item.level !== 'info').length
+    setToast(warnings ? `Opened ${file.name} · ${warnings} check${warnings === 1 ? '' : 's'} to review` : `Opened ${file.name}`)
+  }
+
+  const onFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (file) await openPortableFile(file)
+  }
+
+  const createSnapshot = () => {
+    const next = saveRecoverySnapshot(localStorage, draft, filename, reviewedProjection(draft), new Date().toISOString())
+    setRecoveries(next)
+    setProjectMenuOpen(false)
+    setToast('Recovery snapshot saved locally')
+  }
+
+  const restoreSnapshot = (snapshot: RecoverySnapshot) => {
+    setDraft(snapshot.draft)
+    setFilename(snapshot.filename)
+    setProjectName(snapshot.filename.replace(/\.(qmd|md)$/i, '').replaceAll(/[-_]+/g, ' '))
+    setDiagnostics([{ code: 'recovery-restored', level: 'info', message: `Recovered the local version saved ${new Date(snapshot.savedAt).toLocaleString()}.` }])
+    setRecoveryOpen(false)
+    setToast('Recovered local manuscript version')
   }
 
   return (
@@ -190,11 +269,33 @@ function App() {
             <span>DraftMatter</span>
           </div>
           <span className="topbar-divider" />
-          <button className="project-switcher">
-            <span className="project-dot" />
-            <span className="project-switcher-name">Canopy drought study</span>
-            <Icon name="chevronDown" size={14} />
-          </button>
+          <div className="project-switcher-wrap">
+            <button className={`project-switcher ${projectMenuOpen ? 'active' : ''}`} onClick={() => setProjectMenuOpen((open) => !open)} aria-expanded={projectMenuOpen}>
+              <span className="project-dot" />
+              <span className="project-switcher-name">{projectName}</span>
+              <Icon name="chevronDown" size={14} />
+            </button>
+            {projectMenuOpen && (
+              <div className="project-menu popover">
+                <div className="project-menu-current">
+                  <span className="project-file-icon"><Icon name="document" size={17} /></span>
+                  <span><strong>{filename}</strong><small>Portable manuscript · saved locally</small></span>
+                </div>
+                <div className="project-menu-actions">
+                  <button onClick={() => fileInputRef.current?.click()}><Icon name="document" size={16} /><span><strong>Open manuscript…</strong><small>Markdown or Quarto, up to 5 MB</small></span></button>
+                  <button onClick={createSnapshot}><Icon name="clock" size={16} /><span><strong>Save recovery snapshot</strong><small>Keep a local version in this browser</small></span></button>
+                  <button onClick={() => { setRecoveryOpen(true); setProjectMenuOpen(false) }}><Icon name="history" size={16} /><span><strong>Recovery history</strong><small>{recoveries.length ? `${recoveries.length} local version${recoveries.length === 1 ? '' : 's'}` : 'No local versions yet'}</small></span><span className="menu-count">{recoveries.length}</span></button>
+                  <button onClick={() => download('reviewed')}><Icon name="download" size={16} /><span><strong>Download portable source</strong><small>Save {filename} to this computer</small></span></button>
+                </div>
+                {diagnostics.length > 0 && (
+                  <div className="project-diagnostics">
+                    <span>Import checks</span>
+                    {diagnostics.slice(0, 3).map((item) => <div className={`diagnostic-${item.level}`} key={item.code}><i />{item.message}</div>)}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="document-state" aria-live="polite">
@@ -233,6 +334,7 @@ function App() {
           </button>
         </div>
       </header>
+      <input ref={fileInputRef} className="visually-hidden" type="file" accept=".md,.qmd,text/markdown" onChange={onFileSelected} aria-label="Open portable manuscript" />
 
       <div className="workspace">
         <nav className="app-rail" aria-label="Workspace navigation">
@@ -270,9 +372,9 @@ function App() {
 
             <div className="project-health">
               <div className="project-health-title"><Icon name="spark" size={16} /> Project health</div>
-              <div><span><i className="health-dot okay" /> Citations</span><small>12 linked</small></div>
-              <div><span><i className="health-dot warning" /> Figures</span><small>1 stale</small></div>
-              <div><span><i className="health-dot okay" /> Git</span><small>2 changes</small></div>
+              <div><span><i className="health-dot okay" /> Citations</span><small>{draft.citationInserted ? '13 linked' : '12 linked'}</small></div>
+              <div><span><i className={`health-dot ${draft.cellStatus === 'current' ? 'okay' : 'warning'}`} /> Figures</span><small>{draft.cellStatus === 'current' ? 'Up to date' : draft.cellStatus}</small></div>
+              <div><span><i className={`health-dot ${diagnostics.some((item) => item.level === 'error') ? 'warning' : 'okay'}`} /> Source</span><small>{diagnostics.length ? `${diagnostics.length} check${diagnostics.length === 1 ? '' : 's'}` : 'Portable'}</small></div>
             </div>
 
             <div className="panel-footer">
@@ -501,6 +603,26 @@ function App() {
               <button className="source-result"><span className="source-icon">Z</span><span><strong>Architectural plasticity mediates drought response</strong><small>Coutellier, L. et al. · 2022 · Plant Methods</small><em>10.1186/s13007-022-00891-3</em></span><Icon name="plus" /></button>
             </div>
             <div className="picker-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Add citation</span></div>
+          </div>
+        </div>
+      )}
+
+      {recoveryOpen && (
+        <div className="modal-backdrop recovery-backdrop" onMouseDown={() => setRecoveryOpen(false)}>
+          <div className="recovery-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Recovery history">
+            <div className="recovery-head"><div><span className="eyebrow">Local safety net</span><h2>Recovery history</h2><p>DraftMatter keeps a small, private journal in this browser. Restoring creates a new autosaved state; it does not delete newer versions.</p></div><button className="icon-button" onClick={() => setRecoveryOpen(false)} aria-label="Close recovery history"><Icon name="close" /></button></div>
+            <div className="recovery-list">
+              {recoveries.length === 0 ? (
+                <div className="recovery-empty"><Icon name="history" size={24} /><strong>No recovery versions yet</strong><p>Continue writing or save a snapshot from the project menu.</p></div>
+              ) : recoveries.map((snapshot, index) => (
+                <button key={snapshot.id} onClick={() => restoreSnapshot(snapshot)}>
+                  <span className="recovery-timeline"><i />{index < recoveries.length - 1 && <b />}</span>
+                  <span className="recovery-copy"><strong>{snapshot.title}</strong><small>{snapshot.filename} · {new Date(snapshot.savedAt).toLocaleString()}</small><em>{snapshot.sourceHash}</em></span>
+                  <span className="recovery-action">Restore <Icon name="arrowRight" size={14} /></span>
+                </button>
+              ))}
+            </div>
+            <div className="recovery-footer"><Icon name="check" size={14} /> Stored only on this device · maximum 8 versions</div>
           </div>
         </div>
       )}
