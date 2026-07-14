@@ -752,22 +752,22 @@ function App() {
       <div className="workspace">
         <nav className="app-rail" aria-label="Workspace navigation">
           <div className="rail-items">
-            <button className={activeNav === 'manuscript' ? 'active' : ''} onClick={() => setActiveNav('manuscript')} data-label="Manuscript"><Icon name="document" /></button>
-            <button className={activeNav === 'review' ? 'active' : ''} onClick={showReviewPanel} data-label="Review"><Icon name="message" /><span className="rail-notice">3</span></button>
-            <button className={activeNav === 'sources' ? 'active' : ''} onClick={() => { setActiveNav('sources'); setCitationSearchOpen(true) }} data-label="Sources"><Icon name="book" /></button>
-            <button className={activeNav === 'history' ? 'active' : ''} onClick={() => setActiveNav('history')} data-label="History"><Icon name="history" /></button>
+            <button className={activeNav === 'manuscript' ? 'active' : ''} onClick={() => setActiveNav('manuscript')} data-label="Manuscript" aria-label="Manuscript" aria-current={activeNav === 'manuscript' ? 'page' : undefined}><Icon name="document" /></button>
+            <button className={activeNav === 'review' ? 'active' : ''} onClick={showReviewPanel} data-label="Review" aria-label="Review, 3 open items" aria-current={activeNav === 'review' ? 'page' : undefined}><Icon name="message" /><span className="rail-notice">3</span></button>
+            <button className={activeNav === 'sources' ? 'active' : ''} onClick={() => { setActiveNav('sources'); setCitationSearchOpen(true) }} data-label="Sources" aria-label="Sources" aria-current={activeNav === 'sources' ? 'page' : undefined}><Icon name="book" /></button>
+            <button className={activeNav === 'history' ? 'active' : ''} onClick={() => setActiveNav('history')} data-label="History" aria-label="History" aria-current={activeNav === 'history' ? 'page' : undefined}><Icon name="history" /></button>
           </div>
-          <button data-label="Settings"><Icon name="settings" /></button>
+          <button data-label="Settings" aria-label="Settings"><Icon name="settings" /></button>
         </nav>
 
         {leftPanelOpen && (
-          <aside className="left-panel">
+          <aside className="left-panel" aria-label="Manuscript outline">
             <div className="panel-heading-row">
               <div>
                 <span className="eyebrow">Manuscript</span>
                 <h2>Outline</h2>
               </div>
-              <button className="icon-button subtle"><Icon name="more" /></button>
+              <button className="icon-button subtle" aria-label="Outline options"><Icon name="more" /></button>
             </div>
 
             <div className="outline-tree">
@@ -841,7 +841,7 @@ function App() {
                   <div className="citation-detail-top">
                     <span className="source-icon">Z</span>
                     <div><strong>{primaryCitation ? `${primaryCitation.authors[0] ?? primaryCitation.citekey}${primaryCitation.authors.length > 1 ? ' et al.' : ''}${primaryCitation.year ? ` (${primaryCitation.year})` : ''}` : 'Missing citation'}</strong><p>{primaryCitation?.title ?? draft.citationKeys[0]}</p></div>
-                    <button className="icon-button subtle" onClick={() => setCitationOpen(false)}><Icon name="close" size={15} /></button>
+                    <button className="icon-button subtle" onClick={() => setCitationOpen(false)} aria-label="Close citation details"><Icon name="close" size={15} /></button>
                   </div>
                   <dl><div><dt>Source</dt><dd>{primaryCitation?.container ?? primaryCitation?.source ?? 'Not available'}</dd></div><div><dt>DOI</dt><dd>{primaryCitation?.doi ?? 'Not available'}</dd></div></dl>
                   <div className="citation-actions"><button>Edit citation</button><button onClick={() => { setCitationSearchOpen(true); setCitationOpen(false) }}>Add another source</button></div>
@@ -861,7 +861,7 @@ function App() {
                   <div className="code-cell-label"><span className="python-mark">Py</span><strong>Canopy response over time</strong><span className={`cell-status ${draft.cellStatus}`}><i />{draft.cellStatus === 'running' ? 'Running' : draft.cellStatus === 'stale' ? 'Stale' : 'Current'}</span></div>
                   <div className="code-cell-actions">
                     <button className="run-button" onClick={runCell} disabled={draft.cellStatus === 'running'}><Icon name="play" size={14} /> {draft.cellStatus === 'running' ? 'Running…' : 'Run'}</button>
-                    <button className="icon-button subtle"><Icon name="more" /></button>
+                    <button className="icon-button subtle" aria-label="Code cell options"><Icon name="more" /></button>
                   </div>
                 </div>
                 <div className="code-editor-wrap">
@@ -938,10 +938,10 @@ function App() {
         </main>
 
         {rightPanelOpen && (
-          <aside className="review-panel">
+          <aside className="review-panel" aria-label="Review feedback">
             <div className="review-panel-header">
               <div><span className="eyebrow">Review</span><h2>Open feedback <span>3</span></h2></div>
-              <button className="icon-button subtle" onClick={() => setRightPanelOpen(false)}><Icon name="close" /></button>
+              <button className="icon-button subtle" onClick={() => setRightPanelOpen(false)} aria-label="Close review panel"><Icon name="close" /></button>
             </div>
 
             <div className="markup-view-control">
@@ -956,7 +956,7 @@ function App() {
             </div>
 
             <div className="review-scroll">
-              <div className="review-location"><span>RESULTS · PARAGRAPH 1</span><button><Icon name="more" /></button></div>
+              <div className="review-location"><span>RESULTS · PARAGRAPH 1</span><button aria-label="Review item options"><Icon name="more" /></button></div>
 
               <div className="conflict-card">
                 <div className="conflict-heading"><Icon name="branch" size={16} /><span>2 overlapping alternatives</span><small>Compare one at a time</small></div>
@@ -980,25 +980,25 @@ function App() {
                 </div>
 
                 {activeStatus === 'open' ? (
-                  <div className="review-actions"><button className="accept" onClick={acceptProposal}><Icon name="check" size={15} /> Accept</button><button className="reject" onClick={rejectProposal}><Icon name="x" size={15} /> Reject</button><button className="icon-button"><Icon name="more" /></button></div>
+                  <div className="review-actions"><button className="accept" onClick={acceptProposal}><Icon name="check" size={15} /> Accept</button><button className="reject" onClick={rejectProposal}><Icon name="x" size={15} /> Reject</button><button className="icon-button" aria-label="Suggestion options"><Icon name="more" /></button></div>
                 ) : (
                   <div className="decision-note"><Icon name={activeStatus === 'accepted' ? 'check' : activeStatus === 'rejected' ? 'x' : 'branch'} size={15} /> This proposal is {activeStatus === 'needs-rebase' ? 'preserved and needs rebase' : activeStatus}.</div>
                 )}
               </div>
 
               <div className={`comment-card ${draft.commentResolved ? 'resolved' : ''}`}>
-                <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small>5 minutes ago</small></span><button className="icon-button subtle"><Icon name="more" /></button></div>
+                <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small>5 minutes ago</small></span><button className="icon-button subtle" aria-label="Comment options"><Icon name="more" /></button></div>
                 <div className="comment-quote">“increased modestly”</div>
                 <p>Can we quantify this increase in the main text? The estimate is already in the supplement.</p>
                 {draft.commentReplies.map((message, index) => <div className="reply-message" key={`${message}-${index}`}><Avatar initials="RV" tone="sage" small /><p><strong>You</strong>{message}</p></div>)}
                 {!draft.commentResolved && (
-                  <div className="reply-box"><input value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addReply() }} placeholder="Reply…" aria-label="Reply to comment" /><button onClick={addReply} disabled={!reply.trim()}><Icon name="arrowRight" size={15} /></button></div>
+                  <div className="reply-box"><input value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addReply() }} placeholder="Reply…" aria-label="Reply to comment" /><button onClick={addReply} disabled={!reply.trim()} aria-label="Send reply"><Icon name="arrowRight" size={15} /></button></div>
                 )}
                 <button className="resolve-button" onClick={() => updateDraft({ commentResolved: !draft.commentResolved })}><Icon name="check" size={14} /> {draft.commentResolved ? 'Reopen thread' : 'Resolve thread'}</button>
               </div>
             </div>
 
-            <div className="review-panel-footer"><button><Icon name="message" size={15} /> New comment</button><span>1 of 3</span><button>↑</button><button>↓</button></div>
+            <div className="review-panel-footer"><button><Icon name="message" size={15} /> New comment</button><span>1 of 3</span><button aria-label="Previous review item">↑</button><button aria-label="Next review item">↓</button></div>
           </aside>
         )}
       </div>
@@ -1085,7 +1085,7 @@ function App() {
       {sourceOpen && (
         <div className="source-drawer-backdrop" onMouseDown={() => setSourceOpen(false)}>
           <div className="source-drawer" onMouseDown={(event) => event.stopPropagation()}>
-            <div className="source-drawer-head"><div><span className="eyebrow">Portable source</span><h2>Projection inspector</h2></div><button className="icon-button" onClick={() => setSourceOpen(false)}><Icon name="close" /></button></div>
+            <div className="source-drawer-head"><div><span className="eyebrow">Portable source</span><h2>Projection inspector</h2></div><button className="icon-button" onClick={() => setSourceOpen(false)} aria-label="Close source inspector"><Icon name="close" /></button></div>
             <div className="source-tabs">
               <button className={sourceTab === 'reviewed' ? 'active' : ''} onClick={() => setSourceTab('reviewed')}>Reviewed .qmd</button>
               <button className={sourceTab === 'final' ? 'active' : ''} onClick={() => setSourceTab('final')}>Clean final</button>
