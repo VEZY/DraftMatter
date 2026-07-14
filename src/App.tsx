@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, parseBibliographyFile, searchCitations } from './bibliography'
-import { desktopHost, normaliseHostFailure, type ProjectSnapshot } from './desktopHost'
+import { desktopHost, normaliseHostFailure, resolveMainDocument, type ProjectSnapshot } from './desktopHost'
 import { parsePortableDocument } from './document'
 import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
@@ -141,6 +141,7 @@ function App() {
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
   const [newProjectRoot, setNewProjectRoot] = useState('')
   const [newProjectName, setNewProjectName] = useState('')
+  const [pendingProject, setPendingProject] = useState<{ project: ProjectSnapshot; announce: boolean } | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bibliographyInputRef = useRef<HTMLInputElement>(null)
   const desktopSessionRef = useRef<DesktopSession | null>(null)
@@ -349,6 +350,8 @@ function App() {
         setCitationSearchOpen(false)
         setExportOpen(false)
         setProjectMenuOpen(false)
+        setCreateProjectOpen(false)
+        setPendingProject(null)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -443,11 +446,16 @@ function App() {
     setToast(warnings ? `Opened ${file.name} · ${warnings} check${warnings === 1 ? '' : 's'} to review` : `Opened ${file.name}`)
   }
 
-  const applyDesktopProject = async (project: ProjectSnapshot, announce = true) => {
-    const mainPath = project.documents.some((entry) => entry.path === project.config.mainDocument)
-      ? project.config.mainDocument
-      : project.documents[0]?.path
-    if (!mainPath) throw new Error('This folder does not contain a Markdown or Quarto manuscript.')
+  const applyDesktopProject = async (project: ProjectSnapshot, announce = true, selectedPath?: string) => {
+    const mainPath = resolveMainDocument(project, selectedPath)
+    if (!mainPath) {
+      if (project.documents.length > 1 && !selectedPath) {
+        setPendingProject({ project, announce })
+        setProjectMenuOpen(false)
+        return
+      }
+      throw new Error('This folder does not contain a Markdown or Quarto manuscript.')
+    }
 
     const [document, projectBibliography] = await Promise.all([
       desktopHost.readDocument(project.root, mainPath),
@@ -470,6 +478,7 @@ function App() {
     setCitations(mergeCitationRecords(sampleCitations, projectBibliography.records))
     setBibliographyDiagnostics(projectBibliography.diagnostics)
     setProjectMenuOpen(false)
+    setPendingProject(null)
     setSaveState('saved')
     localStorage.setItem(LAST_PROJECT_ROOT_KEY, project.root)
     const nextRecoveries = saveRecoverySnapshot(localStorage, parsed.draft, displayName, document.content)
@@ -522,6 +531,18 @@ function App() {
       const project = await desktopHost.createProject(newProjectRoot, name)
       await applyDesktopProject(project)
       setCreateProjectOpen(false)
+    } catch (error) {
+      setToast(normaliseHostFailure(error).message)
+    } finally {
+      setProjectBusy(false)
+    }
+  }
+
+  const chooseMainDocument = async (path: string) => {
+    if (!pendingProject || projectBusy) return
+    setProjectBusy(true)
+    try {
+      await applyDesktopProject(pendingProject.project, pendingProject.announce, path)
     } catch (error) {
       setToast(normaliseHostFailure(error).message)
     } finally {
@@ -981,6 +1002,28 @@ function App() {
           </aside>
         )}
       </div>
+
+      {pendingProject && (
+        <div className="modal-backdrop manuscript-picker-backdrop" onMouseDown={() => setPendingProject(null)}>
+          <div className="manuscript-picker-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Choose main manuscript">
+            <div className="create-project-head">
+              <span className="project-file-icon"><Icon name="document" size={18} /></span>
+              <div><span className="eyebrow">Project manuscript</span><h2>Choose the document to open</h2><p>The configured main manuscript is unavailable. DraftMatter will remember your choice for this project.</p></div>
+              <button className="icon-button" onClick={() => setPendingProject(null)} aria-label="Close manuscript chooser"><Icon name="close" /></button>
+            </div>
+            <div className="manuscript-choice-list">
+              {pendingProject.project.documents.map((document) => (
+                <button key={document.path} onClick={() => void chooseMainDocument(document.path)} disabled={projectBusy}>
+                  <span className="project-file-icon"><Icon name="document" size={16} /></span>
+                  <span><strong>{document.path}</strong><small>{Math.max(1, Math.round(document.bytes / 1024))} KB · modified {new Date(document.modifiedMs).toLocaleString()}</small></span>
+                  <Icon name="arrowRight" size={15} />
+                </button>
+              ))}
+            </div>
+            <div className="manuscript-picker-footer"><Icon name="folder" size={14} /><span title={pendingProject.project.root}>{pendingProject.project.root}</span></div>
+          </div>
+        </div>
+      )}
 
       {createProjectOpen && (
         <div className="modal-backdrop create-project-backdrop" onMouseDown={() => setCreateProjectOpen(false)}>

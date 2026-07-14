@@ -68,6 +68,14 @@ export function normaliseHostFailure(error: unknown): HostFailure {
   return { kind: 'unknown', message: error instanceof Error ? error.message : String(error) }
 }
 
+export function resolveMainDocument(project: ProjectSnapshot, selectedPath?: string) {
+  const paths = new Set(project.documents.map((entry) => entry.path))
+  if (selectedPath && paths.has(selectedPath)) return selectedPath
+  if (paths.has(project.config.mainDocument)) return project.config.mainDocument
+  if (project.documents.length === 1) return project.documents[0].path
+  return null
+}
+
 export function createDesktopHost(
   invokeBridge: InvokeBridge = invoke,
   directoryPicker: DirectoryPicker = open as DirectoryPicker,

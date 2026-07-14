@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createDesktopHost, normaliseHostFailure, type ProjectSnapshot } from './desktopHost'
+import { createDesktopHost, normaliseHostFailure, resolveMainDocument, type ProjectSnapshot } from './desktopHost'
 
 const project: ProjectSnapshot = {
   root: '/research/canopy',
@@ -47,5 +47,20 @@ describe('desktop host adapter', () => {
       kind: 'conflict',
       message: 'paper.qmd changed outside DraftMatter.',
     })
+  })
+
+  it('uses configuration or an explicit choice without guessing between manuscripts', () => {
+    const multiple: ProjectSnapshot = {
+      ...project,
+      config: { ...project.config, mainDocument: 'missing.qmd' },
+      documents: [
+        { path: 'article.qmd', kind: 'manuscript', bytes: 10, modifiedMs: 1, hash: 'a' },
+        { path: 'notes.md', kind: 'manuscript', bytes: 20, modifiedMs: 2, hash: 'b' },
+      ],
+    }
+
+    expect(resolveMainDocument(multiple)).toBeNull()
+    expect(resolveMainDocument(multiple, 'notes.md')).toBe('notes.md')
+    expect(resolveMainDocument({ ...multiple, documents: [multiple.documents[0]] })).toBe('article.qmd')
   })
 })
