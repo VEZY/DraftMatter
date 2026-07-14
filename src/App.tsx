@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { formatCitationCluster, mergeCitationRecords, parseBibliographyFile, searchCitations } from './bibliography'
 import { desktopHost, normaliseHostFailure, type ProjectSnapshot } from './desktopHost'
 import { parsePortableDocument } from './document'
+import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
 import { cleanProjection, downloadText, reviewedProjection } from './projections'
 import { sampleCitations } from './sampleCitations'
@@ -99,7 +100,17 @@ function StatusPill({ status }: { status: SuggestionStatus }) {
 
 function App() {
   const initialProjectMeta = useMemo(getInitialProjectMeta, [])
-  const [draft, setDraft] = useState<DraftState>(getInitialDraft)
+  const initialDraftState = useMemo(getInitialDraft, [])
+  const {
+    draft,
+    update: updateDraftHistory,
+    commit: commitDraftHistory,
+    reset: resetDraftHistory,
+    undo: undoDraftHistory,
+    redo: redoDraftHistory,
+    canUndo,
+    canRedo,
+  } = useDraftHistory(initialDraftState)
   const [markupView, setMarkupView] = useState<MarkupView>('all')
   const [activeNav, setActiveNav] = useState<'manuscript' | 'review' | 'sources' | 'history'>('manuscript')
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
@@ -156,7 +167,7 @@ function App() {
     setDraftRevision(0)
   }
 
-  const updateDraft = (patch: Partial<DraftState>) => {
+  const markDraftChanged = () => {
     if (!desktopSaveBlockedRef.current) {
       setSaveState('saving')
       setSaveProblem('')
@@ -166,7 +177,23 @@ function App() {
       draftRevisionRef.current = next
       return next
     })
-    setDraft((current) => ({ ...current, ...patch }))
+  }
+
+  const updateDraft = (patch: Partial<DraftState>) => {
+    markDraftChanged()
+    updateDraftHistory(patch)
+  }
+
+  const undoDraft = () => {
+    if (!canUndo) return
+    markDraftChanged()
+    undoDraftHistory()
+  }
+
+  const redoDraft = () => {
+    if (!canRedo) return
+    markDraftChanged()
+    redoDraftHistory()
   }
 
   useEffect(() => {
@@ -227,6 +254,17 @@ function App() {
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      const target = event.target as HTMLElement | null
+      const nativeTextField = target?.tagName === 'INPUT' || target?.isContentEditable
+      const modifier = event.metaKey || event.ctrlKey
+      if (modifier && !nativeTextField && event.key.toLowerCase() === 'z') {
+        event.preventDefault()
+        if (event.shiftKey) redoDraft()
+        else undoDraft()
+      } else if (modifier && !nativeTextField && event.key.toLowerCase() === 'y') {
+        event.preventDefault()
+        redoDraft()
+      }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault()
         setCommandOpen((open) => !open)
@@ -241,7 +279,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+  }, [canRedo, canUndo])
 
   useEffect(() => {
     if (!toast) return
@@ -319,7 +357,7 @@ function App() {
     replaceDesktopSession(null)
     desktopSaveBlockedRef.current = false
     resetDraftRevision()
-    setDraft(parsed.draft)
+    resetDraftHistory(parsed.draft)
     setFilename(file.name)
     setProjectName(nextName.replaceAll(/[-_]+/g, ' '))
     setDiagnostics(parsed.diagnostics)
@@ -344,7 +382,7 @@ function App() {
     setSaveProblem('')
     resetDraftRevision()
     replaceDesktopSession({ root: project.root, path: mainPath, hash: document.hash })
-    setDraft(parsed.draft)
+    resetDraftHistory(parsed.draft)
     setFilename(displayName)
     setProjectName(project.config.name)
     setDiagnostics(parsed.diagnostics)
@@ -436,7 +474,7 @@ function App() {
   }
 
   const restoreSnapshot = (snapshot: RecoverySnapshot) => {
-    setDraft(snapshot.draft)
+    commitDraftHistory(snapshot.draft)
     if (desktopSession) {
       setDraftRevision((current) => {
         const next = current + 1
@@ -666,8 +704,8 @@ function App() {
             <button aria-label="Insert table"><Icon name="table" size={17} /></button>
             <button aria-label="Insert code cell"><Icon name="code" size={17} /></button>
             <span className="toolbar-divider" />
-            <button aria-label="Undo"><Icon name="undo" size={16} /></button>
-            <button aria-label="Redo" disabled><Icon name="redo" size={16} /></button>
+            <button aria-label="Undo" onClick={undoDraft} disabled={!canUndo}><Icon name="undo" size={16} /></button>
+            <button aria-label="Redo" onClick={redoDraft} disabled={!canRedo}><Icon name="redo" size={16} /></button>
           </div>
 
           <article className="manuscript" aria-label="Editable manuscript">
