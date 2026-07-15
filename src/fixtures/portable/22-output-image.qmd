@@ -1,0 +1,5 @@
+## Results
+
+<!-- dm-output:start cell="fig-canopy" run="sha256:fixture-image" -->
+![Canopy response](figures/canopy.svg){#fig-canopy-result}
+<!-- dm-output:end -->

@@ -1,0 +1,7 @@
+## 1. Introduction
+
+Numbered section.
+
+## 2.1) Methods
+
+Numbered subsection label on a level-two heading.

@@ -1,0 +1,3 @@
+## Introduction
+
+The protocol follows earlier work [see @vezy2024, pp. 18–21; also @martin2023].

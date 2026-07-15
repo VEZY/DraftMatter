@@ -1,0 +1,16 @@
+## Results
+
+The []{#dm-i1s .dm-anchor data-anchor="dm-r-identical" data-edge="start"}leaf area declined[]{#dm-i1e .dm-anchor data-anchor="dm-r-identical" data-edge="end"}.
+
+::::: {.draftmatter-reviews .hidden data-schema="1"}
+:::: {#dm-i01 .dm-change data-anchor="dm-r-identical" data-kind="replace" data-author="dm-a01" data-status="open"}
+~~~{.dm-proposal}
+leaf area declined by 18%
+~~~
+::::
+:::: {#dm-i02 .dm-change data-anchor="dm-r-identical" data-kind="replace" data-author="dm-a02" data-status="open"}
+~~~{.dm-proposal}
+leaf expansion slowed
+~~~
+::::
+:::::

@@ -1,0 +1,7 @@
+## Methods
+
+```{=latex}
+\begin{landscape}
+This raw block is retained for print output.
+\end{landscape}
+```

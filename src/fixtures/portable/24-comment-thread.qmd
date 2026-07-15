@@ -1,0 +1,11 @@
+## Results
+
+Biomass increased[]{#dm-comment-point .dm-anchor data-anchor="dm-comment-01" data-edge="point" data-affinity="after"}.
+
+::::: {.draftmatter-reviews .hidden data-schema="1"}
+:::: {#dm-comment-01 .dm-thread data-anchor="dm-comment-01" data-author="dm-a01" data-status="open"}
+~~~{.dm-message}
+Please report the confidence interval.
+~~~
+::::
+:::::

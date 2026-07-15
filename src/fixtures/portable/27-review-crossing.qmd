@@ -1,0 +1,16 @@
+## Results
+
+[]{#dm-x1s .dm-anchor data-anchor="dm-r-left" data-edge="start"}Drought []{#dm-x2s .dm-anchor data-anchor="dm-r-right" data-edge="start"}reduced leaf[]{#dm-x1e .dm-anchor data-anchor="dm-r-left" data-edge="end"} area by 18%.[]{#dm-x2e .dm-anchor data-anchor="dm-r-right" data-edge="end"}
+
+::::: {.draftmatter-reviews .hidden data-schema="1"}
+:::: {#dm-x01 .dm-change data-anchor="dm-r-left" data-kind="replace" data-author="dm-a01" data-status="open"}
+~~~{.dm-proposal}
+Water limitation reduced leaf
+~~~
+::::
+:::: {#dm-x02 .dm-change data-anchor="dm-r-right" data-kind="replace" data-author="dm-a02" data-status="open"}
+~~~{.dm-proposal}
+lowered leaf area by 18%
+~~~
+::::
+:::::

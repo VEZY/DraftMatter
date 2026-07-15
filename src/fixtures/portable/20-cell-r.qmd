@@ -1,0 +1,5 @@
+## Methods
+
+```r {#tbl-r .execute output="table"}
+data.frame(treatment = c("control", "dry"))
+```

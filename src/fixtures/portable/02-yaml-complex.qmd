@@ -1,0 +1,14 @@
+---
+title: "Water use: a field study"
+authors:
+  - name: Ada Researcher
+    orcid: 0000-0001-2345-6789
+format:
+  html:
+    toc: true
+keywords: [drought, canopy]
+---
+
+## Abstract
+
+Nested YAML must remain intact.

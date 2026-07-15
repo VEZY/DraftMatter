@@ -1,0 +1,5 @@
+## Methods
+
+```python {#fig-python .execute output="figure"}
+print("python fixture")
+```

@@ -1,0 +1,7 @@
+## Terms
+
+LAI
+: Leaf area index.
+
+VPD
+: Vapour pressure deficit.

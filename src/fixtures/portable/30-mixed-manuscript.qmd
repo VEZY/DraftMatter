@@ -1,0 +1,37 @@
+---
+title: "Mixed portable manuscript"
+bibliography: references.bib
+---
+
+## Introduction
+
+Evidence spans several sites [@vezy2024; @martin2023].[^scope]
+
+[^scope]: Three field sites and two controlled environments.
+
+## Methods
+
+- Measure leaf area.
+- Fit $LAI_t = \beta_0 + \beta_1 t$.
+
+```python {#fig-mixed .execute output="figure"}
+print("preserve, do not execute")
+```
+
+<!-- dm-output:start cell="fig-mixed" run="sha256:mixed" -->
+![Mixed response](figures/mixed.svg){#fig-mixed-result}
+<!-- dm-output:end -->
+
+## Results
+
+<aside data-review="field">The raw note remains portable.</aside>
+
+Biomass changed[]{#dm-mixed-comment .dm-anchor data-anchor="dm-comment-mixed" data-edge="point"}.
+
+::::: {.draftmatter-reviews .hidden data-schema="1"}
+:::: {#dm-comment-mixed .dm-thread data-anchor="dm-comment-mixed" data-author="dm-a01" data-status="open"}
+~~~{.dm-message}
+Quantify the change.
+~~~
+::::
+:::::

@@ -1,0 +1,16 @@
+## Results
+
+[]{#dm-n1s .dm-anchor data-anchor="dm-r-outer" data-edge="start"}The drought []{#dm-n2s .dm-anchor data-anchor="dm-r-inner" data-edge="start"}treatment reduced leaf area[]{#dm-n2e .dm-anchor data-anchor="dm-r-inner" data-edge="end"} substantially.[]{#dm-n1e .dm-anchor data-anchor="dm-r-outer" data-edge="end"}
+
+::::: {.draftmatter-reviews .hidden data-schema="1"}
+:::: {#dm-n01 .dm-change data-anchor="dm-r-outer" data-kind="replace" data-author="dm-a01" data-status="open"}
+~~~{.dm-proposal}
+Drought reduced leaf area by 18%.
+~~~
+::::
+:::: {#dm-n02 .dm-change data-anchor="dm-r-inner" data-kind="replace" data-author="dm-a02" data-status="open"}
+~~~{.dm-proposal}
+treatment lowered leaf expansion
+~~~
+::::
+:::::

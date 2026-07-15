@@ -1,0 +1,3 @@
+## Introduction
+
+Leaf area responds to water limitation [@vezy2024].

@@ -1,0 +1,4 @@
+## Field checklist
+
+- [x] Install sensors
+- [ ] Collect final harvest

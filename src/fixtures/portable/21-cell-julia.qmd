@@ -1,0 +1,5 @@
+## Methods
+
+```julia {#fig-julia .execute output="figure"}
+println("portable Julia source; never run during import")
+```

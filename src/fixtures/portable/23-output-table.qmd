@@ -1,0 +1,8 @@
+## Results
+
+<!-- dm-output:start cell="tbl-summary" run="sha256:fixture-table" -->
+| Treatment | Mean |
+|:----------|-----:|
+| Control   | 12.4 |
+| Dry       | 10.1 |
+<!-- dm-output:end -->

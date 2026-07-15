@@ -1,0 +1,7 @@
+## Methods
+
+$$
+E = g_s \times VPD
+$$ {#eq-transpiration}
+
+Equation @eq-transpiration defines transpiration.
