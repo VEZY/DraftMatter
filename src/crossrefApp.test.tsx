@@ -108,8 +108,8 @@ describe('rendered Crossref citation search', () => {
     expect(guidance.textContent).toContain('EndNote')
 
     const refresh = [...guidance.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Refresh Zotero'))!
+    await act(async () => refresh.click())
     await act(async () => {
-      refresh.click()
       await new Promise((resolve) => window.setTimeout(resolve, 320))
     })
     expect(desktopHost.zoteroStatus).toHaveBeenCalled()
