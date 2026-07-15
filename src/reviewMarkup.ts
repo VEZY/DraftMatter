@@ -36,12 +36,20 @@ export interface ReviewChange extends ReviewRecordBase {
   rationale?: string
 }
 
+export interface ReviewThreadMessage {
+  content: string
+  authorId?: string
+  timestamp?: string
+  index?: number
+}
+
 export interface ReviewThread extends ReviewRecordBase {
   kind: 'thread'
   anchorId: string
   authorId: string
   status: string
   messages: string[]
+  messageRecords: ReviewThreadMessage[]
 }
 
 export interface ReviewDecision extends ReviewRecordBase {
@@ -104,18 +112,33 @@ function parseAttributes(source: string) {
   for (const token of tokens) {
     if (token[1].startsWith('#')) id = token[1].slice(1)
     else if (token[1].startsWith('.')) classes.push(token[1].slice(1))
-    else attributes[token[2]] = token[3] ?? token[4] ?? token[5] ?? ''
+    else attributes[token[2]] = decodeAttribute(token[3] ?? token[4] ?? token[5] ?? '')
   }
   return { id, classes, attributes }
 }
 
+function decodeAttribute(value: string) {
+  return value
+    .replaceAll('&quot;', '"')
+    .replaceAll('&#39;', "'")
+    .replaceAll('&lt;', '<')
+    .replaceAll('&gt;', '>')
+    .replaceAll('&amp;', '&')
+}
+
 function literalBlocks(body: string) {
   const lines = indexedLines(body)
-  const blocks: { className: string; content: string; start: number; end: number; contentStart: number; contentEnd: number }[] = []
+  const blocks: { className: string; attributes: Record<string, string>; content: string; start: number; end: number; contentStart: number; contentEnd: number }[] = []
   let index = 0
   while (index < lines.length) {
-    const opening = lines[index].content.match(/^[ \t]*(`{3,}|~{3,})\{\.([a-zA-Z][\w-]*)[^}]*\}[ \t]*$/)
+    const opening = lines[index].content.match(/^[ \t]*(`{3,}|~{3,})\{([^}]*)\}[ \t]*$/)
     if (!opening) {
+      index += 1
+      continue
+    }
+    const parsed = parseAttributes(opening[2])
+    const className = parsed.classes.find((candidate) => candidate.startsWith('dm-')) ?? parsed.classes[0]
+    if (!className) {
       index += 1
       continue
     }
@@ -126,7 +149,8 @@ function literalBlocks(body: string) {
     const contentStart = lines[index].end
     const contentEnd = end < lines.length ? lines[end].start : body.length
     blocks.push({
-      className: opening[2],
+      className,
+      attributes: parsed.attributes,
       content: body.slice(contentStart, contentEnd).replace(/(?:\r\n|\n|\r)$/, ''),
       start: lines[index].start,
       end: end < lines.length ? lines[end].end : body.length,
@@ -136,6 +160,26 @@ function literalBlocks(body: string) {
     index = end + 1
   }
   return blocks
+}
+
+function closingLineIndex(lines: IndexedLine[], start: number, limit: number, colonCount: number) {
+  const closing = new RegExp(`^:{${colonCount},}[ \\t]*$`)
+  let literalFence: { character: string; length: number } | undefined
+  for (let index = start; index < limit; index += 1) {
+    const content = lines[index].content
+    if (literalFence) {
+      const fenceClose = new RegExp(`^[ \\t]*\\${literalFence.character}{${literalFence.length},}[ \\t]*$`)
+      if (fenceClose.test(content)) literalFence = undefined
+      continue
+    }
+    const fenceOpen = content.match(/^[ \t]*(`{3,}|~{3,})\{[^}]*\}[ \t]*$/)
+    if (fenceOpen) {
+      literalFence = { character: fenceOpen[1][0], length: fenceOpen[1].length }
+      continue
+    }
+    if (closing.test(content)) return index
+  }
+  return limit
 }
 
 function deriveRanges(anchors: ReviewAnchor[], diagnostics: DocumentDiagnostic[]) {
@@ -201,14 +245,7 @@ export function parseReviewMarkup(source: string): ReviewMarkupDocument {
     schema = outerAttributes.attributes['data-schema']
     if (schema !== '1') diagnostics.push({ code: 'review-schema-unsupported', level: 'warning', message: `DraftMatter review schema ${schema ?? 'unknown'} is preserved but not fully understood.` })
 
-    let closingIndex = lines.length - 1
-    const outerClosing = new RegExp(`^:{${outerLength},}[ \\t]*$`)
-    for (let index = opener.index + 1; index < lines.length; index += 1) {
-      if (outerClosing.test(lines[index].content)) {
-        closingIndex = index
-        break
-      }
-    }
+    const closingIndex = closingLineIndex(lines, opener.index + 1, lines.length, outerLength)
     sectionEnd = lines[closingIndex]?.end ?? source.length
 
     let index = opener.index + 1
@@ -218,9 +255,7 @@ export function parseReviewMarkup(source: string): ReviewMarkupDocument {
         index += 1
         continue
       }
-      const recordClosing = new RegExp(`^:{${recordOpening[1].length}}[ \\t]*$`)
-      let endIndex = index + 1
-      while (endIndex < closingIndex && !recordClosing.test(lines[endIndex].content)) endIndex += 1
+      const endIndex = closingLineIndex(lines, index + 1, closingIndex, recordOpening[1].length)
       if (endIndex >= closingIndex) {
         diagnostics.push({ code: `review-record-${index}-unclosed`, level: 'error', message: 'A DraftMatter review record is not closed.' })
         break
@@ -249,13 +284,20 @@ export function parseReviewMarkup(source: string): ReviewMarkupDocument {
           rationale: literals.find((block) => block.className === 'dm-rationale')?.content,
         })
       } else if (parsedAttributes.classes.includes('dm-thread')) {
+        const messageRecords = literals.filter((block) => block.className === 'dm-message').map<ReviewThreadMessage>((block) => ({
+          content: block.content,
+          ...(block.attributes['data-author'] ? { authorId: block.attributes['data-author'] } : {}),
+          ...(block.attributes['data-at'] ? { timestamp: block.attributes['data-at'] } : {}),
+          ...(/^\d+$/.test(block.attributes['data-index'] ?? '') ? { index: Number(block.attributes['data-index']) } : {}),
+        }))
         threads.push({
           ...base,
           kind: 'thread',
           anchorId: parsedAttributes.attributes['data-anchor'] ?? '',
           authorId: parsedAttributes.attributes['data-author'] ?? '',
           status: parsedAttributes.attributes['data-status'] ?? 'open',
-          messages: literals.filter((block) => block.className === 'dm-message').map((block) => block.content),
+          messages: messageRecords.map((message) => message.content),
+          messageRecords,
         })
       } else if (parsedAttributes.classes.includes('dm-decision')) {
         decisions.push({
@@ -279,6 +321,15 @@ export function parseReviewMarkup(source: string): ReviewMarkupDocument {
   for (const change of changes.filter((candidate) => candidate.status === 'open')) {
     if (!anchorIds.has(change.anchorId)) diagnostics.push({ code: `review-change-${change.id}-anchor-missing`, level: 'error', message: `Open change ${change.id} references missing anchor ${change.anchorId || '(empty)'}.` })
     if (!authorIds.has(change.authorId)) diagnostics.push({ code: `review-change-${change.id}-author-missing`, level: 'error', message: `Open change ${change.id} references missing author ${change.authorId || '(empty)'}.` })
+  }
+  for (const thread of threads.filter((candidate) => candidate.status !== 'deleted')) {
+    if (!anchorIds.has(thread.anchorId)) diagnostics.push({ code: `review-thread-${thread.id}-anchor-missing`, level: 'error', message: `Review thread ${thread.id} references missing anchor ${thread.anchorId || '(empty)'}.` })
+    if (!authorIds.has(thread.authorId)) diagnostics.push({ code: `review-thread-${thread.id}-author-missing`, level: 'error', message: `Review thread ${thread.id} references missing author ${thread.authorId || '(empty)'}.` })
+  }
+  const changeIds = new Set(changes.map((change) => change.id))
+  for (const decision of decisions) {
+    if (!changeIds.has(decision.changeId)) diagnostics.push({ code: `review-decision-${decision.id}-change-missing`, level: 'error', message: `Review decision ${decision.id} references missing change ${decision.changeId || '(empty)'}.` })
+    if (!authorIds.has(decision.authorId)) diagnostics.push({ code: `review-decision-${decision.id}-author-missing`, level: 'error', message: `Review decision ${decision.id} references missing author ${decision.authorId || '(empty)'}.` })
   }
 
   const recordIds = [...authors, ...changes, ...threads, ...decisions, ...unknownRecords].map((record) => record.id)
