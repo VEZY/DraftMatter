@@ -8,8 +8,8 @@ import type {
 } from './types'
 import { citationKeys, parseCitationCluster } from './citation'
 import { extractExecutableCells } from './executionCells'
+import { parseReviewMarkup } from './reviewMarkup'
 
-const REVIEW_MARKER = '::::: {.draftmatter-reviews'
 const KNOWN_SECTIONS: Record<string, Exclude<SectionKey, 'frontmatter'>> = {
   abstract: 'abstract',
   introduction: 'introduction',
@@ -137,7 +137,8 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
   const originalSource = sourceInput
   const source = sourceInput.replaceAll('\r\n', '\n')
   const diagnostics: DocumentDiagnostic[] = []
-  const reviewIndex = source.indexOf(REVIEW_MARKER)
+  const reviewDocument = parseReviewMarkup(source)
+  const reviewIndex = reviewDocument.sectionStart ?? -1
   const review = reviewIndex >= 0 ? source.slice(reviewIndex) : ''
   const sourceWithoutReview = reviewIndex >= 0 ? source.slice(0, reviewIndex) : source
   if (!review) diagnostics.push({ code: 'review-data-missing', level: 'info', message: 'This manuscript has no embedded DraftMatter review section.' })
@@ -148,8 +149,7 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
   const sections = splitSections(body)
   const intro = cleanCitation(sectionContent(sections, 'introduction', fallback.introduction, diagnostics))
   const methods = parseMethods(sectionContent(sections, 'methods', fallback.methods, diagnostics), fallback, diagnostics)
-  const messages = [...review.matchAll(/~~~\{\.dm-message[^}]*\}\n([\s\S]*?)\n~~~/g)].map((match) => match[1].trim())
-  const commentStatus = review.match(/\{#dm-comment-01[^\n]*data-status="([^"]+)"/)?.[1]
+  const modeledThread = reviewDocument.threads.find((thread) => thread.id === 'dm-comment-01')
 
   const draft: DraftState = {
     ...fallback,
@@ -165,8 +165,8 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
     conclusion: sectionContent(sections, 'conclusion', fallback.conclusion, diagnostics),
     aliceStatus: parseStatus(review, 'dm-c01', fallback.aliceStatus),
     marcusStatus: parseStatus(review, 'dm-c02', fallback.marcusStatus),
-    commentResolved: commentStatus === 'resolved',
-    commentReplies: messages.slice(1),
+    commentResolved: modeledThread?.status === 'resolved',
+    commentReplies: modeledThread?.messages.slice(1) ?? [],
     cellStatus: 'stale',
     lastSavedAt: new Date().toISOString(),
     frontmatterSource: frontmatter,

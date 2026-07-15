@@ -39,6 +39,11 @@ export interface ReviewOperationResult {
   thread: ReviewThread
 }
 
+export interface EnsureReviewAuthorResult {
+  document: ReviewMarkupDocument
+  author: ReviewAuthor
+}
+
 export type ReviewChangeKind = 'insert' | 'delete' | 'replace' | 'format' | 'structural'
 
 export interface CreateReviewChangeRequest {
@@ -287,6 +292,25 @@ function changeResult(document: ReviewMarkupDocument, changeId: string): ReviewC
   const change = document.changes.find((candidate) => candidate.id === changeId)
   if (!change) throw new ReviewOperationError('review-change-missing', `Review change ${changeId} was not created.`)
   return { document, change }
+}
+
+export function ensureReviewAuthor(
+  document: ReviewMarkupDocument,
+  identity: ReviewAuthorIdentity,
+  timestamp?: string,
+): EnsureReviewAuthorResult {
+  assertWritable(document)
+  safeId(identity.id, 'Author ID')
+  if (!identity.name.trim()) throw new ReviewOperationError('review-author-name-empty', 'An author name is required.')
+  const existing = authorFor(document, identity)
+  if (existing) return { document, author: existing }
+  requireUniqueIds(document, [identity.id])
+  const ending = lineEnding(document.source)
+  const updated = parseReviewMarkup(appendSectionRecords(document, authorRecord(identity, reviewTimestamp(timestamp), ending)))
+  assertWritable(updated)
+  const author = updated.authors.find((candidate) => candidate.id === identity.id)
+  if (!author) throw new ReviewOperationError('review-author-missing', `Review author ${identity.id} was not created.`)
+  return { document: updated, author }
 }
 
 export function createReviewThread(source: string, request: CreateReviewThreadRequest): ReviewOperationResult {

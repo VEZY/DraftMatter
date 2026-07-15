@@ -24,11 +24,11 @@ export interface ReviewQueueFilters {
 }
 
 function plainExcerpt(source: string, start: number, end: number) {
-  const section = source.slice(Math.max(0, start - 30), Math.min(source.length, end + 30))
-  return section
+  const selected = source.slice(start, end)
     .replace(/\[\]\{[^}\r\n]*\.dm-anchor\b[^}\r\n]*\}/g, '')
     .replace(/[\r\n]+/g, ' ')
     .trim()
+  return selected || 'Point review'
 }
 
 export function buildReviewQueue(document: ReviewMarkupDocument, filters: ReviewQueueFilters = {}) {

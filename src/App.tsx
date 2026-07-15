@@ -36,6 +36,9 @@ import { materializeExecutionOutput } from './outputMaterializer'
 import { buildExecutionAvailability, parseRetainedOutputs } from './retainedOutputs'
 import { RuntimeProvenance } from './RuntimeProvenance'
 import { discoverRuntimeInventory, type RuntimeInventory, type RuntimeLanguage } from './runtimeDiscovery'
+import { PortableReviewItems } from './PortableReviewItems'
+import { parseReviewMarkup } from './reviewMarkup'
+import { buildReviewQueue } from './reviewQueue'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
@@ -766,6 +769,12 @@ function App() {
       : `Final projection unavailable.\n\n${sourceDiagnostics.map((diagnostic) => `- ${diagnostic.message}`).join('\n')}`
   const displayedSource = sourceEditing ? sourceBuffer : source
   const executionSource = reviewedProjection(draft)
+  const reviewDocument = parseReviewMarkup(executionSource)
+  const reviewQueue = buildReviewQueue(reviewDocument)
+  const demoReviewAvailable = reviewDocument.changes.some((change) => change.id === 'dm-c01')
+    && reviewDocument.changes.some((change) => change.id === 'dm-c02')
+    && reviewDocument.threads.some((thread) => thread.id === 'dm-comment-01')
+  const openReviewCount = reviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
   const executableCells = extractExecutableCells(executionSource).cells
   const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL)
   const retainedOutputs = parseRetainedOutputs(executionSource).outputs
@@ -1054,6 +1063,14 @@ function App() {
     if (!reply.trim()) return
     updateDraft({ commentReplies: [...draft.commentReplies, reply.trim()] })
     setReply('')
+  }
+
+  const applyPortableReviewSource = (source: string, message: string) => {
+    const parsed = parsePortableDocument(source, initialDraft)
+    markDraftChanged()
+    commitDraftHistory(parsed.draft)
+    setDiagnostics(parsed.diagnostics)
+    setToast(message)
   }
 
   const download = (kind: 'reviewed' | 'final' | 'original') => {
@@ -2008,7 +2025,7 @@ function App() {
         {rightPanelOpen && (
           <aside className="review-panel" aria-label="Review feedback">
             <div className="review-panel-header">
-              <div><span className="eyebrow">Review</span><h2>Open feedback <span>3</span></h2></div>
+              <div><span className="eyebrow">Review</span><h2>Open feedback <span>{openReviewCount}</span></h2></div>
               <button className="icon-button subtle" onClick={() => setRightPanelOpen(false)} aria-label="Close review panel"><Icon name="close" /></button>
             </div>
 
@@ -2026,6 +2043,7 @@ function App() {
             <div className="review-scroll">
               <div className="review-location"><span>RESULTS · PARAGRAPH 1</span><button aria-label="Review item options"><Icon name="more" /></button></div>
 
+              {demoReviewAvailable && <>
               <div className="conflict-card">
                 <div className="conflict-heading"><Icon name="branch" size={16} /><span>2 overlapping alternatives</span><small>Compare one at a time</small></div>
 
@@ -2064,9 +2082,14 @@ function App() {
                 )}
                 <button className="resolve-button" onClick={() => updateDraft({ commentResolved: !draft.commentResolved })}><Icon name="check" size={14} /> {draft.commentResolved ? 'Reopen thread' : 'Resolve thread'}</button>
               </div>
-            </div>
+              </>}
 
-            <div className="review-panel-footer"><button><Icon name="message" size={15} /> New comment</button><span>1 of 3</span><button aria-label="Previous review item">↑</button><button aria-label="Next review item">↓</button></div>
+              <PortableReviewItems
+                source={executionSource}
+                excludeIds={demoReviewAvailable ? ['dm-c01', 'dm-c02', 'dm-comment-01'] : []}
+                onApply={applyPortableReviewSource}
+              />
+            </div>
           </aside>
         )}
       </div>
