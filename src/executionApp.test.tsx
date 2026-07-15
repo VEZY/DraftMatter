@@ -44,6 +44,7 @@ describe('rendered local execution workflow', () => {
       .mockResolvedValueOnce({ trusted: false, scope: 'session', warning: 'Project code has the user permissions. Local execution is not a sandbox.' })
       .mockResolvedValue({ trusted: true, scope: 'session', warning: 'Project code has the user permissions. Local execution is not a sandbox.' })
     vi.spyOn(desktopHost, 'trustProjectForSession').mockResolvedValue({ trusted: true, scope: 'session', warning: 'trusted' })
+    vi.spyOn(desktopHost, 'inspectExecutionArtifacts').mockResolvedValue([{ path: 'figures/generated/fig-canopy.svg', hash: `sha256:${'a'.repeat(64)}` }])
     vi.spyOn(desktopHost, 'executeDirect').mockResolvedValue({
       exitCode: 0,
       interrupted: false,
@@ -109,6 +110,7 @@ describe('rendered local execution workflow', () => {
       content: expect.stringContaining('direct-rendered-1'),
       expectedHash: null,
     }))
+    expect(desktopHost.inspectExecutionArtifacts).toHaveBeenCalledWith(rootPath, ['figures/generated/fig-canopy.svg'])
     expect(container.querySelector('.cell-status')?.textContent).toBe('Current')
     expect(container.textContent).toContain('Wrote figures/generated/fig-canopy.svg')
 
@@ -121,5 +123,12 @@ describe('rendered local execution workflow', () => {
       content: expect.stringMatching(/dm-output:start cell="fig-canopy" run="sha256:[a-f0-9]{64}"/),
       expectedHash: 'document-old',
     }))
+
+    vi.mocked(desktopHost.inspectExecutionArtifacts).mockResolvedValue([{ path: 'figures/generated/fig-canopy.svg', hash: `sha256:${'b'.repeat(64)}` }])
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 2600))
+    })
+    expect(container.querySelector('.cell-status')?.textContent).toBe('Stale')
+    expect(container.textContent).toContain('A generated artifact changed outside DraftMatter.')
   })
 })

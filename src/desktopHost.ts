@@ -434,6 +434,11 @@ export function createDesktopHost(
         ? invokeBridge<Array<{ path: string; hash: string }>>('fingerprint_execution_inputs', { root, paths })
         : executionUnavailable()
     },
+    inspectExecutionArtifacts(root: string, paths: string[]) {
+      return available
+        ? invokeBridge<Array<{ path: string; hash?: string }>>('inspect_execution_artifacts', { root, paths })
+        : executionUnavailable()
+    },
     executeDirect(request: DirectHostExecutionRequest) {
       return available
         ? invokeBridge<RawDirectExecution>('execute_direct', { request })

@@ -28,6 +28,13 @@ pub struct DirectExecutionInput {
     pub hash: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ExecutionArtifactFingerprint {
+    pub path: String,
+    pub hash: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DirectExecutionRequest {
@@ -274,6 +281,36 @@ pub fn fingerprint_execution_inputs_impl(
             }
             let (hash, _) = sha256_file(&absolute)?;
             Ok(DirectExecutionInput { path, hash })
+        })
+        .collect()
+}
+
+pub fn inspect_execution_artifacts_impl(
+    root: &str,
+    paths: Vec<String>,
+) -> Result<Vec<ExecutionArtifactFingerprint>, HostError> {
+    if paths.len() > MAX_ARTIFACTS {
+        return Err(HostError::InvalidProject(format!(
+            "A run may record at most {MAX_ARTIFACTS} artifacts."
+        )));
+    }
+    let root = canonical_root(root)?;
+    let mut seen = HashSet::new();
+    paths
+        .into_iter()
+        .map(|path| {
+            if !seen.insert(path.clone()) {
+                return Err(HostError::InvalidProject(format!(
+                    "Execution artifact appears more than once: {path}"
+                )));
+            }
+            let absolute = project_path(&root, &path, true)?;
+            let hash = if absolute.is_file() {
+                Some(sha256_file(&absolute)?.0)
+            } else {
+                None
+            };
+            Ok(ExecutionArtifactFingerprint { path, hash })
         })
         .collect()
 }
@@ -750,6 +787,29 @@ mod tests {
         assert!(fingerprint_execution_inputs_impl(
             project.path().to_str().unwrap(),
             vec!["../outside.csv".to_string()],
+        )
+        .is_err());
+        fs::write(project.path().join("figure.svg"), b"<svg/>").unwrap();
+        let artifacts = inspect_execution_artifacts_impl(
+            project.path().to_str().unwrap(),
+            vec!["figure.svg".to_string(), "missing.svg".to_string()],
+        )
+        .unwrap();
+        assert_eq!(artifacts[0].path, "figure.svg");
+        assert_eq!(
+            artifacts[0].hash,
+            Some(sha256_file(&project.path().join("figure.svg")).unwrap().0)
+        );
+        assert_eq!(
+            artifacts[1],
+            ExecutionArtifactFingerprint {
+                path: "missing.svg".to_string(),
+                hash: None,
+            }
+        );
+        assert!(inspect_execution_artifacts_impl(
+            project.path().to_str().unwrap(),
+            vec![".draftmatter/hidden.svg".to_string()],
         )
         .is_err());
         assert!(project_path(

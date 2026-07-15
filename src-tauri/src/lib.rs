@@ -15,9 +15,10 @@ mod execution_trust;
 mod export_adapter;
 mod git_adapter;
 use direct_execution::{
-    execute_direct_impl, fingerprint_execution_inputs_impl, interrupt_direct_impl,
-    restart_direct_impl, terminate_direct_impl, DirectExecutionInput, DirectExecutionRequest,
-    DirectExecutionResult, DirectProcessRegistry,
+    execute_direct_impl, fingerprint_execution_inputs_impl, inspect_execution_artifacts_impl,
+    interrupt_direct_impl, restart_direct_impl, terminate_direct_impl, DirectExecutionInput,
+    DirectExecutionRequest, DirectExecutionResult, DirectProcessRegistry,
+    ExecutionArtifactFingerprint,
 };
 use execution_manifests::{
     read_execution_manifests_impl, save_execution_manifest_impl, SaveExecutionManifestRequest,
@@ -2151,6 +2152,14 @@ fn fingerprint_execution_inputs(
 }
 
 #[tauri::command]
+fn inspect_execution_artifacts(
+    root: String,
+    paths: Vec<String>,
+) -> Result<Vec<ExecutionArtifactFingerprint>, HostError> {
+    inspect_execution_artifacts_impl(&root, paths)
+}
+
+#[tauri::command]
 async fn execute_direct(
     request: DirectExecutionRequest,
     trust: tauri::State<'_, ExecutionTrustStore>,
@@ -2304,6 +2313,7 @@ pub fn run() {
             trust_project_for_session,
             revoke_project_trust,
             fingerprint_execution_inputs,
+            inspect_execution_artifacts,
             execute_direct,
             interrupt_direct,
             restart_direct,

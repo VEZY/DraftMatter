@@ -951,7 +951,7 @@ function App() {
     if (!root) return
     let disposed = false
     let running = false
-    const verifyDeclaredInputs = async () => {
+    const verifyExecutionFiles = async () => {
       if (running || disposed) return
       const tracker = executionTrackerRef.current
       if (!tracker || executionTrackerRootRef.current !== root) return
@@ -972,6 +972,18 @@ function App() {
             tracker.inputsUnavailable(cell.id, `Declared input check failed: ${normaliseHostFailure(error).message}`)
           }
         }
+        const artifactPaths = [...new Set(tracker.snapshot().flatMap((state) => state.lastSuccessful?.artifacts.map((artifact) => artifact.path) ?? []))]
+        if (artifactPaths.length) {
+          try {
+            const fingerprints: Array<{ path: string; hash?: string }> = []
+            for (let index = 0; index < artifactPaths.length; index += 32) {
+              fingerprints.push(...await desktopHost.inspectExecutionArtifacts(root, artifactPaths.slice(index, index + 32)))
+            }
+            tracker.verifyArtifacts(new Map(fingerprints.flatMap((artifact) => artifact.hash ? [[artifact.path, artifact.hash] as const] : [])))
+          } catch {
+            tracker.verifyArtifacts(new Map())
+          }
+        }
         if (!disposed && executionTrackerRef.current === tracker) {
           setExecutionCellStates(tracker.snapshot())
           setCleanRunCertification(tracker.cleanRunCertification())
@@ -980,8 +992,8 @@ function App() {
         running = false
       }
     }
-    void verifyDeclaredInputs()
-    const interval = window.setInterval(() => void verifyDeclaredInputs(), 2500)
+    void verifyExecutionFiles()
+    const interval = window.setInterval(() => void verifyExecutionFiles(), 2500)
     return () => {
       disposed = true
       window.clearInterval(interval)
