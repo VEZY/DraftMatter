@@ -404,12 +404,50 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector<HTMLAnchorElement>('a[href="#tbl-results"]')?.textContent).toBe('Table results')
   })
 
+  it('edits semantic section labels and retargets matching references atomically', async () => {
+    const changed: string[] = []
+    const sectionSource = '## Background {#sec-background .unnumbered}\n\nSee @sec-background for context.\n\n## Methods {#sec-methods}\n'
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={sectionSource} onChange={(next) => changed.push(next)} />,
+    ))
+
+    const section = container.querySelector<HTMLElement>('.structured-heading-card[data-label="sec-background"]')!
+    expect(section.querySelector('h2')?.id).toBe('sec-background')
+    await act(async () => section.querySelector<HTMLButtonElement>('.structured-heading-edit')?.click())
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Section details"]')!
+    const label = dialog.querySelector<HTMLInputElement>('[aria-label="Section label"]')!
+    const save = dialog.querySelector<HTMLButtonElement>('.structured-heading-save')!
+
+    label.value = ''
+    label.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(dialog.querySelector('.structured-heading-validation')?.textContent).toContain('referenced in the manuscript')
+    expect(save.disabled).toBe(true)
+
+    label.value = 'sec-methods'
+    label.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(dialog.querySelector('.structured-heading-validation')?.textContent).toContain('already belongs')
+    expect(save.disabled).toBe(true)
+
+    label.value = 'sec-context'
+    label.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(save.disabled).toBe(false)
+    await act(async () => save.click())
+
+    expect(changed.at(-1)).toContain('## Background {#sec-context .unnumbered}')
+    expect(changed.at(-1)).toContain('See @sec-context for context.')
+    expect(changed.at(-1)).not.toContain('@sec-background')
+    const updatedSection = container.querySelector<HTMLElement>('.structured-heading-card[data-label="sec-context"]')!
+    expect(updatedSection.querySelector('h2')?.id).toBe('sec-context')
+    expect(document.activeElement).toBe(updatedSection.querySelector('.structured-heading-edit'))
+    expect(container.querySelector<HTMLAnchorElement>('a[href="#sec-context"]')?.textContent).toBe('Section context')
+  })
+
   it.each([
     ['table', (editor: StructuredManuscriptEditorHandle) => editor.insertTable(2, 2, 'Treatment summary.', 'tbl-summary'), ': Treatment summary. {#tbl-summary}'],
     ['figure', (editor: StructuredManuscriptEditorHandle) => editor.insertFigure('figures/growth.svg', 'Growth', 'Growth response.', 'fig-growth'), '![Growth](figures/growth.svg){#fig-growth}'],
     ['Julia code cell', (editor: StructuredManuscriptEditorHandle) => editor.insertCodeCell('julia'), '```julia {#cell-julia-'],
     ['display equation', (editor: StructuredManuscriptEditorHandle) => editor.insertEquation('E = mc^2', true, 'eq-mass'), '$$\nE = mc^2\n$$ {#eq-mass}'],
-    ['section heading', (editor: StructuredManuscriptEditorHandle) => editor.insertHeading('New section', 2), '## New section'],
+    ['section heading', (editor: StructuredManuscriptEditorHandle) => editor.insertHeading('New section', 2, 'sec-new'), '## New section {#sec-new}'],
   ] as const)('inserts a rendered %s block through a structured transaction', async (_name, insert, expected) => {
     const changed: string[] = []
     const editorRef = createRef<StructuredManuscriptEditorHandle>()
@@ -431,5 +469,6 @@ describe('full structured manuscript editor', () => {
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-equation-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-figure-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-table-edit')].every((button) => button.disabled)).toBe(true)
+    expect([...container.querySelectorAll<HTMLButtonElement>('.structured-heading-edit')].every((button) => button.disabled)).toBe(true)
   })
 })

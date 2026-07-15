@@ -90,6 +90,21 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(renderedEditor).not.toContainText('Keep this opaque block exactly.')
     await expect(manuscript.getByText('Preserved source')).toBeVisible()
 
+    await manuscript.getByRole('button', { name: 'Edit section sec-background details' }).click()
+    const sectionDialog = page.getByRole('dialog', { name: 'Section details' })
+    const sectionLabel = sectionDialog.getByRole('textbox', { name: 'Section label' })
+    await sectionLabel.fill('sec-context')
+    await sectionLabel.press('Tab')
+    await expect(sectionDialog.getByRole('button', { name: 'Cancel' })).toBeFocused()
+    await sectionDialog.getByRole('button', { name: 'Cancel' }).press('Shift+Tab')
+    await expect(sectionLabel).toBeFocused()
+    await expect(sectionDialog).toHaveScreenshot('semantic-section-editor.png')
+    await sectionDialog.getByRole('button', { name: 'Save section' }).click()
+    await expect(manuscript.getByRole('link', { name: 'Section context' })).toHaveAttribute('href', '#sec-context')
+    await expect(manuscript.locator('#sec-context')).toHaveText('Background')
+    await expect(manuscript.getByRole('button', { name: 'Edit section sec-context details' })).toBeFocused()
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('## Background {#sec-context}')
+
     await manuscript.getByRole('button', { name: 'Edit display equation eq-fit' }).click()
     await manuscript.getByRole('textbox', { name: 'Display equation eq-fit TeX' }).fill(String.raw`R^2 = \frac{c}{d}`)
     await manuscript.getByRole('button', { name: 'Save equation' }).click()
@@ -152,7 +167,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(page.getByText('Calibration details were independently checked.', { exact: true })).toBeVisible()
     let saved = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))
     expect(saved).toContain('::: {.future-extension data-owner="research-team"}\nKeep this opaque block exactly.\n:::')
-    expect(saved).toContain('See @sec-background for context.')
+    expect(saved).toContain('See @sec-context for context.')
 
     await manuscript.getByText('A dedicated citation insertion target.', { exact: true }).evaluate((element) => {
       const editor = element.closest<HTMLElement>('[contenteditable="true"]')
@@ -234,13 +249,14 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(manuscript.getByText('A carefully revised suggestion sentence.', { exact: true })).toBeVisible()
     await reviewPanel.getByLabel('Markup view').selectOption('all')
 
-    const sectionPrompts = ['Discussion', '2']
+    const sectionPrompts = ['Discussion', '2', 'sec-discussion']
     const acceptSectionPrompt = (dialog: import('@playwright/test').Dialog) => dialog.accept(sectionPrompts.shift())
     page.on('dialog', acceptSectionPrompt)
     await page.getByRole('complementary', { name: 'Manuscript outline' }).getByRole('button', { name: /Add section/ }).click()
     page.off('dialog', acceptSectionPrompt)
     await expect(page.getByRole('complementary', { name: 'Manuscript outline' }).getByText('Discussion')).toBeVisible()
-    await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('## Discussion')
+    await expect(manuscript.locator('#sec-discussion')).toHaveText('Discussion')
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('## Discussion {#sec-discussion}')
 
     await manuscript.locator('#fig-trajectory').evaluate((element) => element.scrollIntoView({ block: 'center' }))
     await expect(page).toHaveScreenshot('generic-manuscript-editor.png')

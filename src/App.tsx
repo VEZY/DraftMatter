@@ -1269,7 +1269,12 @@ function App() {
     if (!title) return
     const requestedLevel = Number(window.prompt('Heading level (1–6)', '2'))
     const level = Number.isInteger(requestedLevel) && requestedLevel >= 1 && requestedLevel <= 6 ? requestedLevel : 2
-    runStructuredCommand((editor) => editor.insertHeading(title, level), 'Add section')
+    const label = window.prompt('Section label (optional, for example sec-methods)')?.trim().replace(/^#/, '')
+    if (label && !/^sec-[a-zA-Z0-9](?:[a-zA-Z0-9_.:-]*[a-zA-Z0-9])?$/.test(label)) {
+      setToast('Section labels use the portable sec-… form, for example sec-methods')
+      return
+    }
+    runStructuredCommand((editor) => editor.insertHeading(title, level, label), 'Add section')
   }
 
   const discoverExecutionEnvironments = async (showDialog = false) => {

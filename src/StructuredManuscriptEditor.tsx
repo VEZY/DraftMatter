@@ -51,7 +51,7 @@ export interface StructuredManuscriptEditorHandle {
   setLink: (href: string, title?: string) => boolean
   setParagraph: () => boolean
   setHeading: (level: number) => boolean
-  insertHeading: (title: string, level?: number) => boolean
+  insertHeading: (title: string, level?: number, label?: string) => boolean
   wrapBlockquote: () => boolean
   wrapBulletList: () => boolean
   wrapOrderedList: () => boolean
@@ -736,6 +736,217 @@ function retargetCrossReferences(transaction: Transaction, previousTarget: strin
   return updated
 }
 
+function labelUsedByAnotherNode(document: ProseMirrorNode, label: string, currentNodeId?: string) {
+  let found = false
+  if (!label) return found
+  document.descendants((candidate) => {
+    if (String(candidate.attrs.id ?? '') !== currentNodeId && candidate.attrs.label === label) found = true
+    return !found
+  })
+  return found
+}
+
+function positionForNodeId(document: ProseMirrorNode, nodeType: ProseMirrorNode['type'], id: string) {
+  let found: number | undefined
+  document.descendants((candidate, position) => {
+    if (candidate.type === nodeType && candidate.attrs.id === id) found = position
+    return found === undefined
+  })
+  return found
+}
+
+function headingNodeView(
+  initialNode: ProseMirrorNode,
+  view: EditorView,
+  getPos: () => number | undefined,
+  isEditable: () => boolean,
+): NodeView {
+  let node = initialNode
+  let editing = false
+  const level = Number(node.attrs.level)
+  const dom = document.createElement('div')
+  dom.className = 'structured-heading-card'
+  const heading = document.createElement(`h${Math.min(6, Math.max(1, level))}`)
+  heading.className = 'structured-heading-content'
+
+  const edit = document.createElement('button')
+  edit.type = 'button'
+  edit.className = 'structured-heading-edit'
+  edit.textContent = 'Section details'
+  edit.contentEditable = 'false'
+
+  const backdrop = document.createElement('div')
+  backdrop.className = 'structured-heading-dialog-backdrop'
+  const editor = document.createElement('div')
+  editor.className = 'structured-heading-editor'
+  editor.contentEditable = 'false'
+  editor.setAttribute('role', 'dialog')
+  editor.setAttribute('aria-modal', 'true')
+  editor.setAttribute('aria-label', 'Section details')
+  const editorHeader = document.createElement('div')
+  editorHeader.className = 'structured-heading-dialog-head'
+  const editorTitle = document.createElement('strong')
+  editorTitle.textContent = 'Section details'
+  const editorSubtitle = document.createElement('small')
+  editorHeader.append(editorTitle, editorSubtitle)
+  const label = document.createElement('label')
+  const labelText = document.createElement('span')
+  labelText.textContent = 'Cross-reference label'
+  const input = document.createElement('input')
+  input.type = 'text'
+  input.className = 'structured-heading-input'
+  input.setAttribute('aria-label', 'Section label')
+  input.placeholder = 'sec-methods'
+  input.spellcheck = false
+  const hint = document.createElement('small')
+  hint.textContent = 'Optional; changing it also updates matching section references.'
+  label.append(labelText, input, hint)
+  const validation = document.createElement('p')
+  validation.className = 'structured-heading-validation'
+  validation.hidden = true
+  const actions = document.createElement('div')
+  actions.className = 'structured-heading-actions'
+  const cancel = document.createElement('button')
+  cancel.type = 'button'
+  cancel.textContent = 'Cancel'
+  const save = document.createElement('button')
+  save.type = 'button'
+  save.className = 'primary-button structured-heading-save'
+  save.textContent = 'Save section'
+  actions.append(cancel, save)
+  editor.append(editorHeader, label, validation, actions)
+
+  const normalizedLabel = () => input.value.trim().replace(/^#/, '')
+  const updateSave = () => {
+    const nextLabel = normalizedLabel()
+    const previousLabel = node.attrs.label ? String(node.attrs.label) : ''
+    const validSyntax = !nextLabel || /^[a-zA-Z][\w.:-]*$/.test(nextLabel)
+    const validSectionLabel = !nextLabel
+      || nextLabel === previousLabel
+      || (nextLabel.startsWith('sec-') && isCrossReferenceTarget(nextLabel))
+    const referenced = hasCrossReferences(view.state.doc, previousLabel)
+    const keepsReferences = !referenced || (Boolean(nextLabel) && nextLabel.startsWith('sec-') && isCrossReferenceTarget(nextLabel))
+    const unique = !nextLabel || !labelUsedByAnotherNode(view.state.doc, nextLabel, String(node.attrs.id))
+    validation.textContent = !validSyntax
+      ? 'Labels must start with a letter and contain only letters, numbers, dots, colons, underscores, or hyphens.'
+      : !validSectionLabel
+        ? 'New section labels must use the portable sec-… form.'
+        : !keepsReferences
+          ? 'This section is referenced in the manuscript. Keep a valid sec-… label so those links remain portable.'
+          : !unique
+            ? 'That label already belongs to another manuscript object.'
+            : ''
+    validation.hidden = validSyntax && validSectionLabel && keepsReferences && unique
+    save.disabled = !isEditable() || !validSyntax || !validSectionLabel || !keepsReferences || !unique
+  }
+  const updateDom = () => {
+    const sectionLabel = node.attrs.label ? String(node.attrs.label) : ''
+    dom.dataset.dmId = String(node.attrs.id)
+    dom.dataset.label = sectionLabel
+    dom.dataset.level = String(node.attrs.level)
+    editorSubtitle.textContent = node.textContent || 'Untitled section'
+    if (sectionLabel) heading.id = sectionLabel
+    else heading.removeAttribute('id')
+    edit.disabled = !isEditable()
+    edit.setAttribute('aria-label', sectionLabel
+      ? `Edit section ${sectionLabel} details`
+      : `Add a cross-reference label to ${node.textContent || 'this section'}`)
+    if (!editing) input.value = sectionLabel
+    updateSave()
+  }
+  const closeEditor = () => {
+    editing = false
+    backdrop.remove()
+    edit.hidden = false
+    input.value = node.attrs.label ? String(node.attrs.label) : ''
+    updateSave()
+    const escapedId = globalThis.CSS?.escape ? globalThis.CSS.escape(String(node.attrs.id)) : String(node.attrs.id).replace(/["\\]/g, '\\$&')
+    const returnTarget = edit.isConnected
+      ? edit
+      : view.dom.querySelector<HTMLButtonElement>(`[data-dm-id="${escapedId}"] .structured-heading-edit`)
+    returnTarget?.focus()
+  }
+  const saveEditor = () => {
+    const position = getPos() ?? positionForNodeId(view.state.doc, node.type, String(node.attrs.id))
+    const nextLabel = normalizedLabel()
+    const previousLabel = node.attrs.label ? String(node.attrs.label) : ''
+    const referenced = hasCrossReferences(view.state.doc, previousLabel)
+    if (
+      typeof position !== 'number'
+      || !isEditable()
+      || (nextLabel && !/^[a-zA-Z][\w.:-]*$/.test(nextLabel))
+      || (nextLabel !== previousLabel && nextLabel && (!nextLabel.startsWith('sec-') || !isCrossReferenceTarget(nextLabel)))
+      || (referenced && (!nextLabel || !nextLabel.startsWith('sec-') || !isCrossReferenceTarget(nextLabel)))
+      || (nextLabel && labelUsedByAnotherNode(view.state.doc, nextLabel, String(node.attrs.id)))
+    ) return
+    let transaction = view.state.tr.setNodeMarkup(position, undefined, {
+      ...node.attrs,
+      label: nextLabel || null,
+      sourceAttributes: updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
+    })
+    transaction = retargetCrossReferences(transaction, previousLabel, nextLabel)
+    view.dispatch(transaction)
+    closeEditor()
+  }
+  edit.addEventListener('click', () => {
+    if (!isEditable()) return
+    editing = true
+    edit.hidden = true
+    document.body.append(backdrop)
+    updateDom()
+    input.focus()
+    input.select()
+  })
+  backdrop.addEventListener('mousedown', (event) => {
+    if (event.target === backdrop) closeEditor()
+  })
+  editor.addEventListener('mousedown', (event) => event.stopPropagation())
+  cancel.addEventListener('click', closeEditor)
+  save.addEventListener('click', saveEditor)
+  input.addEventListener('input', updateSave)
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault()
+      saveEditor()
+    }
+  })
+  editor.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeEditor()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const focusable = [...editor.querySelectorAll<HTMLElement>('input, button:not([disabled])')]
+    if (!focusable.length) return
+    const current = focusable.indexOf(document.activeElement as HTMLElement)
+    const next = event.shiftKey
+      ? (current <= 0 ? focusable.length - 1 : current - 1)
+      : (current < 0 || current === focusable.length - 1 ? 0 : current + 1)
+    event.preventDefault()
+    focusable[next].focus()
+  })
+
+  backdrop.append(editor)
+  dom.append(heading, edit)
+  updateDom()
+  return {
+    dom,
+    contentDOM: heading,
+    stopEvent: (event) => !heading.contains(event.target as Node) && dom.contains(event.target as Node),
+    ignoreMutation: (mutation) => !heading.contains(mutation.target),
+    update(next) {
+      if (next.type !== node.type || next.attrs.level !== node.attrs.level) return false
+      node = next
+      updateDom()
+      return true
+    },
+    destroy() {
+      if (!editing) backdrop.remove()
+    },
+  }
+}
+
 function imageNodeView(
   initialNode: ProseMirrorNode,
   view: EditorView,
@@ -1285,13 +1496,18 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     setLink: (href, title) => run(toggleMark(manuscriptSchema.marks.link, { href, title: title ?? null })),
     setParagraph: () => run(setBlockType(manuscriptSchema.nodes.paragraph)),
     setHeading: (level) => run(setBlockType(manuscriptSchema.nodes.heading, { id: randomId('heading'), level, section: null })),
-    insertHeading: (title, level = 2) => {
+    insertHeading: (title, level = 2, label) => {
       const view = viewRef.current
       if (!view || readOnlyRef.current || !title.trim()) return false
+      const normalizedLabel = label?.trim().replace(/^#/, '') || null
+      if (normalizedLabel && (!normalizedLabel.startsWith('sec-') || !isCrossReferenceTarget(normalizedLabel))) return false
+      if (normalizedLabel && labelUsedByAnotherNode(view.state.doc, normalizedLabel)) return false
       const heading = manuscriptSchema.nodes.heading.createChecked({
         id: randomId('heading'),
         level: Math.min(6, Math.max(1, level)),
         section: null,
+        label: normalizedLabel,
+        sourceAttributes: normalizedLabel ? `#${normalizedLabel}` : null,
       }, manuscriptSchema.text(title.trim()))
       insertBlock(view, heading)
       view.focus()
@@ -1504,6 +1720,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         return true
       },
       nodeViews: {
+        heading: (node, editorView, getPos) => headingNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         code_cell: (node, editorView, getPos) => codeCellNodeView(
           node,
           editorView,
@@ -1559,6 +1776,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     return () => {
       if (pendingSuggestionRef.current) window.clearTimeout(pendingSuggestionRef.current.timeout)
       pendingSuggestionRef.current = undefined
+      document.querySelectorAll('.structured-heading-dialog-backdrop').forEach((dialog) => dialog.remove())
       viewRef.current = null
       view.destroy()
     }
@@ -1623,6 +1841,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-figure-edit').forEach((button) => { button.disabled = readOnly })
     hostRef.current?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('.structured-table-input').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-table-edit').forEach((button) => { button.disabled = readOnly })
+    document.querySelectorAll<HTMLInputElement>('.structured-heading-input').forEach((editor) => { editor.readOnly = readOnly })
+    hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-heading-edit').forEach((button) => { button.disabled = readOnly })
+    document.querySelectorAll<HTMLButtonElement>('.structured-heading-save').forEach((button) => { button.disabled = readOnly })
   }, [readOnly])
 
   useEffect(() => {
