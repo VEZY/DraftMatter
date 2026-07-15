@@ -863,6 +863,23 @@ button:disabled {
   outline: none;
 }
 
+.structured-editable .ProseMirror {
+  min-height: 1.4em;
+  outline: none;
+}
+
+.structured-editable:focus-within {
+  box-shadow: 0 0 0 4px rgba(63, 104, 89, 0.06);
+}
+
+.paper-title .ProseMirror h1 {
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  line-height: inherit;
+  margin: 0;
+}
+
 .authors {
   align-items: center;
   color: #47504c;

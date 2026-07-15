@@ -4,6 +4,8 @@ import { desktopHost, normaliseHostFailure, resolveMainDocument, type ProjectSna
 import { parsePortableDocument } from './document'
 import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
+import { ManuscriptTextEditor } from './ManuscriptTextEditor'
+import { applyDraftCitationTransaction, applyDraftCodeTransaction, applyDraftTextTransaction, type ManuscriptTextField } from './manuscriptModel'
 import { downloadText, projectCleanSource, reviewedProjection } from './projections'
 import { sampleCitations } from './sampleCitations'
 import { initialDraft } from './sampleDraft'
@@ -50,40 +52,6 @@ function getInitialDraft(): DraftState {
 
 function Avatar({ initials, tone = 'sage', small = false }: { initials: string; tone?: 'sage' | 'blue' | 'clay'; small?: boolean }) {
   return <span className={`avatar avatar-${tone} ${small ? 'avatar-small' : ''}`}>{initials}</span>
-}
-
-function Editable({
-  value,
-  onChange,
-  as: Element = 'p',
-  className = '',
-  ariaLabel,
-}: {
-  value: string
-  onChange: (value: string) => void
-  as?: 'p' | 'h1'
-  className?: string
-  ariaLabel: string
-}) {
-  const elementRef = useRef<HTMLElement>(null)
-
-  useEffect(() => {
-    if (elementRef.current && elementRef.current.innerText !== value) elementRef.current.innerText = value
-  }, [value])
-
-  return (
-    <Element
-      ref={elementRef as never}
-      className={`editable ${className}`}
-      contentEditable
-      suppressContentEditableWarning
-      spellCheck
-      aria-label={ariaLabel}
-      onBlur={(event) => onChange(event.currentTarget.innerText.trim())}
-    >
-      {value}
-    </Element>
-  )
 }
 
 function CitationChip({ onClick, label }: { onClick: () => void; label: string }) {
@@ -187,6 +155,10 @@ function App() {
   const updateDraft = (patch: Partial<DraftState>) => {
     markDraftChanged()
     updateDraftHistory(patch)
+  }
+
+  const updateManuscriptText = (field: ManuscriptTextField, value: string) => {
+    updateDraft(applyDraftTextTransaction(draft, field, value))
   }
 
   const undoDraft = () => {
@@ -665,7 +637,7 @@ function App() {
       return
     }
     const citationKeys = [...draft.citationKeys, record.citekey]
-    updateDraft({ citationKeys, citationInserted: citationKeys.length > 1 })
+    updateDraft(applyDraftCitationTransaction(draft, citationKeys))
     setCitationSearchOpen(false)
     setCitationQuery('')
     setToast(`Citation inserted · @${record.citekey}`)
@@ -876,7 +848,7 @@ function App() {
 
           <article className="manuscript" aria-label="Editable manuscript">
             <div className="paper-meta">RESEARCH ARTICLE · PLANT ECOLOGY</div>
-            <Editable as="h1" value={draft.title} onChange={(title) => updateDraft({ title })} ariaLabel="Manuscript title" className="paper-title" />
+            <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" />
             <div className="authors">
               <span><Avatar initials="RV" tone="sage" small /> Remi Vezy<sup>1</sup></span>
               <span><Avatar initials="AM" tone="blue" small /> Alice Martin<sup>2</sup></span>
@@ -886,13 +858,13 @@ function App() {
 
             <section id="abstract" className="abstract-block">
               <h2>Abstract</h2>
-              <Editable value={draft.abstract} onChange={(abstract) => updateDraft({ abstract })} ariaLabel="Abstract" />
+              <ManuscriptTextEditor value={draft.abstract} onChange={(abstract) => updateManuscriptText('abstract', abstract)} ariaLabel="Abstract" />
               <div className="keywords"><strong>Keywords</strong> drought acclimation · plant architecture · reproducibility · phenotyping</div>
             </section>
 
             <section id="introduction">
               <h2><span>1</span> Introduction</h2>
-              <p className="editable" contentEditable suppressContentEditableWarning spellCheck onBlur={(event) => updateDraft({ introduction: event.currentTarget.innerText.replace(/\s*\(Vezy.*$/, '').trim() })}>
+              <p className="editable" contentEditable suppressContentEditableWarning spellCheck onBlur={(event) => updateManuscriptText('introduction', event.currentTarget.innerText.replace(/\s*\(Vezy.*$/, '').trim())}>
                 {draft.introduction}{' '}
                 <CitationChip onClick={() => setCitationOpen((open) => !open)} label={citationLabel} />
               </p>
@@ -914,7 +886,7 @@ function App() {
 
             <section id="methods">
               <h2><span>2</span> Methods</h2>
-              <Editable value={draft.methods} onChange={(methods) => updateDraft({ methods })} ariaLabel="Methods" />
+              <ManuscriptTextEditor value={draft.methods} onChange={(methods) => updateManuscriptText('methods', methods)} ariaLabel="Methods" />
 
               <div className={`code-cell ${draft.cellStatus}`} id="code-cell">
                 <div className="code-cell-header">
@@ -929,7 +901,7 @@ function App() {
                   <textarea
                     aria-label="Python code"
                     value={draft.code}
-                    onChange={(event) => updateDraft({ code: event.target.value, cellStatus: 'stale' })}
+                    onChange={(event) => updateDraft(applyDraftCodeTransaction(draft, event.target.value))}
                     spellCheck={false}
                   />
                 </div>
@@ -959,7 +931,7 @@ function App() {
 
             <section id="results">
               <h2><span>3</span> Results</h2>
-              <Editable value={draft.resultsLead} onChange={(resultsLead) => updateDraft({ resultsLead })} ariaLabel="Results lead" />
+              <ManuscriptTextEditor value={draft.resultsLead} onChange={(resultsLead) => updateManuscriptText('resultsLead', resultsLead)} ariaLabel="Results lead" />
               <p className={`reviewed-sentence markup-${markupView}`}>
                 The drought treatment{' '}
                 {markupView === 'original' ? (
@@ -984,7 +956,7 @@ function App() {
 
             <section id="conclusion">
               <h2><span>4</span> Conclusion</h2>
-              <Editable value={draft.conclusion} onChange={(conclusion) => updateDraft({ conclusion })} ariaLabel="Conclusion" />
+              <ManuscriptTextEditor value={draft.conclusion} onChange={(conclusion) => updateManuscriptText('conclusion', conclusion)} ariaLabel="Conclusion" />
             </section>
 
             <button className="end-insert" onClick={() => setCommandOpen(true)}><Icon name="plus" size={15} /> Add block or type /</button>
