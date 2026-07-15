@@ -123,4 +123,20 @@ describe('portable output materialization', () => {
     expect(materialized.source.match(/<!-- dm-output:end -->/g)).toHaveLength(1)
     expect(materialized.source).toContain('&lt;!-- dm-output:end -->')
   })
+
+  it('retains direct-provider stdout when no richer output is available', () => {
+    const portableSource = source.replace('produces="figures/generated/growth.svg"', 'output="text"')
+    const materialized = materializeExecutionOutput({
+      source: portableSource,
+      cellId: 'fig-growth',
+      result: result({
+        artifacts: [],
+        streams: [{ sequence: 0, name: 'stdout', text: 'direct text output\n' }],
+      }),
+    })
+
+    expect(materialized.ok).toBe(true)
+    if (!materialized.ok) return
+    expect(materialized.source).toContain('~~~text\ndirect text output\n~~~')
+  })
 })

@@ -123,6 +123,14 @@ function generatedBlock(request: MaterializeOutputRequest) {
   const pieces = artifactMarkdown(request.result, presentation)
   const mime = mimeMarkdown(request.result)
   if (mime) pieces.push(mime)
+  if (pieces.length === 0) {
+    const stdout = request.result.streams
+      .filter((stream) => stream.name === 'stdout')
+      .sort((left, right) => left.sequence - right.sequence)
+      .map((stream) => stream.text)
+      .join('')
+    if (stdout) pieces.push(textFence(stdout))
+  }
   if (pieces.length === 0) return undefined
   return [
     `<!-- dm-output:start cell="${request.cellId}" run="${request.result.hashes.result}" -->`,

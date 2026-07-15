@@ -155,6 +155,20 @@ function stableJson(value: unknown): string {
   return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${stableJson(object[key])}`).join(',')}}`
 }
 
+export function executionEnvironmentFingerprint(
+  kind: ExecutionProviderKind,
+  language: ExecutionLanguage,
+  environment: RawProviderEnvironment,
+) {
+  return sha256(stableJson({
+    provider: kind,
+    language,
+    identity: environment.identity,
+    version: environment.version,
+    details: environment.details ?? {},
+  }))
+}
+
 export async function sha256(value: string) {
   const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
   return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
@@ -227,7 +241,7 @@ async function normalizeResult(input: {
   const [codeHash, inputHash, environmentHash] = await Promise.all([
     sha256(input.request.code),
     sha256(stableJson([...input.request.inputs].sort((left, right) => left.path.localeCompare(right.path)))),
-    sha256(stableJson(environmentValue)),
+    executionEnvironmentFingerprint(input.kind, input.request.language, input.environment),
   ])
   const resultHash = await sha256(stableJson({
     status: input.status,

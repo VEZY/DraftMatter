@@ -29,9 +29,10 @@ import { previewCitationIntake, type CitationIntakePreview } from './citationInt
 import { CrossrefSearchSession, crossrefCandidateToCitationRecord, crossrefDuplicateCitekeys, type CrossrefCandidate } from './crossref'
 import { DEFAULT_ACQUISITION_BIBLIOGRAPHY, canonicalizeAcquisitionRecord, citationRecordToAcquisitionCsl, ensureBibliographyReference, persistedAcquisitionRecord } from './citationAcquisition'
 import { createDesktopDirectExecutionTransport } from './directExecutionTransport'
-import { extractExecutableCells } from './executionCells'
-import { executionManifestFromResult, parseExecutionManifest, serializeExecutionManifest, type ExecutionManifest } from './executionFreshness'
-import { createDirectExecutionProvider, sha256, type NormalizedExecutionResult } from './executionProvider'
+import { extractExecutableCells, type ExecutableCell, type ExecutionLanguage } from './executionCells'
+import { ExecutionFreshnessTracker, parseExecutionManifest, serializeExecutionManifest, type CleanRunCertification, type ExecutionCellFreshness, type ExecutionManifest } from './executionFreshness'
+import { createDirectExecutionProvider, executionEnvironmentFingerprint, sha256, type NormalizedExecutionResult } from './executionProvider'
+import { cleanExecutePortableDocument } from './cleanExecution'
 import { EXECUTION_TRUST_ACKNOWLEDGEMENT, createTrustedExecutionBroker } from './executionTrust'
 import { ExecutionOutputView } from './ExecutionOutputView'
 import { materializeExecutionOutput } from './outputMaterializer'
@@ -61,10 +62,11 @@ const LEGACY_SAMPLE_CODE = 'weeks = [0, 2, 4, 6, 8, 10, 12]\ncontrol = [0, 8, 21
 const directExecutionProvider = createDirectExecutionProvider(createDesktopDirectExecutionTransport(desktopHost))
 const executionBroker = createTrustedExecutionBroker(desktopHost, { direct: directExecutionProvider })
 
-function cellStatusLabel(status: DraftState['cellStatus']) {
+function cellStatusLabel(status: DraftState['cellStatus'] | ExecutionCellFreshness['status']) {
   if (status === 'environment-changed') return 'Environment changed'
   if (status === 'output-missing') return 'Output missing'
-  return status[0].toUpperCase() + status.slice(1)
+  if (status === 'never-run') return 'Not run'
+  return status[0].toUpperCase() + status.slice(1).replaceAll('-', ' ')
 }
 
 function projectArtifactPath(root: string, relative: string) {
@@ -88,6 +90,28 @@ interface DesktopSession {
   path: string
   hash: string
   savedRevision: number
+}
+
+type ExecutionCommand =
+  | { kind: 'cell'; cellId: string }
+  | { kind: 'above'; cellId: string }
+  | { kind: 'language'; language: ExecutionLanguage }
+  | { kind: 'clean-all' }
+
+function executionTargets(command: ExecutionCommand, cells: ExecutableCell[]) {
+  if (command.kind === 'cell') return cells.filter((cell) => cell.id === command.cellId)
+  if (command.kind === 'above') {
+    const index = cells.findIndex((cell) => cell.id === command.cellId)
+    return index < 0 ? [] : cells.slice(0, index)
+  }
+  if (command.kind === 'language') return cells.filter((cell) => cell.language === command.language)
+  return cells
+}
+
+function cleanExecutionProjection(source: string) {
+  const final = projectPortableReviewSource(source, { view: 'final' })
+  if (final.ok) return final
+  return projectPortableReviewSource(source, { view: 'original' })
 }
 
 function getInitialProjectMeta() {
@@ -292,13 +316,18 @@ function App() {
   const [runtimeInventory, setRuntimeInventory] = useState<RuntimeInventory>()
   const [runtimeDiscoveryState, setRuntimeDiscoveryState] = useState<'idle' | 'discovering' | 'ready'>('idle')
   const [environmentOpen, setEnvironmentOpen] = useState(false)
+  const [selectedEnvironmentLanguage, setSelectedEnvironmentLanguage] = useState<ExecutionLanguage>('python')
   const [manuscriptSource, setManuscriptSource] = useState(() => localStorage.getItem(STRUCTURED_SOURCE_KEY) ?? reviewedProjection(initialDraftState))
   const [structuredMode, setStructuredMode] = useState(() => localStorage.getItem(STRUCTURED_MODE_KEY) === 'true')
   const [structuredOutline, setStructuredOutline] = useState<StructuredOutlineItem[]>([])
   const [structuredReviewSelection, setStructuredReviewSelection] = useState<StructuredReviewSelection | null>(null)
   const [externalExportSource, setExternalExportSource] = useState<string>()
   const [executionResult, setExecutionResult] = useState<NormalizedExecutionResult>()
-  const [executionManifest, setExecutionManifest] = useState<ExecutionManifest>()
+  const [executionResults, setExecutionResults] = useState<Record<string, NormalizedExecutionResult>>({})
+  const [executionCellStates, setExecutionCellStates] = useState<ExecutionCellFreshness[]>([])
+  const [cleanRunCertification, setCleanRunCertification] = useState<CleanRunCertification>()
+  const [executionPlanBusy, setExecutionPlanBusy] = useState(false)
+  const [executionActiveCell, setExecutionActiveCell] = useState<string>()
   const [executionDiagnostics, setExecutionDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [executionProblem, setExecutionProblem] = useState('')
   const [executionTrustOpen, setExecutionTrustOpen] = useState(false)
@@ -327,8 +356,15 @@ function App() {
   const citationCacheLoadDiagnosticsRef = useRef<DocumentDiagnostic[]>([])
   const citationBibliographyRef = useRef<{ path: string; hash: string | null }>({ path: DEFAULT_ACQUISITION_BIBLIOGRAPHY, hash: null })
   const citationAcquisitionRunningRef = useRef(false)
-  const executionManifestHashRef = useRef<string | null>(null)
+  const executionManifestHashRef = useRef(new Map<string, string | null>())
   const executionAbortRef = useRef<AbortController | null>(null)
+  const executionTrackerRef = useRef<ExecutionFreshnessTracker | undefined>(undefined)
+  const executionTrackerRootRef = useRef<string | undefined>(undefined)
+  const executionSequenceRef = useRef(0)
+  const executionPlanBusyRef = useRef(false)
+  const pendingExecutionCommandRef = useRef<ExecutionCommand | undefined>(undefined)
+  const executionActiveCellRef = useRef<string | undefined>(undefined)
+  const executionActiveLanguageRef = useRef<ExecutionLanguage | undefined>(undefined)
   const crossrefSessionRef = useRef<CrossrefSearchSession | null>(null)
   if (!crossrefSessionRef.current) {
     crossrefSessionRef.current = new CrossrefSearchSession({
@@ -841,8 +877,9 @@ function App() {
       ? cleanSourceResult.source
       : `Final projection unavailable.\n\n${sourceDiagnostics.map((diagnostic) => `- ${diagnostic.message}`).join('\n')}`
   const displayedSource = sourceEditing ? sourceBuffer : source
-  const executionSource = manuscriptSource
-  const reviewDocument = parseReviewMarkup(executionSource)
+  const executionProjection = useMemo(() => cleanExecutionProjection(manuscriptSource), [manuscriptSource])
+  const executionSource = executionProjection.ok ? executionProjection.source : manuscriptSource
+  const reviewDocument = parseReviewMarkup(manuscriptSource)
   const reviewQueue = buildReviewQueue(reviewDocument)
   const structuredReviewProjection = useMemo(() => {
     if (!structuredMode || (markupView !== 'original' && markupView !== 'final')) return null
@@ -856,30 +893,37 @@ function App() {
   const executableCells = extractExecutableCells(executionSource).cells
   const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL) ?? executableCells[0]
   const retainedOutputs = parseRetainedOutputs(executionSource).outputs
-  const latestAttemptManifest = executionResult
-    ? executionManifest?.resultHash === executionResult.hashes.result
-      ? executionManifest
-      : executionManifestFromResult(executionResult, (executionManifest?.sequence ?? -1) + 1)
-    : executionManifest
-  const lastSuccessfulManifest = executionResult?.status === 'succeeded'
-    ? latestAttemptManifest
-    : executionManifest?.status === 'succeeded' ? executionManifest : undefined
-  const executionView = primaryCell ? buildExecutionAvailability({
-    cells: [primaryCell],
-    states: [{
-      cellId: primaryCell.id,
-      language: primaryCell.language,
-      status: draft.cellStatus,
-      ...(latestAttemptManifest ? { lastAttempt: latestAttemptManifest } : {}),
-      ...(lastSuccessfulManifest ? { lastSuccessful: lastSuccessfulManifest } : {}),
-    }],
+  const executionViews = buildExecutionAvailability({
+    cells: executableCells,
+    states: executionCellStates,
     providers: { python: 'direct', r: 'direct', julia: 'direct' },
     inventory: runtimeInventory,
     retainedOutputs,
-    cachedResultCells: executionResult ? new Set([executionResult.cellId]) : undefined,
-  })[0] : undefined
+    cachedResultCells: new Set(Object.keys(executionResults)),
+  })
+  const executionView = primaryCell ? executionViews.find((view) => view.cellId === primaryCell.id) : undefined
   const pythonRuntimeUnavailable = runtimeInventory?.executables.python.health !== undefined
     && runtimeInventory.executables.python.health !== 'available'
+
+  useEffect(() => {
+    const trackerRoot = desktopSession?.root ?? `browser:${filename}`
+    let cancelled = false
+    void (async () => {
+      let tracker = executionTrackerRef.current
+      if (!tracker || executionTrackerRootRef.current !== trackerRoot) {
+        tracker = await ExecutionFreshnessTracker.create(executableCells)
+        if (cancelled) return
+        executionTrackerRef.current = tracker
+        executionTrackerRootRef.current = trackerRoot
+      } else {
+        await tracker.reconcileCells(executableCells)
+        if (cancelled) return
+      }
+      setExecutionCellStates(tracker.snapshot())
+      setCleanRunCertification(tracker.cleanRunCertification())
+    })()
+    return () => { cancelled = true }
+  }, [desktopSession?.root, filename, manuscriptSource])
 
   const openSourceInspector = () => {
     setSourceTab('reviewed')
@@ -917,7 +961,7 @@ function App() {
   }
 
   const applyCollaborativeSource = (remoteSource: string) => {
-    if (remoteSource === executionSource) return
+    if (remoteSource === manuscriptSourceRef.current) return
     const parsed = parsePortableDocument(remoteSource, initialDraft)
     replaceManuscriptSource(remoteSource)
     markDraftChanged()
@@ -1054,6 +1098,21 @@ function App() {
       if (desktopSessionRef.current) {
         setRuntimeInventory(inventory)
         setRuntimeDiscoveryState('ready')
+        const tracker = executionTrackerRef.current
+        if (tracker) {
+          for (const language of ['python', 'r', 'julia'] as const) {
+            const runtime = inventory.executables[language]
+            if (runtime.health === 'available' && runtime.executable) {
+              tracker.environmentChanged(language, await executionEnvironmentFingerprint('direct', language, {
+                identity: runtime.executable,
+                version: runtime.version,
+                details: { mode: 'script-artifact' },
+              }))
+            }
+          }
+          setExecutionCellStates(tracker.snapshot())
+          setCleanRunCertification(tracker.cleanRunCertification())
+        }
       }
       return inventory
     } catch (error) {
@@ -1065,17 +1124,15 @@ function App() {
     }
   }
 
-  const persistExecutionManifest = async (root: string, result: NormalizedExecutionResult) => {
-    const manifest = executionManifestFromResult(result, (executionManifest?.sequence ?? -1) + 1)
-    setExecutionManifest(manifest)
+  const persistExecutionManifest = async (root: string, manifest: ExecutionManifest) => {
     try {
       const saved = await desktopHost.saveExecutionManifest({
         root,
-        cellId: result.cellId,
+        cellId: manifest.cellId,
         content: serializeExecutionManifest(manifest),
-        expectedHash: executionManifestHashRef.current,
+        expectedHash: executionManifestHashRef.current.get(manifest.cellId) ?? null,
       })
-      if (desktopSessionRef.current?.root === root) executionManifestHashRef.current = saved.hash
+      if (desktopSessionRef.current?.root === root) executionManifestHashRef.current.set(manifest.cellId, saved.hash)
       setExecutionDiagnostics((current) => current.filter((diagnostic) => diagnostic.code !== 'execution-manifest-save'))
     } catch (error) {
       const message = normaliseHostFailure(error).message
@@ -1086,20 +1143,41 @@ function App() {
     }
   }
 
-  const executeTrustedCell = async () => {
-    const session = desktopSessionRef.current
-    const currentSource = manuscriptSourceRef.current
-    const availableCells = extractExecutableCells(currentSource).cells
-    const cell = availableCells.find((candidate) => candidate.id === PRIMARY_EXECUTION_CELL) ?? availableCells[0]
-    if (!session || !cell) {
-      setExecutionProblem('No explicit Python executable cell is available in this project source.')
-      setToast('No explicit Python executable cell is available')
-      return
+  const syncExecutionTracker = (tracker: ExecutionFreshnessTracker) => {
+    setExecutionCellStates(tracker.snapshot())
+    setCleanRunCertification(tracker.cleanRunCertification())
+  }
+
+  const ensureExecutionTracker = async (root: string, cells: ExecutableCell[]) => {
+    let tracker = executionTrackerRef.current
+    if (!tracker || executionTrackerRootRef.current !== root) {
+      tracker = await ExecutionFreshnessTracker.create(cells)
+      executionTrackerRef.current = tracker
+      executionTrackerRootRef.current = root
+    } else {
+      await tracker.reconcileCells(cells)
     }
+    syncExecutionTracker(tracker)
+    return tracker
+  }
+
+  const executeTrustedCell = async (
+    cell: ExecutableCell,
+    tracker: ExecutionFreshnessTracker,
+    sequence: number,
+    cleanRunId?: string,
+  ) => {
+    const session = desktopSessionRef.current
+    if (!session) return undefined
 
     const controller = new AbortController()
     executionAbortRef.current = controller
-    updateDraftHistory({ cellStatus: 'running' })
+    executionActiveCellRef.current = cell.id
+    executionActiveLanguageRef.current = cell.language
+    setExecutionActiveCell(cell.id)
+    tracker.markRunning(cell.id)
+    syncExecutionTracker(tracker)
+    if (cell.id === primaryCell?.id) updateDraftHistory({ cellStatus: 'running' })
     setExecutionProblem('')
     setExecutionDiagnostics((current) => current.filter((diagnostic) => !diagnostic.code.startsWith('execution-run-')))
     try {
@@ -1111,86 +1189,260 @@ function App() {
         attributes: cell.attributes,
         inputs: [],
       }, controller.signal)
-      if (desktopSessionRef.current?.root !== session.root) return
+      if (desktopSessionRef.current?.root !== session.root) return undefined
       setExecutionResult(result)
+      setExecutionResults((current) => ({ ...current, [cell.id]: result }))
+      const manifest = tracker.recordResult(result, sequence, cleanRunId)
+      syncExecutionTracker(tracker)
+      await persistExecutionManifest(session.root, manifest)
 
       if (result.status === 'succeeded') {
+        const currentSource = manuscriptSourceRef.current
         const materialized = materializeExecutionOutput({
           source: currentSource,
           cellId: cell.id,
           result,
           presentation: {
-            label: 'fig-canopy-result',
-            alt: 'Canopy response over twelve weeks',
-            caption: 'Normalized canopy area across twelve weeks.',
+            label: cell.id === PRIMARY_EXECUTION_CELL ? 'fig-canopy-result' : `${cell.id}-result`,
+            alt: cell.id === PRIMARY_EXECUTION_CELL ? 'Canopy response over twelve weeks' : `Generated output from ${cell.id}`,
+            caption: cell.id === PRIMARY_EXECUTION_CELL ? 'Normalized canopy area across twelve weeks.' : `Generated output from ${cell.id}.`,
           },
         })
         if (materialized.ok) {
-          const parsed = parsePortableDocument(materialized.source, draft)
-          const nextDraft = { ...parsed.draft, cellStatus: 'current' as const }
+          const parsed = parsePortableDocument(materialized.source, initialDraft)
+          const nextDraft = { ...parsed.draft, cellStatus: cell.id === primaryCell?.id ? 'current' as const : draft.cellStatus }
           replaceManuscriptSource(materialized.source)
           markDraftChanged()
           commitDraftHistory(nextDraft)
           setDiagnostics(parsed.diagnostics)
           writeRecoverySnapshot(nextDraft, filename, materialized.source)
         } else {
-          updateDraftHistory({ cellStatus: 'current' })
+          if (cell.id === primaryCell?.id) updateDraftHistory({ cellStatus: 'current' })
           setExecutionDiagnostics((current) => [
             ...current,
             ...materialized.diagnostics.map((diagnostic) => ({ ...diagnostic, code: `execution-run-${diagnostic.code}` })),
           ])
           setExecutionProblem(materialized.diagnostics[0]?.message ?? 'The live result could not be materialized into portable source.')
         }
-        await persistExecutionManifest(session.root, result)
-        setToast(`Figure regenerated · run ${result.hashes.result.slice(7, 15)}`)
+        setToast(`${cell.id} completed · run ${result.hashes.result.slice(7, 15)}`)
       } else {
-        updateDraftHistory({ cellStatus: result.status })
+        if (cell.id === primaryCell?.id) updateDraftHistory({ cellStatus: result.status })
         const detail = result.errors[0]?.message
           ?? result.streams.find((stream) => stream.name === 'stderr')?.text.trim()
           ?? `The ${cell.language} process ${result.status}.`
         setExecutionProblem(detail)
         setToast(result.status === 'interrupted' ? 'Execution interrupted · retained output preserved' : 'Execution failed · retained output preserved')
       }
+      return result
     } catch (error) {
-      if (desktopSessionRef.current?.root !== session.root) return
+      if (desktopSessionRef.current?.root !== session.root) return undefined
       const interrupted = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
       const message = interrupted ? 'The run was interrupted.' : normaliseHostFailure(error).message
-      updateDraftHistory({ cellStatus: interrupted ? 'interrupted' : 'failed' })
+      tracker.markStopped(cell.id, interrupted ? 'interrupted' : 'failed', message)
+      syncExecutionTracker(tracker)
+      if (cell.id === primaryCell?.id) updateDraftHistory({ cellStatus: interrupted ? 'interrupted' : 'failed' })
       setExecutionProblem(message)
       setToast(interrupted ? 'Execution interrupted · retained output preserved' : 'Execution failed · retained output preserved')
+      return undefined
     } finally {
       if (executionAbortRef.current === controller) executionAbortRef.current = null
+      if (executionActiveCellRef.current === cell.id) {
+        executionActiveCellRef.current = undefined
+        executionActiveLanguageRef.current = undefined
+        setExecutionActiveCell(undefined)
+      }
     }
   }
 
-  const runCell = async () => {
+  const runExecutionCommandTrusted = async (command: ExecutionCommand) => {
+    const session = desktopSessionRef.current
+    if (!session || executionPlanBusyRef.current) return
+    const projection = cleanExecutionProjection(manuscriptSourceRef.current)
+    if (!projection.ok) {
+      setExecutionProblem('Execution needs a clean Final projection. Resolve overlapping review alternatives before running code.')
+      setToast('Execution blocked · resolve overlapping review alternatives')
+      return
+    }
+    const cells = extractExecutableCells(projection.source).cells
+    const targets = executionTargets(command, cells)
+    if (targets.length === 0) {
+      setToast(command.kind === 'above' ? 'There are no executable cells above this cell' : 'No matching executable cells were found')
+      return
+    }
+    executionPlanBusyRef.current = true
+    setExecutionPlanBusy(true)
+    try {
+      const tracker = await ensureExecutionTracker(session.root, cells)
+      if (command.kind === 'clean-all') {
+        const previousStates = tracker.snapshot()
+        const existingManifests = previousStates.flatMap((state) => state.lastSuccessful ? [state.lastSuccessful] : state.lastAttempt ? [state.lastAttempt] : [])
+        const presentation = Object.fromEntries(cells.map((cell) => [cell.id, {
+          label: cell.id === PRIMARY_EXECUTION_CELL ? 'fig-canopy-result' : `${cell.id}-result`,
+          alt: cell.id === PRIMARY_EXECUTION_CELL ? 'Canopy response over twelve weeks' : `Generated output from ${cell.id}`,
+          caption: cell.id === PRIMARY_EXECUTION_CELL ? 'Normalized canopy area across twelve weeks.' : `Generated output from ${cell.id}.`,
+        }]))
+        const outcome = await cleanExecutePortableDocument({
+          source: projection.source,
+          root: session.root,
+          providers: { python: 'direct', r: 'direct', julia: 'direct' },
+          broker: executionBroker,
+          existingManifests,
+          presentation,
+          onLifecycleChange: (states) => {
+            const previous = new Map(previousStates.map((state) => [state.cellId, state]))
+            setExecutionCellStates(states.map((state) => ({
+              ...previous.get(state.cellId),
+              cellId: state.cellId,
+              language: state.language,
+              status: state.status === 'succeeded' ? 'current' : state.status,
+              ...(state.message ? { reason: state.message } : {}),
+            })))
+            const active = states.find((state) => state.status === 'running')
+            executionActiveCellRef.current = active?.cellId
+            executionActiveLanguageRef.current = active?.language
+            setExecutionActiveCell(active?.cellId)
+          },
+        })
+        setExecutionResults(Object.fromEntries(outcome.results.map((result) => [result.cellId, result])))
+        setExecutionResult(outcome.results.at(-1))
+        if (!outcome.ok) {
+          const failedTracker = await ExecutionFreshnessTracker.create(cells, existingManifests)
+          for (const result of outcome.results) {
+            if (result.status !== 'succeeded') {
+              failedTracker.recordResult(result, cells.findIndex((cell) => cell.id === result.cellId), outcome.cleanRunId)
+            }
+          }
+          executionTrackerRef.current = failedTracker
+          syncExecutionTracker(failedTracker)
+          setExecutionDiagnostics((current) => [
+            ...current.filter((diagnostic) => !diagnostic.code.startsWith('execution-clean-')),
+            ...outcome.diagnostics.map((diagnostic) => ({ ...diagnostic, code: `execution-clean-${diagnostic.code}` })),
+          ])
+          setExecutionProblem(outcome.error ?? 'The clean run did not complete; existing outputs were retained.')
+          setToast('Clean run incomplete · previous outputs retained')
+          return
+        }
+
+        let materializedSource = manuscriptSourceRef.current
+        for (const result of outcome.results) {
+          const materialized = materializeExecutionOutput({ source: materializedSource, cellId: result.cellId, result, presentation: presentation[result.cellId] })
+          if (!materialized.ok) {
+            syncExecutionTracker(tracker)
+            setExecutionDiagnostics((current) => [
+              ...current.filter((diagnostic) => !diagnostic.code.startsWith('execution-clean-')),
+              ...materialized.diagnostics.map((diagnostic) => ({ ...diagnostic, code: `execution-clean-${diagnostic.code}` })),
+            ])
+            setExecutionProblem(`Output materialization failed for ${result.cellId}; previous outputs were retained.`)
+            setToast('Clean run output could not be materialized · previous outputs retained')
+            return
+          }
+          materializedSource = materialized.source
+        }
+
+        const cleanTracker = await ExecutionFreshnessTracker.create(cells, outcome.manifests)
+        const certification = cleanTracker.certifyCleanRun(outcome.cleanRunId)
+        executionTrackerRef.current = cleanTracker
+        executionTrackerRootRef.current = session.root
+        executionSequenceRef.current = Math.max(executionSequenceRef.current, cells.length)
+        syncExecutionTracker(cleanTracker)
+        setCleanRunCertification(certification)
+        for (const manifest of outcome.manifests) await persistExecutionManifest(session.root, manifest)
+        const parsed = parsePortableDocument(materializedSource, initialDraft)
+        const nextDraft = { ...parsed.draft, cellStatus: primaryCell ? 'current' as const : draft.cellStatus }
+        replaceManuscriptSource(materializedSource)
+        markDraftChanged()
+        commitDraftHistory(nextDraft)
+        setDiagnostics(parsed.diagnostics)
+        setExecutionDiagnostics((current) => current.filter((diagnostic) => !diagnostic.code.startsWith('execution-clean-')))
+        setExecutionProblem('')
+        writeRecoverySnapshot(nextDraft, filename, materializedSource)
+        setToast(`Clean run certified · ${cells.length} cell${cells.length === 1 ? '' : 's'}`)
+        return
+      }
+      let completed = 0
+      for (const [index, cell] of targets.entries()) {
+        tracker.markQueued(cell.id)
+        syncExecutionTracker(tracker)
+        const result = await executeTrustedCell(cell, tracker, executionSequenceRef.current++)
+        if (!result || result.status !== 'succeeded') break
+        completed += 1
+      }
+      if (completed === targets.length && targets.length > 1) {
+        setToast(`${targets.length} cells completed in document order`)
+      }
+    } catch (error) {
+      const message = normaliseHostFailure(error).message
+      setExecutionProblem(message)
+      setToast(message)
+    } finally {
+      executionPlanBusyRef.current = false
+      setExecutionPlanBusy(false)
+      executionActiveCellRef.current = undefined
+      executionActiveLanguageRef.current = undefined
+      setExecutionActiveCell(undefined)
+    }
+  }
+
+  const requestExecution = async (command: ExecutionCommand) => {
     setCommandOpen(false)
     const session = desktopSessionRef.current
     if (!desktopHost.available || !session) {
       setToast('Code execution is available only in an opened desktop project')
       return
     }
+    const projection = cleanExecutionProjection(manuscriptSourceRef.current)
+    if (!projection.ok) {
+      setExecutionProblem('Execution needs a clean Final projection. Resolve overlapping review alternatives before running code.')
+      setToast('Execution blocked · resolve overlapping review alternatives')
+      return
+    }
+    const targets = executionTargets(command, extractExecutableCells(projection.source).cells)
+    if (targets.length === 0) {
+      setToast(command.kind === 'above' ? 'There are no executable cells above this cell' : 'No matching executable cells were found')
+      return
+    }
     const inventory = runtimeInventory ?? await discoverExecutionEnvironments()
     if (!inventory) return
-    const runtime = inventory.executables.python
-    if (runtime.health !== 'available') {
+    const unavailable = [...new Set(targets.map((cell) => cell.language))]
+      .filter((language) => inventory.executables[language].health !== 'available')
+    if (unavailable.length) {
+      const details = unavailable.map((language) => inventory.executables[language].message).filter(Boolean).join(' ')
+      setSelectedEnvironmentLanguage(unavailable[0])
       setEnvironmentOpen(true)
-      setExecutionProblem(runtime.message ?? 'No healthy Python executable was found. Select or install Python, then refresh environments.')
+      setExecutionProblem(details || `${unavailable.map(runtimeName).join(', ')} execution environment${unavailable.length === 1 ? ' is' : 's are'} unavailable.`)
       return
     }
     try {
       const trust = await desktopHost.executionTrustStatus(session.root)
       if (!trust.trusted) {
+        pendingExecutionCommandRef.current = command
         setExecutionTrustWarning(trust.warning)
         setExecutionTrustOpen(true)
         return
       }
-      await executeTrustedCell()
+      pendingExecutionCommandRef.current = undefined
+      await runExecutionCommandTrusted(command)
     } catch (error) {
       const message = normaliseHostFailure(error).message
       setExecutionProblem(message)
       setToast(message)
     }
+  }
+
+  const runCell = async () => {
+    const projection = cleanExecutionProjection(manuscriptSourceRef.current)
+    if (!projection.ok) {
+      setToast('Execution blocked · resolve overlapping review alternatives')
+      return
+    }
+    const cell = extractExecutableCells(projection.source).cells
+      .find((candidate) => candidate.id === PRIMARY_EXECUTION_CELL)
+      ?? extractExecutableCells(projection.source).cells[0]
+    if (!cell) {
+      setToast('No explicit executable cell is available')
+      return
+    }
+    await requestExecution({ kind: 'cell', cellId: cell.id })
   }
 
   const confirmExecutionTrust = async () => {
@@ -1201,7 +1453,13 @@ function App() {
       const trust = await desktopHost.trustProjectForSession(session.root, EXECUTION_TRUST_ACKNOWLEDGEMENT)
       if (!trust.trusted) throw new Error('The project was not trusted for execution.')
       setExecutionTrustOpen(false)
-      await executeTrustedCell()
+      const projection = cleanExecutionProjection(manuscriptSourceRef.current)
+      if (!projection.ok) throw new Error('Execution needs a clean Final projection. Resolve overlapping review alternatives before running code.')
+      const cells = extractExecutableCells(projection.source).cells
+      const fallback = cells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL) ?? cells[0]
+      const command = pendingExecutionCommandRef.current ?? (fallback ? { kind: 'cell' as const, cellId: fallback.id } : undefined)
+      pendingExecutionCommandRef.current = undefined
+      if (command) await runExecutionCommandTrusted(command)
     } catch (error) {
       const message = normaliseHostFailure(error).message
       setExecutionProblem(message)
@@ -1211,36 +1469,41 @@ function App() {
     }
   }
 
-  const interruptExecution = async () => {
+  const interruptExecution = async (requestedLanguage?: ExecutionLanguage) => {
+    const language = requestedLanguage ?? executionActiveLanguageRef.current ?? primaryCell?.language ?? 'python'
     executionAbortRef.current?.abort()
     try {
-      await executionBroker.interrupt('direct', primaryCell?.language ?? 'python')
+      await executionBroker.interrupt('direct', language)
     } catch (error) {
       setToast(normaliseHostFailure(error).message)
     }
   }
 
-  const restartExecution = async () => {
+  const restartExecution = async (requestedLanguage?: ExecutionLanguage) => {
     const session = desktopSessionRef.current
     if (!session) return
+    const language = requestedLanguage ?? executionActiveLanguageRef.current ?? primaryCell?.language ?? 'python'
     try {
       const trust = await desktopHost.executionTrustStatus(session.root)
       if (!trust.trusted) {
         setToast('Run a cell and trust this project before restarting its execution environment')
         return
       }
-      await executionBroker.restart(session.root, 'direct', primaryCell?.language ?? 'python')
-      setToast('Direct execution environment restarted')
+      if (executionActiveLanguageRef.current === language) executionAbortRef.current?.abort()
+      await executionBroker.restart(session.root, 'direct', language)
+      setToast(`${runtimeName(language)} execution environment restarted`)
     } catch (error) {
       setToast(normaliseHostFailure(error).message)
     }
   }
 
-  const terminateExecution = async () => {
+  const terminateExecution = async (requestedLanguage?: ExecutionLanguage) => {
+    const language = requestedLanguage ?? executionActiveLanguageRef.current ?? primaryCell?.language ?? 'python'
     try {
-      await executionBroker.terminate('direct', primaryCell?.language ?? 'python')
+      if (executionActiveLanguageRef.current === language) executionAbortRef.current?.abort()
+      await executionBroker.terminate('direct', language)
       updateDraftHistory({ cellStatus: draft.cellStatus === 'running' ? 'interrupted' : draft.cellStatus })
-      setToast('Direct execution process terminated')
+      setToast(`${runtimeName(language)} execution process terminated`)
     } catch (error) {
       setToast(normaliseHostFailure(error).message)
     }
@@ -1386,12 +1649,24 @@ function App() {
     const parsed = parsePortableDocument(await file.text(), initialDraft)
     const nextName = file.name.replace(/\.(qmd|md)$/i, '')
     const cacheResult = readCitationCache(localStorage, `browser:${file.name}`)
+    const executionTracker = await ExecutionFreshnessTracker.create(parsed.executableCells)
     replaceDesktopSession(null)
     executionAbortRef.current?.abort()
     executionAbortRef.current = null
-    executionManifestHashRef.current = null
-    setExecutionManifest(undefined)
+    executionManifestHashRef.current.clear()
+    executionTrackerRef.current = executionTracker
+    executionTrackerRootRef.current = `browser:${file.name}`
+    executionSequenceRef.current = 0
+    executionPlanBusyRef.current = false
+    pendingExecutionCommandRef.current = undefined
+    executionActiveCellRef.current = undefined
+    executionActiveLanguageRef.current = undefined
     setExecutionResult(undefined)
+    setExecutionResults({})
+    setExecutionCellStates(executionTracker.snapshot())
+    setCleanRunCertification(undefined)
+    setExecutionPlanBusy(false)
+    setExecutionActiveCell(undefined)
     setExecutionDiagnostics([])
     setExecutionProblem('')
     setRuntimeInventory(undefined)
@@ -1450,6 +1725,12 @@ function App() {
     if (mainPath !== project.config.mainDocument) await desktopHost.setMainDocument(project.root, mainPath)
     const parsed = parsePortableDocument(document.content, initialDraft)
     const manifestResults = manifestSnapshots.map((snapshot) => ({ snapshot, ...parseExecutionManifest(snapshot.content) }))
+    const validManifests = manifestResults.flatMap(({ manifest }) => manifest ? [manifest] : [])
+    const executionTracker = await ExecutionFreshnessTracker.create(parsed.executableCells, validManifests)
+    const cleanRunIds = new Set(validManifests.map((manifest) => manifest.cleanRunId).filter((value): value is string => Boolean(value)))
+    if (cleanRunIds.size === 1 && validManifests.length === parsed.executableCells.length) {
+      executionTracker.certifyCleanRun([...cleanRunIds][0])
+    }
     const manifestDiagnostics: DocumentDiagnostic[] = manifestResults.flatMap(({ snapshot, error }) => error ? [{
       code: `execution-manifest-${snapshot.path}`,
       level: 'warning' as const,
@@ -1481,9 +1762,20 @@ function App() {
     setSaveProblem('')
     executionAbortRef.current?.abort()
     executionAbortRef.current = null
-    executionManifestHashRef.current = primaryManifestResult?.snapshot.hash ?? null
-    setExecutionManifest(primaryManifest)
+    executionManifestHashRef.current = new Map(manifestResults.flatMap(({ snapshot, manifest }) => manifest ? [[manifest.cellId, snapshot.hash] as const] : []))
+    executionTrackerRef.current = executionTracker
+    executionTrackerRootRef.current = project.root
+    executionSequenceRef.current = Math.max(0, ...validManifests.map((manifest) => manifest.sequence + 1))
+    executionPlanBusyRef.current = false
+    pendingExecutionCommandRef.current = undefined
+    executionActiveCellRef.current = undefined
+    executionActiveLanguageRef.current = undefined
     setExecutionResult(undefined)
+    setExecutionResults({})
+    setExecutionCellStates(executionTracker.snapshot())
+    setCleanRunCertification(executionTracker.cleanRunCertification())
+    setExecutionPlanBusy(false)
+    setExecutionActiveCell(undefined)
     setExecutionDiagnostics(manifestDiagnostics)
     setExecutionProblem('')
     setRuntimeInventory(undefined)
@@ -2216,18 +2508,50 @@ function App() {
               <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" />
             )}
             {primaryCell && (
-              <div className="structured-execution-bar">
-                <span><Icon name="code" size={15} /><strong>{primaryCell.language === 'r' ? 'R' : runtimeName(primaryCell.language)} cell</strong><small>{primaryCell.id} · execution is explicit</small><em className={`cell-status ${draft.cellStatus}`}><i />{cellStatusLabel(draft.cellStatus)}</em></span>
-                {draft.cellStatus === 'running'
-                  ? <button onClick={() => void interruptExecution()}><Icon name="close" size={13} /> Interrupt</button>
-                  : <button className="run-button" onClick={() => void runCell()} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}><Icon name="play" size={13} /> Run first cell</button>}
-                <button className="subtle" onClick={() => void discoverExecutionEnvironments(true)} disabled={!desktopSession}><Icon name="more" size={14} /> Environments</button>
-              </div>
-            )}
-            {executionResult && (
-              <div className="structured-live-result" aria-label="Latest execution result">
-                <ExecutionOutputView result={executionResult} artifactUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) : path} />
-              </div>
+              <section className="structured-execution-workspace" aria-label="Executable cells">
+                <div className="structured-execution-bar">
+                  <span><Icon name="code" size={15} /><strong>Execution workspace</strong><small>{executableCells.length} explicit cell{executableCells.length === 1 ? '' : 's'} · Python, R, and Julia stay isolated</small></span>
+                  {[...new Set(executableCells.map((cell) => cell.language))].map((language) => (
+                    <button className="subtle" key={language} onClick={() => void requestExecution({ kind: 'language', language })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && runtimeInventory.executables[language].health !== 'available')}>
+                      <Icon name="play" size={12} /> Run {runtimeName(language)}
+                    </button>
+                  ))}
+                  <button className="subtle" onClick={() => void requestExecution({ kind: 'clean-all' })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && executableCells.some((cell) => runtimeInventory.executables[cell.language].health !== 'available'))}><Icon name="history" size={13} /> Clean run</button>
+                  <button className="subtle" onClick={() => void discoverExecutionEnvironments(true)} disabled={!desktopSession}><Icon name="more" size={14} /> Environments</button>
+                </div>
+                {!desktopSession && <p className="execution-browser-note">Execution controls are disabled in the browser. Open this manuscript as a desktop project to run local code.</p>}
+                <div className="execution-cell-list">
+                  {executableCells.map((cell, index) => {
+                    const state = executionCellStates.find((candidate) => candidate.cellId === cell.id)
+                    const view = executionViews.find((candidate) => candidate.cellId === cell.id)
+                    const status = executionActiveCell === cell.id ? 'running' : state?.status ?? 'never-run'
+                    const result = executionResults[cell.id]
+                    return (
+                      <div className={`execution-cell-row ${view?.tone === 'warning' ? 'warning' : ''}`} key={cell.id}>
+                        <div className="execution-cell-summary">
+                          <span className="execution-language">{runtimeName(cell.language)}</span>
+                          <strong>{cell.id}</strong>
+                          <em className={`cell-status ${status}`}><i />{cellStatusLabel(status)}</em>
+                          <small>{state?.reason ?? view?.message ?? 'Ready for an explicit run.'}</small>
+                        </div>
+                        <div className="execution-cell-actions">
+                          {index > 0 && <button className="subtle" onClick={() => void requestExecution({ kind: 'above', cellId: cell.id })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && executableCells.slice(0, index).some((candidate) => runtimeInventory.executables[candidate.language].health !== 'available'))}>Run above</button>}
+                          {executionActiveCell === cell.id
+                            ? <button onClick={() => void interruptExecution(cell.language)}><Icon name="close" size={13} /> Interrupt</button>
+                            : <button className="run-button" onClick={() => void requestExecution({ kind: 'cell', cellId: cell.id })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && view && !view.executionEnabled)}><Icon name="play" size={13} /> Run</button>}
+                        </div>
+                        {view?.provenance.length ? <p className="execution-cell-provenance">{view.provenance.join(' · ')}</p> : null}
+                        {result && (
+                          <div className="structured-live-result" aria-label={`Latest execution result for ${cell.id}`}>
+                            <ExecutionOutputView result={result} artifactUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) : path} />
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+                {cleanRunCertification && <p className="clean-run-certification"><Icon name="check" size={13} /> Clean run certified · {cleanRunCertification.resultHashes.length} outputs from one ordered run</p>}
+              </section>
             )}
             {structuredReviewProjection && (
               <div className={`structured-review-preview ${structuredReviewProjection.ok ? '' : 'blocked'}`} role={structuredReviewProjection.ok ? 'status' : 'alert'}>
@@ -2525,7 +2849,7 @@ function App() {
               </>}
 
               <PortableReviewItems
-                source={executionSource}
+                source={manuscriptSource}
                 excludeIds={demoReviewAvailable ? ['dm-c01', 'dm-c02', 'dm-comment-01'] : []}
                 selectedTarget={structuredMode ? structuredReviewSelection : null}
                 onApply={applyPortableReviewSource}
@@ -2567,22 +2891,22 @@ function App() {
             <div className="execution-environment-list">
               {(['python', 'r', 'julia'] as const).map((language) => {
                 const runtime = runtimeInventory?.executables[language]
-                const selected = language === 'python'
-                return <div className={selected ? 'selected' : ''} key={language}>
+                const selected = language === selectedEnvironmentLanguage
+                return <button className={selected ? 'selected' : ''} key={language} onClick={() => setSelectedEnvironmentLanguage(language)} aria-pressed={selected}>
                   <span className={`runtime-language runtime-${language}`}>{language === 'python' ? 'Py' : language === 'julia' ? 'Jl' : 'R'}</span>
                   <span><strong>{runtimeName(language)}</strong><small>{runtimeDiscoveryState === 'discovering' ? 'Checking…' : runtime?.health === 'available' ? `${runtime.version ?? 'Version available'} · ${runtime.executable}` : runtime?.message ?? 'Not checked'}</small></span>
                   <span className={`runtime-health ${runtime?.health ?? 'not-checked'}`}>{runtime?.health === 'available' ? 'Available' : runtime?.health === 'unhealthy' ? 'Needs attention' : runtime?.health === 'missing' ? 'Missing' : 'Not checked'}</span>
-                </div>
+                </button>
               })}
             </div>
             <div className="execution-provider-summary">
-              <div><strong>Selected provider</strong><span>Direct process · Python</span></div>
+              <div><strong>Selected provider</strong><span>Direct process · {runtimeName(selectedEnvironmentLanguage)}</span></div>
               <div><strong>Jupyter kernels</strong><span>{runtimeInventory ? `${runtimeInventory.jupyter.kernels.filter((kernel) => kernel.health === 'available').length} available` : 'Not checked'}</span></div>
             </div>
             {executionProblem && <div className="execution-environment-help" role="alert">{executionProblem}</div>}
             <div className="execution-dialog-actions environment-actions">
-              <button onClick={() => void restartExecution()} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}>Restart</button>
-              <button onClick={() => void terminateExecution()} disabled={!desktopSession}>Terminate</button>
+              <button onClick={() => void restartExecution(selectedEnvironmentLanguage)} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}>Restart {runtimeName(selectedEnvironmentLanguage)}</button>
+              <button onClick={() => void terminateExecution(selectedEnvironmentLanguage)} disabled={!desktopSession}>Terminate {runtimeName(selectedEnvironmentLanguage)}</button>
               <span />
               <button onClick={() => void discoverExecutionEnvironments()} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}>{runtimeDiscoveryState === 'discovering' ? 'Checking…' : 'Refresh'}</button>
               <button className="primary-button" onClick={() => setEnvironmentOpen(false)}>Done</button>
@@ -2603,7 +2927,7 @@ function App() {
 
       <CollaborationDialog
         open={collaborationOpen}
-        source={executionSource}
+        source={manuscriptSource}
         onClose={() => setCollaborationOpen(false)}
         onRemoteSource={applyCollaborativeSource}
         onStatus={updateCollaborationStatus}

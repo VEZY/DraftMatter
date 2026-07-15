@@ -209,6 +209,14 @@ export class ExecutionFreshnessTracker {
     this.certification = undefined
   }
 
+  markStopped(cellId: string, status: 'failed' | 'interrupted', reason: string) {
+    const state = this.states.get(cellId)
+    if (!state) throw new Error(`Executable cell ${cellId} was not found.`)
+    state.status = status
+    state.reason = reason
+    this.certification = undefined
+  }
+
   recordResult(result: NormalizedExecutionResult, sequence: number, cleanRunId?: string) {
     const state = this.states.get(result.cellId)
     if (!state || state.language !== result.language) throw new Error(`Execution result does not match cell ${result.cellId}.`)
