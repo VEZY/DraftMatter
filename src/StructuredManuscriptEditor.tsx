@@ -350,6 +350,121 @@ function citationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   }
 }
 
+function crossReferenceNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () => number | undefined, isEditable: () => boolean): NodeView {
+  let node = initialNode
+  let editing = false
+  const dom = document.createElement('span')
+  dom.className = 'structured-cross-reference'
+  dom.contentEditable = 'false'
+  const link = document.createElement('a')
+  link.className = 'structured-cross-reference-link'
+  link.setAttribute('data-dm-node', 'cross-reference')
+  const edit = document.createElement('button')
+  edit.type = 'button'
+  edit.className = 'structured-cross-reference-edit'
+  edit.textContent = 'Edit'
+  const editor = document.createElement('span')
+  editor.className = 'structured-cross-reference-editor'
+  editor.hidden = true
+  const input = document.createElement('input')
+  input.type = 'text'
+  input.className = 'structured-cross-reference-input'
+  input.setAttribute('aria-label', 'Cross-reference target')
+  input.placeholder = 'fig-growth'
+  input.spellcheck = false
+  const validation = document.createElement('small')
+  validation.className = 'structured-cross-reference-validation'
+  validation.hidden = true
+  const cancel = document.createElement('button')
+  cancel.type = 'button'
+  cancel.textContent = 'Cancel'
+  const save = document.createElement('button')
+  save.type = 'button'
+  save.className = 'primary-button'
+  save.textContent = 'Save reference'
+  editor.append(input, validation, cancel, save)
+
+  const normalizedTarget = () => input.value.trim().replace(/^@/, '')
+  const updateSave = () => {
+    const valid = isCrossReferenceTarget(normalizedTarget())
+    validation.textContent = valid ? '' : 'Use a portable fig-, tbl-, eq-, or sec- target.'
+    validation.hidden = valid
+    save.disabled = !isEditable() || !valid
+  }
+  const updateDom = () => {
+    const target = String(node.attrs.target)
+    dom.dataset.dmId = String(node.attrs.id)
+    dom.dataset.target = target
+    link.dataset.dmId = String(node.attrs.id)
+    link.href = `#${target}`
+    link.textContent = String(node.attrs.rendered || formatCrossReferenceTarget(target))
+    link.title = `Reference target ${target}`
+    edit.disabled = !isEditable()
+    edit.setAttribute('aria-label', `Edit cross-reference to ${target}`)
+    input.readOnly = !isEditable()
+    if (!editing) input.value = target
+    updateSave()
+  }
+  const closeEditor = () => {
+    editing = false
+    editor.hidden = true
+    link.hidden = false
+    edit.hidden = false
+    input.value = String(node.attrs.target)
+    updateSave()
+    edit.focus()
+  }
+  const saveEditor = () => {
+    const target = normalizedTarget()
+    const position = getPos()
+    if (typeof position !== 'number' || !isEditable() || !isCrossReferenceTarget(target)) return
+    view.dispatch(view.state.tr.setNodeMarkup(position, undefined, {
+      ...node.attrs,
+      target,
+      rendered: formatCrossReferenceTarget(target),
+    }))
+    closeEditor()
+  }
+  edit.addEventListener('mousedown', (event) => event.preventDefault())
+  edit.addEventListener('click', () => {
+    if (!isEditable()) return
+    editing = true
+    link.hidden = true
+    edit.hidden = true
+    editor.hidden = false
+    input.value = String(node.attrs.target)
+    updateSave()
+    input.focus()
+    input.select()
+  })
+  cancel.addEventListener('click', closeEditor)
+  save.addEventListener('click', saveEditor)
+  input.addEventListener('input', updateSave)
+  input.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeEditor()
+    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault()
+      saveEditor()
+    }
+  })
+
+  dom.append(link, edit, editor)
+  updateDom()
+  return {
+    dom,
+    stopEvent: (event) => dom.contains(event.target as Node),
+    ignoreMutation: () => true,
+    update(next) {
+      if (next.type !== node.type) return false
+      node = next
+      updateDom()
+      return true
+    },
+  }
+}
+
 function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () => number | undefined, displayMode: boolean, isEditable: () => boolean): NodeView {
   let node = initialNode
   let editing = false
@@ -1871,6 +1986,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         ),
         raw_block: (node) => rawNodeView(node, (nodeId) => onInspectRawRef.current?.(nodeId)),
         citation: (node, editorView, getPos) => citationNodeView(node, editorView, getPos, (id, items) => onCitationSelectRef.current?.(id, items)),
+        cross_reference: (node, editorView, getPos) => crossReferenceNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         equation_inline: (node, editorView, getPos) => equationNodeView(node, editorView, getPos, false, () => !readOnlyRef.current),
         equation_block: (node, editorView, getPos) => equationNodeView(node, editorView, getPos, true, () => !readOnlyRef.current),
         footnote_reference: (node, editorView) => footnoteReferenceNodeView(node, editorView),
@@ -1978,6 +2094,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-footnote-edit').forEach((button) => { button.disabled = readOnly })
     hostRef.current?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('.structured-equation-input, .structured-equation-label-input').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-equation-edit').forEach((button) => { button.disabled = readOnly })
+    hostRef.current?.querySelectorAll<HTMLInputElement>('.structured-cross-reference-input').forEach((editor) => { editor.readOnly = readOnly })
+    hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-cross-reference-edit').forEach((button) => { button.disabled = readOnly })
     hostRef.current?.querySelectorAll<HTMLInputElement>('.structured-figure-input').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-figure-edit').forEach((button) => { button.disabled = readOnly })
     hostRef.current?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('.structured-table-input').forEach((editor) => { editor.readOnly = readOnly })

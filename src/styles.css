@@ -3940,6 +3940,18 @@ kbd {
 .structured-editor-content ul,
 .structured-editor-content ol { margin: 1em 0 1.4em; padding-left: 1.75em; }
 .structured-editor-content a { color: var(--sage-dark); text-decoration-color: #a7bbb2; text-underline-offset: 3px; }
+.structured-cross-reference { align-items: baseline; display: inline-flex; gap: 2px; position: relative; white-space: nowrap; }
+.structured-cross-reference-edit { background: transparent; border: 0; color: #738279; font-size: 8px; font-weight: 700; opacity: 0; padding: 1px 2px; transition: opacity .12s ease; }
+.structured-cross-reference:hover > .structured-cross-reference-edit,
+.structured-cross-reference-edit:focus-visible { opacity: 1; }
+.structured-cross-reference-edit:disabled { cursor: default; opacity: 0; pointer-events: none; }
+.structured-cross-reference-editor { align-items: center; display: inline-flex; font-family: Inter, ui-sans-serif, sans-serif; gap: 4px; vertical-align: baseline; }
+.structured-cross-reference-editor[hidden] { display: none; }
+.structured-cross-reference-input { background: #fff; border: 1px solid #d5ddd8; border-radius: 4px; color: #3f4d46; font: 9px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 4px 6px; width: 120px; }
+.structured-cross-reference-input:focus { border-color: #8ba296; outline: 2px solid rgba(63, 104, 89, .14); }
+.structured-cross-reference-validation { color: #9a5e4a; font-size: 8px; font-weight: 600; }
+.structured-cross-reference-validation[hidden] { display: none; }
+.structured-cross-reference-editor button { font-size: 8px; padding: 4px 6px; }
 .structured-editor-content table { border-collapse: collapse; font-family: Inter, ui-sans-serif, sans-serif; font-size: 13px; margin: 1.6em 0; width: 100%; }
 .structured-editor-content th,
 .structured-editor-content td { border-bottom: 1px solid var(--line); padding: 9px 10px; text-align: left; vertical-align: top; }

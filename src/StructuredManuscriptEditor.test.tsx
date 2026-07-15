@@ -276,6 +276,37 @@ describe('full structured manuscript editor', () => {
     expect(changed.at(-1)).toContain('[^method]: Calibration details.')
   })
 
+  it('retargets a rendered cross-reference without exposing source punctuation', async () => {
+    const changed: string[] = []
+    const referenceSource = '# References\n\nSee @fig-growth for context.\n\n![Growth](growth.svg){#fig-growth}\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n: Means. {#tbl-means}\n'
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={referenceSource} onChange={(next) => changed.push(next)} />,
+    ))
+
+    const reference = container.querySelector<HTMLElement>('.structured-cross-reference[data-target="fig-growth"]')!
+    expect(reference.querySelector<HTMLAnchorElement>('[data-dm-node="cross-reference"]')?.textContent).toBe('Figure growth')
+    await act(async () => reference.querySelector<HTMLButtonElement>('.structured-cross-reference-edit')?.click())
+    const input = reference.querySelector<HTMLInputElement>('.structured-cross-reference-input')!
+    const save = reference.querySelector<HTMLButtonElement>('.structured-cross-reference-editor .primary-button')!
+
+    input.value = 'growth'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(reference.querySelector('.structured-cross-reference-validation')?.textContent).toContain('portable')
+    expect(save.disabled).toBe(true)
+
+    input.value = '@tbl-means'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(save.disabled).toBe(false)
+    await act(async () => save.click())
+
+    expect(changed.at(-1)).toContain('See @tbl-means for context.')
+    expect(changed.at(-1)).not.toContain('@fig-growth for context')
+    expect(reference.dataset.target).toBe('tbl-means')
+    expect(reference.querySelector<HTMLAnchorElement>('[data-dm-node="cross-reference"]')?.getAttribute('href')).toBe('#tbl-means')
+    expect(reference.querySelector<HTMLAnchorElement>('[data-dm-node="cross-reference"]')?.textContent).toBe('Table means')
+    expect(document.activeElement).toBe(reference.querySelector('.structured-cross-reference-edit'))
+  })
+
   it('numbers repeated references by first use and edits definitions without exposing punctuation', async () => {
     const changed: string[] = []
     const numberedSource = '# Notes\n\nBeta first[^beta], alpha next[^alpha], and beta again[^beta].\n\n[^alpha]: Alpha **details**.\n[^beta]: Beta details.\n'
@@ -507,6 +538,8 @@ describe('full structured manuscript editor', () => {
     expect([...container.querySelectorAll<HTMLInputElement>('.structured-footnote-label-input')].every((input) => input.readOnly)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-equation-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLInputElement>('.structured-equation-label-input')].every((input) => input.readOnly)).toBe(true)
+    expect([...container.querySelectorAll<HTMLButtonElement>('.structured-cross-reference-edit')].every((button) => button.disabled)).toBe(true)
+    expect([...container.querySelectorAll<HTMLInputElement>('.structured-cross-reference-input')].every((input) => input.readOnly)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-figure-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-table-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-heading-edit')].every((button) => button.disabled)).toBe(true)
