@@ -8,6 +8,8 @@
     "build": "tsc -p tsconfig.app.json --noEmit && vite build",
     "preview": "vite preview",
     "check": "tsc -p tsconfig.app.json --noEmit",
+    "compliance:generate": "node scripts/generate-compliance.mjs",
+    "compliance:check": "node scripts/generate-compliance.mjs --verify",
     "test": "vitest run",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",

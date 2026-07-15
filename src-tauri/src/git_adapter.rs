@@ -175,11 +175,21 @@ fn empty_status(version: Option<String>) -> GitRepositoryStatus {
 }
 
 fn git_command(current_dir: &Path) -> Command {
+    let disabled_hooks = std::env::temp_dir().join(format!(
+        "draftmatter-git-hooks-disabled-{}",
+        std::process::id()
+    ));
+    let _ = fs::create_dir_all(&disabled_hooks);
     let mut command = Command::new("git");
     command
         .current_dir(current_dir)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "Never")
+        .env("GIT_CONFIG_COUNT", "2")
+        .env("GIT_CONFIG_KEY_0", "core.hooksPath")
+        .env("GIT_CONFIG_VALUE_0", disabled_hooks)
+        .env("GIT_CONFIG_KEY_1", "core.fsmonitor")
+        .env("GIT_CONFIG_VALUE_1", "false")
         .env("LC_ALL", "C");
     command
 }
@@ -929,6 +939,9 @@ mod tests {
     use std::ffi::OsStr;
     use tempfile::tempdir;
 
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
+
     fn git<I, S>(root: &Path, args: I) -> Output
     where
         I: IntoIterator<Item = S>,
@@ -1322,5 +1335,43 @@ mod tests {
             message: "Empty".to_string(),
         });
         assert!(matches!(empty, Err(HostError::Conflict(_))));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_hooks_and_fsmonitor_cannot_execute_through_the_adapter() {
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("paper.qmd"), "base\n").unwrap();
+        commit_all(project.path(), "base");
+        let sentinel = project.path().join("hook-ran");
+        let hooks = project.path().join("controlled-hooks");
+        fs::create_dir_all(&hooks).unwrap();
+        let hook = hooks.join("post-commit");
+        fs::write(
+            &hook,
+            format!("#!/bin/sh\nprintf unsafe > '{}'\n", sentinel.display()),
+        )
+        .unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        git(
+            project.path(),
+            ["config", "core.hooksPath", &hooks.to_string_lossy()],
+        );
+        git(
+            project.path(),
+            ["config", "core.fsmonitor", &hook.to_string_lossy()],
+        );
+        fs::write(project.path().join("paper.qmd"), "next\n").unwrap();
+
+        let root = project.path().to_string_lossy().to_string();
+        git_status_impl(&root).unwrap();
+        git_create_checkpoint_impl(GitCheckpointRequest {
+            root,
+            paths: vec!["paper.qmd".to_string()],
+            message: "Safe checkpoint".to_string(),
+        })
+        .unwrap();
+        assert!(!sentinel.exists());
     }
 }

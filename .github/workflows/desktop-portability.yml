@@ -66,6 +66,12 @@ jobs:
       - name: Check frontend types
         run: npm run check
 
+      - name: Enforce dependency licence allowlist
+        run: npm run compliance:check
+
+      - name: Generate platform notices and CycloneDX SBOM
+        run: npm run compliance:generate
+
       - name: Test frontend and host adapter
         run: npm test
 
@@ -80,3 +86,11 @@ jobs:
           args: ${{ matrix.args }}
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: draftmatter-[platform]-[arch]-[bundle]
+
+      - name: Upload platform compliance inventory
+        uses: actions/upload-artifact@v6
+        with:
+          name: draftmatter-${{ matrix.target }}-compliance
+          path: |
+            compliance/THIRD_PARTY_NOTICES.md
+            compliance/sbom.cdx.json
