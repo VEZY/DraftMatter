@@ -1864,10 +1864,12 @@ function App() {
     try {
       const html = renderNativeHtmlExport(projection.source, {
         title: draft.title,
-        citationLabels: {
-          [serializeCitationCluster(draftCitationItems)]: citationLabel,
-          '[@coutellier2022]': resultsCitationLabel,
-        },
+        citationLabels: structuredMode
+          ? structuredCitationLabels
+          : {
+            [serializeCitationCluster(draftCitationItems)]: citationLabel,
+            '[@coutellier2022]': resultsCitationLabel,
+          },
         bibliography: renderedBibliography,
       })
       const base = filename.replace(/\.(qmd|md)$/i, '')

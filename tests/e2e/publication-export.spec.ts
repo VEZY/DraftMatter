@@ -34,14 +34,30 @@ print("must remain inert")
 
 test.describe('DM-P5-01/02 native publication exports', () => {
   test.beforeEach(async ({ page }) => {
-    await page.addInitScript((portableSource) => {
+    await page.addInitScript(({ portableSource, citations }) => {
       localStorage.setItem('draftmatter.structured-source.v1', portableSource)
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
-    }, source)
+      localStorage.setItem('draftmatter.citations.v1', JSON.stringify(citations))
+    }, {
+      portableSource: source,
+      citations: [{
+        citekey: 'field2026',
+        type: 'article-journal',
+        title: 'Independent measurements of canopy area',
+        authors: ['Ari Field', 'Mira Stone'],
+        year: '2026',
+        container: 'Journal of Field Synthesis',
+        doi: '10.1000/field.2026',
+        source: 'csl-json',
+        availability: 'cached',
+        provenance: { origin: 'manual-import', locator: 'references.json' },
+      }],
+    })
     await page.goto('/')
   })
 
   test('downloads and renders the opened manuscript rather than the demo article', async ({ page, context }, testInfo) => {
+    await expect(page.getByText('(Field and Stone, 2026)')).toBeVisible()
     await page.getByRole('button', { name: 'Export' }).click()
     const htmlDownloadEvent = page.waitForEvent('download')
     await page.getByRole('button', { name: /Native HTML/ }).click()
@@ -56,6 +72,8 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(html.match(/<h1>/g)).toHaveLength(1)
     expect(html).not.toContain('<main><h1')
     expect(html).toContain('Canopy area differed by <strong>18%</strong>')
+    expect(html).toContain('<cite class="citation" data-citekeys="field2026">(Field and Stone, 2026)</cite>')
+    expect(html).toContain('Independent measurements of canopy area')
     expect(html).toContain('<figure id="fig-response">')
     expect(html).toContain('<table>')
     expect(html).toContain('role="math"')
