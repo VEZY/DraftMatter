@@ -100,7 +100,13 @@ export function buildCitationLock(records: CitationRecord[], previous?: Citation
   for (const record of records) {
     const candidate = entryForRecord(record)
     const byKey = entries.find((entry) => normalizedKey(entry.citekey) === normalizedKey(candidate.citekey))
-    if (byKey) continue
+    if (byKey) {
+      if (sourceFingerprint(byKey.source) === sourceFingerprint(candidate.source)) {
+        byKey.version = candidate.version
+        byKey.identifiers = candidate.identifiers
+      }
+      continue
+    }
     const bySource = entries.find((entry) => sourceFingerprint(entry.source) === sourceFingerprint(candidate.source))
     if (bySource) {
       bySource.aliases = [...new Set([...bySource.aliases, candidate.citekey])]

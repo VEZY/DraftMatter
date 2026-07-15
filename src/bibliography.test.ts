@@ -28,9 +28,19 @@ describe('local bibliography', () => {
     expect(result.records[0]).toMatchObject({ citekey: 'martin2023', authors: ['Alice Martin'], year: '2023' })
   })
 
-  it('deduplicates by citation key and DOI', () => {
+  it('deduplicates by citation key without silently merging a matching DOI', () => {
     const duplicate = { ...sampleCitations[0], citekey: 'different-key' }
-    expect(mergeCitationRecords(sampleCitations, [sampleCitations[0], duplicate])).toHaveLength(sampleCitations.length)
+    const merged = mergeCitationRecords(sampleCitations, [sampleCitations[0], duplicate])
+    expect(merged).toHaveLength(sampleCitations.length + 1)
+    expect(merged.at(-1)?.citekey).toBe('different-key')
+  })
+
+  it('replaces a demonstration record when a real source provides its citekey', () => {
+    const imported = { ...sampleCitations[0], source: 'bibtex' as const, provenance: { origin: 'project-file' as const, locator: 'references.bib' } }
+    const merged = mergeCitationRecords(sampleCitations, [imported])
+
+    expect(merged).toHaveLength(sampleCitations.length)
+    expect(merged[0]).toEqual(imported)
   })
 
   it('refreshes newer Zotero metadata by item identity without changing its cached citekey', () => {
@@ -85,6 +95,20 @@ describe('local bibliography', () => {
     expect(result.records[0].provenance).toEqual({ origin: 'project-file', locator: 'references.bib' })
     expect(result.diagnostics).toEqual([
       expect.objectContaining({ code: 'project-bibliography-1-unreadable', level: 'error', message: 'missing.bib: File disappeared' }),
+    ])
+  })
+
+  it('diagnoses duplicate keys across project bibliography files before indexing', async () => {
+    const result = await loadProjectBibliographies(
+      ['first.bib', 'second.json'],
+      async (path) => path.endsWith('.json')
+        ? JSON.stringify([{ id: 'same', title: 'Second source' }])
+        : '@article{same, title={First source}}',
+    )
+
+    expect(result.records).toHaveLength(1)
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: 'project-bibliography-duplicate-key-same', level: 'error' }),
     ])
   })
 

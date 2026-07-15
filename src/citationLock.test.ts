@@ -45,6 +45,15 @@ describe('citation lock', () => {
     ]))
   })
 
+  it('refreshes source versions only when the locked citekey identity is unchanged', () => {
+    const previous = buildCitationLock([zotero])
+    const refreshed = { ...zotero, sourceIdentity: { ...zotero.sourceIdentity!, itemVersion: 44, libraryVersion: '910' } }
+    const reassigned = { ...refreshed, sourceIdentity: { ...refreshed.sourceIdentity, itemKey: 'OTHER' } }
+
+    expect(buildCitationLock([refreshed], previous).entries[0].version).toBe('44@910')
+    expect(buildCitationLock([reassigned], previous).entries[0].version).toBe('42@902')
+  })
+
   it('reports duplicates, missing/offline keys, reassignment, aliases, and DOI suggestions without merging', () => {
     const offline = { ...bibtex, citekey: 'lockedOffline', doi: undefined, provenance: { origin: 'project-file' as const, locator: 'offline.bib' } }
     const lock = buildCitationLock([zotero, bibtex, offline])

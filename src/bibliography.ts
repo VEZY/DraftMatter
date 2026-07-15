@@ -239,22 +239,32 @@ export async function loadProjectBibliographies(
     }
   }))
 
-  return results.reduce<BibliographyResult>((combined, result) => ({
-    records: mergeCitationRecords(combined.records, result.records),
-    diagnostics: [...combined.diagnostics, ...result.diagnostics],
-  }), { records: [], diagnostics: [] })
+  const records = results.flatMap((result) => result.records)
+  const diagnostics = results.flatMap((result) => result.diagnostics)
+  const byKey = new Map<string, CitationRecord[]>()
+  for (const record of records) {
+    const key = record.citekey.toLowerCase()
+    byKey.set(key, [...(byKey.get(key) ?? []), record])
+  }
+  for (const [key, matches] of byKey) {
+    if (matches.length < 2) continue
+    diagnostics.push({
+      code: `project-bibliography-duplicate-key-${key}`,
+      level: 'error',
+      message: `Citation key ${matches[0].citekey} appears in ${matches.length} project bibliography files and was not merged automatically.`,
+    })
+  }
+  return { records: mergeCitationRecords([], records), diagnostics }
 }
 
 export function mergeCitationRecords(existing: CitationRecord[], incoming: CitationRecord[]) {
   const records = [...existing]
   const byKey = new Map(records.map((record, index) => [record.citekey.toLowerCase(), index]))
-  const byDoi = new Map(records.flatMap((record, index) => record.doi ? [[record.doi.toLowerCase(), index] as const] : []))
   const bySourceIdentity = new Map<string, number>(records.flatMap((record, index) => record.sourceIdentity
     ? [[`${record.sourceIdentity.provider}:${record.sourceIdentity.itemKey}`, index] as const]
     : []))
   for (const record of incoming) {
     const key = record.citekey.toLowerCase()
-    const doi = record.doi?.toLowerCase()
     const sourceIdentity = record.sourceIdentity
       ? `${record.sourceIdentity.provider}:${record.sourceIdentity.itemKey}`
       : undefined
@@ -270,11 +280,17 @@ export function mergeCitationRecords(existing: CitationRecord[], incoming: Citat
       }
       continue
     }
-    if (byKey.has(key) || (doi && byDoi.has(doi))) continue
+    const keyIndex = byKey.get(key)
+    if (keyIndex !== undefined) {
+      if (records[keyIndex].source === 'sample' && record.source !== 'sample') {
+        records[keyIndex] = record
+        if (sourceIdentity) bySourceIdentity.set(sourceIdentity, keyIndex)
+      }
+      continue
+    }
     const index = records.length
     records.push(record)
     byKey.set(key, index)
-    if (doi) byDoi.set(doi, index)
     if (sourceIdentity) bySourceIdentity.set(sourceIdentity, index)
   }
   return records

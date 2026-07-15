@@ -43,6 +43,12 @@ export interface SaveDocumentResult {
   recoveryPath: string | null
 }
 
+export interface SaveCitationLockRequest {
+  root: string
+  content: string
+  expectedHash: string | null
+}
+
 export interface ZoteroStatus {
   available: boolean
   zoteroVersion?: string
@@ -135,6 +141,12 @@ export function createDesktopHost(
     },
     readBibliography(root: string, path: string) {
       return invokeBridge<DocumentSnapshot>('read_bibliography', { root, path })
+    },
+    readCitationLock(root: string) {
+      return invokeBridge<DocumentSnapshot | null>('read_citation_lock', { root })
+    },
+    saveCitationLock(request: SaveCitationLockRequest) {
+      return invokeBridge<DocumentSnapshot>('save_citation_lock', { request })
     },
     saveDocument(request: SaveDocumentRequest) {
       return invokeBridge<SaveDocumentResult>('save_document', { request })

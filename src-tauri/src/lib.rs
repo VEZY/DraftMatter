@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 const PROJECT_SCHEMA: u32 = 1;
 const MAX_RECOVERY_FILES: usize = 8;
 const MAX_BIBLIOGRAPHY_BYTES: u64 = 10 * 1024 * 1024;
+const MAX_CITATION_LOCK_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_ZOTERO_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 const ZOTERO_PORT: u16 = 23119;
 
@@ -73,6 +74,14 @@ pub struct SaveDocumentResult {
     pub hash: String,
     pub bytes: u64,
     pub recovery_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveCitationLockRequest {
+    pub root: String,
+    pub content: String,
+    pub expected_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -429,6 +438,92 @@ fn read_bibliography_impl(raw_root: &str, relative: &str) -> Result<DocumentSnap
         hash: source_hash(content.as_bytes()),
         content,
         modified_ms: modified_ms(&metadata),
+    })
+}
+
+fn citation_lock_path(root: &Path) -> PathBuf {
+    root.join(".draftmatter").join("citations.lock.json")
+}
+
+fn validate_citation_lock(content: &str) -> Result<(), HostError> {
+    if content.len() as u64 > MAX_CITATION_LOCK_BYTES {
+        return Err(HostError::UnsupportedFile(
+            "The citation lock exceeds the 4 MB project limit.".to_string(),
+        ));
+    }
+    let value: serde_json::Value = serde_json::from_str(content).map_err(|error| {
+        HostError::InvalidProject(format!("The citation lock is not valid JSON: {error}"))
+    })?;
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        != Some(1)
+    {
+        return Err(HostError::InvalidProject(
+            "The citation lock must use schemaVersion 1.".to_string(),
+        ));
+    }
+    if !value
+        .get("entries")
+        .is_some_and(serde_json::Value::is_array)
+    {
+        return Err(HostError::InvalidProject(
+            "The citation lock must contain an entries array.".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn read_citation_lock_impl(raw_root: &str) -> Result<Option<DocumentSnapshot>, HostError> {
+    let root = canonical_root(raw_root)?;
+    let path = citation_lock_path(&root);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let metadata = fs::metadata(&path)?;
+    if metadata.len() > MAX_CITATION_LOCK_BYTES {
+        return Err(HostError::UnsupportedFile(
+            "The citation lock exceeds the 4 MB project limit.".to_string(),
+        ));
+    }
+    let content = fs::read_to_string(&path).map_err(|error| {
+        HostError::InvalidProject(format!("The citation lock must be valid UTF-8: {error}"))
+    })?;
+    Ok(Some(DocumentSnapshot {
+        path: ".draftmatter/citations.lock.json".to_string(),
+        hash: source_hash(content.as_bytes()),
+        content,
+        modified_ms: modified_ms(&metadata),
+    }))
+}
+
+fn save_citation_lock_impl(
+    request: SaveCitationLockRequest,
+) -> Result<DocumentSnapshot, HostError> {
+    validate_citation_lock(&request.content)?;
+    let root = canonical_root(&request.root)?;
+    let path = citation_lock_path(&root);
+    let previous = if path.exists() {
+        fs::read(&path)?
+    } else {
+        Vec::new()
+    };
+    if let Some(expected) = request.expected_hash.as_deref() {
+        let actual = source_hash(&previous);
+        if actual != expected {
+            return Err(HostError::Conflict(format!(
+                ".draftmatter/citations.lock.json changed outside DraftMatter (expected {expected}, found {actual})."
+            )));
+        }
+    } else if !previous.is_empty() {
+        return Err(HostError::Conflict(
+            ".draftmatter/citations.lock.json appeared outside DraftMatter before the first save."
+                .to_string(),
+        ));
+    }
+    write_atomic(&path, request.content.as_bytes(), false)?;
+    read_citation_lock_impl(&request.root)?.ok_or_else(|| {
+        HostError::Io("The citation lock disappeared after it was saved.".to_string())
     })
 }
 
@@ -960,6 +1055,16 @@ fn read_bibliography(root: String, path: String) -> Result<DocumentSnapshot, Hos
 }
 
 #[tauri::command]
+fn read_citation_lock(root: String) -> Result<Option<DocumentSnapshot>, HostError> {
+    read_citation_lock_impl(&root)
+}
+
+#[tauri::command]
+fn save_citation_lock(request: SaveCitationLockRequest) -> Result<DocumentSnapshot, HostError> {
+    save_citation_lock_impl(request)
+}
+
+#[tauri::command]
 fn save_document(request: SaveDocumentRequest) -> Result<SaveDocumentResult, HostError> {
     save_document_impl(request)
 }
@@ -997,6 +1102,8 @@ pub fn run() {
             create_project,
             read_document,
             read_bibliography,
+            read_citation_lock,
+            save_citation_lock,
             save_document,
             document_status,
             set_main_document,
@@ -1121,6 +1228,53 @@ mod tests {
             read_bibliography_impl(root.to_str().unwrap(), "../references.bib"),
             Err(HostError::InvalidPath(_))
         ));
+    }
+
+    #[test]
+    fn persists_only_valid_citation_locks_atomically_and_detects_conflicts() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("project");
+        create_project(root.to_string_lossy().into_owned(), "Test".into()).unwrap();
+        assert_eq!(
+            read_citation_lock_impl(root.to_str().unwrap()).unwrap(),
+            None
+        );
+
+        let content = "{\n  \"schemaVersion\": 1,\n  \"entries\": []\n}\n";
+        let saved = save_citation_lock_impl(SaveCitationLockRequest {
+            root: root.to_string_lossy().into_owned(),
+            content: content.into(),
+            expected_hash: None,
+        })
+        .unwrap();
+        assert_eq!(saved.path, ".draftmatter/citations.lock.json");
+        assert_eq!(saved.content, content);
+
+        fs::write(
+            root.join(".draftmatter/citations.lock.json"),
+            "{\"schemaVersion\":1,\"entries\":[{\"external\":true}]}",
+        )
+        .unwrap();
+        let conflict = save_citation_lock_impl(SaveCitationLockRequest {
+            root: root.to_string_lossy().into_owned(),
+            content: content.into(),
+            expected_hash: Some(saved.hash),
+        })
+        .unwrap_err();
+        assert!(matches!(conflict, HostError::Conflict(_)));
+        assert!(
+            fs::read_to_string(root.join(".draftmatter/citations.lock.json"))
+                .unwrap()
+                .contains("external")
+        );
+
+        let invalid = save_citation_lock_impl(SaveCitationLockRequest {
+            root: root.to_string_lossy().into_owned(),
+            content: "{\"schemaVersion\":2,\"entries\":[]}".into(),
+            expected_hash: None,
+        })
+        .unwrap_err();
+        assert!(matches!(invalid, HostError::InvalidProject(_)));
     }
 
     #[test]

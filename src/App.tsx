@@ -13,6 +13,7 @@ import { readRecoverySnapshots, saveRecoverySnapshot, type RecoverySnapshot } fr
 import type { CitationItem, CitationRecord, DocumentDiagnostic, DraftState, MarkupView, SuggestionStatus } from './types'
 import { queryZoteroLibrary, type ZoteroVersionStamp } from './zotero'
 import { citationItemsForDraft, normalizeCitationItems } from './citation'
+import { buildCitationLock, diagnoseCitationLock, parseCitationLock, serializeCitationLock, type CitationLock } from './citationLock'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
@@ -119,6 +120,8 @@ function App() {
   const [projectName, setProjectName] = useState(initialProjectMeta.projectName)
   const [diagnostics, setDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [bibliographyDiagnostics, setBibliographyDiagnostics] = useState<DocumentDiagnostic[]>([])
+  const [citationLockDiagnostics, setCitationLockDiagnostics] = useState<DocumentDiagnostic[]>([])
+  const [citationLockHostDiagnostics, setCitationLockHostDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [zoteroDiagnostics, setZoteroDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [zoteroState, setZoteroState] = useState<'idle' | 'searching' | 'available' | 'unavailable' | 'desktop-only'>('idle')
   const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>(() => readRecoverySnapshots(localStorage))
@@ -140,6 +143,12 @@ function App() {
   const externalCheckRunningRef = useRef(false)
   const reopenAttemptedRef = useRef(false)
   const zoteroVersionRef = useRef<ZoteroVersionStamp>(getInitialZoteroVersion())
+  const citationLockRef = useRef<CitationLock>(buildCitationLock([]))
+  const citationLockHashRef = useRef<string | null>(null)
+  const citationLockSavedContentRef = useRef<string | null>(null)
+  const citationLockLoadDiagnosticsRef = useRef<DocumentDiagnostic[]>([])
+  const citationLockSaveBlockedRef = useRef(false)
+  const citationLockSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
 
   const writeRecoverySnapshot = (nextDraft: DraftState, nextFilename: string, source: string, savedAt?: string) => {
     try {
@@ -163,7 +172,7 @@ function App() {
   const citationLabel = formatCitationCluster(citations, draftCitationItems)
   const activeCitationItem = draftCitationItems.find((item) => item.citekey === citationEditKey) ?? draftCitationItems[0]
   const activeCitationRecord = citations.find((record) => record.citekey === activeCitationItem?.citekey)
-  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...zoteroDiagnostics]
+  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...zoteroDiagnostics]
 
   const replaceDesktopSession = (next: DesktopSession | null) => {
     desktopSessionRef.current = next
@@ -348,6 +357,45 @@ function App() {
       }])
     }
   }, [citations])
+
+  useEffect(() => {
+    const lock = buildCitationLock(citations.filter((record) => record.source !== 'sample'), citationLockRef.current)
+    const content = serializeCitationLock(lock)
+    citationLockRef.current = lock
+    setCitationLockDiagnostics([
+      ...citationLockLoadDiagnosticsRef.current,
+      ...diagnoseCitationLock(citations, draft.citationKeys, lock),
+    ])
+
+    const root = desktopSession?.root
+    if (!root || citationLockSaveBlockedRef.current || content === citationLockSavedContentRef.current) return
+    const timeout = window.setTimeout(() => {
+      citationLockSaveQueueRef.current = citationLockSaveQueueRef.current.then(async () => {
+        if (desktopSessionRef.current?.root !== root || citationLockSaveBlockedRef.current) return
+        try {
+          const saved = await desktopHost.saveCitationLock({
+            root,
+            content,
+            expectedHash: citationLockHashRef.current,
+          })
+          if (desktopSessionRef.current?.root !== root) return
+          citationLockHashRef.current = saved.hash
+          citationLockSavedContentRef.current = content
+          setCitationLockHostDiagnostics([])
+        } catch (error) {
+          if (desktopSessionRef.current?.root !== root) return
+          const failure = normaliseHostFailure(error)
+          if (failure.kind === 'conflict') citationLockSaveBlockedRef.current = true
+          setCitationLockHostDiagnostics([{
+            code: 'citation-lock-save',
+            level: 'error',
+            message: `${failure.message} Citation edits remain in the manuscript and local recovery journal.`,
+          }])
+        }
+      })
+    }, 700)
+    return () => window.clearTimeout(timeout)
+  }, [citations, desktopSession?.root, draft.citationKeys.join('\u0000')])
 
   useEffect(() => {
     if (!citationSearchOpen) return
@@ -560,6 +608,13 @@ function App() {
     const parsed = parsePortableDocument(await file.text(), initialDraft)
     const nextName = file.name.replace(/\.(qmd|md)$/i, '')
     replaceDesktopSession(null)
+    citationLockRef.current = buildCitationLock([])
+    citationLockHashRef.current = null
+    citationLockSavedContentRef.current = null
+    citationLockLoadDiagnosticsRef.current = []
+    citationLockSaveBlockedRef.current = false
+    setCitationLockDiagnostics([])
+    setCitationLockHostDiagnostics([])
     desktopSaveBlockedRef.current = false
     resetDraftRevision()
     resetDraftHistory(parsed.draft)
@@ -584,26 +639,42 @@ function App() {
       throw new Error('This folder does not contain a Markdown or Quarto manuscript.')
     }
 
-    const [document, projectBibliography] = await Promise.all([
+    const [document, projectBibliography, lockSnapshot] = await Promise.all([
       desktopHost.readDocument(project.root, mainPath),
       loadProjectBibliographies(
         project.bibliographies.map((entry) => entry.path),
         async (path) => (await desktopHost.readBibliography(project.root, path)).content,
       ),
+      desktopHost.readCitationLock(project.root),
     ])
     if (mainPath !== project.config.mainDocument) await desktopHost.setMainDocument(project.root, mainPath)
     const parsed = parsePortableDocument(document.content, initialDraft)
+    const projectCitations = mergeCitationRecords(projectBibliography.records, sampleCitations)
+    const lockResult = lockSnapshot
+      ? parseCitationLock(lockSnapshot.content)
+      : { lock: buildCitationLock([]), diagnostics: [] }
+    const projectLock = buildCitationLock(projectCitations.filter((record) => record.source !== 'sample'), lockResult.lock)
     const displayName = mainPath.split('/').at(-1) ?? mainPath
     desktopSaveBlockedRef.current = false
     setSaveProblem('')
     resetDraftRevision()
+    citationLockRef.current = projectLock
+    citationLockHashRef.current = lockSnapshot?.hash ?? null
+    citationLockSavedContentRef.current = lockSnapshot?.content ?? null
+    citationLockLoadDiagnosticsRef.current = lockResult.diagnostics
+    citationLockSaveBlockedRef.current = lockResult.diagnostics.some((diagnostic) => diagnostic.level === 'error')
     replaceDesktopSession({ root: project.root, path: mainPath, hash: document.hash, savedRevision: 0 })
     resetDraftHistory(parsed.draft)
     setFilename(displayName)
     setProjectName(project.config.name)
     setDiagnostics(parsed.diagnostics)
-    setCitations(mergeCitationRecords(sampleCitations, projectBibliography.records))
+    setCitations(projectCitations)
     setBibliographyDiagnostics(projectBibliography.diagnostics)
+    setCitationLockDiagnostics([
+      ...lockResult.diagnostics,
+      ...diagnoseCitationLock(projectCitations, parsed.draft.citationKeys, projectLock),
+    ])
+    setCitationLockHostDiagnostics([])
     setProjectMenuOpen(false)
     setPendingProject(null)
     setSaveState('saved')

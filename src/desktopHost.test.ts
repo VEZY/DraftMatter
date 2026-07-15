@@ -20,6 +20,8 @@ describe('desktop host adapter', () => {
     await expect(host.openProject('/research/canopy')).resolves.toEqual(project)
     await host.readDocument('/research/canopy', 'paper.qmd')
     await host.readBibliography('/research/canopy', 'references.bib')
+    await host.readCitationLock('/research/canopy')
+    await host.saveCitationLock({ root: '/research/canopy', content: '{"schemaVersion":1,"entries":[]}', expectedHash: null })
     await host.saveDocument({ root: '/research/canopy', path: 'paper.qmd', content: '# Paper', expectedHash: 'old' })
     await host.documentStatus('/research/canopy', 'paper.qmd', 'next')
     await host.setMainDocument('/research/canopy', 'renamed.qmd')
@@ -30,6 +32,8 @@ describe('desktop host adapter', () => {
       ['open_project', { root: '/research/canopy' }],
       ['read_document', { root: '/research/canopy', path: 'paper.qmd' }],
       ['read_bibliography', { root: '/research/canopy', path: 'references.bib' }],
+      ['read_citation_lock', { root: '/research/canopy' }],
+      ['save_citation_lock', { request: { root: '/research/canopy', content: '{"schemaVersion":1,"entries":[]}', expectedHash: null } }],
       ['save_document', { request: { root: '/research/canopy', path: 'paper.qmd', content: '# Paper', expectedHash: 'old' } }],
       ['document_status', { root: '/research/canopy', path: 'paper.qmd', expectedHash: 'next' }],
       ['set_main_document', { root: '/research/canopy', path: 'renamed.qmd' }],
