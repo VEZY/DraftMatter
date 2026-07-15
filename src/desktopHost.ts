@@ -58,6 +58,13 @@ export interface SaveCitationLockRequest {
   expectedHash: string | null
 }
 
+export interface SaveExecutionManifestRequest {
+  root: string
+  cellId: string
+  content: string
+  expectedHash: string | null
+}
+
 export interface AcquireCitationsRequest {
   root: string
   documentPath: string
@@ -303,6 +310,12 @@ export function createDesktopHost(
       return available
         ? invokeBridge<boolean>('terminate_direct', { language })
         : executionUnavailable()
+    },
+    readExecutionManifests(root: string) {
+      return invokeBridge<DocumentSnapshot[]>('read_execution_manifests', { root })
+    },
+    saveExecutionManifest(request: SaveExecutionManifestRequest) {
+      return invokeBridge<DocumentSnapshot>('save_execution_manifest', { request })
     },
   }
 }

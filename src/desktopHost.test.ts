@@ -61,6 +61,8 @@ describe('desktop host adapter', () => {
     await host.interruptDirect('python')
     await host.restartDirect('r')
     await host.terminateDirect('julia')
+    await host.readExecutionManifests('/research/canopy')
+    await host.saveExecutionManifest({ root: '/research/canopy', cellId: 'cell-1', content: '{"schemaVersion":1}', expectedHash: null })
 
     expect(calls).toEqual([
       ['open_project', { root: '/research/canopy' }],
@@ -90,6 +92,8 @@ describe('desktop host adapter', () => {
       ['interrupt_direct', { language: 'python' }],
       ['restart_direct', { language: 'r' }],
       ['terminate_direct', { language: 'julia' }],
+      ['read_execution_manifests', { root: '/research/canopy' }],
+      ['save_execution_manifest', { request: { root: '/research/canopy', cellId: 'cell-1', content: '{"schemaVersion":1}', expectedHash: null } }],
     ])
   })
 

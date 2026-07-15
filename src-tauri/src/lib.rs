@@ -10,10 +10,14 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri_plugin_opener::OpenerExt;
 
 mod direct_execution;
+mod execution_manifests;
 mod execution_trust;
 use direct_execution::{
     execute_direct_impl, interrupt_direct_impl, restart_direct_impl, terminate_direct_impl,
     DirectExecutionRequest, DirectExecutionResult, DirectProcessRegistry,
+};
+use execution_manifests::{
+    read_execution_manifests_impl, save_execution_manifest_impl, SaveExecutionManifestRequest,
 };
 mod runtime;
 use execution_trust::{
@@ -2163,6 +2167,18 @@ fn terminate_direct(
     terminate_direct_impl(language, &processes)
 }
 
+#[tauri::command]
+fn read_execution_manifests(root: String) -> Result<Vec<DocumentSnapshot>, HostError> {
+    read_execution_manifests_impl(&root)
+}
+
+#[tauri::command]
+fn save_execution_manifest(
+    request: SaveExecutionManifestRequest,
+) -> Result<DocumentSnapshot, HostError> {
+    save_execution_manifest_impl(request)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2196,7 +2212,9 @@ pub fn run() {
             execute_direct,
             interrupt_direct,
             restart_direct,
-            terminate_direct
+            terminate_direct,
+            read_execution_manifests,
+            save_execution_manifest
         ])
         .run(tauri::generate_context!())
         .expect("error while running DraftMatter");
