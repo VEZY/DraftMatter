@@ -30,6 +30,8 @@ pub struct ProjectConfig {
     pub citation_style: String,
     #[serde(default = "default_citation_locale")]
     pub citation_locale: String,
+    #[serde(default)]
+    pub citation_bibliography: Option<String>,
 }
 
 fn default_citation_style() -> String {
@@ -113,6 +115,34 @@ pub struct SaveCitationLockRequest {
     pub root: String,
     pub content: String,
     pub expected_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AcquireCitationsRequest {
+    pub root: String,
+    pub document_path: String,
+    pub document_content: String,
+    pub expected_document_hash: String,
+    pub bibliography_path: String,
+    pub expected_bibliography_hash: Option<String>,
+    pub bibliography_records: Vec<serde_json::Value>,
+    pub lock_content: String,
+    pub expected_lock_hash: Option<String>,
+    pub cache_content: String,
+    pub expected_cache_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AcquireCitationsResult {
+    pub document_hash: String,
+    pub bibliography_hash: String,
+    pub lock_hash: String,
+    pub cache_hash: String,
+    pub bibliography_path: String,
+    pub acquired: usize,
+    pub unchanged: usize,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -410,6 +440,7 @@ fn default_config(root: &Path, documents: &[ProjectEntry]) -> ProjectConfig {
             .unwrap_or_else(|| "paper.qmd".to_string()),
         citation_style: default_citation_style(),
         citation_locale: default_citation_locale(),
+        citation_bibliography: None,
     }
 }
 
@@ -446,6 +477,7 @@ fn persist_config(root: &Path, config: &ProjectConfig) -> Result<(), HostError> 
 
 fn open_project_impl(raw_root: &str) -> Result<ProjectSnapshot, HostError> {
     let root = canonical_root(raw_root)?;
+    recover_citation_transactions(&root)?;
     let mut documents = Vec::new();
     let mut bibliographies = Vec::new();
     discover_entries(&root, &root, 0, &mut documents, &mut bibliographies)?;
@@ -533,6 +565,61 @@ fn citation_lock_path(root: &Path) -> PathBuf {
     root.join(".draftmatter").join("citations.lock.json")
 }
 
+fn citation_cache_path(root: &Path) -> PathBuf {
+    root.join(".draftmatter").join("cited-records.json")
+}
+
+fn validate_citation_cache(content: &str) -> Result<(), HostError> {
+    if content.len() as u64 > MAX_CITATION_LOCK_BYTES {
+        return Err(HostError::UnsupportedFile(
+            "The cited-record cache exceeds the 4 MB project limit.".to_string(),
+        ));
+    }
+    let value: serde_json::Value = serde_json::from_str(content).map_err(|error| {
+        HostError::InvalidProject(format!("The cited-record cache is not valid JSON: {error}"))
+    })?;
+    if value
+        .get("schemaVersion")
+        .and_then(serde_json::Value::as_u64)
+        != Some(1)
+        || !value
+            .get("records")
+            .is_some_and(serde_json::Value::is_array)
+    {
+        return Err(HostError::InvalidProject(
+            "The cited-record cache must use schemaVersion 1 and contain a records array."
+                .to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn read_citation_cache_impl(raw_root: &str) -> Result<Option<DocumentSnapshot>, HostError> {
+    let root = canonical_root(raw_root)?;
+    let path = citation_cache_path(&root);
+    if !path.exists() {
+        return Ok(None);
+    }
+    let metadata = fs::metadata(&path)?;
+    if metadata.len() > MAX_CITATION_LOCK_BYTES {
+        return Err(HostError::UnsupportedFile(
+            "The cited-record cache exceeds the 4 MB project limit.".to_string(),
+        ));
+    }
+    let content = fs::read_to_string(&path).map_err(|error| {
+        HostError::InvalidProject(format!(
+            "The cited-record cache must be valid UTF-8: {error}"
+        ))
+    })?;
+    validate_citation_cache(&content)?;
+    Ok(Some(DocumentSnapshot {
+        path: ".draftmatter/cited-records.json".to_string(),
+        hash: source_hash(content.as_bytes()),
+        content,
+        modified_ms: modified_ms(&metadata),
+    }))
+}
+
 fn validate_citation_lock(content: &str) -> Result<(), HostError> {
     if content.len() as u64 > MAX_CITATION_LOCK_BYTES {
         return Err(HostError::UnsupportedFile(
@@ -615,6 +702,232 @@ fn save_citation_lock_impl(
     })
 }
 
+fn expected_file_bytes(
+    path: &Path,
+    expected_hash: Option<&str>,
+    label: &str,
+) -> Result<Vec<u8>, HostError> {
+    let previous = if path.exists() {
+        fs::read(path)?
+    } else {
+        Vec::new()
+    };
+    match expected_hash {
+        Some(expected) if source_hash(&previous) != expected => Err(HostError::Conflict(format!(
+            "{label} changed outside DraftMatter (expected {expected}, found {}).",
+            source_hash(&previous)
+        ))),
+        None if !previous.is_empty() => Err(HostError::Conflict(format!(
+            "{label} appeared outside DraftMatter before citation acquisition."
+        ))),
+        _ => Ok(previous),
+    }
+}
+
+fn citation_json_id(value: &serde_json::Value) -> Option<&str> {
+    value
+        .get("id")
+        .and_then(serde_json::Value::as_str)
+        .filter(|id| {
+            !id.is_empty()
+                && id.len() <= 128
+                && id.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || "_:.+-".contains(character)
+                })
+        })
+}
+
+fn citation_json_doi(value: &serde_json::Value) -> Option<String> {
+    value
+        .get("DOI")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|doi| valid_doi(doi))
+        .map(str::to_ascii_lowercase)
+}
+
+fn citation_json_provider(value: &serde_json::Value) -> Option<String> {
+    let metadata = value.get("_draftmatter")?;
+    let provider = metadata.get("provider")?.as_str()?.trim();
+    let provider_id = metadata.get("providerId")?.as_str()?.trim();
+    if provider.is_empty() || provider_id.is_empty() {
+        None
+    } else {
+        Some(format!("{provider}:{provider_id}"))
+    }
+}
+
+fn merge_acquired_bibliography(
+    previous: &[u8],
+    incoming: &[serde_json::Value],
+) -> Result<(Vec<u8>, usize, usize), HostError> {
+    if incoming.is_empty() || incoming.len() > 100 {
+        return Err(HostError::InvalidProject(
+            "A citation acquisition must contain between 1 and 100 records.".to_string(),
+        ));
+    }
+    let mut records = if previous.is_empty() {
+        Vec::new()
+    } else {
+        serde_json::from_slice::<Vec<serde_json::Value>>(previous).map_err(|error| {
+            HostError::InvalidProject(format!(
+                "The acquisition bibliography must be a CSL JSON array: {error}"
+            ))
+        })?
+    };
+    if records
+        .iter()
+        .any(|record| citation_json_id(record).is_none())
+    {
+        return Err(HostError::InvalidProject(
+            "The acquisition bibliography contains a record without a safe CSL id.".to_string(),
+        ));
+    }
+    let mut acquired = 0;
+    let mut unchanged = 0;
+    for candidate in incoming {
+        let id = citation_json_id(candidate).ok_or_else(|| {
+            HostError::InvalidProject("An acquired citation record has no safe CSL id.".to_string())
+        })?;
+        let doi = citation_json_doi(candidate);
+        let provider = citation_json_provider(candidate);
+        let existing = records.iter().find(|record| {
+            doi.as_ref()
+                .is_some_and(|value| citation_json_doi(record).as_ref() == Some(value))
+                || provider
+                    .as_ref()
+                    .is_some_and(|value| citation_json_provider(record).as_ref() == Some(value))
+                || citation_json_id(record).is_some_and(|value| value.eq_ignore_ascii_case(id))
+        });
+        if let Some(existing) = existing {
+            let existing_id = citation_json_id(existing).unwrap_or_default();
+            if !existing_id.eq_ignore_ascii_case(id) {
+                return Err(HostError::Conflict(format!(
+                    "This citation is already acquired as @{existing_id}; refresh the project before inserting it again."
+                )));
+            }
+            unchanged += 1;
+            continue;
+        }
+        records.push(candidate.clone());
+        acquired += 1;
+    }
+    records.sort_by(|left, right| {
+        citation_json_id(left)
+            .unwrap_or_default()
+            .to_ascii_lowercase()
+            .cmp(
+                &citation_json_id(right)
+                    .unwrap_or_default()
+                    .to_ascii_lowercase(),
+            )
+    });
+    let mut content = serde_json::to_vec_pretty(&records)
+        .map_err(|error| HostError::InvalidProject(error.to_string()))?;
+    content.push(b'\n');
+    if content.len() as u64 > MAX_BIBLIOGRAPHY_BYTES {
+        return Err(HostError::UnsupportedFile(
+            "The acquisition bibliography exceeds the 10 MB project limit.".to_string(),
+        ));
+    }
+    Ok((content, acquired, unchanged))
+}
+
+fn acquire_citations_impl(
+    request: AcquireCitationsRequest,
+) -> Result<AcquireCitationsResult, HostError> {
+    acquire_citations_impl_with_fault(request, None)
+}
+
+fn acquire_citations_impl_with_fault(
+    request: AcquireCitationsRequest,
+    fail_after_replace: Option<usize>,
+) -> Result<AcquireCitationsResult, HostError> {
+    validate_citation_lock(&request.lock_content)?;
+    validate_citation_cache(&request.cache_content)?;
+    let root = canonical_root(&request.root)?;
+    recover_citation_transactions(&root)?;
+    let document_path = contained_path(&root, &request.document_path)?;
+    if !manuscript_extension(&document_path) {
+        return Err(HostError::UnsupportedFile(
+            "Citation acquisition can update only a .md or .qmd manuscript.".to_string(),
+        ));
+    }
+    let bibliography_path = contained_path(&root, &request.bibliography_path)?;
+    if bibliography_path.extension().and_then(OsStr::to_str) != Some("json")
+        || request.bibliography_path.starts_with(".draftmatter/")
+    {
+        return Err(HostError::UnsupportedFile(
+            "The portable acquisition target must be a project-visible CSL JSON file.".to_string(),
+        ));
+    }
+    let previous_document = expected_file_bytes(
+        &document_path,
+        Some(&request.expected_document_hash),
+        &request.document_path,
+    )?;
+    let previous_bibliography = expected_file_bytes(
+        &bibliography_path,
+        request.expected_bibliography_hash.as_deref(),
+        &request.bibliography_path,
+    )?;
+    let lock_path = citation_lock_path(&root);
+    expected_file_bytes(
+        &lock_path,
+        request.expected_lock_hash.as_deref(),
+        ".draftmatter/citations.lock.json",
+    )?;
+    let cache_path = citation_cache_path(&root);
+    expected_file_bytes(
+        &cache_path,
+        request.expected_cache_hash.as_deref(),
+        ".draftmatter/cited-records.json",
+    )?;
+
+    let (bibliography_content, acquired, unchanged) =
+        merge_acquired_bibliography(&previous_bibliography, &request.bibliography_records)?;
+    let mut documents = Vec::new();
+    let mut bibliographies = Vec::new();
+    discover_entries(&root, &root, 0, &mut documents, &mut bibliographies)?;
+    let mut config = load_config(&root, &documents)?;
+    config.citation_bibliography = Some(request.bibliography_path.clone());
+    let config_content = serde_json::to_vec_pretty(&config)
+        .map_err(|error| HostError::InvalidProject(error.to_string()))?;
+
+    let changes = vec![
+        (
+            request.bibliography_path.clone(),
+            bibliography_content.clone(),
+        ),
+        (
+            ".draftmatter/citations.lock.json".to_string(),
+            request.lock_content.as_bytes().to_vec(),
+        ),
+        (
+            ".draftmatter/cited-records.json".to_string(),
+            request.cache_content.as_bytes().to_vec(),
+        ),
+        (".draftmatter/project.json".to_string(), config_content),
+        (
+            request.document_path.clone(),
+            request.document_content.as_bytes().to_vec(),
+        ),
+    ];
+    apply_citation_file_transaction(&root, changes, fail_after_replace)?;
+    if !previous_document.is_empty() && previous_document != request.document_content.as_bytes() {
+        let _ = create_recovery(&root, &request.document_path, &previous_document);
+    }
+    Ok(AcquireCitationsResult {
+        document_hash: source_hash(request.document_content.as_bytes()),
+        bibliography_hash: source_hash(&bibliography_content),
+        lock_hash: source_hash(request.lock_content.as_bytes()),
+        cache_hash: source_hash(request.cache_content.as_bytes()),
+        bibliography_path: request.bibliography_path,
+        acquired,
+        unchanged,
+    })
+}
+
 fn temporary_path(path: &Path) -> Result<PathBuf, HostError> {
     let parent = path.parent().ok_or_else(|| {
         HostError::InvalidPath(format!(
@@ -690,6 +1003,150 @@ fn write_atomic(path: &Path, bytes: &[u8], fail_before_replace: bool) -> Result<
         let _ = fs::remove_file(temp);
     }
     result
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CitationTransactionManifest {
+    state: String,
+    files: Vec<CitationTransactionFile>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CitationTransactionFile {
+    target: String,
+    backup: Option<String>,
+}
+
+fn rollback_citation_transaction(
+    root: &Path,
+    directory: &Path,
+    manifest: &CitationTransactionManifest,
+) -> Result<(), HostError> {
+    for file in manifest.files.iter().rev() {
+        let target = contained_path(root, &file.target)?;
+        if let Some(backup) = file.backup.as_deref() {
+            let bytes = fs::read(directory.join(safe_relative(backup)?))?;
+            write_atomic(&target, &bytes, false)?;
+        } else if target.exists() {
+            fs::remove_file(&target)?;
+        }
+    }
+    if directory.exists() {
+        fs::remove_dir_all(directory)?;
+    }
+    Ok(())
+}
+
+fn recover_citation_transactions(root: &Path) -> Result<(), HostError> {
+    let transactions = root.join(".draftmatter").join("transactions");
+    if !transactions.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(&transactions)? {
+        let directory = entry?.path();
+        if !directory.is_dir() {
+            continue;
+        }
+        let manifest_path = directory.join("manifest.json");
+        let manifest: CitationTransactionManifest =
+            serde_json::from_slice(&fs::read(&manifest_path).map_err(|error| {
+                HostError::InvalidProject(format!(
+                    "Citation acquisition recovery cannot read {}: {error}",
+                    manifest_path.display()
+                ))
+            })?)
+            .map_err(|error| {
+                HostError::InvalidProject(format!(
+                    "Citation acquisition recovery cannot parse {}: {error}",
+                    manifest_path.display()
+                ))
+            })?;
+        if manifest.state == "committed" {
+            fs::remove_dir_all(&directory)?;
+        } else {
+            rollback_citation_transaction(root, &directory, &manifest)?;
+        }
+    }
+    Ok(())
+}
+
+fn apply_citation_file_transaction(
+    root: &Path,
+    changes: Vec<(String, Vec<u8>)>,
+    fail_after_replace: Option<usize>,
+) -> Result<(), HostError> {
+    let mut seen = std::collections::HashSet::new();
+    if changes
+        .iter()
+        .any(|(target, _)| !seen.insert(target.clone()))
+    {
+        return Err(HostError::InvalidProject(
+            "A citation acquisition transaction contains duplicate target files.".to_string(),
+        ));
+    }
+    let directory = root.join(".draftmatter").join("transactions").join(format!(
+        "citation-{}-{}",
+        now_millis(),
+        std::process::id()
+    ));
+    fs::create_dir_all(&directory)?;
+    let mut manifest = CitationTransactionManifest {
+        state: "prepared".to_string(),
+        files: Vec::new(),
+    };
+    for (index, (target, _)) in changes.iter().enumerate() {
+        let path = contained_path(root, target)?;
+        let backup = if path.exists() {
+            let name = format!("backup-{index}.bin");
+            write_atomic(&directory.join(&name), &fs::read(&path)?, false)?;
+            Some(name)
+        } else {
+            None
+        };
+        manifest.files.push(CitationTransactionFile {
+            target: target.clone(),
+            backup,
+        });
+    }
+    let manifest_path = directory.join("manifest.json");
+    write_atomic(
+        &manifest_path,
+        &serde_json::to_vec_pretty(&manifest)
+            .map_err(|error| HostError::InvalidProject(error.to_string()))?,
+        false,
+    )?;
+
+    let result = (|| {
+        for (index, (target, content)) in changes.iter().enumerate() {
+            write_atomic(&contained_path(root, target)?, content, false)?;
+            if fail_after_replace == Some(index + 1) {
+                return Err(HostError::Io(format!(
+                    "Injected citation acquisition failure after {} replacement(s).",
+                    index + 1
+                )));
+            }
+        }
+        manifest.state = "committed".to_string();
+        write_atomic(
+            &manifest_path,
+            &serde_json::to_vec_pretty(&manifest)
+                .map_err(|error| HostError::InvalidProject(error.to_string()))?,
+            false,
+        )?;
+        fs::remove_dir_all(&directory)?;
+        Ok(())
+    })();
+    if let Err(error) = result {
+        rollback_citation_transaction(root, &directory, &manifest).map_err(|rollback| {
+            HostError::Io(format!(
+                "{error} Citation acquisition rollback also failed: {rollback}"
+            ))
+        })?;
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn recovery_filename(relative: &str, hash: &str) -> String {
@@ -1436,6 +1893,7 @@ fn create_project(root: String, name: String) -> Result<ProjectSnapshot, HostErr
         main_document: main_document.clone(),
         citation_style: default_citation_style(),
         citation_locale: default_citation_locale(),
+        citation_bibliography: None,
     };
     persist_config(&canonical, &config)?;
     let document = canonical.join(&main_document);
@@ -1465,6 +1923,11 @@ fn read_citation_lock(root: String) -> Result<Option<DocumentSnapshot>, HostErro
 }
 
 #[tauri::command]
+fn read_citation_cache(root: String) -> Result<Option<DocumentSnapshot>, HostError> {
+    read_citation_cache_impl(&root)
+}
+
+#[tauri::command]
 fn save_citation_lock(request: SaveCitationLockRequest) -> Result<DocumentSnapshot, HostError> {
     save_citation_lock_impl(request)
 }
@@ -1472,6 +1935,13 @@ fn save_citation_lock(request: SaveCitationLockRequest) -> Result<DocumentSnapsh
 #[tauri::command]
 fn save_document(request: SaveDocumentRequest) -> Result<SaveDocumentResult, HostError> {
     save_document_impl(request)
+}
+
+#[tauri::command]
+fn acquire_citations(
+    request: AcquireCitationsRequest,
+) -> Result<AcquireCitationsResult, HostError> {
+    acquire_citations_impl(request)
 }
 
 #[tauri::command]
@@ -1533,8 +2003,10 @@ pub fn run() {
             read_document,
             read_bibliography,
             read_citation_lock,
+            read_citation_cache,
             save_citation_lock,
             save_document,
+            acquire_citations,
             document_status,
             set_main_document,
             set_citation_preferences,
@@ -1572,6 +2044,62 @@ mod tests {
             String::from_utf8_lossy(&request[..count]).into_owned()
         });
         (address, handle)
+    }
+
+    fn acquisition_record(id: &str) -> serde_json::Value {
+        serde_json::json!({
+            "id": id,
+            "type": "article-journal",
+            "title": "DynACof: A process-based model",
+            "author": [{"family": "Vezy", "given": "Remi"}],
+            "issued": {"date-parts": [[2020]]},
+            "DOI": "10.1016/j.envsoft.2019.104609",
+            "_draftmatter": {
+                "provider": "crossref",
+                "providerId": "10.1016/j.envsoft.2019.104609"
+            }
+        })
+    }
+
+    fn acquisition_request(
+        root: &Path,
+        expected_bibliography_hash: Option<String>,
+    ) -> AcquireCitationsRequest {
+        let document = fs::read(root.join("paper.qmd")).unwrap();
+        let lock = fs::read(root.join(".draftmatter/citations.lock.json")).unwrap();
+        let cache = fs::read(root.join(".draftmatter/cited-records.json")).unwrap();
+        AcquireCitationsRequest {
+            root: root.to_string_lossy().into_owned(),
+            document_path: "paper.qmd".to_string(),
+            document_content: "---\nbibliography: references.json\n---\n\nCited [@vezy2020dynacof].\n".to_string(),
+            expected_document_hash: source_hash(&document),
+            bibliography_path: "references.json".to_string(),
+            expected_bibliography_hash,
+            bibliography_records: vec![acquisition_record("vezy2020dynacof")],
+            lock_content: "{\"schemaVersion\":1,\"entries\":[{\"citekey\":\"vezy2020dynacof\",\"source\":{\"provider\":\"crossref\",\"doi\":\"10.1016/j.envsoft.2019.104609\"},\"aliases\":[],\"identifiers\":{\"doi\":\"10.1016/j.envsoft.2019.104609\"}}]}\n".to_string(),
+            expected_lock_hash: Some(source_hash(&lock)),
+            cache_content: "{\"schemaVersion\":1,\"records\":[{\"citekey\":\"vezy2020dynacof\",\"type\":\"article\",\"title\":\"DynACof: A process-based model\",\"authors\":[\"Remi Vezy\"],\"year\":\"2020\",\"doi\":\"10.1016/j.envsoft.2019.104609\",\"source\":\"crossref\"}]}\n".to_string(),
+            expected_cache_hash: Some(source_hash(&cache)),
+        }
+    }
+
+    fn prepare_acquisition_project(root: &Path) {
+        fs::create_dir_all(root.join(".draftmatter")).unwrap();
+        fs::write(
+            root.join("paper.qmd"),
+            "---\ntitle: Test\n---\n\nNo citation.\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join(".draftmatter/citations.lock.json"),
+            "{\"schemaVersion\":1,\"entries\":[]}\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join(".draftmatter/cited-records.json"),
+            "{\"schemaVersion\":1,\"records\":[]}\n",
+        )
+        .unwrap();
     }
 
     #[test]
@@ -1643,6 +2171,90 @@ mod tests {
         );
         assert!(scholar_search_url("   ").is_err());
         assert!(scholar_search_url(&"x".repeat(513)).is_err());
+    }
+
+    #[test]
+    fn citation_acquisition_is_idempotent_by_doi_and_provider_identity() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        prepare_acquisition_project(root);
+
+        let first = acquire_citations_impl(acquisition_request(root, None)).unwrap();
+        assert_eq!(first.acquired, 1);
+        assert_eq!(first.unchanged, 0);
+        assert!(fs::read_to_string(root.join("paper.qmd"))
+            .unwrap()
+            .contains("@vezy2020dynacof"));
+        let bibliography = fs::read_to_string(root.join("references.json")).unwrap();
+        assert_eq!(
+            bibliography
+                .matches("10.1016/j.envsoft.2019.104609")
+                .count(),
+            2
+        );
+        assert_eq!(
+            open_project_impl(root.to_str().unwrap())
+                .unwrap()
+                .config
+                .citation_bibliography
+                .as_deref(),
+            Some("references.json")
+        );
+
+        let mut repeated = acquisition_request(root, Some(first.bibliography_hash.clone()));
+        repeated.expected_document_hash = first.document_hash;
+        repeated.expected_lock_hash = Some(first.lock_hash);
+        repeated.expected_cache_hash = Some(first.cache_hash);
+        let second = acquire_citations_impl(repeated).unwrap();
+        assert_eq!(second.acquired, 0);
+        assert_eq!(second.unchanged, 1);
+        assert_eq!(
+            fs::read_to_string(root.join("references.json")).unwrap(),
+            bibliography
+        );
+
+        let mut conflicting = acquisition_request(root, Some(second.bibliography_hash));
+        conflicting.expected_document_hash = second.document_hash;
+        conflicting.expected_lock_hash = Some(second.lock_hash);
+        conflicting.expected_cache_hash = Some(second.cache_hash);
+        conflicting.bibliography_records = vec![acquisition_record("anotherKey")];
+        assert!(matches!(
+            acquire_citations_impl(conflicting),
+            Err(HostError::Conflict(_))
+        ));
+    }
+
+    #[test]
+    fn every_injected_acquisition_failure_rolls_all_project_files_back() {
+        for fail_after in 1..=5 {
+            let temporary = tempdir().unwrap();
+            let root = temporary.path();
+            prepare_acquisition_project(root);
+            let before_document = fs::read(root.join("paper.qmd")).unwrap();
+            let before_lock = fs::read(root.join(".draftmatter/citations.lock.json")).unwrap();
+            let before_cache = fs::read(root.join(".draftmatter/cited-records.json")).unwrap();
+
+            assert!(acquire_citations_impl_with_fault(
+                acquisition_request(root, None),
+                Some(fail_after)
+            )
+            .is_err());
+            assert_eq!(fs::read(root.join("paper.qmd")).unwrap(), before_document);
+            assert_eq!(
+                fs::read(root.join(".draftmatter/citations.lock.json")).unwrap(),
+                before_lock
+            );
+            assert_eq!(
+                fs::read(root.join(".draftmatter/cited-records.json")).unwrap(),
+                before_cache
+            );
+            assert!(!root.join("references.json").exists());
+            assert!(!root.join(".draftmatter/project.json").exists());
+            assert!(fs::read_dir(root.join(".draftmatter/transactions"))
+                .unwrap()
+                .next()
+                .is_none());
+        }
     }
 
     #[test]

@@ -8,6 +8,7 @@ export interface ProjectConfig {
   mainDocument: string
   citationStyle: 'draftmatter-author-date' | 'draftmatter-numeric'
   citationLocale: 'en-US' | 'fr-FR'
+  citationBibliography?: string
 }
 
 export interface ProjectEntry {
