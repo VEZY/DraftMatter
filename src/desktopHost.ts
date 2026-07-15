@@ -1,6 +1,7 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { CrossrefTransportError, type CrossrefRequest, type CrossrefWork } from './crossref'
+import type { JupyterKernelInventory, RuntimeExecutableProbe, RuntimeLanguage } from './runtimeDiscovery'
 
 export interface ProjectConfig {
   schemaVersion: number
@@ -253,6 +254,12 @@ export function createDesktopHost(
     },
     openScholarSearch(query: string) {
       return invokeBridge<void>('open_scholar_search', { query })
+    },
+    probeRuntime(language: RuntimeLanguage) {
+      return invokeBridge<RuntimeExecutableProbe>('probe_runtime_executable', { language })
+    },
+    discoverJupyterKernels() {
+      return invokeBridge<JupyterKernelInventory>('discover_jupyter_kernels')
     },
   }
 }

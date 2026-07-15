@@ -9,6 +9,12 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri_plugin_opener::OpenerExt;
 
+mod runtime;
+use runtime::{
+    discover_jupyter_kernels_impl, probe_runtime_executable_impl, JupyterKernelInventory,
+    RuntimeExecutableProbe, RuntimeLanguage,
+};
+
 const PROJECT_SCHEMA: u32 = 1;
 const MAX_RECOVERY_FILES: usize = 8;
 const MAX_BIBLIOGRAPHY_BYTES: u64 = 10 * 1024 * 1024;
@@ -2073,6 +2079,16 @@ fn open_scholar_search(app: tauri::AppHandle, query: String) -> Result<(), HostE
         .map_err(|error| HostError::Integration(format!("Could not open Google Scholar: {error}")))
 }
 
+#[tauri::command]
+fn probe_runtime_executable(language: RuntimeLanguage) -> RuntimeExecutableProbe {
+    probe_runtime_executable_impl(language)
+}
+
+#[tauri::command]
+fn discover_jupyter_kernels() -> JupyterKernelInventory {
+    discover_jupyter_kernels_impl()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2095,7 +2111,9 @@ pub fn run() {
             zotero_search,
             crossref_search,
             resolve_doi_csl,
-            open_scholar_search
+            open_scholar_search,
+            probe_runtime_executable,
+            discover_jupyter_kernels
         ])
         .run(tauri::generate_context!())
         .expect("error while running DraftMatter");
