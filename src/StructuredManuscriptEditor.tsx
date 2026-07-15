@@ -17,6 +17,7 @@ import { captureReviewSuggestion } from './reviewSuggestionCapture'
 import { parseStructuredManuscript, serializeStructuredManuscript, type StructuredManuscriptMetadata } from './structuredManuscript'
 import type { ExecutionFreshnessStatus } from './executionFreshness'
 import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
+import { motionAwareScrollBehavior } from './accessibility'
 
 export interface StructuredOutlineItem {
   id: string
@@ -1026,7 +1027,7 @@ function footnoteReferenceNodeView(initialNode: ProseMirrorNode, view: EditorVie
   button.addEventListener('click', () => {
     const definition = [...view.dom.querySelectorAll<HTMLElement>('.structured-footnote-definition')]
       .find((candidate) => candidate.dataset.footnoteLabel === String(node.attrs.label))
-    definition?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    definition?.scrollIntoView({ behavior: motionAwareScrollBehavior(), block: 'center' })
     definition?.focus({ preventScroll: true })
   })
   dom.append(button)
@@ -2203,7 +2204,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       const escaped = globalThis.CSS?.escape ? globalThis.CSS.escape(id) : id.replace(/["\\]/g, '\\$&')
       const element = hostRef.current?.querySelector<HTMLElement>(`[data-dm-id="${escaped}"]`)
       if (!element) return false
-      element.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      element.scrollIntoView({ behavior: motionAwareScrollBehavior(), block: 'center' })
       return true
     },
     source: () => {

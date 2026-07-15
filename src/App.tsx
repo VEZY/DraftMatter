@@ -50,6 +50,7 @@ import { renderDocxExport } from './docxExport'
 import { ExternalExportDialog } from './ExternalExportDialog'
 import { CollaborationDialog } from './CollaborationDialog'
 import type { CollaborationCheckpoint, CollaborationClientStatus } from './sharedEditor'
+import { motionAwareScrollBehavior } from './accessibility'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
@@ -1200,7 +1201,7 @@ function App() {
   }
 
   const scrollTo = (id: string) => {
-    document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    document.getElementById(id)?.scrollIntoView({ behavior: motionAwareScrollBehavior(), block: 'start' })
   }
 
   const runStructuredCommand = (command: (editor: StructuredManuscriptEditorHandle) => boolean, label: string) => {
