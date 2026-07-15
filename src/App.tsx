@@ -7,13 +7,13 @@ import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
 import { ManuscriptTextEditor } from './ManuscriptTextEditor'
 import { applyDraftCitationTransaction, applyDraftCodeTransaction, applyDraftTextTransaction, type ManuscriptTextField } from './manuscriptModel'
-import { downloadText, projectCleanSource, reviewedProjection } from './projections'
+import { downloadBlob, downloadText, projectCleanSource, reviewedProjection } from './projections'
 import { sampleCitations } from './sampleCitations'
 import { initialDraft } from './sampleDraft'
 import { readRecoverySnapshots, saveRecoverySnapshot, type RecoverySnapshot } from './storage'
 import type { CitationItem, CitationRecord, DocumentDiagnostic, DraftState, MarkupView, SuggestionStatus } from './types'
 import { queryZoteroLibrary, type ZoteroVersionStamp } from './zotero'
-import { citationItemsForDraft, normalizeCitationItems } from './citation'
+import { citationItemsForDraft, normalizeCitationItems, serializeCitationCluster } from './citation'
 import { buildCitationLock, diagnoseCitationLock, parseCitationLock, serializeCitationLock, type CitationLock } from './citationLock'
 import { createCitationCache, hydrateCitationsFromCache, parseCitationCache, readCitationCache, serializeCitationCache, writeCitationCache, type CitationCache } from './citationCache'
 import {
@@ -40,6 +40,7 @@ import { PortableReviewItems } from './PortableReviewItems'
 import { GitHistoryPanel } from './GitHistoryPanel'
 import { parseReviewMarkup } from './reviewMarkup'
 import { buildReviewQueue } from './reviewQueue'
+import { printNativeHtml, renderNativeHtmlExport } from './nativeHtmlExport'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
@@ -1098,6 +1099,37 @@ function App() {
     setToast(kind === 'reviewed' ? 'Portable project source exported' : `Clean ${kind} projection exported`)
   }
 
+  const exportPublication = (kind: 'html' | 'pdf') => {
+    const projection = projectCleanSource(draft, 'final')
+    if (!projection.ok) {
+      setDiagnostics((current) => [
+        ...current.filter((diagnostic) => !diagnostic.code.startsWith('final-projection-')),
+        ...projection.diagnostics,
+      ])
+      setExportOpen(false)
+      setToast('Publication export blocked · resolve the overlapping alternatives')
+      return
+    }
+    try {
+      const html = renderNativeHtmlExport(projection.source, {
+        title: draft.title,
+        citationLabels: {
+          [serializeCitationCluster(draftCitationItems)]: citationLabel,
+          '[@coutellier2022]': resultsCitationLabel,
+        },
+        bibliography: renderedBibliography,
+      })
+      const base = filename.replace(/\.(qmd|md)$/i, '')
+      if (kind === 'html') downloadBlob(`${base}.html`, html, 'text/html;charset=utf-8')
+      else printNativeHtml(html)
+      setExportOpen(false)
+      setToast(kind === 'html' ? 'Clean native HTML exported' : 'Clean print view opened · choose Save as PDF')
+    } catch (error) {
+      setExportOpen(false)
+      setToast(`Export blocked · ${readableError(error)}`)
+    }
+  }
+
   const showReviewPanel = () => {
     setActiveNav('review')
     setRightPanelOpen(true)
@@ -1758,6 +1790,8 @@ function App() {
             </button>
             {exportOpen && (
               <div className="popover export-menu">
+                <button onClick={() => exportPublication('html')}><span><strong>Native HTML</strong><small>Semantic, styled, and script-free</small></span><Icon name="arrowRight" /></button>
+                <button onClick={() => exportPublication('pdf')}><span><strong>Print / PDF</strong><small>Browser print with clean page styling</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => download('final')}><span><strong>Clean final</strong><small>Resolved manuscript, no review data</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => download('original')}><span><strong>Clean original</strong><small>Accepted base before open suggestions</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => download('reviewed')}><span><strong>Portable source</strong><small>QMD with anchors and review records</small></span><Icon name="arrowRight" /></button>

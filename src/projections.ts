@@ -161,7 +161,11 @@ ${REVIEW_END}
 }
 
 export function downloadText(filename: string, content: string) {
-  const blob = new Blob([content], { type: 'text/markdown;charset=utf-8' })
+  downloadBlob(filename, content, 'text/markdown;charset=utf-8')
+}
+
+export function downloadBlob(filename: string, content: BlobPart, type: string) {
+  const blob = new Blob([content], { type })
   const url = URL.createObjectURL(blob)
   const anchor = document.createElement('a')
   anchor.href = url
