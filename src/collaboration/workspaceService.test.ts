@@ -57,10 +57,10 @@ describe('authenticated collaboration workspace service', () => {
     await service.createProject(alice, 'alpha', { id: 'secret-paper', name: 'Secret paper' })
     await service.createWorkspace(bob, { id: 'beta', name: 'Beta' })
 
-    const crossTenant = service.getProject(bob, 'alpha', 'secret-paper')
-    const nonexistent = service.getProject(bob, 'alpha', 'does-not-exist')
-    await expect(crossTenant).rejects.toEqual(expect.objectContaining({ code: 'not-found', message: 'The collaboration project was not found.' }))
-    await expect(nonexistent).rejects.toEqual(expect.objectContaining({ code: 'not-found', message: 'The collaboration project was not found.' }))
+    await Promise.all([
+      expect(service.getProject(bob, 'alpha', 'secret-paper')).rejects.toEqual(expect.objectContaining({ code: 'not-found', message: 'The collaboration project was not found.' })),
+      expect(service.getProject(bob, 'alpha', 'does-not-exist')).rejects.toEqual(expect.objectContaining({ code: 'not-found', message: 'The collaboration project was not found.' })),
+    ])
     await expect(service.listProjects(bob, 'alpha')).rejects.toMatchObject({ code: 'not-found' })
   })
 

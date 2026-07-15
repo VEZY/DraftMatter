@@ -90,7 +90,9 @@ describe('rendered local execution workflow', () => {
 
     await act(async () => {
       [...trustDialog.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Trust for this session'))!.click()
-      await new Promise((resolve) => window.setTimeout(resolve, 40))
+    })
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 80))
     })
 
     expect(desktopHost.trustProjectForSession).toHaveBeenCalledWith(rootPath, 'run-project-code-with-user-permissions')
