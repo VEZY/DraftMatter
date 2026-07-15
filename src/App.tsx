@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, parseBibliographyFile, searchCitations } from './bibliography'
+import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, searchCitations } from './bibliography'
 import { desktopHost, normaliseHostFailure, resolveMainDocument, type ProjectSnapshot } from './desktopHost'
 import { parsePortableDocument } from './document'
 import { useDraftHistory } from './draftHistory'
@@ -22,6 +22,7 @@ import {
   type CitationLocale,
   type CitationStyleId,
 } from './cslRenderer'
+import { previewCitationIntake, type CitationIntakePreview } from './citationIntake'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
@@ -170,6 +171,10 @@ function App() {
   const [citationPickerItems, setCitationPickerItems] = useState<CitationItem[]>([])
   const [citationActiveIndex, setCitationActiveIndex] = useState(0)
   const [citationEditKey, setCitationEditKey] = useState('')
+  const [citationIntakeText, setCitationIntakeText] = useState('')
+  const [citationIntakePreview, setCitationIntakePreview] = useState<CitationIntakePreview | null>(null)
+  const [citationIntakeSelected, setCitationIntakeSelected] = useState<string[]>([])
+  const [citationDropActive, setCitationDropActive] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
   const [sourceTab, setSourceTab] = useState<'reviewed' | 'final' | 'original'>('reviewed')
@@ -940,6 +945,58 @@ function App() {
     setCitationSearchOpen(true)
   }
 
+  const showCitationIntake = (payload: string, intakeFilename = 'pasted-citations.txt') => {
+    const preview = previewCitationIntake(payload, citations, intakeFilename)
+    setCitationIntakeText(payload)
+    setCitationIntakePreview(preview)
+    setCitationIntakeSelected(preview.records.filter((item) => item.selectedByDefault).map((item) => item.id))
+    setCitationOpen(false)
+    setCommandOpen(false)
+    setCitationSearchOpen(true)
+  }
+
+  const dismissCitationIntake = () => {
+    setCitationIntakePreview(null)
+    setCitationIntakeSelected([])
+    setCitationIntakeText('')
+  }
+
+  const acceptCitationIntake = () => {
+    if (!citationIntakePreview) return
+    const accepted = citationIntakePreview.records.filter((item) => citationIntakeSelected.includes(item.id)).map((item) => item.record)
+    if (!accepted.length) {
+      setToast('Select at least one valid record from the preview')
+      return
+    }
+    setCitations((current) => mergeCitationRecords(current, accepted))
+    setCitationPickerItems((current) => [
+      ...current,
+      ...accepted.filter((record) => !current.some((item) => item.citekey === record.citekey)).map((record) => ({ citekey: record.citekey })),
+    ])
+    setToast(`${accepted.length} imported record${accepted.length === 1 ? '' : 's'} staged for this citation`)
+    dismissCitationIntake()
+  }
+
+  const onCitationDrop = async (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setCitationDropActive(false)
+    const file = event.dataTransfer.files?.[0]
+    if (file) {
+      if (!/\.(bib|bibtex|json|ris|enw|txt)$/i.test(file.name)) {
+        setToast('Drop a BibTeX, CSL JSON, RIS, EndNote, or plain-text citation file')
+        return
+      }
+      if (file.size > 10 * 1024 * 1024) {
+        setToast('Citation intake accepts files up to 10 MB')
+        return
+      }
+      showCitationIntake(await file.text(), file.name)
+      return
+    }
+    const payload = event.dataTransfer.getData('text/plain')
+    if (payload.trim()) showCitationIntake(payload)
+  }
+
   const toggleCitationPickerRecord = (record: CitationRecord) => {
     setCitations((current) => mergeCitationRecords(current, [record]))
     setCitationPickerItems((current) => current.some((item) => item.citekey === record.citekey)
@@ -991,14 +1048,9 @@ function App() {
       setToast('This prototype indexes bibliography files up to 10 MB')
       return
     }
-    const parsed = parseBibliographyFile(file.name, await file.text())
-    const next = mergeCitationRecords(citations, parsed.records)
-    const added = next.length - citations.length
-    setCitations(next)
-    setBibliographyDiagnostics(parsed.diagnostics)
     setProjectMenuOpen(false)
     if (!citationSearchOpen) openCitationPicker()
-    setToast(`Indexed ${added} new source${added === 1 ? '' : 's'} from ${file.name}`)
+    showCitationIntake(await file.text(), file.name)
   }
 
   const updateCitationPreferences = (style: CitationStyleId, locale: CitationLocale) => {
@@ -1466,7 +1518,17 @@ function App() {
 
       {citationSearchOpen && (
         <div className="modal-backdrop" onMouseDown={() => setCitationSearchOpen(false)}>
-          <div className="citation-picker" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Insert citation">
+          <div
+            className={`citation-picker ${citationDropActive ? 'drop-active' : ''}`}
+            onMouseDown={(event) => event.stopPropagation()}
+            onDragEnter={(event) => { event.preventDefault(); setCitationDropActive(true) }}
+            onDragOver={(event) => { event.preventDefault(); setCitationDropActive(true) }}
+            onDragLeave={(event) => { if (event.currentTarget === event.target) setCitationDropActive(false) }}
+            onDrop={(event) => void onCitationDrop(event)}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Insert citation"
+          >
             <div className="picker-search"><Icon name="search" /><input
               autoFocus
               value={citationQuery}
@@ -1491,6 +1553,46 @@ function App() {
               aria-activedescendant={citationResults[citationActiveIndex] ? `citation-result-${citationResults[citationActiveIndex].citekey}` : undefined}
             /><kbd>esc</kbd></div>
             <div className="picker-body">
+              <div className="citation-intake-box">
+                <div className="citation-intake-heading"><span><Icon name="download" size={13} /><strong>Paste or drop a citation</strong></span><button onClick={() => bibliographyInputRef.current?.click()}>Choose file…</button></div>
+                <textarea
+                  value={citationIntakeText}
+                  onChange={(event) => setCitationIntakeText(event.target.value)}
+                  onPaste={(event) => {
+                    const payload = event.clipboardData.getData('text/plain')
+                    if (!payload.trim()) return
+                    event.preventDefault()
+                    showCitationIntake(payload)
+                  }}
+                  placeholder="Paste DOI, BibTeX, RIS/EndNote, or CSL JSON — or drop a citation file"
+                  aria-label="Paste DOI, BibTeX, RIS/EndNote, or CSL JSON"
+                />
+                <div className="citation-intake-actions"><span>Preview only · nothing is imported yet</span><button onClick={() => showCitationIntake(citationIntakeText)} disabled={!citationIntakeText.trim()}>Preview</button></div>
+              </div>
+              {citationIntakePreview && (
+                <div className="citation-intake-preview" aria-label="Citation import preview">
+                  <div className="citation-preview-head">
+                    <span><strong>{citationIntakePreview.format === 'csl-json' ? 'CSL JSON' : citationIntakePreview.format === 'endnote' ? 'EndNote' : citationIntakePreview.format.toUpperCase()} preview</strong><small>{citationIntakePreview.filename} · original payload retained</small></span>
+                    <button onClick={dismissCitationIntake} aria-label="Dismiss citation preview"><Icon name="close" size={14} /></button>
+                  </div>
+                  {citationIntakePreview.diagnostics.length > 0 && <div className="citation-preview-diagnostics">{citationIntakePreview.diagnostics.map((diagnostic) => <p className={diagnostic.level} key={diagnostic.code}><i />{diagnostic.message}</p>)}</div>}
+                  {citationIntakePreview.doi && (
+                    <div className="citation-doi-preview"><span className="source-icon">D</span><span><strong>{citationIntakePreview.doi}</strong><small>Metadata has not been resolved; this DOI remains available to retry.</small></span><button onClick={() => setToast('DOI metadata lookup is unavailable · the original DOI is still retained')}>Retry lookup</button></div>
+                  )}
+                  {citationIntakePreview.records.length > 0 && (
+                    <>
+                      <div className="citation-preview-select"><span>{citationIntakeSelected.length} of {citationIntakePreview.records.length} selected</span><button onClick={() => setCitationIntakeSelected(citationIntakePreview.records.map((item) => item.id))}>Select all</button><button onClick={() => setCitationIntakeSelected([])}>None</button></div>
+                      <div className="citation-preview-records">{citationIntakePreview.records.map((item) => (
+                        <label key={item.id} className={item.duplicateCitekeys.length ? 'duplicate' : ''}>
+                          <input type="checkbox" checked={citationIntakeSelected.includes(item.id)} onChange={(event) => setCitationIntakeSelected((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} />
+                          <span><strong>{item.record.title}</strong><small>{item.record.authors.join(' · ') || 'Unknown creator'}{item.record.year ? ` · ${item.record.year}` : ''} · @{item.record.citekey}</small>{item.duplicateCitekeys.length > 0 && <em>Possible duplicate of {item.duplicateCitekeys.map((key) => `@${key}`).join(', ')} · kept separate unless selected</em>}{item.diagnostics.map((diagnostic) => <em key={diagnostic.code}>{diagnostic.message}</em>)}</span>
+                        </label>
+                      ))}</div>
+                      <div className="citation-preview-footer"><details><summary>Original payload</summary><pre>{citationIntakePreview.originalPayload.slice(0, 10000)}{citationIntakePreview.originalPayload.length > 10000 ? '\n…preview truncated; full payload retained in memory' : ''}</pre></details><button onClick={acceptCitationIntake} disabled={!citationIntakeSelected.length}>Stage selected · {citationIntakeSelected.length}</button></div>
+                    </>
+                  )}
+                </div>
+              )}
               <div className="picker-filter">
                 <span>
                   {citationResults.length} matching source{citationResults.length === 1 ? '' : 's'}
