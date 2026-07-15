@@ -4,6 +4,7 @@ import {
   requiredPortableFixtureFeatures,
   type PortableFixtureFeature,
 } from './portableFixtureManifest'
+import { parseLosslessPortableSource, serializeLosslessPortableSource } from './portableSource'
 
 const fixtureModules = import.meta.glob<string>('./fixtures/portable/*.{md,qmd}', {
   eager: true,
@@ -59,5 +60,56 @@ describe('portable manuscript fixture corpus', () => {
         expect(featureChecks[feature](source), `${fixture.filename} does not demonstrate ${feature}`).toBe(true)
       }
     }
+  })
+
+  it('round-trips and reopens every fixture without changing preserved bytes', () => {
+    for (const fixture of portableFixtureManifest) {
+      const source = sourceByFilename.get(fixture.filename) ?? ''
+      const parsed = parseLosslessPortableSource(source)
+      const serialized = serializeLosslessPortableSource(parsed)
+      const reopened = parseLosslessPortableSource(serialized)
+
+      expect(serialized, `${fixture.filename} changed during its first serialization`).toBe(source)
+      expect(serializeLosslessPortableSource(reopened), `${fixture.filename} changed after reopening`).toBe(source)
+      expect(reopened, `${fixture.filename} produced a non-deterministic syntax tree`).toEqual(parsed)
+
+      let cursor = 0
+      for (const node of parsed.nodes) {
+        expect(node.start, `${fixture.filename} contains a gap or overlapping raw node`).toBe(cursor)
+        expect(node.raw, `${fixture.filename} changed bytes in ${node.id}`).toBe(source.slice(node.start, node.end))
+        cursor = node.end
+      }
+      expect(cursor, `${fixture.filename} was not consumed completely`).toBe(source.length)
+    }
+  })
+
+  it('recognizes structural boundaries while leaving their raw source untouched', () => {
+    const kinds = new Set(
+      portableFixtureManifest.flatMap((fixture) => {
+        const source = sourceByFilename.get(fixture.filename) ?? ''
+        return parseLosslessPortableSource(source).nodes.map((node) => node.kind)
+      }),
+    )
+
+    expect(kinds).toEqual(new Set([
+      'frontmatter',
+      'heading',
+      'list',
+      'executable-fence',
+      'raw-block',
+      'output',
+      'review-section',
+      'unknown',
+      'text',
+      'blank',
+    ]))
+  })
+
+  it('preserves Windows line endings exactly', () => {
+    const source = '---\r\ntitle: "Portable"\r\n---\r\n\r\n## Results\r\n\r\nText.\r\n'
+    const parsed = parseLosslessPortableSource(source)
+
+    expect(parsed.lineEnding).toBe('\r\n')
+    expect(serializeLosslessPortableSource(parsed)).toBe(source)
   })
 })
