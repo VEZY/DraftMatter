@@ -2,6 +2,19 @@
 // Keep this entrypoint free of host adapters; browserBoundary.test.ts enforces
 // that contract across its complete local import graph.
 export { sharedEditorCapabilities, type SharedEditorCapabilities } from './capabilities'
+export {
+  CollaborativeDocument,
+  syncCollaborativeDocuments,
+  syncCollaboratorPresence,
+  type ActiveCollaborator,
+  type CollaborationSnapshot,
+  type CollaborativeAnchor,
+  type CollaborativeAuthor,
+  type CollaborativeDecision,
+  type CollaborativeProposal,
+  type CollaborativeThread,
+  type CollaboratorPresence,
+} from './collaboration'
 
 export { parsePortableDocument } from '../document'
 export { materializePortableDraftSource } from '../portableDraft'

@@ -34,7 +34,9 @@
     "remark-parse": "11.0.0",
     "typescript": "latest",
     "unified": "11.0.5",
-    "vite": "latest"
+    "vite": "latest",
+    "y-protocols": "1.0.7",
+    "yjs": "13.6.31"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.4",

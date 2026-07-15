@@ -384,7 +384,9 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | html-encoding-sniffer | 6.0.0 | MIT | development |
 | npm | is-plain-obj | 4.1.0 | MIT | required |
 | npm | is-potential-custom-element-name | 1.0.1 | MIT | development |
+| npm | isomorphic.js | 0.2.5 | MIT | required |
 | npm | jsdom | 29.1.1 | MIT | development |
+| npm | lib0 | 0.2.117 | MIT | required |
 | npm | lightningcss | 1.32.0 | MPL-2.0 | required |
 | npm | lightningcss-android-arm64 | 1.32.0 | MPL-2.0 | required |
 | npm | lightningcss-darwin-arm64 | 1.32.0 | MPL-2.0 | required |
@@ -481,3 +483,5 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | why-is-node-running | 2.3.0 | MIT | development |
 | npm | xml-name-validator | 5.0.0 | Apache-2.0 | development |
 | npm | xmlchars | 2.2.0 | MIT | development |
+| npm | y-protocols | 1.0.7 | MIT | required |
+| npm | yjs | 13.6.31 | MIT | required |
