@@ -26,11 +26,11 @@ use execution_trust::{
     ExecutionTrustStatus, ExecutionTrustStore,
 };
 use git_adapter::{
-    git_branches_impl, git_create_branch_impl, git_create_commit_impl, git_diff_impl,
-    git_fetch_impl, git_initialize_impl, git_pull_impl, git_push_impl, git_stage_impl,
-    git_status_impl, git_switch_branch_impl, GitBranchRequest, GitBranchStatus, GitCommitRequest,
-    GitCommitResult, GitDiffRequest, GitDiffResult, GitInitializeResult, GitRemoteRequest,
-    GitRemoteResult, GitRepositoryStatus, GitStageRequest,
+    git_branches_impl, git_create_branch_impl, git_create_checkpoint_impl, git_create_commit_impl,
+    git_diff_impl, git_fetch_impl, git_initialize_impl, git_pull_impl, git_push_impl,
+    git_stage_impl, git_status_impl, git_switch_branch_impl, GitBranchRequest, GitBranchStatus,
+    GitCheckpointRequest, GitCommitRequest, GitCommitResult, GitDiffRequest, GitDiffResult,
+    GitInitializeResult, GitRemoteRequest, GitRemoteResult, GitRepositoryStatus, GitStageRequest,
 };
 use runtime::{
     discover_jupyter_kernels_impl, probe_runtime_executable_impl, JupyterKernelInventory,
@@ -2213,6 +2213,11 @@ fn git_create_commit(request: GitCommitRequest) -> Result<GitCommitResult, HostE
 }
 
 #[tauri::command]
+fn git_create_checkpoint(request: GitCheckpointRequest) -> Result<GitCommitResult, HostError> {
+    git_create_checkpoint_impl(request)
+}
+
+#[tauri::command]
 fn git_branches(root: String) -> Result<GitBranchStatus, HostError> {
     git_branches_impl(&root)
 }
@@ -2283,6 +2288,7 @@ pub fn run() {
             git_diff,
             git_stage,
             git_create_commit,
+            git_create_checkpoint,
             git_branches,
             git_create_branch,
             git_switch_branch,

@@ -68,6 +68,7 @@ describe('desktop host adapter', () => {
     await host.gitDiff({ root: '/research/canopy', path: 'paper.qmd', staged: false })
     await host.gitStage({ root: '/research/canopy', paths: ['paper.qmd'] })
     await host.gitCreateCommit({ root: '/research/canopy', message: 'Results checkpoint' })
+    await host.gitCreateCheckpoint({ root: '/research/canopy', paths: ['paper.qmd'], message: 'Selected checkpoint' })
     await host.gitBranches('/research/canopy')
     await host.gitCreateBranch({ root: '/research/canopy', name: 'results' })
     await host.gitSwitchBranch({ root: '/research/canopy', name: 'main' })
@@ -110,6 +111,7 @@ describe('desktop host adapter', () => {
       ['git_diff', { request: { root: '/research/canopy', path: 'paper.qmd', staged: false } }],
       ['git_stage', { request: { root: '/research/canopy', paths: ['paper.qmd'] } }],
       ['git_create_commit', { request: { root: '/research/canopy', message: 'Results checkpoint' } }],
+      ['git_create_checkpoint', { request: { root: '/research/canopy', paths: ['paper.qmd'], message: 'Selected checkpoint' } }],
       ['git_branches', { root: '/research/canopy' }],
       ['git_create_branch', { request: { root: '/research/canopy', name: 'results' } }],
       ['git_switch_branch', { request: { root: '/research/canopy', name: 'main' } }],

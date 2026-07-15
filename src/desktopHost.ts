@@ -123,6 +123,10 @@ export interface GitCommitRequest {
   message: string
 }
 
+export interface GitCheckpointRequest extends GitCommitRequest {
+  paths: string[]
+}
+
 export interface GitCommitResult {
   hash: string
   shortHash: string
@@ -438,6 +442,11 @@ export function createDesktopHost(
     gitCreateCommit(request: GitCommitRequest) {
       return available
         ? invokeBridge<GitCommitResult>('git_create_commit', { request })
+        : gitUnavailable()
+    },
+    gitCreateCheckpoint(request: GitCheckpointRequest) {
+      return available
+        ? invokeBridge<GitCommitResult>('git_create_checkpoint', { request })
         : gitUnavailable()
     },
     gitBranches(root: string) {

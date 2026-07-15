@@ -96,6 +96,14 @@ pub struct GitCommitRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct GitCheckpointRequest {
+    pub root: String,
+    pub paths: Vec<String>,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct GitCommitResult {
     pub hash: String,
     pub short_hash: String,
@@ -673,6 +681,40 @@ pub fn git_create_commit_impl(request: GitCommitRequest) -> Result<GitCommitResu
     })
 }
 
+pub fn git_create_checkpoint_impl(
+    request: GitCheckpointRequest,
+) -> Result<GitCommitResult, HostError> {
+    let context = require_repository(&request.root)?;
+    let message = validate_commit_message(&request.message)?;
+    let paths = selected_repository_paths(&context, &request.paths)?;
+
+    let mut stage_arguments = vec!["add", "--all", "--"];
+    stage_arguments.extend(paths.iter().map(String::as_str));
+    require_success(
+        run_git(&context.repository_root, &stage_arguments)?,
+        "stage the selected checkpoint files",
+    )?;
+
+    let mut commit_arguments = vec!["commit", "--only", "--no-verify", "-m", &message, "--"];
+    commit_arguments.extend(paths.iter().map(String::as_str));
+    require_success(
+        run_git(&context.repository_root, &commit_arguments)?,
+        "create the selected checkpoint",
+    )?;
+
+    let hash = require_success(
+        run_git(&context.repository_root, &["rev-parse", "HEAD"])?,
+        "read the new checkpoint",
+    )?;
+    let hash = String::from_utf8_lossy(&hash.stdout).trim().to_string();
+    Ok(GitCommitResult {
+        short_hash: hash.chars().take(8).collect(),
+        hash,
+        message,
+        files: request.paths,
+    })
+}
+
 fn validate_branch_name(context: &RepositoryContext, name: &str) -> Result<(), HostError> {
     if name.is_empty() || name.len() > 255 || name.contains('\0') {
         return Err(HostError::InvalidProject(
@@ -987,6 +1029,33 @@ mod tests {
         assert_eq!(status.entries.len(), 1);
         assert_eq!(status.entries[0].path, "notes.md");
         assert!(!status.entries[0].staged);
+    }
+
+    #[test]
+    fn one_step_checkpoint_preserves_unselected_staged_changes() {
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("paper.qmd"), "one\n").unwrap();
+        fs::write(project.path().join("notes.md"), "private\n").unwrap();
+        commit_all(project.path(), "base");
+        fs::write(project.path().join("paper.qmd"), "two\n").unwrap();
+        fs::write(project.path().join("notes.md"), "private staged edits\n").unwrap();
+        git(project.path(), ["add", "notes.md"]);
+
+        let checkpoint = git_create_checkpoint_impl(GitCheckpointRequest {
+            root: project.path().to_string_lossy().to_string(),
+            paths: vec!["paper.qmd".to_string()],
+            message: "Selected manuscript".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(checkpoint.files, vec!["paper.qmd"]);
+        let committed = git(project.path(), ["show", "HEAD:paper.qmd"]);
+        assert_eq!(String::from_utf8_lossy(&committed.stdout), "two\n");
+        let status = git_status_impl(&project.path().to_string_lossy()).unwrap();
+        assert_eq!(status.entries.len(), 1);
+        assert_eq!(status.entries[0].path, "notes.md");
+        assert!(status.entries[0].staged);
     }
 
     #[test]

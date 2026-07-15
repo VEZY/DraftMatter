@@ -37,6 +37,7 @@ import { buildExecutionAvailability, parseRetainedOutputs } from './retainedOutp
 import { RuntimeProvenance } from './RuntimeProvenance'
 import { discoverRuntimeInventory, type RuntimeInventory, type RuntimeLanguage } from './runtimeDiscovery'
 import { PortableReviewItems } from './PortableReviewItems'
+import { GitHistoryPanel } from './GitHistoryPanel'
 import { parseReviewMarkup } from './reviewMarkup'
 import { buildReviewQueue } from './reviewQueue'
 
@@ -1798,7 +1799,9 @@ function App() {
           <button data-label="Settings" aria-label="Settings"><Icon name="settings" /></button>
         </nav>
 
-        {leftPanelOpen && (
+        {leftPanelOpen && (activeNav === 'history' ? (
+          <GitHistoryPanel root={desktopSession?.root} manuscriptPath={desktopSession?.path} onNotice={setToast} />
+        ) : (
           <aside className="left-panel" aria-label="Manuscript outline">
             <div className="panel-heading-row">
               <div>
@@ -1834,7 +1837,7 @@ function App() {
               <button onClick={openSourceInspector}><Icon name="code" size={15} /> View source</button>
             </div>
           </aside>
-        )}
+        ))}
 
         <main className="editor-area">
           <div className="format-toolbar" aria-label="Formatting toolbar">
