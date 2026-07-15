@@ -121,6 +121,19 @@ function App() {
   const externalCheckRunningRef = useRef(false)
   const reopenAttemptedRef = useRef(false)
 
+  const writeRecoverySnapshot = (nextDraft: DraftState, nextFilename: string, source: string, savedAt?: string) => {
+    try {
+      const next = saveRecoverySnapshot(localStorage, nextDraft, nextFilename, source, savedAt)
+      setRecoveries(next)
+      return next
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      setSaveProblem(`Local recovery journal unavailable: ${message}`)
+      if (!desktopSessionRef.current) setSaveState('error')
+      return null
+    }
+  }
+
   const activeStatus = draft.activeProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
   const activeReplacement = draft.activeProposal === 'alice'
     ? 'reduced leaf area by 18%'
@@ -176,8 +189,14 @@ function App() {
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       const next = { ...draft, lastSavedAt: new Date().toISOString() }
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
-      if (!desktopSession) setSaveState('saved')
+      try {
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+        if (!desktopSession) setSaveState('saved')
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        setSaveProblem(`Local autosave unavailable: ${message}`)
+        if (!desktopSession) setSaveState('error')
+      }
     }, 380)
     return () => window.clearTimeout(timeout)
   }, [draft, desktopSession])
@@ -287,8 +306,7 @@ function App() {
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
-      const next = saveRecoverySnapshot(localStorage, draft, filename, reviewedProjection(draft))
-      setRecoveries(next)
+      writeRecoverySnapshot(draft, filename, reviewedProjection(draft))
     }, 1800)
     return () => window.clearTimeout(timeout)
   }, [draft, filename])
@@ -472,10 +490,9 @@ function App() {
     setDiagnostics(parsed.diagnostics)
     setProjectMenuOpen(false)
     setSaveState('saved')
-    const nextRecoveries = saveRecoverySnapshot(localStorage, parsed.draft, file.name, reviewedProjection(parsed.draft))
-    setRecoveries(nextRecoveries)
+    const recoveryAvailable = writeRecoverySnapshot(parsed.draft, file.name, reviewedProjection(parsed.draft)) !== null
     const warnings = parsed.diagnostics.filter((item) => item.level !== 'info').length
-    setToast(warnings ? `Opened ${file.name} · ${warnings} check${warnings === 1 ? '' : 's'} to review` : `Opened ${file.name}`)
+    setToast(`${warnings ? `Opened ${file.name} · ${warnings} check${warnings === 1 ? '' : 's'} to review` : `Opened ${file.name}`}${recoveryAvailable ? '' : ' · local recovery unavailable'}`)
   }
 
   const applyDesktopProject = async (project: ProjectSnapshot, announce = true, selectedPath?: string) => {
@@ -513,8 +530,7 @@ function App() {
     setPendingProject(null)
     setSaveState('saved')
     localStorage.setItem(LAST_PROJECT_ROOT_KEY, project.root)
-    const nextRecoveries = saveRecoverySnapshot(localStorage, parsed.draft, displayName, document.content)
-    setRecoveries(nextRecoveries)
+    writeRecoverySnapshot(parsed.draft, displayName, document.content)
     if (announce) {
       const sourceCount = projectBibliography.records.length
       setToast(`Opened ${project.config.name} · ${mainPath}${sourceCount ? ` · ${sourceCount} project source${sourceCount === 1 ? '' : 's'}` : ''}`)
@@ -605,10 +621,9 @@ function App() {
   }
 
   const createSnapshot = () => {
-    const next = saveRecoverySnapshot(localStorage, draft, filename, reviewedProjection(draft), new Date().toISOString())
-    setRecoveries(next)
+    const next = writeRecoverySnapshot(draft, filename, reviewedProjection(draft), new Date().toISOString())
     setProjectMenuOpen(false)
-    setToast('Recovery snapshot saved locally')
+    setToast(next ? 'Recovery snapshot saved locally' : 'Could not save a local recovery snapshot')
   }
 
   const restoreSnapshot = (snapshot: RecoverySnapshot) => {

@@ -19,10 +19,26 @@ export interface KeyValueStorage {
   setItem(key: string, value: string): void
 }
 
+function isRecoverySnapshot(value: unknown): value is RecoverySnapshot {
+  if (typeof value !== 'object' || value === null) return false
+  const candidate = value as Partial<RecoverySnapshot>
+  return typeof candidate.id === 'string'
+    && typeof candidate.filename === 'string'
+    && typeof candidate.title === 'string'
+    && typeof candidate.savedAt === 'string'
+    && Number.isFinite(Date.parse(candidate.savedAt))
+    && typeof candidate.sourceHash === 'string'
+    && typeof candidate.source === 'string'
+    && candidate.sourceHash === sourceHash(candidate.source)
+    && typeof candidate.draft === 'object'
+    && candidate.draft !== null
+    && typeof candidate.draft.title === 'string'
+}
+
 export function readRecoverySnapshots(storage: KeyValueStorage): RecoverySnapshot[] {
   try {
     const parsed = JSON.parse(storage.getItem(RECOVERY_KEY) ?? '[]')
-    return Array.isArray(parsed) ? parsed : []
+    return Array.isArray(parsed) ? parsed.filter(isRecoverySnapshot).slice(0, MAX_RECOVERIES) : []
   } catch {
     return []
   }

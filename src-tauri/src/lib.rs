@@ -497,6 +497,13 @@ fn create_recovery(root: &Path, relative: &str, previous: &[u8]) -> Result<Strin
 }
 
 fn save_document_impl(request: SaveDocumentRequest) -> Result<SaveDocumentResult, HostError> {
+    save_document_impl_with_fault(request, false)
+}
+
+fn save_document_impl_with_fault(
+    request: SaveDocumentRequest,
+    fail_before_replace: bool,
+) -> Result<SaveDocumentResult, HostError> {
     let root = canonical_root(&request.root)?;
     let path = contained_path(&root, &request.path)?;
     if !manuscript_extension(&path) {
@@ -526,7 +533,7 @@ fn save_document_impl(request: SaveDocumentRequest) -> Result<SaveDocumentResult
     } else {
         Some(create_recovery(&root, &request.path, &previous)?)
     };
-    write_atomic(&path, request.content.as_bytes(), false)?;
+    write_atomic(&path, request.content.as_bytes(), fail_before_replace)?;
     Ok(SaveDocumentResult {
         path: request.path,
         hash: source_hash(request.content.as_bytes()),
@@ -821,5 +828,68 @@ mod tests {
         assert!(matches!(error, HostError::Io(_)));
         assert_eq!(fs::read_to_string(&path).unwrap(), "valid old source");
         assert_eq!(fs::read_dir(temporary.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn interrupted_save_keeps_the_document_and_a_valid_recovery() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("project");
+        create_project(root.to_string_lossy().into_owned(), "Test".into()).unwrap();
+        let before = read_document_impl(root.to_str().unwrap(), "paper.qmd").unwrap();
+
+        let error = save_document_impl_with_fault(
+            SaveDocumentRequest {
+                root: root.to_string_lossy().into_owned(),
+                path: "paper.qmd".into(),
+                content: "# New source that must not be partial\n".into(),
+                expected_hash: Some(before.hash.clone()),
+            },
+            true,
+        )
+        .unwrap_err();
+
+        assert!(matches!(error, HostError::Io(_)));
+        assert_eq!(fs::read_to_string(root.join("paper.qmd")).unwrap(), before.content);
+        let recovery_directory = root.join(".draftmatter/recovery");
+        let recoveries = fs::read_dir(&recovery_directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        assert_eq!(recoveries.len(), 1);
+        assert_eq!(fs::read_to_string(&recoveries[0]).unwrap(), before.content);
+        assert!(!fs::read_dir(&root)
+            .unwrap()
+            .filter_map(Result::ok)
+            .any(|entry| entry.file_name().to_string_lossy().contains("draftmatter-tmp")));
+    }
+
+    #[test]
+    fn disk_recovery_history_is_bounded_and_every_entry_is_valid() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("project");
+        create_project(root.to_string_lossy().into_owned(), "Test".into()).unwrap();
+
+        for revision in 0..12 {
+            let before = read_document_impl(root.to_str().unwrap(), "paper.qmd").unwrap();
+            save_document_impl(SaveDocumentRequest {
+                root: root.to_string_lossy().into_owned(),
+                path: "paper.qmd".into(),
+                content: format!("---\ntitle: \"Revision {revision}\"\n---\n"),
+                expected_hash: Some(before.hash),
+            })
+            .unwrap();
+        }
+
+        let recovery_directory = root.join(".draftmatter/recovery");
+        let recoveries = fs::read_dir(recovery_directory)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .collect::<Vec<_>>();
+        assert_eq!(recoveries.len(), MAX_RECOVERY_FILES);
+        for recovery in recoveries {
+            let content = fs::read_to_string(recovery).unwrap();
+            assert!(!content.is_empty());
+            assert!(content.contains("title:"));
+        }
     }
 }
