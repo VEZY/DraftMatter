@@ -15,6 +15,7 @@ export interface CollaborationServiceConfig {
     issuer: string
     audience: string | string[]
     jwksUri: string
+    allowInsecureHttp: boolean
   }
   webhookSecret: Uint8Array
   allowedOrigins: string[]
@@ -54,14 +55,14 @@ function bool(environment: NodeJS.ProcessEnv, name: string, fallback: boolean) {
   throw new CollaborationConfigError(`${name} must be true or false.`)
 }
 
-function httpsUrl(value: string, name: string) {
+function httpsUrl(value: string, name: string, allowInsecureHttp = false) {
   let url: URL
   try {
     url = new URL(value)
   } catch {
     throw new CollaborationConfigError(`${name} must be an absolute URL.`)
   }
-  if (url.protocol !== 'https:' && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1') {
+  if (url.protocol !== 'https:' && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1' && !allowInsecureHttp) {
     throw new CollaborationConfigError(`${name} must use HTTPS outside loopback development.`)
   }
   return url.toString().replace(/\/$/, '')
@@ -88,8 +89,9 @@ function databaseSsl(environment: NodeJS.ProcessEnv) {
 
 export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = process.env): CollaborationServiceConfig {
   const mode = environment.NODE_ENV === 'production' ? 'production' : environment.NODE_ENV === 'test' ? 'test' : 'development'
-  const issuer = httpsUrl(required(environment, 'DM_OIDC_ISSUER'), 'DM_OIDC_ISSUER')
-  const jwksUri = httpsUrl(required(environment, 'DM_OIDC_JWKS_URI'), 'DM_OIDC_JWKS_URI')
+  const allowInsecureOidc = mode !== 'production'
+  const issuer = httpsUrl(required(environment, 'DM_OIDC_ISSUER'), 'DM_OIDC_ISSUER', allowInsecureOidc)
+  const jwksUri = httpsUrl(required(environment, 'DM_OIDC_JWKS_URI'), 'DM_OIDC_JWKS_URI', allowInsecureOidc)
   const audiences = required(environment, 'DM_OIDC_AUDIENCE').split(',').map((value) => value.trim()).filter(Boolean)
   if (!audiences.length) throw new CollaborationConfigError('DM_OIDC_AUDIENCE must contain at least one audience.')
   const allowedOrigins = (environment.DM_ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean).map((value) => httpsUrl(value, 'DM_ALLOWED_ORIGINS'))
@@ -124,7 +126,7 @@ export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = 
         ...(accessKeyId && secretAccessKey ? { credentials: { accessKeyId, secretAccessKey } } : {}),
       },
     },
-    oidc: { issuer, audience: audiences.length === 1 ? audiences[0] : audiences, jwksUri },
+    oidc: { issuer, audience: audiences.length === 1 ? audiences[0] : audiences, jwksUri, allowInsecureHttp: allowInsecureOidc },
     webhookSecret: secret(required(environment, 'DM_WEBHOOK_SECRET')),
     allowedOrigins,
     maxPayloadBytes: integer(environment, 'DM_MAX_PAYLOAD_BYTES', 1024 * 1024, 16 * 1024, 16 * 1024 * 1024),

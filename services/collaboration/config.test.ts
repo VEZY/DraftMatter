@@ -33,11 +33,20 @@ describe('collaboration service configuration', () => {
 
   it('fails closed for missing secrets, insecure remote identity, and empty production origins', () => {
     expect(() => loadCollaborationServiceConfig(environment({ DM_WEBHOOK_SECRET: 'short' }))).toThrow(/32 bytes/)
-    expect(() => loadCollaborationServiceConfig(environment({ DM_OIDC_JWKS_URI: 'http://identity.example.test/jwks' }))).toThrow(/HTTPS/)
+    expect(() => loadCollaborationServiceConfig(environment({ NODE_ENV: 'production', DM_ALLOWED_ORIGINS: 'https://app.example.test', DM_OIDC_JWKS_URI: 'http://identity.example.test/jwks' }))).toThrow(/HTTPS/)
     expect(() => loadCollaborationServiceConfig(environment({ NODE_ENV: 'production', DM_ALLOWED_ORIGINS: '' }))).toThrow(/ALLOWED_ORIGINS/)
   })
 
   it('never accepts a half-configured object-storage credential pair', () => {
     expect(() => loadCollaborationServiceConfig(environment({ DM_OBJECT_SECRET_KEY: '' }))).toThrow(/configured together/)
+  })
+
+  it('allows an internal HTTP JWKS only outside production', () => {
+    expect(loadCollaborationServiceConfig(environment({ DM_OIDC_JWKS_URI: 'http://keycloak:8080/realms/draftmatter/protocol/openid-connect/certs' })).oidc.allowInsecureHttp).toBe(true)
+    expect(() => loadCollaborationServiceConfig(environment({
+      NODE_ENV: 'production',
+      DM_ALLOWED_ORIGINS: 'https://app.example.test',
+      DM_OIDC_JWKS_URI: 'http://keycloak:8080/realms/draftmatter/protocol/openid-connect/certs',
+    }))).toThrow(/HTTPS/)
   })
 })

@@ -16,6 +16,7 @@ export interface OidcIdentityVerifierOptions {
   algorithms?: string[]
   clockToleranceSeconds?: number
   maxTokenAge?: string | number
+  allowInsecureHttp?: boolean
 }
 
 function opaqueId(prefix: string, value: string) {
@@ -36,7 +37,7 @@ export class OidcIdentityVerifier implements CollaborationIdentityVerifier {
     if (!options.issuer.trim()) throw new Error('OIDC issuer is required.')
     if (!options.keyResolver && !options.jwksUri) throw new Error('OIDC JWKS URI or key resolver is required.')
     const jwksUrl = options.jwksUri ? new URL(options.jwksUri) : undefined
-    if (jwksUrl && jwksUrl.protocol !== 'https:' && jwksUrl.hostname !== 'localhost' && jwksUrl.hostname !== '127.0.0.1') {
+    if (jwksUrl && jwksUrl.protocol !== 'https:' && jwksUrl.hostname !== 'localhost' && jwksUrl.hostname !== '127.0.0.1' && !options.allowInsecureHttp) {
       throw new Error('OIDC JWKS must use HTTPS outside loopback development.')
     }
     this.keyResolver = options.keyResolver ?? createRemoteJWKSet(jwksUrl!, {

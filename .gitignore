@@ -3,6 +3,7 @@ dist/
 dist-service/
 .DS_Store
 *.local
+.env
 *.log
 *.tsbuildinfo
 vite.config.js

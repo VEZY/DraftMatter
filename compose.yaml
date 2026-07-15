@@ -1,0 +1,84 @@
+name: draftmatter
+
+services:
+  postgres:
+    image: postgres:18.4-alpine
+    environment:
+      POSTGRES_DB: draftmatter
+      POSTGRES_USER: draftmatter
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-this-postgres-password}
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U draftmatter -d draftmatter"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - postgres-data:/var/lib/postgresql
+      - ./deploy/postgres/init-keycloak.sql:/docker-entrypoint-initdb.d/10-keycloak.sql:ro
+    restart: unless-stopped
+
+  object-storage:
+    image: chrislusf/seaweedfs:4.29
+    command: ["mini", "-dir=/data"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${OBJECT_ACCESS_KEY:-draftmatter-local}
+      AWS_SECRET_ACCESS_KEY: ${OBJECT_SECRET_KEY:-change-this-object-storage-secret}
+      S3_BUCKET: draftmatter
+    volumes:
+      - object-data:/data
+    restart: unless-stopped
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.0
+    command: ["start-dev", "--import-realm", "--health-enabled=true"]
+    environment:
+      KC_BOOTSTRAP_ADMIN_USERNAME: admin
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:-change-this-keycloak-password}
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://postgres:5432/keycloak
+      KC_DB_USERNAME: draftmatter
+      KC_DB_PASSWORD: ${POSTGRES_PASSWORD:-change-this-postgres-password}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./deploy/keycloak/draftmatter-realm.json:/opt/keycloak/data/import/draftmatter-realm.json:ro
+    restart: unless-stopped
+
+  collaboration:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: development
+      DM_ADDRESS: 0.0.0.0
+      DM_PORT: 1234
+      DM_DATABASE_URL: postgres://draftmatter:${POSTGRES_PASSWORD:-change-this-postgres-password}@postgres:5432/draftmatter
+      DM_DATABASE_TLS: disable
+      DM_OBJECT_BUCKET: draftmatter
+      DM_OBJECT_ENDPOINT: http://object-storage:8333
+      DM_OBJECT_REGION: us-east-1
+      DM_OBJECT_FORCE_PATH_STYLE: "true"
+      DM_OBJECT_ACCESS_KEY: ${OBJECT_ACCESS_KEY:-draftmatter-local}
+      DM_OBJECT_SECRET_KEY: ${OBJECT_SECRET_KEY:-change-this-object-storage-secret}
+      DM_OIDC_ISSUER: http://localhost:8080/realms/draftmatter
+      DM_OIDC_JWKS_URI: http://keycloak:8080/realms/draftmatter/protocol/openid-connect/certs
+      DM_OIDC_AUDIENCE: draftmatter-local
+      DM_ALLOWED_ORIGINS: http://localhost:5173
+      DM_WEBHOOK_SECRET: ${WEBHOOK_SECRET:-change-this-webhook-secret-with-at-least-32-bytes}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      object-storage:
+        condition: service_started
+      keycloak:
+        condition: service_started
+    ports:
+      - "127.0.0.1:1234:1234"
+    restart: on-failure:5
+
+volumes:
+  postgres-data:
+  object-data:
