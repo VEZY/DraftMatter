@@ -33,13 +33,16 @@ export interface StructuredManuscriptEditorHandle {
   setLink: (href: string, title?: string) => boolean
   setParagraph: () => boolean
   setHeading: (level: number) => boolean
+  insertHeading: (title: string, level?: number) => boolean
   wrapBlockquote: () => boolean
   wrapBulletList: () => boolean
   wrapOrderedList: () => boolean
   undo: () => boolean
   redo: () => boolean
   insertCodeCell: (language: 'python' | 'r' | 'julia') => boolean
-  insertEquation: (display?: boolean) => boolean
+  insertEquation: (tex: string, display?: boolean, label?: string) => boolean
+  insertCrossReference: (target: string) => boolean
+  insertFootnote: (label: string, content: string) => boolean
   insertCitation: (items: CitationItem[], rendered?: string) => boolean
   citationSource: (items: CitationItem[], rendered?: string) => string | null
   replaceCitation: (id: string, items: CitationItem[], rendered?: string) => boolean
@@ -98,6 +101,12 @@ function citationNode(items: CitationItem[], rendered?: string) {
     suppressAuthor: false,
     rendered: rendered || `(${keys.join('; ')})`,
   })
+}
+
+function insertBlock(view: EditorView, node: ProseMirrorNode) {
+  const { $from, to } = view.state.selection
+  const position = $from.depth > 0 ? $from.after(1) : to
+  view.dispatch(view.state.tr.insert(position, node).scrollIntoView())
 }
 
 function selectedReviewText(view: EditorView): StructuredReviewSelection | null {
@@ -379,6 +388,18 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     setLink: (href, title) => run(toggleMark(manuscriptSchema.marks.link, { href, title: title ?? null })),
     setParagraph: () => run(setBlockType(manuscriptSchema.nodes.paragraph)),
     setHeading: (level) => run(setBlockType(manuscriptSchema.nodes.heading, { id: randomId('heading'), level, section: null })),
+    insertHeading: (title, level = 2) => {
+      const view = viewRef.current
+      if (!view || readOnlyRef.current || !title.trim()) return false
+      const heading = manuscriptSchema.nodes.heading.createChecked({
+        id: randomId('heading'),
+        level: Math.min(6, Math.max(1, level)),
+        section: null,
+      }, manuscriptSchema.text(title.trim()))
+      insertBlock(view, heading)
+      view.focus()
+      return true
+    },
     wrapBlockquote: () => run(wrapIn(manuscriptSchema.nodes.blockquote, { id: randomId('quote') })),
     wrapBulletList: () => run(wrapInList(manuscriptSchema.nodes.bullet_list, { id: randomId('list') })),
     wrapOrderedList: () => run(wrapInList(manuscriptSchema.nodes.ordered_list, { id: randomId('list'), order: 1 })),
@@ -388,24 +409,54 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       const view = viewRef.current
       if (!view || readOnlyRef.current) return false
       const id = randomId(`cell-${language}`)
-      view.dispatch(view.state.tr.replaceSelectionWith(manuscriptSchema.nodes.code_cell.createChecked({
+      insertBlock(view, manuscriptSchema.nodes.code_cell.createChecked({
         id,
         language,
         code: '',
         outputKind: null,
         status: 'stale',
         attributes: { execute: true },
-      })).scrollIntoView())
+      }))
       view.focus()
       return true
     },
-    insertEquation: (display = false) => {
+    insertEquation: (tex, display = false, label) => {
       const view = viewRef.current
-      if (!view || readOnlyRef.current) return false
+      if (!view || readOnlyRef.current || !tex.trim()) return false
       const node = display
-        ? manuscriptSchema.nodes.equation_block.createChecked({ id: randomId('equation'), tex: '', label: null })
-        : manuscriptSchema.nodes.equation_inline.createChecked({ id: randomId('equation-inline'), tex: '' })
-      view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView())
+        ? manuscriptSchema.nodes.equation_block.createChecked({ id: randomId('equation'), tex: tex.trim(), label: label?.replace(/^@/, '') || null })
+        : manuscriptSchema.nodes.equation_inline.createChecked({ id: randomId('equation-inline'), tex: tex.trim() })
+      if (display) insertBlock(view, node)
+      else view.dispatch(view.state.tr.replaceSelectionWith(node))
+      view.focus()
+      return true
+    },
+    insertCrossReference: (target) => {
+      const view = viewRef.current
+      const normalized = target.trim().replace(/^@/, '')
+      if (!view || readOnlyRef.current || !/^(fig|tbl|eq|sec)-[a-zA-Z0-9_.:-]+$/.test(normalized)) return false
+      view.dispatch(view.state.tr.replaceSelectionWith(manuscriptSchema.nodes.cross_reference.createChecked({
+        id: randomId('cross-reference'),
+        target: normalized,
+        rendered: normalized,
+      })))
+      view.focus()
+      return true
+    },
+    insertFootnote: (label, content) => {
+      const view = viewRef.current
+      const normalized = label.trim().replace(/^\[\^|\]$/g, '')
+      if (!view || readOnlyRef.current || !/^[a-zA-Z0-9_.:-]+$/.test(normalized) || !content.trim()) return false
+      let transaction = view.state.tr.replaceSelectionWith(manuscriptSchema.nodes.footnote_reference.createChecked({
+        id: randomId('footnote-reference'),
+        label: normalized,
+      }))
+      transaction = transaction.insert(transaction.doc.content.size, manuscriptSchema.nodes.footnote_definition.createChecked({
+        id: randomId('footnote-definition'),
+        label: normalized,
+        contentMarkdown: content.trim(),
+      }))
+      view.dispatch(transaction)
       view.focus()
       return true
     },
@@ -480,7 +531,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           ])
         }),
       ))
-      view.dispatch(view.state.tr.replaceSelectionWith(manuscriptSchema.nodes.table.createChecked({ id: randomId('table') }, tableRows)).scrollIntoView())
+      insertBlock(view, manuscriptSchema.nodes.table.createChecked({ id: randomId('table') }, tableRows))
       view.focus()
       return true
     },
@@ -489,7 +540,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       if (!view || readOnlyRef.current || !path) return false
       const children = [manuscriptSchema.nodes.image.createChecked({ id: randomId('image'), src: path, alt, title: null, label: label ?? null })]
       if (caption) children.push(manuscriptSchema.nodes.caption.createChecked({ id: randomId('caption') }, manuscriptSchema.text(caption)))
-      view.dispatch(view.state.tr.replaceSelectionWith(manuscriptSchema.nodes.figure.createChecked({ id: randomId('figure') }, children)).scrollIntoView())
+      insertBlock(view, manuscriptSchema.nodes.figure.createChecked({ id: randomId('figure') }, children))
       view.focus()
       return true
     },

@@ -3317,7 +3317,7 @@ kbd {
 .source-drawer-footer .secondary { background: transparent; border: 1px solid var(--line-strong); color: #65716b; }
 
 .command-backdrop { padding-top: 18vh; }
-.command-menu { padding-bottom: 7px; width: 510px; }
+.command-menu { max-height: 72vh; overflow-y: auto; padding-bottom: 7px; width: 510px; }
 
 .command-group-title {
   color: #9aa29e;
@@ -3740,6 +3740,7 @@ kbd {
 .structured-editor-content figcaption { color: var(--muted); font-family: Inter, ui-sans-serif, sans-serif; font-size: 12px; line-height: 1.55; margin-top: 9px; }
 .structured-citation { background: #e7eef2; border: 0; border-radius: 4px; color: #365a6f; cursor: pointer; display: inline; font-family: Inter, ui-sans-serif, sans-serif; font-size: .86em; line-height: inherit; margin: 0; padding: 2px 5px; }
 .structured-citation:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.toolbar-symbol { font-family: Georgia, serif; font-size: 16px; line-height: 1; }
 .dm-review-thread { background: rgba(230, 194, 83, .18); border-bottom: 1px solid rgba(178, 139, 34, .55); }
 .dm-review-change { background: rgba(91, 145, 112, .14); border-bottom: 1px solid rgba(69, 119, 88, .58); }
 .dm-review-needs-rebase { background: rgba(202, 143, 73, .16); border-bottom-color: rgba(168, 105, 42, .62); }

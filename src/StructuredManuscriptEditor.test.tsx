@@ -47,6 +47,8 @@ Check this statement.
 :::::
 `
 
+const shortSource = '# Node commands\n\nPlace content here.\n'
+
 describe('full structured manuscript editor', () => {
   let container: HTMLDivElement
   let root: ReturnType<typeof createRoot>
@@ -189,6 +191,38 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector('.structured-citation')?.textContent).toBe('(Vezy et al., 2024)')
     expect(editorRef.current?.source()).toBe(source)
     expect(changed).not.toHaveBeenCalled()
+  })
+
+  it('inserts equations, cross-references, and a portable footnote at the selection', async () => {
+    const changed: string[] = []
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    await act(async () => root.render(
+      <StructuredManuscriptEditor ref={editorRef} source={shortSource} onChange={(next) => changed.push(next)} />,
+    ))
+
+    await act(async () => { expect(editorRef.current?.insertEquation('x^2 + y^2')).toBe(true) })
+    await act(async () => { expect(editorRef.current?.insertCrossReference('fig-growth')).toBe(true) })
+    await act(async () => { expect(editorRef.current?.insertFootnote('method', 'Calibration details.')).toBe(true) })
+
+    expect(changed.at(-1)).toContain('$x^2 + y^2$@fig-growth[^method]')
+    expect(changed.at(-1)).toContain('[^method]: Calibration details.')
+  })
+
+  it.each([
+    ['table', (editor: StructuredManuscriptEditorHandle) => editor.insertTable(), '| --- | --- |'],
+    ['figure', (editor: StructuredManuscriptEditorHandle) => editor.insertFigure('figures/growth.svg', 'Growth', 'Growth response.', 'fig-growth'), '![Growth](figures/growth.svg){#fig-growth}'],
+    ['Julia code cell', (editor: StructuredManuscriptEditorHandle) => editor.insertCodeCell('julia'), '```julia {#cell-julia-'],
+    ['display equation', (editor: StructuredManuscriptEditorHandle) => editor.insertEquation('E = mc^2', true, 'eq-mass'), '$$\nE = mc^2\n$$ {#eq-mass}'],
+    ['section heading', (editor: StructuredManuscriptEditorHandle) => editor.insertHeading('New section', 2), '## New section'],
+  ] as const)('inserts a rendered %s block through a structured transaction', async (_name, insert, expected) => {
+    const changed: string[] = []
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    await act(async () => root.render(
+      <StructuredManuscriptEditor ref={editorRef} source={shortSource} onChange={(next) => changed.push(next)} />,
+    ))
+
+    await act(async () => { expect(insert(editorRef.current!)).toBe(true) })
+    expect(changed.at(-1)).toContain(expected)
   })
 
   it('makes both prose and embedded code read-only for non-editing roles', async () => {

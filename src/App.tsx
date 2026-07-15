@@ -1005,6 +1005,42 @@ function App() {
     runStructuredCommand((editor) => editor.insertFigure(path, alt, caption), 'Insert image')
   }
 
+  const insertStructuredEquation = (display = false) => {
+    const tex = window.prompt(`${display ? 'Display' : 'Inline'} equation (TeX, without $ delimiters)`)?.trim()
+    if (!tex) return
+    const label = display ? window.prompt('Equation label (optional, for example eq-growth)')?.trim() : undefined
+    runStructuredCommand((editor) => editor.insertEquation(tex, display, label), `Insert ${display ? 'display' : 'inline'} equation`)
+  }
+
+  const insertStructuredCrossReference = () => {
+    const target = window.prompt('Cross-reference target (for example fig-growth, tbl-results, eq-model, or sec-methods)')?.trim()
+    if (target) runStructuredCommand((editor) => editor.insertCrossReference(target), 'Insert cross-reference')
+  }
+
+  const insertStructuredFootnote = () => {
+    const label = window.prompt('Footnote label (letters, numbers, dots, colons, underscores, or hyphens)')?.trim()
+    if (!label) return
+    const content = window.prompt('Footnote text')?.trim()
+    if (content) runStructuredCommand((editor) => editor.insertFootnote(label, content), 'Insert footnote')
+  }
+
+  const insertStructuredCodeCell = () => {
+    const language = window.prompt('Code language: python, r, or julia', 'python')?.trim().toLowerCase()
+    if (language === 'python' || language === 'r' || language === 'julia') {
+      runStructuredCommand((editor) => editor.insertCodeCell(language), `Insert ${language === 'r' ? 'R' : language} code cell`)
+    } else if (language) {
+      setToast('DraftMatter executable cells currently support Python, R, or Julia')
+    }
+  }
+
+  const addStructuredSection = () => {
+    const title = window.prompt('Section heading')?.trim()
+    if (!title) return
+    const requestedLevel = Number(window.prompt('Heading level (1–6)', '2'))
+    const level = Number.isInteger(requestedLevel) && requestedLevel >= 1 && requestedLevel <= 6 ? requestedLevel : 2
+    runStructuredCommand((editor) => editor.insertHeading(title, level), 'Add section')
+  }
+
   const discoverExecutionEnvironments = async (showDialog = false) => {
     if (showDialog) setEnvironmentOpen(true)
     if (!desktopHost.available || !desktopSessionRef.current) {
@@ -2125,7 +2161,7 @@ function App() {
                     <span>{item.title}</span><small>H{item.level}</small>
                   </button>
                 )) : <p className="outline-empty">Add a heading to build the outline.</p>}
-                <button className="add-section" onClick={() => setCommandOpen(true)}><Icon name="plus" size={15} /> Add section</button>
+                <button className="add-section" onClick={addStructuredSection}><Icon name="plus" size={15} /> Add section</button>
               </> : <>
                 <button className="outline-title active" onClick={() => scrollTo('title')}>{draft.title}</button>
                 <button onClick={() => scrollTo('abstract')}><span>Abstract</span><small>112</small></button>
@@ -2166,7 +2202,8 @@ function App() {
             <button aria-label="Block quote" onClick={() => runStructuredCommand((editor) => editor.wrapBlockquote(), 'Block quote')}><Icon name="quote" size={17} /></button>
             <button aria-label="Insert image" onClick={insertStructuredFigure}><Icon name="image" size={17} /></button>
             <button aria-label="Insert table" onClick={() => runStructuredCommand((editor) => editor.insertTable(), 'Insert table')}><Icon name="table" size={17} /></button>
-            <button aria-label="Insert code cell" onClick={() => runStructuredCommand((editor) => editor.insertCodeCell('python'), 'Insert code cell')}><Icon name="code" size={17} /></button>
+            <button aria-label="Insert equation" onClick={() => insertStructuredEquation()}><span className="toolbar-symbol">∑</span></button>
+            <button aria-label="Insert code cell" onClick={insertStructuredCodeCell}><Icon name="code" size={17} /></button>
             <span className="toolbar-divider" />
             <button aria-label="Undo" onClick={() => structuredMode ? structuredEditorRef.current?.undo() : undoDraft()} disabled={!structuredMode && !canUndo}><Icon name="undo" size={16} /></button>
             <button aria-label="Redo" onClick={() => structuredMode ? structuredEditorRef.current?.redo() : redoDraft()} disabled={!structuredMode && !canRedo}><Icon name="redo" size={16} /></button>
@@ -2835,6 +2872,14 @@ function App() {
             <span className="command-group-title">Suggested</span>
             <button onClick={() => { setCommandOpen(false); openCitationPicker() }}><span className="command-icon">@</span><span><strong>Insert citation</strong><small>Search Zotero and project bibliography</small></span><kbd>⌘ ⇧ C</kbd></button>
             <button onClick={() => { setCommandOpen(false); showReviewPanel() }}><span className="command-icon"><Icon name="message" size={17} /></span><span><strong>Add comment</strong><small>Attach a note to selected text</small></span></button>
+            <button onClick={() => { setCommandOpen(false); addStructuredSection() }}><span className="command-icon">H2</span><span><strong>Add section</strong><small>Insert a heading and update the outline</small></span></button>
+            <button onClick={() => { setCommandOpen(false); insertStructuredEquation() }}><span className="command-icon">∑</span><span><strong>Insert inline equation</strong><small>Rendered TeX kept as portable Markdown math</small></span></button>
+            <button onClick={() => { setCommandOpen(false); insertStructuredEquation(true) }}><span className="command-icon">∫</span><span><strong>Insert display equation</strong><small>Add an optional portable equation label</small></span></button>
+            <button onClick={() => { setCommandOpen(false); insertStructuredCrossReference() }}><span className="command-icon">§</span><span><strong>Insert cross-reference</strong><small>Link a figure, table, equation, or section</small></span></button>
+            <button onClick={() => { setCommandOpen(false); insertStructuredFootnote() }}><span className="command-icon">¹</span><span><strong>Insert footnote</strong><small>Add a reference here and its definition below</small></span></button>
+            <button onClick={() => { setCommandOpen(false); runStructuredCommand((editor) => editor.insertTable(), 'Insert table') }}><span className="command-icon"><Icon name="table" size={17} /></span><span><strong>Insert table</strong><small>Create an editable two-column table</small></span></button>
+            <button onClick={() => { setCommandOpen(false); insertStructuredFigure() }}><span className="command-icon"><Icon name="image" size={17} /></span><span><strong>Insert figure</strong><small>Use a project-relative image with alt text</small></span></button>
+            <button onClick={() => { setCommandOpen(false); insertStructuredCodeCell() }}><span className="command-icon"><Icon name="code" size={17} /></span><span><strong>Insert code cell</strong><small>Choose Python, R, or Julia explicitly</small></span></button>
             <button onClick={() => { setCommandOpen(false); runCell() }} disabled={!desktopSession}><span className="command-icon"><Icon name="play" size={17} /></span><span><strong>Run code cell</strong><small>{desktopSession ? 'Execute the current cell explicitly' : 'Desktop project required · unavailable to browser collaborators'}</small></span><kbd>⌘ ↵</kbd></button>
             <button onClick={() => { setCommandOpen(false); openSourceInspector() }}><span className="command-icon"><Icon name="code" size={17} /></span><span><strong>Inspect portable source</strong><small>Compare reviewed and clean projections</small></span></button>
           </div>
