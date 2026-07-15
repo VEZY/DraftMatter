@@ -112,6 +112,16 @@ function CitationChip({ onClick, label }: { onClick: () => void; label: string }
   )
 }
 
+function citationSourceBadge(record?: CitationRecord) {
+  if (!record) return { className: '', label: 'C' }
+  if (record.source === 'zotero') return { className: 'zotero', label: 'Z' }
+  if (record.source === 'bibtex') return { className: 'bib', label: 'B' }
+  if (record.source === 'ris') return { className: 'bib', label: 'R' }
+  if (record.source === 'endnote') return { className: 'bib', label: 'E' }
+  if (record.source === 'csl-json') return { className: '', label: 'C' }
+  return { className: '', label: 'L' }
+}
+
 function StatusPill({ status }: { status: SuggestionStatus }) {
   const label = status === 'needs-rebase' ? 'Needs rebase' : status[0].toUpperCase() + status.slice(1)
   return <span className={`status-pill status-${status}`}>{label}</span>
@@ -239,6 +249,7 @@ function App() {
   const resultsCitationLabel = renderedCitations.results ?? formatCitationCluster(citations, [{ citekey: 'coutellier2022' }])
   const activeCitationItem = draftCitationItems.find((item) => item.citekey === citationEditKey) ?? draftCitationItems[0]
   const activeCitationRecord = citations.find((record) => record.citekey === activeCitationItem?.citekey)
+  const activeCitationBadge = citationSourceBadge(activeCitationRecord)
   const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics]
 
   const replaceDesktopSession = (next: DesktopSession | null) => {
@@ -972,8 +983,8 @@ function App() {
     const file = event.currentTarget.files?.[0]
     event.currentTarget.value = ''
     if (!file) return
-    if (!/\.(bib|bibtex|json)$/i.test(file.name)) {
-      setToast('Choose a BibTeX or CSL JSON bibliography')
+    if (!/\.(bib|bibtex|json|ris|enw)$/i.test(file.name)) {
+      setToast('Choose a BibTeX, CSL JSON, RIS, or EndNote bibliography')
       return
     }
     if (file.size > 10 * 1024 * 1024) {
@@ -1050,7 +1061,7 @@ function App() {
                   ) : (
                     <button onClick={() => fileInputRef.current?.click()}><Icon name="document" size={16} /><span><strong>Open manuscript…</strong><small>Markdown or Quarto, up to 5 MB</small></span></button>
                   )}
-                  <button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={16} /><span><strong>Attach bibliography…</strong><small>BibTeX or CSL JSON · {citations.length} indexed</small></span></button>
+                  <button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={16} /><span><strong>Attach bibliography…</strong><small>BibTeX, CSL JSON, RIS, or EndNote · {citations.length} indexed</small></span></button>
                   <button onClick={createSnapshot}><Icon name="clock" size={16} /><span><strong>Save recovery snapshot</strong><small>Keep a private safety copy on this device</small></span></button>
                   <button onClick={() => { setRecoveryOpen(true); setProjectMenuOpen(false) }}><Icon name="history" size={16} /><span><strong>Recovery history</strong><small>{recoveries.length ? `${recoveries.length} local version${recoveries.length === 1 ? '' : 's'}` : 'No local versions yet'}</small></span><span className="menu-count">{recoveries.length}</span></button>
                   <button onClick={() => download('reviewed')}><Icon name="download" size={16} /><span><strong>Download portable source</strong><small>Save {filename} to this computer</small></span></button>
@@ -1124,7 +1135,7 @@ function App() {
         </div>
       )}
       <input ref={fileInputRef} className="visually-hidden" type="file" accept=".md,.qmd,text/markdown" onChange={onFileSelected} aria-label="Open portable manuscript" />
-      <input ref={bibliographyInputRef} className="visually-hidden" type="file" accept=".bib,.bibtex,.json,application/json" onChange={onBibliographySelected} aria-label="Attach bibliography" />
+      <input ref={bibliographyInputRef} className="visually-hidden" type="file" accept=".bib,.bibtex,.json,.ris,.enw,application/json,text/plain" onChange={onBibliographySelected} aria-label="Attach bibliography" />
 
       <div className="workspace">
         <nav className="app-rail" aria-label="Workspace navigation">
@@ -1217,7 +1228,7 @@ function App() {
               {citationOpen && (
                 <div className="citation-detail popover">
                   <div className="citation-detail-top">
-                    <span className={`source-icon ${activeCitationRecord?.source === 'zotero' ? 'zotero' : activeCitationRecord?.source === 'bibtex' ? 'bib' : ''}`}>{activeCitationRecord?.source === 'zotero' ? 'Z' : activeCitationRecord?.source === 'bibtex' ? 'B' : 'C'}</span>
+                    <span className={`source-icon ${activeCitationBadge.className}`}>{activeCitationBadge.label}</span>
                     <div><strong>Citation cluster · {draftCitationItems.length} source{draftCitationItems.length === 1 ? '' : 's'}</strong><p>{citationLabel}</p></div>
                     <button className="icon-button subtle" onClick={() => setCitationOpen(false)} aria-label="Close citation details"><Icon name="close" size={15} /></button>
                   </div>
@@ -1496,6 +1507,7 @@ function App() {
               {citationResults.length ? citationResults.map((record) => {
                 const isCited = citationPickerItems.some((item) => item.citekey === record.citekey)
                 const isActive = citationResults[citationActiveIndex]?.citekey === record.citekey
+                const badge = citationSourceBadge(record)
                 return (
                   <button
                     id={`citation-result-${record.citekey}`}
@@ -1505,12 +1517,12 @@ function App() {
                     onMouseEnter={() => setCitationActiveIndex(citationResults.indexOf(record))}
                     aria-pressed={isCited}
                   >
-                    <span className={`source-icon ${record.source === 'bibtex' ? 'bib' : record.source === 'zotero' ? 'zotero' : ''}`}>{record.source === 'bibtex' ? 'B' : record.source === 'csl-json' ? 'C' : record.source === 'zotero' ? 'Z' : 'L'}</span>
+                    <span className={`source-icon ${badge.className}`}>{badge.label}</span>
                     <span><strong>{record.title}</strong><small>{record.authors.length ? record.authors.slice(0, 2).join(' & ') : record.citekey}{record.year ? ` · ${record.year}` : ''}{record.container ? ` · ${record.container}` : ''}</small><em>{record.doi ?? `@${record.citekey}`}{record.availability === 'cached' ? ' · cached copy' : ''}</em></span>
                     {isCited ? <Icon name="check" /> : <Icon name="plus" />}
                   </button>
                 )
-              }) : <div className="citation-empty"><Icon name="search" size={21} /><strong>No matching sources</strong><p>Try fewer terms, open Zotero, or import a BibTeX/CSL JSON file.</p></div>}
+              }) : <div className="citation-empty"><Icon name="search" size={21} /><strong>No matching sources</strong><p>Try fewer terms, open Zotero, or import a bibliography file.</p></div>}
             </div>
             <div className="picker-footer">
               <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Select</span><span><kbd>⌘</kbd><kbd>↵</kbd> Confirm</span>

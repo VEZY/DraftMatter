@@ -22,6 +22,13 @@ const bibtex: CitationRecord = {
   sourceIdentity: undefined,
 }
 
+const ris: CitationRecord = {
+  ...bibtex,
+  citekey: 'dupont2024canopy',
+  source: 'ris',
+  provenance: { origin: 'project-file', locator: 'library.ris' },
+}
+
 describe('citation lock', () => {
   it('serializes deterministically with durable source identity and normalized identifiers', () => {
     const lock = buildCitationLock([zotero, bibtex])
@@ -43,6 +50,15 @@ describe('citation lock', () => {
     expect(diagnoseCitationLock([renamed], ['martinCanopy2025'], lock)).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'citation-key-renamed-martincanopy2025', level: 'warning' }),
     ]))
+  })
+
+  it('round-trips tagged-text bibliography identities', () => {
+    const lock = buildCitationLock([ris, { ...ris, citekey: 'alvarez2020field', source: 'endnote', provenance: { origin: 'project-file', locator: 'export.enw' } }])
+    const source = serializeCitationLock(lock)
+
+    expect(source).toContain('"format": "ris"')
+    expect(source).toContain('"format": "endnote"')
+    expect(parseCitationLock(source)).toEqual({ lock, diagnostics: [] })
   })
 
   it('refreshes source versions only when the locked citekey identity is unchanged', () => {

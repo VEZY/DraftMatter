@@ -32,7 +32,7 @@ function isCitationRecord(value: unknown): value is CitationRecord {
     && typeof record.title === 'string'
     && Array.isArray(record.authors)
     && record.authors.every((author) => typeof author === 'string')
-    && (record.source === 'bibtex' || record.source === 'csl-json' || record.source === 'zotero' || record.source === 'sample')
+    && (record.source === 'bibtex' || record.source === 'csl-json' || record.source === 'ris' || record.source === 'endnote' || record.source === 'zotero' || record.source === 'sample')
 }
 
 function cachedRecord(record: CitationRecord): CitationRecord {

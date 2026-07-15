@@ -4,7 +4,7 @@ export const CITATION_LOCK_SCHEMA = 1 as const
 
 export type CitationLockSource =
   | { provider: 'zotero'; itemKey: string }
-  | { provider: 'bibliography'; format: 'bibtex' | 'csl-json'; locator: string; sourceKey: string }
+  | { provider: 'bibliography'; format: 'bibtex' | 'csl-json' | 'ris' | 'endnote'; locator: string; sourceKey: string }
   | { provider: 'sample'; sourceKey: string }
 
 export interface CitationLockEntry {
@@ -39,7 +39,7 @@ export function citationLockSource(record: CitationRecord): CitationLockSource {
   if (record.sourceIdentity?.provider === 'zotero') {
     return { provider: 'zotero', itemKey: record.sourceIdentity.itemKey }
   }
-  if (record.source === 'bibtex' || record.source === 'csl-json') {
+  if (record.source === 'bibtex' || record.source === 'csl-json' || record.source === 'ris' || record.source === 'endnote') {
     return {
       provider: 'bibliography',
       format: record.source,
@@ -126,7 +126,7 @@ function isLockSource(value: unknown): value is CitationLockSource {
   const source = value as Partial<CitationLockSource> & Record<string, unknown>
   if (source.provider === 'zotero') return typeof source.itemKey === 'string' && Boolean(source.itemKey)
   if (source.provider === 'bibliography') {
-    return (source.format === 'bibtex' || source.format === 'csl-json')
+    return (source.format === 'bibtex' || source.format === 'csl-json' || source.format === 'ris' || source.format === 'endnote')
       && typeof source.locator === 'string'
       && typeof source.sourceKey === 'string'
   }

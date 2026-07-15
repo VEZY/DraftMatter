@@ -327,7 +327,7 @@ fn discover_entries(
             .to_ascii_lowercase();
         match extension.as_str() {
             "md" | "qmd" => documents.push(read_entry(root, &path, ProjectEntryKind::Manuscript)?),
-            "bib" | "bibtex" | "json" => {
+            "bib" | "bibtex" | "json" | "ris" | "enw" => {
                 bibliographies.push(read_entry(root, &path, ProjectEntryKind::Bibliography)?)
             }
             _ => {}
@@ -419,7 +419,7 @@ fn bibliography_extension(path: &Path) -> bool {
             .unwrap_or_default()
             .to_ascii_lowercase()
             .as_str(),
-        "bib" | "bibtex" | "json"
+        "bib" | "bibtex" | "json" | "ris" | "enw"
     )
 }
 
@@ -447,7 +447,7 @@ fn read_bibliography_impl(raw_root: &str, relative: &str) -> Result<DocumentSnap
     let path = contained_path(&root, relative)?;
     if !bibliography_extension(&path) {
         return Err(HostError::UnsupportedFile(format!(
-            "Only .bib, .bibtex, and .json bibliography files can be read: {relative}"
+            "Only .bib, .bibtex, .json, .ris, and .enw bibliography files can be read: {relative}"
         )));
     }
     let metadata = fs::metadata(&path)
@@ -1294,10 +1294,23 @@ mod tests {
             "@article{vezy2024, title={Portable research}}",
         )
         .unwrap();
+        fs::write(root.join("library.ris"), "TY  - JOUR\nER  -\n").unwrap();
+        fs::write(root.join("export.enw"), "%0 Journal Article\n%T Portable\n").unwrap();
 
         let bibliography =
             read_bibliography_impl(root.to_str().unwrap(), "references.bib").unwrap();
         assert!(bibliography.content.contains("vezy2024"));
+        assert!(read_bibliography_impl(root.to_str().unwrap(), "library.ris").is_ok());
+        assert!(read_bibliography_impl(root.to_str().unwrap(), "export.enw").is_ok());
+        let discovered = open_project_impl(root.to_str().unwrap()).unwrap();
+        assert_eq!(
+            discovered
+                .bibliographies
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["export.enw", "library.ris", "references.bib"]
+        );
         assert!(matches!(
             read_bibliography_impl(root.to_str().unwrap(), "paper.qmd"),
             Err(HostError::UnsupportedFile(_))

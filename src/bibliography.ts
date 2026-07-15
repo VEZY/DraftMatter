@@ -1,6 +1,8 @@
 import { normalizeCitationItems } from './citation'
 import type { BibliographyResult, CitationItem, CitationRecord, DocumentDiagnostic } from './types'
 
+export type BibliographyFormat = 'bibtex' | 'csl-json' | 'ris' | 'endnote'
+
 function cleanLatex(value: string) {
   return value
     .replace(/\\&/g, '&')
@@ -15,6 +17,32 @@ function normalizeAuthor(author: string) {
   if (!cleaned.includes(',')) return cleaned
   const [family, given] = cleaned.split(',').map((part) => part.trim())
   return [given, family].filter(Boolean).join(' ')
+}
+
+function normalizeDoi(value?: string) {
+  return value?.trim().replace(/^doi:\s*/i, '').replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '') || undefined
+}
+
+function citekeyPart(value: string) {
+  return value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-zA-Z0-9]+/g, '').toLowerCase()
+}
+
+function fallbackCitekey(authors: string[], year: string | undefined, title: string, format: 'ris' | 'endnote', index: number) {
+  const family = authors[0]?.split(/\s+/).at(-1) ?? ''
+  const titleWord = title.split(/\s+/).find((word) => citekeyPart(word).length >= 3) ?? ''
+  return `${citekeyPart(family) || format}${year?.match(/\d{4}/)?.[0] ?? ''}${citekeyPart(titleWord) || index + 1}`
+}
+
+function uniqueCitekey(candidate: string, seenKeys: Set<string>) {
+  const base = candidate.trim()
+  let key = base
+  let suffix = 2
+  while (seenKeys.has(key.toLowerCase())) {
+    key = `${base}-${suffix}`
+    suffix += 1
+  }
+  seenKeys.add(key.toLowerCase())
+  return key
 }
 
 function findBalancedEnd(source: string, start: number, open: string, close: string) {
@@ -137,8 +165,8 @@ export function parseBibTeX(source: string): BibliographyResult {
       title: fields.title || 'Untitled reference',
       authors: fields.author ? fields.author.split(/\s+and\s+/i).map(normalizeAuthor) : [],
       year: fields.year || fields.date?.slice(0, 4),
-      container: fields.journal || fields.booktitle || fields.publisher,
-      doi: fields.doi?.replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, ''),
+      container: fields.journaltitle || fields.journal || fields.booktitle || fields.publisher,
+      doi: normalizeDoi(fields.doi),
       url: fields.url,
       source: 'bibtex',
     })
@@ -147,6 +175,143 @@ export function parseBibTeX(source: string): BibliographyResult {
   if (!records.length && !diagnostics.some((item) => item.level === 'error')) {
     diagnostics.push({ code: 'bibtex-empty', level: 'warning', message: 'No bibliography entries were found.' })
   }
+  return { records, diagnostics }
+}
+
+const risTypeMap: Record<string, string> = {
+  ABST: 'article',
+  BOOK: 'book',
+  CHAP: 'chapter',
+  CONF: 'paper-conference',
+  CPAPER: 'paper-conference',
+  ELEC: 'webpage',
+  JOUR: 'article-journal',
+  MGZN: 'article-magazine',
+  RPRT: 'report',
+  SER: 'book',
+  THES: 'thesis',
+}
+
+function taggedLines(source: string, pattern: RegExp) {
+  const records: Array<Map<string, string[]>> = []
+  let current = new Map<string, string[]>()
+  let previousTag = ''
+  for (const line of source.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n')) {
+    const match = line.match(pattern)
+    if (match) {
+      const tag = match[1].toUpperCase()
+      if ((tag === 'TY' || tag === '%0') && current.size) {
+        records.push(current)
+        current = new Map<string, string[]>()
+      }
+      current.set(tag, [...(current.get(tag) ?? []), match[2].trim()])
+      previousTag = tag
+      if (tag === 'ER') {
+        records.push(current)
+        current = new Map<string, string[]>()
+        previousTag = ''
+      }
+    } else if (previousTag && line.trim()) {
+      const values = current.get(previousTag) ?? []
+      if (values.length) values[values.length - 1] = `${values.at(-1)} ${line.trim()}`
+    }
+  }
+  if (current.size) records.push(current)
+  return records
+}
+
+function firstField(fields: Map<string, string[]>, ...tags: string[]) {
+  return tags.flatMap((tag) => fields.get(tag) ?? []).find((value) => Boolean(value?.trim()))
+}
+
+export function parseRis(source: string): BibliographyResult {
+  const diagnostics: DocumentDiagnostic[] = []
+  const seenKeys = new Set<string>()
+  const tagged = taggedLines(source, /^([A-Z0-9]{2})\s{2}-\s?(.*)$/i)
+  const records = tagged.flatMap<CitationRecord>((fields, index) => {
+    const type = firstField(fields, 'TY')
+    const ended = fields.has('ER')
+    if (!type) {
+      diagnostics.push({ code: `ris-type-missing-${index + 1}`, level: 'error', message: `Skipped RIS record ${index + 1} because it has no TY type marker.` })
+      return []
+    }
+    if (!ended) diagnostics.push({ code: `ris-record-unclosed-${index + 1}`, level: 'warning', message: `RIS record ${index + 1} has no ER end marker; its readable fields were retained.` })
+    const title = firstField(fields, 'TI', 'T1', 'CT') ?? 'Untitled reference'
+    const authors = [...(fields.get('AU') ?? []), ...(fields.get('A1') ?? [])].map(normalizeAuthor).filter(Boolean)
+    const year = firstField(fields, 'PY', 'Y1', 'DA')?.match(/\d{4}/)?.[0]
+    const requestedKey = firstField(fields, 'ID')
+    const generatedKey = fallbackCitekey(authors, year, title, 'ris', index)
+    const normalizedRequested = requestedKey?.toLowerCase()
+    if (normalizedRequested && seenKeys.has(normalizedRequested)) {
+      diagnostics.push({ code: `ris-key-duplicate-${normalizedRequested}`, level: 'warning', message: `Skipped duplicate RIS citation key ${requestedKey}.` })
+      return []
+    }
+    const citekey = requestedKey ? uniqueCitekey(requestedKey, seenKeys) : uniqueCitekey(generatedKey, seenKeys)
+    if (!requestedKey) diagnostics.push({ code: `ris-id-generated-${index + 1}`, level: 'info', message: `RIS record ${index + 1} has no ID; generated citation key ${citekey}.` })
+    if (title === 'Untitled reference') diagnostics.push({ code: `ris-title-missing-${citekey}`, level: 'warning', message: `${citekey} has no title.` })
+    return [{
+      citekey,
+      type: risTypeMap[type.toUpperCase()] ?? type.toLowerCase(),
+      title,
+      authors,
+      year,
+      container: firstField(fields, 'JO', 'JF', 'T2', 'JA', 'PB'),
+      doi: normalizeDoi(firstField(fields, 'DO')),
+      url: firstField(fields, 'UR', 'L1', 'L2'),
+      source: 'ris',
+    }]
+  })
+  if (!records.length && !diagnostics.length) diagnostics.push({ code: 'ris-empty', level: 'warning', message: 'No RIS records were found.' })
+  return { records, diagnostics }
+}
+
+const endnoteTypeMap: Record<string, string> = {
+  'book': 'book',
+  'book section': 'chapter',
+  'conference paper': 'paper-conference',
+  'electronic article': 'article-journal',
+  'journal article': 'article-journal',
+  'report': 'report',
+  'thesis': 'thesis',
+  'web page': 'webpage',
+}
+
+export function parseEndNote(source: string): BibliographyResult {
+  const diagnostics: DocumentDiagnostic[] = []
+  const seenKeys = new Set<string>()
+  const tagged = taggedLines(source, /^(%[0A-Z])\s*(.*)$/i)
+  const records = tagged.flatMap<CitationRecord>((fields, index) => {
+    const type = firstField(fields, '%0')
+    if (!type) {
+      diagnostics.push({ code: `endnote-type-missing-${index + 1}`, level: 'error', message: `Skipped EndNote record ${index + 1} because it has no %0 reference type.` })
+      return []
+    }
+    const title = firstField(fields, '%T') ?? 'Untitled reference'
+    const authors = (fields.get('%A') ?? []).map(normalizeAuthor).filter(Boolean)
+    const year = firstField(fields, '%D')?.match(/\d{4}/)?.[0]
+    const requestedKey = firstField(fields, '%F')
+    const generatedKey = fallbackCitekey(authors, year, title, 'endnote', index)
+    const normalizedRequested = requestedKey?.toLowerCase()
+    if (normalizedRequested && seenKeys.has(normalizedRequested)) {
+      diagnostics.push({ code: `endnote-key-duplicate-${normalizedRequested}`, level: 'warning', message: `Skipped duplicate EndNote citation key ${requestedKey}.` })
+      return []
+    }
+    const citekey = requestedKey ? uniqueCitekey(requestedKey, seenKeys) : uniqueCitekey(generatedKey, seenKeys)
+    if (!requestedKey) diagnostics.push({ code: `endnote-id-generated-${index + 1}`, level: 'info', message: `EndNote record ${index + 1} has no %F label; generated citation key ${citekey}.` })
+    if (title === 'Untitled reference') diagnostics.push({ code: `endnote-title-missing-${citekey}`, level: 'warning', message: `${citekey} has no title.` })
+    return [{
+      citekey,
+      type: endnoteTypeMap[type.toLowerCase()] ?? type.toLowerCase().replaceAll(' ', '-'),
+      title,
+      authors,
+      year,
+      container: firstField(fields, '%J', '%B', '%I'),
+      doi: normalizeDoi(firstField(fields, '%R')),
+      url: firstField(fields, '%U'),
+      source: 'endnote',
+    }]
+  })
+  if (!records.length && !diagnostics.length) diagnostics.push({ code: 'endnote-empty', level: 'warning', message: 'No EndNote tagged-text records were found.' })
   return { records, diagnostics }
 }
 
@@ -203,7 +368,16 @@ export function parseBibliographyFile(
   source: string,
   origin: NonNullable<CitationRecord['provenance']>['origin'] = 'manual-import',
 ) {
-  const parsed = /\.json$/i.test(filename) ? parseCslJson(source) : parseBibTeX(source)
+  const format = detectBibliographyFormat(filename, source)
+  const parsed = format === 'csl-json'
+    ? parseCslJson(source)
+    : format === 'bibtex'
+      ? parseBibTeX(source)
+      : format === 'ris'
+        ? parseRis(source)
+        : format === 'endnote'
+          ? parseEndNote(source)
+          : { records: [], diagnostics: [{ code: 'bibliography-format-unknown', level: 'error' as const, message: `Could not identify the bibliography format for ${filename}.` }] }
   return {
     ...parsed,
     records: parsed.records.map((record) => ({
@@ -211,6 +385,19 @@ export function parseBibliographyFile(
       provenance: { origin, locator: filename },
     })),
   }
+}
+
+export function detectBibliographyFormat(filename: string, source: string): BibliographyFormat | null {
+  if (/\.json$/i.test(filename)) return 'csl-json'
+  if (/\.(?:bib|bibtex)$/i.test(filename)) return 'bibtex'
+  if (/\.ris$/i.test(filename)) return 'ris'
+  if (/\.enw$/i.test(filename)) return 'endnote'
+  const content = source.trimStart()
+  if (/^[\[{]/.test(content)) return 'csl-json'
+  if (/^@[a-zA-Z]+\s*[({]/.test(content)) return 'bibtex'
+  if (/^TY\s{2}-/m.test(content)) return 'ris'
+  if (/^%0\s+/m.test(content)) return 'endnote'
+  return null
 }
 
 export async function loadProjectBibliographies(

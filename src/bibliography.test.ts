@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest'
-import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, parseBibTeX, parseCslJson, searchCitations } from './bibliography'
+import { detectBibliographyFormat, formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, parseBibliographyFile, parseBibTeX, parseCslJson, parseEndNote, parseRis, searchCitations } from './bibliography'
 import { sampleCitations } from './sampleCitations'
+import endnoteFixture from './fixtures/bibliography/multi-record.enw?raw'
+import risFixture from './fixtures/bibliography/multi-record.ris?raw'
 
 describe('local bibliography', () => {
   it('parses braced and quoted BibTeX fields', () => {
@@ -26,6 +28,85 @@ describe('local bibliography', () => {
   it('parses CSL JSON records', () => {
     const result = parseCslJson(JSON.stringify([{ id: 'martin2023', type: 'article-journal', title: 'Growth coordination', author: [{ given: 'Alice', family: 'Martin' }], issued: { 'date-parts': [[2023]] } }]))
     expect(result.records[0]).toMatchObject({ citekey: 'martin2023', authors: ['Alice Martin'], year: '2023' })
+  })
+
+  it('parses multi-record RIS with Unicode, repeated authors, and generated keys', () => {
+    const result = parseRis(risFixture)
+
+    expect(result.records).toEqual([
+      expect.objectContaining({
+        citekey: 'dupont2024canopy',
+        type: 'article-journal',
+        title: 'Réponses du couvert à la sécheresse',
+        authors: ['Élodie Dupont', 'Rémi Vezy'],
+        year: '2024',
+        container: 'Écologie végétale',
+        doi: '10.1000/canopy.2024',
+        source: 'ris',
+      }),
+      expect.objectContaining({
+        citekey: 'chen2021portable',
+        type: 'book',
+        title: 'Portable research archives',
+        authors: ['Bo Chen'],
+        year: '2021',
+        source: 'ris',
+      }),
+    ])
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: 'ris-id-generated-2', level: 'info' }),
+    ])
+  })
+
+  it('parses multi-record EndNote tagged text and continuation lines', () => {
+    const result = parseEndNote(endnoteFixture)
+
+    expect(result.records).toEqual([
+      expect.objectContaining({
+        citekey: 'martin2023growth',
+        type: 'article-journal',
+        authors: ['Alice Martin', 'Marcus Chen'],
+        doi: '10.1111/nph.19208',
+        source: 'endnote',
+      }),
+      expect.objectContaining({
+        citekey: 'alvarez2020field',
+        type: 'report',
+        title: 'A field protocol for intermittent drought',
+        authors: ['Niña Alvarez'],
+        year: '2020',
+        source: 'endnote',
+      }),
+    ])
+    expect(result.diagnostics).toEqual([
+      expect.objectContaining({ code: 'endnote-id-generated-2', level: 'info' }),
+    ])
+  })
+
+  it('sniffs interchange formats and attaches file provenance', () => {
+    expect(detectBibliographyFormat('pasted.txt', risFixture)).toBe('ris')
+    expect(detectBibliographyFormat('pasted.txt', endnoteFixture)).toBe('endnote')
+    expect(detectBibliographyFormat('references.data', '{"id":"one"}')).toBe('csl-json')
+    expect(detectBibliographyFormat('references.data', '@article{one, title={One}}')).toBe('bibtex')
+    expect(detectBibliographyFormat('notes.txt', 'plain notes')).toBeNull()
+    expect(parseBibliographyFile('library.ris', risFixture).records[0].provenance).toEqual({ origin: 'manual-import', locator: 'library.ris' })
+    expect(parseBibliographyFile('library.enw', endnoteFixture, 'project-file').records[0].provenance).toEqual({ origin: 'project-file', locator: 'library.enw' })
+  })
+
+  it('reports malformed and duplicate tagged-text records deterministically', () => {
+    const ris = parseRis('TY  - JOUR\nID  - same\nTI  - First\nER  -\nTY  - BOOK\nID  - SAME\nTI  - Duplicate\nER  -\nTY  - JOUR\nTI  - Open')
+    expect(ris.records.map((record) => record.citekey)).toEqual(['same', 'risopen'])
+    expect(ris.diagnostics).toEqual([
+      expect.objectContaining({ code: 'ris-key-duplicate-same', level: 'warning' }),
+      expect.objectContaining({ code: 'ris-record-unclosed-3', level: 'warning' }),
+      expect.objectContaining({ code: 'ris-id-generated-3', level: 'info' }),
+    ])
+
+    const endnote = parseEndNote('%A Martin, Alice\n%T Missing type')
+    expect(endnote.records).toEqual([])
+    expect(endnote.diagnostics).toEqual([
+      expect.objectContaining({ code: 'endnote-type-missing-1', level: 'error' }),
+    ])
   })
 
   it('deduplicates by citation key without silently merging a matching DOI', () => {

@@ -34,6 +34,22 @@ describe('offline cited-record cache', () => {
     expect(offline).toEqual({ cache: first.cache, diagnostics: [] })
   })
 
+  it('retains normalized tagged-text records across an offline reopen', () => {
+    const ris: CitationRecord = {
+      ...zotero,
+      citekey: 'dupont2024canopy',
+      source: 'ris',
+      provenance: { origin: 'project-file', locator: 'library.ris' },
+      sourceIdentity: undefined,
+    }
+    const reopened = parseCitationCache(serializeCitationCache(createCitationCache([ris], [ris.citekey]).cache))
+
+    expect(reopened).toEqual({
+      cache: { schemaVersion: 1, records: [expect.objectContaining({ citekey: ris.citekey, source: 'ris', availability: 'cached' })] },
+      diagnostics: [],
+    })
+  })
+
   it('isolates project caches and degrades cleanly for invalid or unavailable storage', () => {
     const values = new Map<string, string>()
     const storage = {
