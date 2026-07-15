@@ -349,10 +349,19 @@ function parseBlocks(lines: SourceLine[], diagnostics: DocumentDiagnostic[], ord
       continue
     }
 
-    const image = value.match(/^\s*!\[([^\]]*)\]\(([^)\s]+)(?:\s+["']([^"']*)["'])?\)(?:\{#([^}\s]+)[^}]*\})?\s*$/)
+    const image = value.match(/^\s*!\[([^\]]*)\]\(([^)\s]+)(?:\s+["']([^"']*)["'])?\)(?:\s*\{([^}\r\n]+)\})?\s*$/)
     if (image) {
       const imageId = id('image', lines[index].raw)
-      const content = [manuscriptSchema.nodes.image.createChecked({ id: imageId, src: image[2], alt: image[1], title: image[3] || null, label: image[4] || null })]
+      const sourceAttributes = image[4] || null
+      const label = sourceAttributes?.match(/(?:^|\s)#([a-zA-Z][\w.:-]*)/)?.[1] ?? null
+      const content = [manuscriptSchema.nodes.image.createChecked({
+        id: imageId,
+        src: image[2],
+        alt: image[1],
+        title: image[3] || null,
+        label,
+        sourceAttributes,
+      })]
       if (lines[index + 1]?.content.match(/^:\s+(.+)/)) {
         const caption = lines[index + 1].content.replace(/^:\s+/, '')
         content.push(manuscriptSchema.nodes.caption.createChecked({ id: `${imageId}-caption` }, inlineNodes(caption, `${imageId}-caption`)))
@@ -525,8 +534,12 @@ function serializeBlock(node: ProseMirrorNode, ending: string, index = 0): strin
     const caption = node.childCount > 1 ? node.child(1) : undefined
     if (!image) return ''
     const title = image.attrs.title ? ` "${image.attrs.title}"` : ''
-    const label = image.attrs.label ? `{#${image.attrs.label}}` : ''
-    return `![${image.attrs.alt}](${image.attrs.src}${title})${label}${caption ? `${ending}: ${serializeInlineContent(caption)}` : ''}`
+    const attributes = image.attrs.sourceAttributes
+      ? `{${image.attrs.sourceAttributes}}`
+      : image.attrs.label
+        ? `{#${image.attrs.label}}`
+        : ''
+    return `![${image.attrs.alt}](${image.attrs.src}${title})${attributes}${caption ? `${ending}: ${serializeInlineContent(caption)}` : ''}`
   }
   if (node.type === manuscriptSchema.nodes.footnote_definition) return `[^${node.attrs.label}]: ${node.attrs.contentMarkdown}`
   if (node.type === manuscriptSchema.nodes.table) return serializeTable(node, ending)

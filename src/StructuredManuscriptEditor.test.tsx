@@ -21,7 +21,7 @@ $$ {#eq-fit .unnumbered}
 | --- | ---: |
 | Drought | 18 |
 
-![Growth](figures/growth.svg){#fig-growth}
+![Growth](figures/growth.svg){#fig-growth .wide data-owner="field-team"}
 : Growth response.
 
 ~~~python {#cell-growth .execute output="figure"}
@@ -128,6 +128,7 @@ describe('full structured manuscript editor', () => {
     expect(changed.at(-1)).toContain('::: {.future-widget}\nOpaque raw payload.\n:::')
     expect(changed.at(-1)).toContain('::::: {.draftmatter-reviews .hidden data-schema="1"}')
     expect(changed.at(-1)).toContain('[]{#dm-point .dm-anchor data-anchor="dm-comment" data-edge="point"}')
+    expect(changed.at(-1)).toContain('{#fig-growth .wide data-owner="field-team"}')
 
     await act(async () => { expect(editorRef.current?.setHeading(2)).toBe(true) })
     expect(changed.at(-1)).toContain('## Generic manuscript')
@@ -275,6 +276,47 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector('.structured-equation-inline')?.textContent).not.toContain('\\frac')
   })
 
+  it('edits semantic figure metadata and keeps matching cross-references valid', async () => {
+    const changed: string[] = []
+    const asset = vi.fn((path: string) => `asset://${path}`)
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={source} onChange={(next) => changed.push(next)} resolveAssetUrl={asset} />,
+    ))
+
+    const figure = container.querySelector<HTMLElement>('.structured-figure-media')!
+    expect(figure.id).toBe('fig-growth')
+    expect(figure.querySelector('img')?.alt).toBe('Growth')
+    expect(container.querySelector('[data-dm-node="cross-reference"]')?.getAttribute('href')).toBe('#fig-growth')
+
+    await act(async () => figure.querySelector<HTMLButtonElement>('[aria-label="Edit figure fig-growth"]')?.click())
+    const label = figure.querySelector<HTMLInputElement>('[aria-label="Figure label"]')!
+    label.value = ''
+    label.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(figure.querySelector('.structured-figure-validation')?.textContent).toContain('referenced')
+    expect(figure.querySelector<HTMLButtonElement>('.structured-figure-actions .primary-button')?.disabled).toBe(true)
+
+    const values = [
+      ['Figure source path', 'figures/growth-revised.svg'],
+      ['Figure alternative text', 'Revised growth response'],
+      ['Figure title', 'Measured canopy response'],
+      ['Figure label', 'fig-response'],
+    ] as const
+    for (const [ariaLabel, value] of values) {
+      const input = figure.querySelector<HTMLInputElement>(`[aria-label="${ariaLabel}"]`)!
+      input.value = value
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    }
+    await act(async () => figure.querySelector<HTMLButtonElement>('.structured-figure-actions .primary-button')?.click())
+
+    expect(changed.at(-1)).toContain('![Revised growth response](figures/growth-revised.svg "Measured canopy response"){#fig-response .wide data-owner="field-team"}')
+    expect(changed.at(-1)).toContain('@fig-response')
+    expect(changed.at(-1)).not.toContain('@fig-growth')
+    expect(figure.id).toBe('fig-response')
+    expect(figure.querySelector('img')?.getAttribute('src')).toBe('asset://figures/growth-revised.svg')
+    expect(figure.querySelector('img')?.getAttribute('title')).toBe('Measured canopy response')
+    expect(container.querySelector('[data-dm-node="cross-reference"]')?.getAttribute('href')).toBe('#fig-response')
+  })
+
   it.each([
     ['table', (editor: StructuredManuscriptEditorHandle) => editor.insertTable(), '| --- | --- |'],
     ['figure', (editor: StructuredManuscriptEditorHandle) => editor.insertFigure('figures/growth.svg', 'Growth', 'Growth response.', 'fig-growth'), '![Growth](figures/growth.svg){#fig-growth}'],
@@ -299,5 +341,6 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector<HTMLTextAreaElement>('.structured-code-editor')?.readOnly).toBe(true)
     expect(container.querySelector<HTMLButtonElement>('.structured-footnote-edit')?.disabled).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-equation-edit')].every((button) => button.disabled)).toBe(true)
+    expect([...container.querySelectorAll<HTMLButtonElement>('.structured-figure-edit')].every((button) => button.disabled)).toBe(true)
   })
 })

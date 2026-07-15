@@ -620,14 +620,239 @@ function outputNodeView(node: ProseMirrorNode, resolveAssetUrl: (path: string) =
   return { dom }
 }
 
-function imageNodeView(node: ProseMirrorNode, resolveAssetUrl: (path: string) => string): NodeView {
-  const dom = document.createElement('img')
-  dom.src = resolveAssetUrl(String(node.attrs.src))
-  dom.alt = String(node.attrs.alt ?? '')
-  dom.title = String(node.attrs.title ?? '')
-  dom.dataset.label = String(node.attrs.label ?? '')
-  dom.dataset.dmId = String(node.attrs.id)
-  return { dom }
+function updatePortableAttributeId(sourceAttributes: unknown, previousLabel: string, nextLabel: string) {
+  if (previousLabel === nextLabel) return sourceAttributes ? String(sourceAttributes) : (nextLabel ? `#${nextLabel}` : null)
+  const source = sourceAttributes ? String(sourceAttributes) : ''
+  const id = /(^|\s)#[a-zA-Z][\w.:-]*(?=\s|$)/
+  if (nextLabel) {
+    if (id.test(source)) return source.replace(id, (_match, prefix: string) => `${prefix}#${nextLabel}`)
+    return [`#${nextLabel}`, source.trim()].filter(Boolean).join(' ')
+  }
+  const withoutId = source.replace(id, '$1').replace(/\s+/g, ' ').trim()
+  return withoutId || null
+}
+
+function imageNodeView(
+  initialNode: ProseMirrorNode,
+  view: EditorView,
+  getPos: () => number | undefined,
+  resolveAssetUrl: (path: string) => string,
+  isEditable: () => boolean,
+): NodeView {
+  let node = initialNode
+  let editing = false
+  const dom = document.createElement('div')
+  dom.className = 'structured-figure-media'
+  dom.contentEditable = 'false'
+
+  const header = document.createElement('div')
+  header.className = 'structured-figure-header'
+  const descriptor = document.createElement('span')
+  descriptor.className = 'structured-figure-label'
+  const edit = document.createElement('button')
+  edit.type = 'button'
+  edit.className = 'structured-figure-edit'
+  edit.textContent = 'Edit figure'
+  header.append(descriptor, edit)
+
+  const image = document.createElement('img')
+  image.loading = 'lazy'
+  image.decoding = 'async'
+
+  const editor = document.createElement('div')
+  editor.className = 'structured-figure-editor'
+  editor.hidden = true
+  const fields = document.createElement('div')
+  fields.className = 'structured-figure-fields'
+  const field = (text: string, input: HTMLInputElement, note?: string) => {
+    const label = document.createElement('label')
+    const caption = document.createElement('span')
+    caption.textContent = text
+    label.append(caption, input)
+    if (note) {
+      const hint = document.createElement('small')
+      hint.textContent = note
+      label.append(hint)
+    }
+    return label
+  }
+  const source = document.createElement('input')
+  source.type = 'text'
+  source.className = 'structured-figure-input'
+  source.setAttribute('aria-label', 'Figure source path')
+  source.spellcheck = false
+  const alt = document.createElement('input')
+  alt.type = 'text'
+  alt.className = 'structured-figure-input'
+  alt.setAttribute('aria-label', 'Figure alternative text')
+  const title = document.createElement('input')
+  title.type = 'text'
+  title.className = 'structured-figure-input'
+  title.setAttribute('aria-label', 'Figure title')
+  const labelInput = document.createElement('input')
+  labelInput.type = 'text'
+  labelInput.className = 'structured-figure-input'
+  labelInput.setAttribute('aria-label', 'Figure label')
+  labelInput.spellcheck = false
+  fields.append(
+    field('Image source', source, 'Use a project-relative path.'),
+    field('Alternative text', alt, 'Leave blank only when the image is decorative.'),
+    field('Hover title', title, 'Optional.'),
+    field('Cross-reference label', labelInput, 'Optional; changing it also updates matching references.'),
+  )
+  const validation = document.createElement('p')
+  validation.className = 'structured-figure-validation'
+  validation.hidden = true
+  const actions = document.createElement('div')
+  actions.className = 'structured-figure-actions'
+  const cancel = document.createElement('button')
+  cancel.type = 'button'
+  cancel.textContent = 'Cancel'
+  const save = document.createElement('button')
+  save.type = 'button'
+  save.className = 'primary-button'
+  save.textContent = 'Save figure'
+  actions.append(cancel, save)
+  editor.append(fields, validation, actions)
+
+  const normalizedLabel = () => labelInput.value.trim().replace(/^#/, '')
+  const hasMatchingReferences = (target: string) => {
+    let found = false
+    if (!target) return found
+    view.state.doc.descendants((candidate) => {
+      if (candidate.type === manuscriptSchema.nodes.cross_reference && candidate.attrs.target === target) found = true
+      return !found
+    })
+    return found
+  }
+  const updateSave = () => {
+    const nextLabel = normalizedLabel()
+    const previousLabel = node.attrs.label ? String(node.attrs.label) : ''
+    const validLabelSyntax = !nextLabel || /^[a-zA-Z][\w.:-]*$/.test(nextLabel)
+    const validFigureLabel = !nextLabel
+      || nextLabel === previousLabel
+      || (nextLabel.startsWith('fig-') && isCrossReferenceTarget(nextLabel))
+    const referenced = hasMatchingReferences(previousLabel)
+    const keepsReferences = !referenced || (Boolean(nextLabel) && nextLabel.startsWith('fig-') && isCrossReferenceTarget(nextLabel))
+    validation.textContent = !validLabelSyntax
+      ? 'Labels must start with a letter and contain only letters, numbers, dots, colons, underscores, or hyphens.'
+      : !validFigureLabel
+        ? 'New figure labels must use the portable fig-… form.'
+      : !keepsReferences
+        ? 'This figure is referenced in the manuscript. Keep a valid fig-… label so those links remain portable.'
+        : ''
+    validation.hidden = validLabelSyntax && validFigureLabel && keepsReferences
+    save.disabled = !isEditable() || !source.value.trim() || !validLabelSyntax || !validFigureLabel || !keepsReferences
+  }
+  const updateDom = () => {
+    const sourcePath = String(node.attrs.src)
+    const figureLabel = node.attrs.label ? String(node.attrs.label) : ''
+    const imageTitle = node.attrs.title ? String(node.attrs.title) : ''
+    dom.dataset.dmNode = 'figure-image'
+    dom.dataset.dmId = String(node.attrs.id)
+    dom.dataset.label = figureLabel
+    if (figureLabel) dom.id = figureLabel
+    else dom.removeAttribute('id')
+    descriptor.textContent = figureLabel ? `Figure · ${figureLabel}` : 'Figure'
+    edit.disabled = !isEditable()
+    edit.setAttribute('aria-label', figureLabel ? `Edit figure ${figureLabel}` : 'Edit figure')
+    image.src = resolveAssetUrl(sourcePath)
+    image.alt = String(node.attrs.alt ?? '')
+    if (imageTitle) image.title = imageTitle
+    else image.removeAttribute('title')
+    if (!editing) {
+      source.value = sourcePath
+      alt.value = String(node.attrs.alt ?? '')
+      title.value = imageTitle
+      labelInput.value = figureLabel
+    }
+    updateSave()
+  }
+  const closeEditor = () => {
+    editing = false
+    editor.hidden = true
+    edit.hidden = false
+    source.value = String(node.attrs.src)
+    alt.value = String(node.attrs.alt ?? '')
+    title.value = node.attrs.title ? String(node.attrs.title) : ''
+    labelInput.value = node.attrs.label ? String(node.attrs.label) : ''
+    updateSave()
+    edit.focus()
+  }
+  const saveEditor = () => {
+    const position = getPos()
+    const sourcePath = source.value.trim()
+    const nextLabel = normalizedLabel()
+    const previousLabel = node.attrs.label ? String(node.attrs.label) : ''
+    const referenced = hasMatchingReferences(previousLabel)
+    if (
+      typeof position !== 'number'
+      || !isEditable()
+      || !sourcePath
+      || (nextLabel && !/^[a-zA-Z][\w.:-]*$/.test(nextLabel))
+      || (nextLabel !== previousLabel && nextLabel && (!nextLabel.startsWith('fig-') || !isCrossReferenceTarget(nextLabel)))
+      || (referenced && (!nextLabel || !nextLabel.startsWith('fig-') || !isCrossReferenceTarget(nextLabel)))
+    ) return
+    let transaction = view.state.tr.setNodeMarkup(position, undefined, {
+      ...node.attrs,
+      src: sourcePath,
+      alt: alt.value.trim(),
+      title: title.value.trim() || null,
+      label: nextLabel || null,
+      sourceAttributes: updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
+    })
+    if (previousLabel && nextLabel && previousLabel !== nextLabel) {
+      transaction.doc.descendants((candidate, candidatePosition) => {
+        if (candidate.type === manuscriptSchema.nodes.cross_reference && candidate.attrs.target === previousLabel) {
+          transaction = transaction.setNodeMarkup(candidatePosition, undefined, {
+            ...candidate.attrs,
+            target: nextLabel,
+            rendered: formatCrossReferenceTarget(nextLabel),
+          })
+        }
+        return true
+      })
+    }
+    view.dispatch(transaction)
+    closeEditor()
+  }
+  edit.addEventListener('click', () => {
+    if (!isEditable()) return
+    editing = true
+    edit.hidden = true
+    editor.hidden = false
+    updateDom()
+    source.focus()
+    source.select()
+  })
+  cancel.addEventListener('click', closeEditor)
+  save.addEventListener('click', saveEditor)
+  for (const input of [source, alt, title, labelInput]) {
+    input.addEventListener('input', updateSave)
+    input.addEventListener('keydown', (event) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeEditor()
+      } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+        event.preventDefault()
+        saveEditor()
+      }
+    })
+  }
+
+  dom.append(header, image, editor)
+  updateDom()
+  return {
+    dom,
+    stopEvent: (event) => dom.contains(event.target as Node),
+    ignoreMutation: () => true,
+    update(next) {
+      if (next.type !== node.type) return false
+      node = next
+      updateDom()
+      return true
+    },
+  }
 }
 
 function editorState(document: ProseMirrorNode) {
@@ -925,7 +1150,15 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     insertFigure: (path, alt, caption, label) => {
       const view = viewRef.current
       if (!view || readOnlyRef.current || !path) return false
-      const children = [manuscriptSchema.nodes.image.createChecked({ id: randomId('image'), src: path, alt, title: null, label: label ?? null })]
+      const normalizedLabel = label?.trim().replace(/^#/, '') || null
+      const children = [manuscriptSchema.nodes.image.createChecked({
+        id: randomId('image'),
+        src: path,
+        alt,
+        title: null,
+        label: normalizedLabel,
+        sourceAttributes: normalizedLabel ? `#${normalizedLabel}` : null,
+      })]
       if (caption) children.push(manuscriptSchema.nodes.caption.createChecked({ id: randomId('caption') }, manuscriptSchema.text(caption)))
       insertBlock(view, manuscriptSchema.nodes.figure.createChecked({ id: randomId('figure') }, children))
       view.focus()
@@ -981,7 +1214,13 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         footnote_reference: (node, editorView) => footnoteReferenceNodeView(node, editorView),
         footnote_definition: (node, editorView, getPos) => footnoteDefinitionNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         output_block: (node) => outputNodeView(node, (path) => resolveAssetUrlRef.current?.(path) ?? path),
-        image: (node) => imageNodeView(node, (path) => resolveAssetUrlRef.current?.(path) ?? path),
+        image: (node, editorView, getPos) => imageNodeView(
+          node,
+          editorView,
+          getPos,
+          (path) => resolveAssetUrlRef.current?.(path) ?? path,
+          () => !readOnlyRef.current,
+        ),
       },
       dispatchTransaction(transaction) {
         const capturesTextSuggestion = transaction.docChanged
@@ -1075,6 +1314,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-footnote-edit').forEach((button) => { button.disabled = readOnly })
     hostRef.current?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('.structured-equation-input').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-equation-edit').forEach((button) => { button.disabled = readOnly })
+    hostRef.current?.querySelectorAll<HTMLInputElement>('.structured-figure-input').forEach((editor) => { editor.readOnly = readOnly })
+    hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-figure-edit').forEach((button) => { button.disabled = readOnly })
   }, [readOnly])
 
   return <div ref={hostRef} className={`structured-manuscript-editor ${className}`.trim()} data-read-only={readOnly ? 'true' : 'false'} />

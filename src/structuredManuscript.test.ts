@@ -130,6 +130,26 @@ describe('generic structured manuscript bridge', () => {
     expect(literal.document.firstChild?.attrs.sourceAttributes).toBeNull()
   })
 
+  it('preserves figure attributes while exposing a semantic cross-reference target', () => {
+    const source = '# Figures\n\nIntroductory text.\n\n![Canopy](figures/canopy.svg "Observed canopy"){#fig-canopy .wide data-credit="Field team"}\n: Canopy response over time.\n'
+    const parsed = parseStructuredManuscript(source)
+    const figure = parsed.document.lastChild
+    const image = figure?.firstChild
+
+    expect(image?.attrs).toMatchObject({
+      src: 'figures/canopy.svg',
+      alt: 'Canopy',
+      title: 'Observed canopy',
+      label: 'fig-canopy',
+      sourceAttributes: '#fig-canopy .wide data-credit="Field team"',
+    })
+    const edited = replaceFirstText(parsed.document, 'Introductory', 'Updated')
+    const saved = serializeStructuredManuscript(edited, parsed.metadata)
+    expect(saved).toContain('![Canopy](figures/canopy.svg "Observed canopy"){#fig-canopy .wide data-credit="Field team"}')
+    expect(parseStructuredManuscript(saved).document.lastChild?.firstChild?.attrs.sourceAttributes)
+      .toBe('#fig-canopy .wide data-credit="Field team"')
+  })
+
   it('reopens labeled display equations without consuming following manuscript blocks', () => {
     const source = '$$\nE = mc^2\n$$ {#eq-mass .unnumbered}\n\nParagraph after math.\n'
     const parsed = parseStructuredManuscript(source)

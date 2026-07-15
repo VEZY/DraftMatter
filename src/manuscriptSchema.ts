@@ -79,15 +79,36 @@ const nodes: Record<string, NodeSpec> = {
     toDOM: (node) => ['figure', { 'data-dm-node': 'figure', 'data-dm-id': node.attrs.id ?? '' }, 0],
   },
   image: {
-    attrs: { ...identified, src: { default: '' }, alt: { default: '' }, title: { default: null }, label: { default: null } },
+    attrs: {
+      ...identified,
+      src: { default: '' },
+      alt: { default: '' },
+      title: { default: null },
+      label: { default: null },
+      sourceAttributes: { default: null },
+    },
     group: 'block',
     atom: true,
     draggable: true,
     parseDOM: [{ tag: 'img[src]', getAttrs: (element) => {
       const image = element as HTMLImageElement
-      return { src: image.getAttribute('src'), alt: image.getAttribute('alt') ?? '', title: image.getAttribute('title'), label: image.dataset.label ?? null }
+      return {
+        src: image.getAttribute('src'),
+        alt: image.getAttribute('alt') ?? '',
+        title: image.getAttribute('title'),
+        label: image.dataset.label || image.id || null,
+        sourceAttributes: image.dataset.sourceAttributes ?? null,
+      }
     } }],
-    toDOM: (node) => ['img', { src: node.attrs.src, alt: node.attrs.alt, title: node.attrs.title, 'data-label': node.attrs.label ?? '', 'data-dm-id': node.attrs.id ?? '' }],
+    toDOM: (node) => ['img', {
+      id: node.attrs.label ?? undefined,
+      src: node.attrs.src,
+      alt: node.attrs.alt,
+      title: node.attrs.title,
+      'data-label': node.attrs.label ?? '',
+      'data-source-attributes': node.attrs.sourceAttributes ?? '',
+      'data-dm-id': node.attrs.id ?? '',
+    }],
   },
   caption: {
     attrs: identified,
