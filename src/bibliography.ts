@@ -343,6 +343,24 @@ export function parseCslJson(source: string): BibliographyResult {
       if (value.title === undefined) diagnostics.push({ code: `csl-title-missing-${citekey}`, level: 'warning', message: `${citekey} has no title.` })
       const issued = value.issued as { 'date-parts'?: Array<Array<number | string>> } | undefined
       const authors = Array.isArray(value.author) ? value.author.map((author) => cslAuthorName(author as Record<string, unknown>)).filter(Boolean) : []
+      const acquisition = value._draftmatter && typeof value._draftmatter === 'object'
+        ? value._draftmatter as Record<string, unknown>
+        : undefined
+      const acquiredSource = acquisition?.provider === 'crossref'
+        ? 'crossref' as const
+        : acquisition?.provider === 'zotero'
+          ? 'zotero' as const
+          : 'csl-json' as const
+      const zoteroIdentity = acquisition?.provider === 'zotero'
+        && typeof acquisition.providerId === 'string'
+        && typeof acquisition.providerVersion === 'number'
+        ? {
+          provider: 'zotero' as const,
+          itemKey: acquisition.providerId,
+          itemVersion: acquisition.providerVersion,
+          ...(typeof acquisition.libraryVersion === 'string' ? { libraryVersion: acquisition.libraryVersion } : {}),
+        }
+        : undefined
       return [{
         citekey,
         type: String(value.type ?? 'article'),
@@ -353,7 +371,8 @@ export function parseCslJson(source: string): BibliographyResult {
         doi: typeof value.DOI === 'string' ? value.DOI : undefined,
         url: typeof value.URL === 'string' ? value.URL : undefined,
         cslData: value,
-        source: 'csl-json',
+        source: acquiredSource,
+        ...(zoteroIdentity ? { sourceIdentity: zoteroIdentity } : {}),
       }]
     })
     if (!records.length) diagnostics.push({ code: 'csl-empty', level: 'warning', message: 'No CSL JSON records were found.' })

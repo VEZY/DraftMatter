@@ -17,6 +17,7 @@ const MAX_ZOTERO_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_CROSSREF_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 const ZOTERO_PORT: u16 = 23119;
 const CROSSREF_WORKS_URL: &str = "https://api.crossref.org/works";
+const DOI_RESOLVER_URL: &str = "https://doi.org";
 const CROSSREF_USER_AGENT: &str = "DraftMatter/0.1 (desktop scholarly search)";
 const CROSSREF_MAILTO: Option<&str> = option_env!("DRAFTMATTER_CROSSREF_MAILTO");
 
@@ -1050,6 +1051,10 @@ fn recover_citation_transactions(root: &Path) -> Result<(), HostError> {
             continue;
         }
         let manifest_path = directory.join("manifest.json");
+        if !manifest_path.exists() {
+            fs::remove_dir_all(&directory)?;
+            continue;
+        }
         let manifest: CitationTransactionManifest =
             serde_json::from_slice(&fs::read(&manifest_path).map_err(|error| {
                 HostError::InvalidProject(format!(
@@ -1870,6 +1875,77 @@ fn crossref_search_impl(
     parse_crossref_response(&body)
 }
 
+fn doi_csl_request_url(doi: &str) -> Result<String, CrossrefCommandError> {
+    let normalized = doi
+        .trim()
+        .strip_prefix("https://doi.org/")
+        .unwrap_or(doi.trim())
+        .to_ascii_lowercase();
+    if normalized.len() > 512 || !valid_doi(&normalized) {
+        return Err(crossref_error("invalid-request", "The DOI is not valid."));
+    }
+    Ok(format!(
+        "{DOI_RESOLVER_URL}/{}",
+        percent_encode_query(&normalized)
+    ))
+}
+
+fn parse_doi_csl_response(body: &[u8]) -> Result<serde_json::Value, CrossrefCommandError> {
+    let value = serde_json::from_slice::<serde_json::Value>(body).map_err(|error| {
+        crossref_error(
+            "invalid-response",
+            format!("The DOI resolver returned unreadable CSL JSON: {error}"),
+        )
+    })?;
+    if !value.is_object() {
+        return Err(crossref_error(
+            "invalid-response",
+            "The DOI resolver did not return a CSL JSON object.",
+        ));
+    }
+    Ok(value)
+}
+
+fn resolve_doi_csl_impl(doi: &str) -> Result<serde_json::Value, CrossrefCommandError> {
+    let url = doi_csl_request_url(doi)?;
+    let response = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(4))
+        .timeout_read(Duration::from_secs(8))
+        .build()
+        .get(&url)
+        .set("Accept", "application/vnd.citationstyles.csl+json")
+        .set("User-Agent", CROSSREF_USER_AGENT)
+        .call()
+        .map_err(|error| match error {
+            ureq::Error::Status(429, _) => CrossrefCommandError {
+                kind: "rate-limit".to_string(),
+                message: "The DOI resolver is rate-limiting requests.".to_string(),
+                retry_after_ms: Some(1_000),
+            },
+            ureq::Error::Status(status, _) => crossref_error(
+                "http",
+                format!("DOI metadata resolution returned HTTP {status}."),
+            ),
+            ureq::Error::Transport(_) => crossref_error(
+                "offline",
+                "DOI metadata resolution is unavailable. Check the network connection and retry.",
+            ),
+        })?;
+    let mut body = Vec::new();
+    response
+        .into_reader()
+        .take(MAX_CROSSREF_RESPONSE_BYTES + 1)
+        .read_to_end(&mut body)
+        .map_err(|error| crossref_error("offline", format!("DOI metadata read failed: {error}")))?;
+    if body.len() as u64 > MAX_CROSSREF_RESPONSE_BYTES {
+        return Err(crossref_error(
+            "invalid-response",
+            "DOI metadata exceeded the 4 MB safety limit.",
+        ));
+    }
+    parse_doi_csl_response(&body)
+}
+
 #[tauri::command]
 fn open_project(root: String) -> Result<ProjectSnapshot, HostError> {
     open_project_impl(&root)
@@ -1985,6 +2061,11 @@ fn crossref_search(
 }
 
 #[tauri::command]
+fn resolve_doi_csl(doi: String) -> Result<serde_json::Value, CrossrefCommandError> {
+    resolve_doi_csl_impl(&doi)
+}
+
+#[tauri::command]
 fn open_scholar_search(app: tauri::AppHandle, query: String) -> Result<(), HostError> {
     let url = scholar_search_url(&query)?;
     app.opener()
@@ -2013,6 +2094,7 @@ pub fn run() {
             zotero_status,
             zotero_search,
             crossref_search,
+            resolve_doi_csl,
             open_scholar_search
         ])
         .run(tauri::generate_context!())
@@ -2174,6 +2256,24 @@ mod tests {
     }
 
     #[test]
+    fn bounds_and_validates_doi_csl_content_negotiation() {
+        assert_eq!(
+            doi_csl_request_url("https://doi.org/10.1016/J.ENVSOFT.2019.104609").unwrap(),
+            "https://doi.org/10.1016%2Fj.envsoft.2019.104609"
+        );
+        assert!(doi_csl_request_url("https://example.org/not-a-doi").is_err());
+        assert_eq!(
+            parse_doi_csl_response(br#"{"title":"DynACof","DOI":"10.1016/j.envsoft.2019.104609"}"#)
+                .unwrap()["title"],
+            "DynACof"
+        );
+        assert_eq!(
+            parse_doi_csl_response(br#"[]"#).unwrap_err().kind,
+            "invalid-response"
+        );
+    }
+
+    #[test]
     fn citation_acquisition_is_idempotent_by_doi_and_provider_identity() {
         let temporary = tempdir().unwrap();
         let root = temporary.path();
@@ -2255,6 +2355,23 @@ mod tests {
                 .next()
                 .is_none());
         }
+    }
+
+    #[test]
+    fn project_open_discards_an_unprepared_acquisition_directory_safely() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        prepare_acquisition_project(root);
+        let orphan = root.join(".draftmatter/transactions/unprepared");
+        fs::create_dir_all(&orphan).unwrap();
+        fs::write(orphan.join("backup-0.bin"), b"unused").unwrap();
+
+        assert!(open_project_impl(root.to_str().unwrap()).is_ok());
+        assert!(!orphan.exists());
+        assert_eq!(
+            fs::read_to_string(root.join("paper.qmd")).unwrap(),
+            "---\ntitle: Test\n---\n\nNo citation.\n"
+        );
     }
 
     #[test]

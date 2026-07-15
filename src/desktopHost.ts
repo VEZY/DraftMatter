@@ -53,6 +53,30 @@ export interface SaveCitationLockRequest {
   expectedHash: string | null
 }
 
+export interface AcquireCitationsRequest {
+  root: string
+  documentPath: string
+  documentContent: string
+  expectedDocumentHash: string
+  bibliographyPath: string
+  expectedBibliographyHash: string | null
+  bibliographyRecords: Array<Record<string, unknown>>
+  lockContent: string
+  expectedLockHash: string | null
+  cacheContent: string
+  expectedCacheHash: string | null
+}
+
+export interface AcquireCitationsResult {
+  documentHash: string
+  bibliographyHash: string
+  lockHash: string
+  cacheHash: string
+  bibliographyPath: string
+  acquired: number
+  unchanged: number
+}
+
 export interface ZoteroStatus {
   available: boolean
   zoteroVersion?: string
@@ -173,11 +197,17 @@ export function createDesktopHost(
     readCitationLock(root: string) {
       return invokeBridge<DocumentSnapshot | null>('read_citation_lock', { root })
     },
+    readCitationCache(root: string) {
+      return invokeBridge<DocumentSnapshot | null>('read_citation_cache', { root })
+    },
     saveCitationLock(request: SaveCitationLockRequest) {
       return invokeBridge<DocumentSnapshot>('save_citation_lock', { request })
     },
     saveDocument(request: SaveDocumentRequest) {
       return invokeBridge<SaveDocumentResult>('save_document', { request })
+    },
+    acquireCitations(request: AcquireCitationsRequest) {
+      return invokeBridge<AcquireCitationsResult>('acquire_citations', { request })
     },
     documentStatus(root: string, path: string, expectedHash: string) {
       return invokeBridge<DocumentStatus>('document_status', { root, path, expectedHash })
@@ -211,6 +241,13 @@ export function createDesktopHost(
         return response.works
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') throw error
+        throw normaliseCrossrefFailure(error)
+      }
+    },
+    async resolveDoiCsl(doi: string) {
+      try {
+        return await invokeBridge<Record<string, unknown>>('resolve_doi_csl', { doi })
+      } catch (error) {
         throw normaliseCrossrefFailure(error)
       }
     },

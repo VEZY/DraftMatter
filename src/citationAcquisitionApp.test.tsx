@@ -1,0 +1,130 @@
+// @vitest-environment jsdom
+
+import { act } from 'react'
+import { createRoot } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import App from './App'
+import { desktopHost, type ProjectSnapshot } from './desktopHost'
+import { reviewedProjection } from './projections'
+import { initialDraft } from './sampleDraft'
+
+const rootPath = '/research/dynacof'
+const source = reviewedProjection(initialDraft)
+const project: ProjectSnapshot = {
+  root: rootPath,
+  config: { schemaVersion: 1, name: 'DynACof paper', mainDocument: 'paper.qmd', citationStyle: 'draftmatter-author-date', citationLocale: 'en-US' },
+  documents: [{ path: 'paper.qmd', kind: 'manuscript', bytes: source.length, modifiedMs: 1, hash: 'doc-old' }],
+  bibliographies: [],
+}
+const dynacof = {
+  doi: '10.1016/j.envsoft.2019.104609',
+  title: 'DynACof: A process-based model to study coffee agroforestry systems',
+  authors: [{ family: 'Vezy', given: 'Rémi' }],
+  year: 2020,
+  container: 'Environmental Modelling & Software',
+  type: 'journal-article',
+  url: 'https://doi.org/10.1016/j.envsoft.2019.104609',
+  providerScore: 12,
+}
+
+async function enter(input: HTMLInputElement, value: string) {
+  const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+  await act(async () => {
+    setter?.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+}
+
+describe('rendered portable citation acquisition', () => {
+  let container: HTMLDivElement
+  let appRoot: ReturnType<typeof createRoot>
+  let previousAvailability: boolean
+
+  beforeEach(async () => {
+    ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    localStorage.clear()
+    localStorage.setItem('draftmatter.last-project-root.v1', rootPath)
+    previousAvailability = desktopHost.available
+    desktopHost.available = true
+    vi.spyOn(desktopHost, 'openProject').mockResolvedValue(project)
+    vi.spyOn(desktopHost, 'readDocument').mockResolvedValue({ path: 'paper.qmd', content: source, hash: 'doc-old', modifiedMs: 1 })
+    vi.spyOn(desktopHost, 'readCitationLock').mockResolvedValue({ path: '.draftmatter/citations.lock.json', content: '{"schemaVersion":1,"entries":[]}\n', hash: 'lock-old', modifiedMs: 1 })
+    vi.spyOn(desktopHost, 'readCitationCache').mockResolvedValue(null)
+    vi.spyOn(desktopHost, 'saveCitationLock').mockResolvedValue({ path: '.draftmatter/citations.lock.json', content: '{"schemaVersion":1,"entries":[]}\n', hash: 'lock-old', modifiedMs: 1 })
+    vi.spyOn(desktopHost, 'setCitationPreferences').mockResolvedValue(project)
+    vi.spyOn(desktopHost, 'documentStatus').mockResolvedValue({ kind: 'current', hash: 'doc-old', modifiedMs: 1 })
+    vi.spyOn(desktopHost, 'zoteroStatus').mockResolvedValue({ available: false, message: 'closed' })
+    vi.spyOn(desktopHost, 'searchCrossref').mockResolvedValue([dynacof])
+    vi.spyOn(desktopHost, 'resolveDoiCsl').mockResolvedValue({
+      type: 'article-journal', title: 'Canonical DynACof title', author: [{ family: 'Vezy', given: 'Rémi' }], issued: { 'date-parts': [[2020]] }, DOI: dynacof.doi,
+    })
+    vi.spyOn(desktopHost, 'acquireCitations').mockResolvedValue({
+      documentHash: 'doc-new', bibliographyHash: 'bib-new', lockHash: 'lock-new', cacheHash: 'cache-new', bibliographyPath: 'references.json', acquired: 1, unchanged: 0,
+    })
+    container = document.createElement('div')
+    document.body.append(container)
+    appRoot = createRoot(container)
+    await act(async () => {
+      appRoot.render(<App />)
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+  })
+
+  afterEach(async () => {
+    await act(async () => appRoot.unmount())
+    desktopHost.available = previousAvailability
+    vi.restoreAllMocks()
+    container.remove()
+  })
+
+  async function selectDynacof() {
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, shiftKey: true, bubbles: true })))
+    const search = container.querySelector<HTMLInputElement>('input[aria-label="Search citation sources"]')!
+    await enter(search, 'vezy et al. 2020 DynACof')
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 480)) })
+    await act(async () => container.querySelector<HTMLButtonElement>('.crossref-result')!.click())
+  }
+
+  it('writes the portable files before closing the picker or exposing the citation', async () => {
+    await selectDynacof()
+    expect(localStorage.getItem('draftmatter.citations.v1')).not.toContain(dynacof.doi)
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.confirm-citation')!.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+
+    expect(desktopHost.resolveDoiCsl).toHaveBeenCalledWith(dynacof.doi)
+    expect(desktopHost.acquireCitations).toHaveBeenCalledWith(expect.objectContaining({
+      root: rootPath,
+      documentPath: 'paper.qmd',
+      expectedDocumentHash: 'doc-old',
+      bibliographyPath: 'references.json',
+      expectedBibliographyHash: null,
+      expectedLockHash: 'lock-old',
+      expectedCacheHash: null,
+      bibliographyRecords: [expect.objectContaining({
+        id: 'vezy2020dynacof',
+        title: 'Canonical DynACof title',
+        _draftmatter: expect.objectContaining({ provider: 'crossref', providerId: dynacof.doi }),
+      })],
+      documentContent: expect.stringContaining('bibliography:'),
+      lockContent: expect.stringContaining('vezy2020dynacof'),
+      cacheContent: expect.stringContaining('vezy2020dynacof'),
+    }))
+    expect(container.querySelector('[role="dialog"][aria-label="Insert citation"]')).toBeNull()
+    expect(localStorage.getItem('draftmatter.citations.v1')).toContain(dynacof.doi)
+  })
+
+  it('keeps the picker and manuscript unchanged when the host reports a conflict', async () => {
+    vi.mocked(desktopHost.acquireCitations).mockRejectedValueOnce({ kind: 'conflict', message: 'references.json changed outside DraftMatter.' })
+    await selectDynacof()
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.confirm-citation')!.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+
+    expect(container.querySelector('[role="dialog"][aria-label="Insert citation"]')).not.toBeNull()
+    expect(container.textContent).toContain('Citation was not inserted')
+    expect(localStorage.getItem('draftmatter.citations.v1')).not.toContain(dynacof.doi)
+  })
+})

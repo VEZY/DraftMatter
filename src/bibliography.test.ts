@@ -30,6 +30,19 @@ describe('local bibliography', () => {
     expect(result.records[0]).toMatchObject({ citekey: 'martin2023', authors: ['Alice Martin'], year: '2023' })
   })
 
+  it('rehydrates durable provider identity from an acquired CSL record', () => {
+    const result = parseCslJson(JSON.stringify({
+      id: 'zotero-PXW99EKT',
+      type: 'article-journal',
+      title: 'Canopy responses',
+      _draftmatter: { provider: 'zotero', providerId: 'PXW99EKT', providerVersion: 42, libraryVersion: '902' },
+    }))
+    expect(result.records[0]).toMatchObject({
+      source: 'zotero',
+      sourceIdentity: { provider: 'zotero', itemKey: 'PXW99EKT', itemVersion: 42, libraryVersion: '902' },
+    })
+  })
+
   it('parses multi-record RIS with Unicode, repeated authors, and generated keys', () => {
     const result = parseRis(risFixture)
 

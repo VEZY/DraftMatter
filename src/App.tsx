@@ -14,7 +14,7 @@ import type { CitationItem, CitationRecord, DocumentDiagnostic, DraftState, Mark
 import { queryZoteroLibrary, type ZoteroVersionStamp } from './zotero'
 import { citationItemsForDraft, normalizeCitationItems } from './citation'
 import { buildCitationLock, diagnoseCitationLock, parseCitationLock, serializeCitationLock, type CitationLock } from './citationLock'
-import { createCitationCache, hydrateCitationsFromCache, readCitationCache, writeCitationCache, type CitationCache } from './citationCache'
+import { createCitationCache, hydrateCitationsFromCache, parseCitationCache, readCitationCache, serializeCitationCache, writeCitationCache, type CitationCache } from './citationCache'
 import {
   citationLocaleOptions,
   citationStyleOptions,
@@ -24,6 +24,7 @@ import {
 } from './cslRenderer'
 import { previewCitationIntake, type CitationIntakePreview } from './citationIntake'
 import { CrossrefSearchSession, crossrefCandidateToCitationRecord, crossrefDuplicateCitekeys, type CrossrefCandidate } from './crossref'
+import { DEFAULT_ACQUISITION_BIBLIOGRAPHY, canonicalizeAcquisitionRecord, citationRecordToAcquisitionCsl, ensureBibliographyReference, persistedAcquisitionRecord } from './citationAcquisition'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
@@ -206,6 +207,7 @@ function App() {
   const [zoteroDiagnostics, setZoteroDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [zoteroState, setZoteroState] = useState<'idle' | 'searching' | 'available' | 'unavailable' | 'desktop-only'>('idle')
   const [zoteroRefreshRevision, setZoteroRefreshRevision] = useState(0)
+  const [zoteroRecords, setZoteroRecords] = useState<CitationRecord[]>([])
   const [crossrefDiagnostics, setCrossrefDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [crossrefState, setCrossrefState] = useState<'idle' | 'searching' | 'available' | 'unavailable' | 'desktop-only'>('idle')
   const [crossrefCandidates, setCrossrefCandidates] = useState<CrossrefCandidate[]>([])
@@ -213,7 +215,9 @@ function App() {
   const [scholarHelpOpen, setScholarHelpOpen] = useState(false)
   const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>(() => readRecoverySnapshots(localStorage))
   const [citations, setCitations] = useState<CitationRecord[]>(getInitialCitations)
+  const [stagedCitationRecords, setStagedCitationRecords] = useState<CitationRecord[]>([])
   const [citationQuery, setCitationQuery] = useState('')
+  const [citationAcquisitionState, setCitationAcquisitionState] = useState<'idle' | 'saving'>('idle')
   const [desktopSession, setDesktopSession] = useState<DesktopSession | null>(null)
   const [draftRevision, setDraftRevision] = useState(0)
   const [projectBusy, setProjectBusy] = useState(false)
@@ -237,7 +241,10 @@ function App() {
   const citationLockSaveBlockedRef = useRef(false)
   const citationLockSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const citationCacheRef = useRef<CitationCache>({ schemaVersion: 1, records: [] })
+  const citationCacheHashRef = useRef<string | null>(null)
   const citationCacheLoadDiagnosticsRef = useRef<DocumentDiagnostic[]>([])
+  const citationBibliographyRef = useRef<{ path: string; hash: string | null }>({ path: DEFAULT_ACQUISITION_BIBLIOGRAPHY, hash: null })
+  const citationAcquisitionRunningRef = useRef(false)
   const crossrefSessionRef = useRef<CrossrefSearchSession | null>(null)
   if (!crossrefSessionRef.current) {
     crossrefSessionRef.current = new CrossrefSearchSession({
@@ -262,15 +269,23 @@ function App() {
   const activeReplacement = draft.activeProposal === 'alice'
     ? 'reduced leaf area by 18%'
     : 'lowered leaf expansion during the treatment period'
-  const citationResults = useMemo(() => searchCitations(citations, citationQuery).slice(0, 8), [citations, citationQuery])
+  const localPickerRecords = useMemo(
+    () => mergeCitationRecords(citations, [...stagedCitationRecords, ...zoteroRecords]),
+    [citations, stagedCitationRecords, zoteroRecords],
+  )
+  const citationResults = useMemo(() => searchCitations(localPickerRecords, citationQuery).slice(0, 8), [localPickerRecords, citationQuery])
   const crossrefRecords = useMemo(() => {
-    const occupied = [...citations]
+    const occupied = [...localPickerRecords]
     return crossrefCandidates.slice(0, 8).map((candidate) => {
       const record = crossrefCandidateToCitationRecord(candidate, occupied)
       occupied.push(record)
       return record
     })
-  }, [citations, crossrefCandidates])
+  }, [localPickerRecords, crossrefCandidates])
+  const transientAcquisitionRecords = useMemo(
+    () => mergeCitationRecords([], [...stagedCitationRecords, ...zoteroRecords, ...crossrefRecords]),
+    [stagedCitationRecords, zoteroRecords, crossrefRecords],
+  )
   const pickerResults = [...citationResults, ...crossrefRecords]
   const draftCitationItems = citationItemsForDraft(draft)
   const citationLabel = renderedCitations.introduction ?? formatCitationCluster(citations, draftCitationItems)
@@ -339,7 +354,7 @@ function App() {
   }, [draft, desktopSession])
 
   useEffect(() => {
-    if (!desktopSession || draftRevision === 0 || desktopSaveBlockedRef.current) return
+    if (!desktopSession || draftRevision === 0 || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current) return
     const revision = draftRevision
     const content = reviewedProjection(draft)
     const root = desktopSession.root
@@ -348,7 +363,7 @@ function App() {
       setSaveState('saving')
       desktopSaveQueueRef.current = desktopSaveQueueRef.current.then(async () => {
         const current = desktopSessionRef.current
-        if (!current || current.root !== root || current.path !== path || desktopSaveBlockedRef.current) return
+        if (!current || current.root !== root || current.path !== path || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current) return
         try {
           const result = await desktopHost.saveDocument({ root, path, content, expectedHash: current.hash })
           const next = { ...current, hash: result.hash, savedRevision: revision }
@@ -380,7 +395,7 @@ function App() {
     }
 
     const checkExternalStatus = async () => {
-      if (disposed || externalCheckRunningRef.current || desktopSaveBlockedRef.current) return
+      if (disposed || externalCheckRunningRef.current || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current) return
       externalCheckRunningRef.current = true
       try {
         const expected = desktopSessionRef.current
@@ -521,10 +536,10 @@ function App() {
     ])
 
     const root = desktopSession?.root
-    if (!root || citationLockSaveBlockedRef.current || content === citationLockSavedContentRef.current) return
+    if (!root || citationLockSaveBlockedRef.current || citationAcquisitionRunningRef.current || content === citationLockSavedContentRef.current) return
     const timeout = window.setTimeout(() => {
       citationLockSaveQueueRef.current = citationLockSaveQueueRef.current.then(async () => {
-        if (desktopSessionRef.current?.root !== root || citationLockSaveBlockedRef.current) return
+        if (desktopSessionRef.current?.root !== root || citationLockSaveBlockedRef.current || citationAcquisitionRunningRef.current) return
         try {
           const saved = await desktopHost.saveCitationLock({
             root,
@@ -551,8 +566,12 @@ function App() {
   }, [citations, desktopSession?.root, draft.citationKeys.join('\u0000')])
 
   useEffect(() => {
-    if (!citationSearchOpen) return
+    if (!citationSearchOpen) {
+      setZoteroRecords([])
+      return
+    }
     if (!desktopHost.available) {
+      setZoteroRecords([])
       setZoteroState('desktop-only')
       return
     }
@@ -568,9 +587,12 @@ function App() {
 
       setZoteroState(result.available ? 'available' : 'unavailable')
       setZoteroDiagnostics(result.diagnostics)
-      if (!result.available) return
+      if (!result.available) {
+        setZoteroRecords([])
+        return
+      }
 
-      setCitations((current) => mergeCitationRecords(current, result.records))
+      setZoteroRecords(result.records)
       zoteroVersionRef.current = result.version
       try {
         localStorage.setItem(ZOTERO_VERSION_KEY, JSON.stringify(result.version))
@@ -594,6 +616,7 @@ function App() {
     if (!citationSearchOpen) {
       session.cancel()
       setCrossrefCandidates([])
+      setStagedCitationRecords([])
       setCrossrefState('idle')
       return
     }
@@ -808,7 +831,9 @@ function App() {
     setCitationLockDiagnostics([])
     setCitationLockHostDiagnostics([])
     citationCacheRef.current = cacheResult.cache
+    citationCacheHashRef.current = null
     citationCacheLoadDiagnosticsRef.current = cacheResult.diagnostics
+    citationBibliographyRef.current = { path: DEFAULT_ACQUISITION_BIBLIOGRAPHY, hash: null }
     setCitationCacheDiagnostics(cacheResult.diagnostics)
     setCitations((current) => hydrateCitationsFromCache(current, cacheResult.cache))
     desktopSaveBlockedRef.current = false
@@ -835,17 +860,20 @@ function App() {
       throw new Error('This folder does not contain a Markdown or Quarto manuscript.')
     }
 
-    const [document, projectBibliography, lockSnapshot] = await Promise.all([
+    const [document, projectBibliography, lockSnapshot, cacheSnapshot] = await Promise.all([
       desktopHost.readDocument(project.root, mainPath),
       loadProjectBibliographies(
         project.bibliographies.map((entry) => entry.path),
         async (path) => (await desktopHost.readBibliography(project.root, path)).content,
       ),
       desktopHost.readCitationLock(project.root),
+      desktopHost.readCitationCache(project.root),
     ])
     if (mainPath !== project.config.mainDocument) await desktopHost.setMainDocument(project.root, mainPath)
     const parsed = parsePortableDocument(document.content, initialDraft)
-    const cacheResult = readCitationCache(localStorage, project.root)
+    const cacheResult = cacheSnapshot
+      ? parseCitationCache(cacheSnapshot.content)
+      : readCitationCache(localStorage, project.root)
     const liveProjectCitations = mergeCitationRecords(projectBibliography.records, sampleCitations)
     const projectCitations = hydrateCitationsFromCache(liveProjectCitations, cacheResult.cache)
     const lockResult = lockSnapshot
@@ -862,7 +890,13 @@ function App() {
     citationLockLoadDiagnosticsRef.current = lockResult.diagnostics
     citationLockSaveBlockedRef.current = lockResult.diagnostics.some((diagnostic) => diagnostic.level === 'error')
     citationCacheRef.current = cacheResult.cache
+    citationCacheHashRef.current = cacheSnapshot?.hash ?? null
     citationCacheLoadDiagnosticsRef.current = cacheResult.diagnostics
+    const acquisitionPath = project.config.citationBibliography ?? DEFAULT_ACQUISITION_BIBLIOGRAPHY
+    citationBibliographyRef.current = {
+      path: acquisitionPath,
+      hash: project.bibliographies.find((entry) => entry.path === acquisitionPath)?.hash ?? null,
+    }
     replaceDesktopSession({ root: project.root, path: mainPath, hash: document.hash, savedRevision: 0 })
     resetDraftHistory(parsed.draft)
     setFilename(displayName)
@@ -1029,7 +1063,7 @@ function App() {
       setToast('Select at least one valid record from the preview')
       return
     }
-    setCitations((current) => mergeCitationRecords(current, accepted))
+    setStagedCitationRecords((current) => mergeCitationRecords(current, accepted))
     setCitationPickerItems((current) => [
       ...current,
       ...accepted.filter((record) => !current.some((item) => item.citekey === record.citekey)).map((record) => ({ citekey: record.citekey })),
@@ -1106,8 +1140,8 @@ function App() {
       setDoiLookupState('idle')
       return
     }
-    const record = crossrefCandidateToCitationRecord(candidate, citations)
-    const duplicates = crossrefDuplicateCitekeys(candidate, citations)
+    const record = crossrefCandidateToCitationRecord(candidate, localPickerRecords)
+    const duplicates = crossrefDuplicateCitekeys(candidate, localPickerRecords)
     const selectedByDefault = duplicates.length === 0
     setCitationIntakePreview({
       ...preview,
@@ -1129,25 +1163,121 @@ function App() {
     setToast('DOI metadata resolved · review it before staging')
   }
 
-  const toggleCitationPickerRecord = (record: CitationRecord, materialize = true) => {
-    if (materialize) setCitations((current) => mergeCitationRecords(current, [record]))
+  const toggleCitationPickerRecord = (record: CitationRecord) => {
     setCitationPickerItems((current) => current.some((item) => item.citekey === record.citekey)
       ? current.filter((item) => item.citekey !== record.citekey)
       : [...current, { citekey: record.citekey }])
   }
 
-  const confirmCitationPicker = () => {
-    if (!citationPickerItems.length) {
+  const confirmCitationPicker = async () => {
+    if (!citationPickerItems.length || citationAcquisitionState === 'saving') {
       setToast('Select at least one source for the citation')
       return
     }
-    const selectedCrossref = crossrefRecords.filter((record) => citationPickerItems.some((item) => item.citekey === record.citekey))
-    if (selectedCrossref.length) setCitations((current) => mergeCitationRecords(current, selectedCrossref))
-    updateDraft(applyDraftCitationTransaction(draft, citationPickerItems))
-    setCitationSearchOpen(false)
-    setCitationQuery('')
-    setCitationEditKey(citationPickerItems[0].citekey)
-    setToast(`${citationPickerItems.length} source${citationPickerItems.length === 1 ? '' : 's'} in citation`)
+    const selectedAcquisitions = transientAcquisitionRecords.filter((record) => citationPickerItems.some((item) => item.citekey === record.citekey))
+    const session = desktopSessionRef.current
+    if (!session || !selectedAcquisitions.length) {
+      if (selectedAcquisitions.length) setCitations((current) => mergeCitationRecords(current, selectedAcquisitions))
+      updateDraft(applyDraftCitationTransaction(draft, citationPickerItems))
+      setCitationSearchOpen(false)
+      setCitationQuery('')
+      setCitationEditKey(citationPickerItems[0].citekey)
+      setToast(`${citationPickerItems.length} source${citationPickerItems.length === 1 ? '' : 's'} in citation`)
+      return
+    }
+
+    setCitationAcquisitionState('saving')
+    citationAcquisitionRunningRef.current = true
+    setSaveState('saving')
+    try {
+      await desktopSaveQueueRef.current
+      await citationLockSaveQueueRef.current
+      const currentSession = desktopSessionRef.current
+      if (!currentSession || currentSession.root !== session.root || currentSession.path !== session.path) {
+        throw new Error('The active project changed before citation acquisition could start.')
+      }
+      const target = citationBibliographyRef.current
+      const resolutionDiagnostics: DocumentDiagnostic[] = []
+      const canonicalRecords = await Promise.all(selectedAcquisitions.map(async (record) => {
+        if (!record.doi) return persistedAcquisitionRecord(record, target.path)
+        try {
+          return canonicalizeAcquisitionRecord(record, await desktopHost.resolveDoiCsl(record.doi), target.path)
+        } catch (error) {
+          resolutionDiagnostics.push({
+            code: `citation-doi-resolution-${record.citekey}`,
+            level: 'info',
+            message: `Canonical DOI metadata was unavailable for @${record.citekey}; the reviewed provider metadata was retained. ${readableError(error)}`,
+          })
+          return persistedAcquisitionRecord(record, target.path)
+        }
+      }))
+      const nextCitations = mergeCitationRecords(citations, canonicalRecords)
+      const nextDraft: DraftState = { ...draft, ...applyDraftCitationTransaction(draft, citationPickerItems) }
+      const documentContent = ensureBibliographyReference(reviewedProjection(nextDraft), target.path)
+      const nextLock = buildCitationLock(nextCitations.filter((record) => record.source !== 'sample'), citationLockRef.current)
+      const lockContent = serializeCitationLock(nextLock)
+      const nextCacheResult = createCitationCache(nextCitations, nextDraft.citationKeys, citationCacheRef.current)
+      const cacheContent = serializeCitationCache(nextCacheResult.cache)
+      const result = await desktopHost.acquireCitations({
+        root: currentSession.root,
+        documentPath: currentSession.path,
+        documentContent,
+        expectedDocumentHash: currentSession.hash,
+        bibliographyPath: target.path,
+        expectedBibliographyHash: target.hash,
+        bibliographyRecords: canonicalRecords.map((record) => citationRecordToAcquisitionCsl(record, target.path)),
+        lockContent,
+        expectedLockHash: citationLockHashRef.current,
+        cacheContent,
+        expectedCacheHash: citationCacheHashRef.current,
+      })
+
+      const savedDraft = parsePortableDocument(documentContent, initialDraft)
+      commitDraftHistory(savedDraft.draft)
+      setDiagnostics(savedDraft.diagnostics)
+      resetDraftRevision()
+      replaceDesktopSession({ ...currentSession, hash: result.documentHash, savedRevision: 0 })
+      citationBibliographyRef.current = { path: result.bibliographyPath, hash: result.bibliographyHash }
+      citationLockRef.current = nextLock
+      citationLockHashRef.current = result.lockHash
+      citationLockSavedContentRef.current = lockContent
+      citationLockLoadDiagnosticsRef.current = []
+      citationLockSaveBlockedRef.current = false
+      citationCacheRef.current = nextCacheResult.cache
+      citationCacheHashRef.current = result.cacheHash
+      citationCacheLoadDiagnosticsRef.current = []
+      setCitations(nextCitations)
+      setCitationLockHostDiagnostics([])
+      setCitationCacheDiagnostics([...resolutionDiagnostics, ...nextCacheResult.diagnostics])
+      try {
+        writeCitationCache(localStorage, currentSession.root, nextCacheResult.cache)
+      } catch {
+        setCitationCacheDiagnostics((current) => [...current, {
+          code: 'citation-cache-browser-mirror-unavailable',
+          level: 'info',
+          message: 'The portable project cache was saved, but its browser mirror is unavailable on this device.',
+        }])
+      }
+      setCitationSearchOpen(false)
+      setCitationQuery('')
+      setCitationEditKey(citationPickerItems[0].citekey)
+      setSaveProblem('')
+      setSaveState('saved')
+      setToast(`${result.acquired ? `${result.acquired} portable record${result.acquired === 1 ? '' : 's'} acquired` : 'Citation already acquired'} · ${citationPickerItems.length} source${citationPickerItems.length === 1 ? '' : 's'} in citation`)
+    } catch (error) {
+      const failure = normaliseHostFailure(error)
+      if (failure.kind === 'conflict') {
+        desktopSaveBlockedRef.current = true
+        setSaveState('conflict')
+      } else {
+        setSaveState('error')
+      }
+      setSaveProblem(failure.message)
+      setToast(`Citation was not inserted · ${failure.message}`)
+    } finally {
+      citationAcquisitionRunningRef.current = false
+      setCitationAcquisitionState('idle')
+    }
   }
 
   const openCitationDetails = () => {
@@ -1651,7 +1781,7 @@ function App() {
       )}
 
       {citationSearchOpen && (
-        <div className="modal-backdrop" onMouseDown={() => setCitationSearchOpen(false)}>
+        <div className="modal-backdrop" onMouseDown={() => { if (citationAcquisitionState === 'idle') setCitationSearchOpen(false) }}>
           <div
             className={`citation-picker ${citationDropActive ? 'drop-active' : ''}`}
             onMouseDown={(event) => event.stopPropagation()}
@@ -1680,7 +1810,7 @@ function App() {
                 } else if (event.key === 'Enter' && pickerResults[citationActiveIndex]) {
                   event.preventDefault()
                   const record = pickerResults[citationActiveIndex]
-                  toggleCitationPickerRecord(record, record.source !== 'crossref')
+                  toggleCitationPickerRecord(record)
                 }
               }}
               placeholder="Search authors, titles, years, or DOI…"
@@ -1784,13 +1914,13 @@ function App() {
                 const isCited = citationPickerItems.some((item) => item.citekey === record.citekey)
                 const resultIndex = citationResults.length + index
                 const isActive = pickerResults[citationActiveIndex]?.citekey === record.citekey
-                const duplicates = crossrefDuplicateCitekeys(crossrefCandidates[index], citations)
+                const duplicates = crossrefDuplicateCitekeys(crossrefCandidates[index], localPickerRecords)
                 return (
                   <button
                     id={`citation-result-${record.citekey}`}
                     className={`source-result crossref-result ${isCited ? 'selected' : ''} ${isActive ? 'active' : ''}`}
                     key={`${record.doi}-${record.citekey}`}
-                    onClick={() => toggleCitationPickerRecord(record, false)}
+                    onClick={() => toggleCitationPickerRecord(record)}
                     onMouseEnter={() => setCitationActiveIndex(resultIndex)}
                     aria-pressed={isCited}
                   >
@@ -1805,7 +1935,7 @@ function App() {
             <div className="picker-footer">
               <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Select</span><span><kbd>⌘</kbd><kbd>↵</kbd> Confirm</span>
               <button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={12} /> Import</button>
-              <button className="confirm-citation" onClick={confirmCitationPicker} disabled={!citationPickerItems.length}>Insert selected · {citationPickerItems.length}</button>
+              <button className="confirm-citation" onClick={() => void confirmCitationPicker()} disabled={!citationPickerItems.length || citationAcquisitionState === 'saving'}>{citationAcquisitionState === 'saving' ? 'Saving portable citation…' : `Insert selected · ${citationPickerItems.length}`}</button>
             </div>
           </div>
         </div>

@@ -21,14 +21,29 @@ describe('desktop host adapter', () => {
     await host.readDocument('/research/canopy', 'paper.qmd')
     await host.readBibliography('/research/canopy', 'references.bib')
     await host.readCitationLock('/research/canopy')
+    await host.readCitationCache('/research/canopy')
     await host.saveCitationLock({ root: '/research/canopy', content: '{"schemaVersion":1,"entries":[]}', expectedHash: null })
     await host.saveDocument({ root: '/research/canopy', path: 'paper.qmd', content: '# Paper', expectedHash: 'old' })
+    await host.acquireCitations({
+      root: '/research/canopy',
+      documentPath: 'paper.qmd',
+      documentContent: 'Cited [@vezy2020].',
+      expectedDocumentHash: 'old',
+      bibliographyPath: 'references.json',
+      expectedBibliographyHash: null,
+      bibliographyRecords: [{ id: 'vezy2020' }],
+      lockContent: '{"schemaVersion":1,"entries":[]}',
+      expectedLockHash: null,
+      cacheContent: '{"schemaVersion":1,"records":[]}',
+      expectedCacheHash: null,
+    })
     await host.documentStatus('/research/canopy', 'paper.qmd', 'next')
     await host.setMainDocument('/research/canopy', 'renamed.qmd')
     await host.setCitationPreferences('/research/canopy', 'draftmatter-numeric', 'fr-FR')
     await host.zoteroStatus()
     await host.searchZotero('canopy water', 12)
     await host.searchCrossref({ kind: 'doi', doi: '10.1016/j.envsoft.2019.104609' })
+    await host.resolveDoiCsl('10.1016/j.envsoft.2019.104609')
     await host.openScholarSearch('vezy et al. 2020 DynACof')
 
     expect(calls).toEqual([
@@ -36,14 +51,19 @@ describe('desktop host adapter', () => {
       ['read_document', { root: '/research/canopy', path: 'paper.qmd' }],
       ['read_bibliography', { root: '/research/canopy', path: 'references.bib' }],
       ['read_citation_lock', { root: '/research/canopy' }],
+      ['read_citation_cache', { root: '/research/canopy' }],
       ['save_citation_lock', { request: { root: '/research/canopy', content: '{"schemaVersion":1,"entries":[]}', expectedHash: null } }],
       ['save_document', { request: { root: '/research/canopy', path: 'paper.qmd', content: '# Paper', expectedHash: 'old' } }],
+      ['acquire_citations', { request: {
+        root: '/research/canopy', documentPath: 'paper.qmd', documentContent: 'Cited [@vezy2020].', expectedDocumentHash: 'old', bibliographyPath: 'references.json', expectedBibliographyHash: null, bibliographyRecords: [{ id: 'vezy2020' }], lockContent: '{"schemaVersion":1,"entries":[]}', expectedLockHash: null, cacheContent: '{"schemaVersion":1,"records":[]}', expectedCacheHash: null,
+      } }],
       ['document_status', { root: '/research/canopy', path: 'paper.qmd', expectedHash: 'next' }],
       ['set_main_document', { root: '/research/canopy', path: 'renamed.qmd' }],
       ['set_citation_preferences', { root: '/research/canopy', style: 'draftmatter-numeric', locale: 'fr-FR' }],
       ['zotero_status', undefined],
       ['zotero_search', { query: 'canopy water', limit: 12 }],
       ['crossref_search', { request: { doi: '10.1016/j.envsoft.2019.104609' } }],
+      ['resolve_doi_csl', { doi: '10.1016/j.envsoft.2019.104609' }],
       ['open_scholar_search', { query: 'vezy et al. 2020 DynACof' }],
     ])
   })
