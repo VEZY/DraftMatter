@@ -2074,8 +2074,8 @@ function App() {
                   <div className="code-cell-actions">
                     {draft.cellStatus === 'running'
                       ? <button className="run-button interrupt" onClick={() => void interruptExecution()}><Icon name="close" size={13} /> Interrupt</button>
-                      : <button className="run-button" onClick={() => void runCell()} disabled={runtimeDiscoveryState === 'discovering' || pythonRuntimeUnavailable}><Icon name="play" size={14} /> {runtimeDiscoveryState === 'discovering' ? 'Checking…' : 'Run'}</button>}
-                    <button className="icon-button subtle" onClick={() => void discoverExecutionEnvironments(true)} aria-label="Execution environments and options"><Icon name="more" /></button>
+                      : <button className="run-button" onClick={() => void runCell()} disabled={!desktopSession || runtimeDiscoveryState === 'discovering' || pythonRuntimeUnavailable} title={!desktopSession ? 'Execution is available only in a trusted desktop project.' : undefined}><Icon name="play" size={14} /> {runtimeDiscoveryState === 'discovering' ? 'Checking…' : 'Run'}</button>}
+                    <button className="icon-button subtle" onClick={() => void discoverExecutionEnvironments(true)} aria-label="Execution environments and options" disabled={!desktopSession} title={!desktopSession ? 'Browser collaborators can inspect code and retained output but cannot run it.' : undefined}><Icon name="more" /></button>
                   </div>
                 </div>
                 <div className="code-editor-wrap">
@@ -2585,7 +2585,7 @@ function App() {
             <span className="command-group-title">Suggested</span>
             <button onClick={() => { setCommandOpen(false); openCitationPicker() }}><span className="command-icon">@</span><span><strong>Insert citation</strong><small>Search Zotero and project bibliography</small></span><kbd>⌘ ⇧ C</kbd></button>
             <button onClick={() => { setCommandOpen(false); showReviewPanel() }}><span className="command-icon"><Icon name="message" size={17} /></span><span><strong>Add comment</strong><small>Attach a note to selected text</small></span></button>
-            <button onClick={() => { setCommandOpen(false); runCell() }}><span className="command-icon"><Icon name="play" size={17} /></span><span><strong>Run code cell</strong><small>Execute the current cell explicitly</small></span><kbd>⌘ ↵</kbd></button>
+            <button onClick={() => { setCommandOpen(false); runCell() }} disabled={!desktopSession}><span className="command-icon"><Icon name="play" size={17} /></span><span><strong>Run code cell</strong><small>{desktopSession ? 'Execute the current cell explicitly' : 'Desktop project required · unavailable to browser collaborators'}</small></span><kbd>⌘ ↵</kbd></button>
             <button onClick={() => { setCommandOpen(false); openSourceInspector() }}><span className="command-icon"><Icon name="code" size={17} /></span><span><strong>Inspect portable source</strong><small>Compare reviewed and clean projections</small></span></button>
           </div>
         </div>

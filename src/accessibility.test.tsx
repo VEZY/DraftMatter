@@ -38,4 +38,14 @@ describe('accessibility baseline', () => {
       targets: violation.nodes.map((node) => node.target),
     }))).toEqual([])
   })
+
+  it('keeps project execution visibly unavailable at the browser capability boundary', async () => {
+    await act(async () => root.render(<App />))
+    expect(container.querySelector<HTMLButtonElement>('.run-button')?.disabled).toBe(true)
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Execution environments and options"]')?.disabled).toBe(true)
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open command menu"]')!.click())
+    const runCommand = [...container.querySelectorAll<HTMLButtonElement>('.command-menu button')].find((button) => button.textContent?.includes('Run code cell'))
+    expect(runCommand?.disabled).toBe(true)
+    expect(runCommand?.textContent).toContain('unavailable to browser collaborators')
+  })
 })
