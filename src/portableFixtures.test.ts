@@ -4,6 +4,8 @@ import {
   requiredPortableFixtureFeatures,
   type PortableFixtureFeature,
 } from './portableFixtureManifest'
+import { parseReviewMarkup } from './reviewMarkup'
+import { projectPortableReviewSource } from './reviewProjector'
 import { parseLosslessPortableSource, serializeLosslessPortableSource } from './portableSource'
 
 const fixtureModules = import.meta.glob<string>('./fixtures/portable/*.{md,qmd}', {
@@ -111,5 +113,40 @@ describe('portable manuscript fixture corpus', () => {
 
     expect(parsed.lineEnding).toBe('\r\n')
     expect(serializeLosslessPortableSource(parsed)).toBe(source)
+  })
+
+  it('produces deterministic clean Original and resolved Final projections for every fixture', () => {
+    for (const fixture of portableFixtureManifest) {
+      const source = sourceByFilename.get(fixture.filename) ?? ''
+      const original = projectPortableReviewSource(source, { view: 'original' })
+
+      expect(original.ok, `${fixture.filename} could not produce Original`).toBe(true)
+      if (!original.ok) continue
+      const originalReview = parseReviewMarkup(original.source)
+      expect(originalReview.anchors, `${fixture.filename} leaked anchors into Original`).toEqual([])
+      expect(originalReview.sectionStart, `${fixture.filename} leaked review records into Original`).toBeUndefined()
+      expect(projectPortableReviewSource(source, { view: 'original' }), `${fixture.filename} Original was not deterministic`).toEqual(original)
+
+      const unresolvedFinal = projectPortableReviewSource(source, { view: 'final' })
+      const selectedChangeIds = unresolvedFinal.ok
+        ? []
+        : unresolvedFinal.conflicts.map((conflict) => conflict.candidates[0]?.changeId).filter((id): id is string => Boolean(id))
+      const resolvedFinal = unresolvedFinal.ok
+        ? unresolvedFinal
+        : projectPortableReviewSource(source, { view: 'final', selectedChangeIds })
+
+      expect(resolvedFinal.ok, `${fixture.filename} could not produce a resolved Final`).toBe(true)
+      if (!resolvedFinal.ok) continue
+      const finalReview = parseReviewMarkup(resolvedFinal.source)
+      expect(finalReview.anchors, `${fixture.filename} leaked anchors into Final`).toEqual([])
+      expect(finalReview.sectionStart, `${fixture.filename} leaked review records into Final`).toBeUndefined()
+      expect(projectPortableReviewSource(source, { view: 'final', selectedChangeIds }), `${fixture.filename} Final was not deterministic`).toEqual(resolvedFinal)
+
+      const preservedRaw = parseLosslessPortableSource(source).semanticNodes.filter((node) => node.kind === 'raw-markdown')
+      for (const raw of preservedRaw) {
+        expect(original.source, `${fixture.filename} lost unsupported raw node ${raw.id} in Original`).toContain(raw.raw)
+        expect(resolvedFinal.source, `${fixture.filename} lost unsupported raw node ${raw.id} in Final`).toContain(raw.raw)
+      }
+    }
   })
 })
