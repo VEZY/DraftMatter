@@ -88,4 +88,33 @@ describe('portable semantic source transactions', () => {
     )
     expect(serializeLosslessPortableSource(document)).toBe('Evidence [@vezy2024].\n')
   })
+
+  it('keeps citation and anchor syntax literal inside code, raw, output, and review payloads', () => {
+    const source = `Visible [@visible][]{#dm-visible .dm-anchor data-anchor="visible" data-edge="point"}.
+
+\`\`\`python {#cell-literal .execute}
+print("[@inside-code] []{#inside-code .dm-anchor}")
+\`\`\`
+
+::: {.future-extension}
+[@inside-raw] []{#inside-raw .dm-anchor}
+:::
+
+<!-- dm-output:start cell="cell-literal" run="sha256:literal" -->
+[@inside-output] []{#inside-output .dm-anchor}
+<!-- dm-output:end -->
+
+::::: {.draftmatter-reviews .hidden data-schema="1"}
+:::: {#dm-change-literal .dm-change data-anchor="visible" data-author="dm-author" data-kind="replace" data-status="open"}
+~~~{.dm-proposal}
+[@inside-review] []{#inside-review .dm-anchor}
+~~~
+::::
+:::::
+`
+    const document = parseLosslessPortableSource(source)
+
+    expect(document.semanticNodes.filter((node) => node.kind === 'citation').map((node) => node.raw)).toEqual(['[@visible]'])
+    expect(document.semanticNodes.filter((node) => node.kind === 'review-anchor').map((node) => node.id)).toEqual(['anchor:dm-visible'])
+  })
 })

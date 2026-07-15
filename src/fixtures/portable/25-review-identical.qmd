@@ -13,4 +13,8 @@ leaf area declined by 18%
 leaf expansion slowed
 ~~~
 ::::
+:::: {#dm-a01 .dm-author data-name="Alice Martin"}
+::::
+:::: {#dm-a02 .dm-author data-name="Marcus Chen"}
+::::
 :::::

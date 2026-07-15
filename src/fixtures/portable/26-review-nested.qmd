@@ -13,4 +13,8 @@ Drought reduced leaf area by 18%.
 treatment lowered leaf expansion
 ~~~
 ::::
+:::: {#dm-a01 .dm-author data-name="Alice Martin"}
+::::
+:::: {#dm-a02 .dm-author data-name="Marcus Chen"}
+::::
 :::::

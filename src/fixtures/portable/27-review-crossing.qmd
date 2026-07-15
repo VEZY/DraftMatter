@@ -13,4 +13,8 @@ Water limitation reduced leaf
 lowered leaf area by 18%
 ~~~
 ::::
+:::: {#dm-a01 .dm-author data-name="Alice Martin"}
+::::
+:::: {#dm-a02 .dm-author data-name="Marcus Chen"}
+::::
 :::::

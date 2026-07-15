@@ -84,6 +84,8 @@ function explicitId(raw: string) {
 
 function semanticNodes(source: string, nodes: PortableSourceNode[]): PortableSemanticNode[] {
   const semantic: PortableSemanticNode[] = []
+  const literalRanges = nodes.filter((node) => node.kind === 'executable-fence' || node.kind === 'raw-block' || node.kind === 'output' || node.kind === 'review-section')
+  const isLiteralRange = (start: number, end: number) => literalRanges.some((range) => start >= range.start && end <= range.end)
   let citationOrdinal = 0
   let outputOrdinal = 0
   let anchorOrdinal = 0
@@ -133,8 +135,9 @@ function semanticNodes(source: string, nodes: PortableSourceNode[]): PortableSem
 
   const citationPattern = /\[([^\]\r\n]*@[a-zA-Z0-9_:.+-]+[^\]\r\n]*)\]/g
   for (const match of source.matchAll(citationPattern)) {
-    citationOrdinal += 1
     const start = match.index ?? 0
+    if (isLiteralRange(start, start + match[0].length)) continue
+    citationOrdinal += 1
     const citekeys = [...match[1].matchAll(/@([a-zA-Z0-9_:.+-]+)/g)].map((key) => key[1])
     semantic.push({
       id: `citation:${citationOrdinal}`,
@@ -148,18 +151,20 @@ function semanticNodes(source: string, nodes: PortableSourceNode[]): PortableSem
 
   const anchorPattern = /\[\]\{([^}\r\n]*\.dm-anchor[^}\r\n]*)\}/g
   for (const match of source.matchAll(anchorPattern)) {
-    anchorOrdinal += 1
     const start = match.index ?? 0
+    if (isLiteralRange(start, start + match[0].length)) continue
+    anchorOrdinal += 1
     const label = explicitId(match[1])
     const anchor = match[1].match(/\bdata-anchor="([^"]+)"/)?.[1]
     const edge = match[1].match(/\bdata-edge="([^"]+)"/)?.[1]
+    const affinity = match[1].match(/\bdata-affinity="([^"]+)"/)?.[1]
     semantic.push({
       id: label ? `anchor:${label}` : `anchor:${anchorOrdinal}`,
       kind: 'review-anchor',
       start,
       end: start + match[0].length,
       raw: match[0],
-      attributes: { ...(label ? { label } : {}), ...(anchor ? { anchor } : {}), ...(edge ? { edge } : {}) },
+      attributes: { ...(label ? { label } : {}), ...(anchor ? { anchor } : {}), ...(edge ? { edge } : {}), ...(affinity ? { affinity } : {}) },
     })
   }
 
