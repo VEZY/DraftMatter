@@ -194,7 +194,15 @@ export function diagnoseCitationLock(records: CitationRecord[], citedKeys: strin
 
   for (const citedKey of citedKeys) {
     const key = normalizedKey(citedKey)
-    if (recordsByKey.has(key)) continue
+    const available = recordsByKey.get(key)
+    if (available) {
+      if (available.some((record) => record.availability === 'cached')) diagnostics.push({
+        code: `citation-source-cached-${key}`,
+        level: 'info',
+        message: `Citation ${citedKey} is rendered from its offline cache because the live source is unavailable.`,
+      })
+      continue
+    }
     const canonical = lock.entries.find((entry) => normalizedKey(entry.citekey) === key)
     const aliased = lock.entries.find((entry) => entry.aliases.some((alias) => normalizedKey(alias) === key))
     if (aliased) diagnostics.push({

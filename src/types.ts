@@ -69,6 +69,7 @@ export interface CitationRecord {
   doi?: string
   url?: string
   source: 'bibtex' | 'csl-json' | 'zotero' | 'sample'
+  availability?: 'live' | 'cached'
   provenance?: {
     origin: 'project-file' | 'manual-import' | 'zotero-local' | 'sample'
     locator?: string

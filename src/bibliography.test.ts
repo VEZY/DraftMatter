@@ -63,6 +63,7 @@ describe('local bibliography', () => {
       citekey: 'stable-key',
     }])
     expect(mergeCitationRecords([refreshed], [cached])).toEqual([refreshed])
+    expect(mergeCitationRecords([{ ...refreshed, availability: 'cached' }], [refreshed])).toEqual([refreshed])
   })
 
   it('searches title, author, year, and identifiers', () => {

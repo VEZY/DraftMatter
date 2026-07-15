@@ -54,6 +54,13 @@ describe('citation lock', () => {
     expect(buildCitationLock([reassigned], previous).entries[0].version).toBe('42@902')
   })
 
+  it('reports a cited offline snapshot as readable cached provenance', () => {
+    const lock = buildCitationLock([zotero])
+    expect(diagnoseCitationLock([{ ...zotero, availability: 'cached' }], [zotero.citekey], lock)).toEqual([
+      expect.objectContaining({ code: 'citation-source-cached-martincanopy2025', level: 'info' }),
+    ])
+  })
+
   it('reports duplicates, missing/offline keys, reassignment, aliases, and DOI suggestions without merging', () => {
     const offline = { ...bibtex, citekey: 'lockedOffline', doi: undefined, provenance: { origin: 'project-file' as const, locator: 'offline.bib' } }
     const lock = buildCitationLock([zotero, bibtex, offline])

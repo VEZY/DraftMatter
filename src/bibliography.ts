@@ -274,7 +274,10 @@ export function mergeCitationRecords(existing: CitationRecord[], incoming: Citat
       if (
         current.sourceIdentity
         && record.sourceIdentity
-        && record.sourceIdentity.itemVersion > current.sourceIdentity.itemVersion
+        && (
+          record.sourceIdentity.itemVersion > current.sourceIdentity.itemVersion
+          || (current.availability === 'cached' && record.availability !== 'cached')
+        )
       ) {
         records[identityIndex] = { ...record, citekey: current.citekey }
       }
@@ -282,7 +285,10 @@ export function mergeCitationRecords(existing: CitationRecord[], incoming: Citat
     }
     const keyIndex = byKey.get(key)
     if (keyIndex !== undefined) {
-      if (records[keyIndex].source === 'sample' && record.source !== 'sample') {
+      if (
+        (records[keyIndex].source === 'sample' && record.source !== 'sample')
+        || (records[keyIndex].availability === 'cached' && record.availability !== 'cached')
+      ) {
         records[keyIndex] = record
         if (sourceIdentity) bySourceIdentity.set(sourceIdentity, keyIndex)
       }

@@ -14,6 +14,7 @@ import type { CitationItem, CitationRecord, DocumentDiagnostic, DraftState, Mark
 import { queryZoteroLibrary, type ZoteroVersionStamp } from './zotero'
 import { citationItemsForDraft, normalizeCitationItems } from './citation'
 import { buildCitationLock, diagnoseCitationLock, parseCitationLock, serializeCitationLock, type CitationLock } from './citationLock'
+import { createCitationCache, hydrateCitationsFromCache, readCitationCache, writeCitationCache, type CitationCache } from './citationCache'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
@@ -122,6 +123,7 @@ function App() {
   const [bibliographyDiagnostics, setBibliographyDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [citationLockDiagnostics, setCitationLockDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [citationLockHostDiagnostics, setCitationLockHostDiagnostics] = useState<DocumentDiagnostic[]>([])
+  const [citationCacheDiagnostics, setCitationCacheDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [zoteroDiagnostics, setZoteroDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [zoteroState, setZoteroState] = useState<'idle' | 'searching' | 'available' | 'unavailable' | 'desktop-only'>('idle')
   const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>(() => readRecoverySnapshots(localStorage))
@@ -149,6 +151,8 @@ function App() {
   const citationLockLoadDiagnosticsRef = useRef<DocumentDiagnostic[]>([])
   const citationLockSaveBlockedRef = useRef(false)
   const citationLockSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const citationCacheRef = useRef<CitationCache>({ schemaVersion: 1, records: [] })
+  const citationCacheLoadDiagnosticsRef = useRef<DocumentDiagnostic[]>([])
 
   const writeRecoverySnapshot = (nextDraft: DraftState, nextFilename: string, source: string, savedAt?: string) => {
     try {
@@ -172,7 +176,7 @@ function App() {
   const citationLabel = formatCitationCluster(citations, draftCitationItems)
   const activeCitationItem = draftCitationItems.find((item) => item.citekey === citationEditKey) ?? draftCitationItems[0]
   const activeCitationRecord = citations.find((record) => record.citekey === activeCitationItem?.citekey)
-  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...zoteroDiagnostics]
+  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics]
 
   const replaceDesktopSession = (next: DesktopSession | null) => {
     desktopSessionRef.current = next
@@ -357,6 +361,22 @@ function App() {
       }])
     }
   }, [citations])
+
+  useEffect(() => {
+    const result = createCitationCache(citations, draft.citationKeys, citationCacheRef.current)
+    citationCacheRef.current = result.cache
+    const projectIdentity = desktopSession?.root ?? `browser:${filename}`
+    try {
+      writeCitationCache(localStorage, projectIdentity, result.cache)
+      setCitationCacheDiagnostics([...citationCacheLoadDiagnosticsRef.current, ...result.diagnostics])
+    } catch {
+      setCitationCacheDiagnostics([
+        ...citationCacheLoadDiagnosticsRef.current,
+        ...result.diagnostics,
+        { code: 'citation-cache-write-unavailable', level: 'warning', message: 'Citations remain available for this session, but their offline cache could not be stored.' },
+      ])
+    }
+  }, [citations, desktopSession?.root, draft.citationKeys.join('\u0000'), filename])
 
   useEffect(() => {
     const lock = buildCitationLock(citations.filter((record) => record.source !== 'sample'), citationLockRef.current)
@@ -607,6 +627,7 @@ function App() {
 
     const parsed = parsePortableDocument(await file.text(), initialDraft)
     const nextName = file.name.replace(/\.(qmd|md)$/i, '')
+    const cacheResult = readCitationCache(localStorage, `browser:${file.name}`)
     replaceDesktopSession(null)
     citationLockRef.current = buildCitationLock([])
     citationLockHashRef.current = null
@@ -615,6 +636,10 @@ function App() {
     citationLockSaveBlockedRef.current = false
     setCitationLockDiagnostics([])
     setCitationLockHostDiagnostics([])
+    citationCacheRef.current = cacheResult.cache
+    citationCacheLoadDiagnosticsRef.current = cacheResult.diagnostics
+    setCitationCacheDiagnostics(cacheResult.diagnostics)
+    setCitations((current) => hydrateCitationsFromCache(current, cacheResult.cache))
     desktopSaveBlockedRef.current = false
     resetDraftRevision()
     resetDraftHistory(parsed.draft)
@@ -649,7 +674,9 @@ function App() {
     ])
     if (mainPath !== project.config.mainDocument) await desktopHost.setMainDocument(project.root, mainPath)
     const parsed = parsePortableDocument(document.content, initialDraft)
-    const projectCitations = mergeCitationRecords(projectBibliography.records, sampleCitations)
+    const cacheResult = readCitationCache(localStorage, project.root)
+    const liveProjectCitations = mergeCitationRecords(projectBibliography.records, sampleCitations)
+    const projectCitations = hydrateCitationsFromCache(liveProjectCitations, cacheResult.cache)
     const lockResult = lockSnapshot
       ? parseCitationLock(lockSnapshot.content)
       : { lock: buildCitationLock([]), diagnostics: [] }
@@ -663,6 +690,8 @@ function App() {
     citationLockSavedContentRef.current = lockSnapshot?.content ?? null
     citationLockLoadDiagnosticsRef.current = lockResult.diagnostics
     citationLockSaveBlockedRef.current = lockResult.diagnostics.some((diagnostic) => diagnostic.level === 'error')
+    citationCacheRef.current = cacheResult.cache
+    citationCacheLoadDiagnosticsRef.current = cacheResult.diagnostics
     replaceDesktopSession({ root: project.root, path: mainPath, hash: document.hash, savedRevision: 0 })
     resetDraftHistory(parsed.draft)
     setFilename(displayName)
@@ -675,6 +704,7 @@ function App() {
       ...diagnoseCitationLock(projectCitations, parsed.draft.citationKeys, projectLock),
     ])
     setCitationLockHostDiagnostics([])
+    setCitationCacheDiagnostics(cacheResult.diagnostics)
     setProjectMenuOpen(false)
     setPendingProject(null)
     setSaveState('saved')
@@ -1015,7 +1045,7 @@ function App() {
 
             <div className="project-health">
               <div className="project-health-title"><Icon name="spark" size={16} /> Project health</div>
-              <div><span><i className="health-dot okay" /> Citations</span><small>{draft.citationKeys.length} cited · {citations.length} indexed</small></div>
+              <div><span><i className="health-dot okay" /> Citations</span><small>{draft.citationKeys.length} cited · {citations.length} indexed{citations.some((record) => record.availability === 'cached') ? ' · offline cache active' : ''}</small></div>
               <div><span><i className={`health-dot ${draft.cellStatus === 'current' ? 'okay' : 'warning'}`} /> Figures</span><small>{draft.cellStatus === 'current' ? 'Up to date' : draft.cellStatus}</small></div>
               <div><span><i className={`health-dot ${allDiagnostics.some((item) => item.level === 'error') ? 'warning' : 'okay'}`} /> Source</span><small>{allDiagnostics.length ? `${allDiagnostics.length} check${allDiagnostics.length === 1 ? '' : 's'}` : 'Portable'}</small></div>
             </div>
@@ -1078,7 +1108,7 @@ function App() {
                       const record = citations.find((candidate) => candidate.citekey === item.citekey)
                       return (
                         <div className={item.citekey === activeCitationItem?.citekey ? 'active' : ''} key={item.citekey}>
-                          <button onClick={() => setCitationEditKey(item.citekey)}><strong>{record?.title ?? item.citekey}</strong><small>@{item.citekey}</small></button>
+                          <button onClick={() => setCitationEditKey(item.citekey)}><strong>{record?.title ?? item.citekey}</strong><small>@{item.citekey}{record?.availability === 'cached' ? ' · cached copy' : ''}</small></button>
                           <button onClick={() => removeCitationItem(item.citekey)} aria-label={`Remove ${item.citekey} from citation`}><Icon name="close" size={13} /></button>
                         </div>
                       )
@@ -1341,7 +1371,7 @@ function App() {
                     aria-pressed={isCited}
                   >
                     <span className={`source-icon ${record.source === 'bibtex' ? 'bib' : record.source === 'zotero' ? 'zotero' : ''}`}>{record.source === 'bibtex' ? 'B' : record.source === 'csl-json' ? 'C' : record.source === 'zotero' ? 'Z' : 'L'}</span>
-                    <span><strong>{record.title}</strong><small>{record.authors.length ? record.authors.slice(0, 2).join(' & ') : record.citekey}{record.year ? ` · ${record.year}` : ''}{record.container ? ` · ${record.container}` : ''}</small><em>{record.doi ?? `@${record.citekey}`}</em></span>
+                    <span><strong>{record.title}</strong><small>{record.authors.length ? record.authors.slice(0, 2).join(' & ') : record.citekey}{record.year ? ` · ${record.year}` : ''}{record.container ? ` · ${record.container}` : ''}</small><em>{record.doi ?? `@${record.citekey}`}{record.availability === 'cached' ? ' · cached copy' : ''}</em></span>
                     {isCited ? <Icon name="check" /> : <Icon name="plus" />}
                   </button>
                 )
