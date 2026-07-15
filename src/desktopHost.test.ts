@@ -40,6 +40,11 @@ describe('desktop host adapter', () => {
     await host.documentStatus('/research/canopy', 'paper.qmd', 'next')
     await host.setMainDocument('/research/canopy', 'renamed.qmd')
     await host.setCitationPreferences('/research/canopy', 'draftmatter-numeric', 'fr-FR')
+    await host.setExecutionPreferences('/research/canopy', {
+      python: { provider: 'kernel', kernel: 'python-fixture' },
+      r: { provider: 'direct' },
+      julia: { provider: 'direct' },
+    })
     await host.zoteroStatus()
     await host.searchZotero('canopy water', 12)
     await host.searchCrossref({ kind: 'doi', doi: '10.1016/j.envsoft.2019.104609' })
@@ -100,6 +105,9 @@ describe('desktop host adapter', () => {
       ['document_status', { root: '/research/canopy', path: 'paper.qmd', expectedHash: 'next' }],
       ['set_main_document', { root: '/research/canopy', path: 'renamed.qmd' }],
       ['set_citation_preferences', { root: '/research/canopy', style: 'draftmatter-numeric', locale: 'fr-FR' }],
+      ['set_execution_preferences', { root: '/research/canopy', preferences: {
+        python: { provider: 'kernel', kernel: 'python-fixture' }, r: { provider: 'direct' }, julia: { provider: 'direct' },
+      } }],
       ['zotero_status', undefined],
       ['zotero_search', { query: 'canopy water', limit: 12 }],
       ['crossref_search', { request: { doi: '10.1016/j.envsoft.2019.104609' } }],

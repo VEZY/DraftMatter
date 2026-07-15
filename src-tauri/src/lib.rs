@@ -73,6 +73,36 @@ pub struct ProjectConfig {
     pub citation_locale: String,
     #[serde(default)]
     pub citation_bibliography: Option<String>,
+    #[serde(default)]
+    pub execution: ProjectExecutionPreferences,
+}
+
+#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ProjectExecutionProvider {
+    #[default]
+    Direct,
+    Kernel,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectExecutionLanguagePreferences {
+    #[serde(default)]
+    pub provider: ProjectExecutionProvider,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kernel: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectExecutionPreferences {
+    #[serde(default)]
+    pub python: ProjectExecutionLanguagePreferences,
+    #[serde(default)]
+    pub r: ProjectExecutionLanguagePreferences,
+    #[serde(default)]
+    pub julia: ProjectExecutionLanguagePreferences,
 }
 
 fn default_citation_style() -> String {
@@ -93,6 +123,32 @@ fn validate_citation_preferences(style: &str, locale: &str) -> Result<(), HostEr
         return Err(HostError::InvalidProject(format!(
             "Unsupported citation locale: {locale}."
         )));
+    }
+    Ok(())
+}
+
+fn validate_execution_preferences(
+    preferences: &ProjectExecutionPreferences,
+) -> Result<(), HostError> {
+    for kernel in [
+        preferences.python.kernel.as_deref(),
+        preferences.r.kernel.as_deref(),
+        preferences.julia.kernel.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if kernel.is_empty()
+            || kernel.len() > 128
+            || !kernel
+                .chars()
+                .all(|character| character.is_ascii_alphanumeric() || "._-".contains(character))
+        {
+            return Err(HostError::InvalidProject(
+                "Jupyter kernel names may contain only ASCII letters, numbers, dots, dashes, and underscores."
+                    .to_string(),
+            ));
+        }
     }
     Ok(())
 }
@@ -482,6 +538,7 @@ fn default_config(root: &Path, documents: &[ProjectEntry]) -> ProjectConfig {
         citation_style: default_citation_style(),
         citation_locale: default_citation_locale(),
         citation_bibliography: None,
+        execution: ProjectExecutionPreferences::default(),
     }
 }
 
@@ -506,6 +563,7 @@ fn load_config(root: &Path, documents: &[ProjectEntry]) -> Result<ProjectConfig,
         )));
     }
     validate_citation_preferences(&config.citation_style, &config.citation_locale)?;
+    validate_execution_preferences(&config.execution)?;
     Ok(config)
 }
 
@@ -1344,6 +1402,18 @@ fn set_citation_preferences_impl(
     open_project_impl(raw_root)
 }
 
+fn set_execution_preferences_impl(
+    raw_root: &str,
+    preferences: ProjectExecutionPreferences,
+) -> Result<ProjectSnapshot, HostError> {
+    validate_execution_preferences(&preferences)?;
+    let mut snapshot = open_project_impl(raw_root)?;
+    snapshot.config.execution = preferences;
+    let root = canonical_root(raw_root)?;
+    persist_config(&root, &snapshot.config)?;
+    open_project_impl(raw_root)
+}
+
 #[derive(Debug)]
 struct ZoteroHttpResponse {
     status: u16,
@@ -2010,6 +2080,7 @@ fn create_project(root: String, name: String) -> Result<ProjectSnapshot, HostErr
         citation_style: default_citation_style(),
         citation_locale: default_citation_locale(),
         citation_bibliography: None,
+        execution: ProjectExecutionPreferences::default(),
     };
     persist_config(&canonical, &config)?;
     let document = canonical.join(&main_document);
@@ -2081,6 +2152,14 @@ fn set_citation_preferences(
     locale: String,
 ) -> Result<ProjectSnapshot, HostError> {
     set_citation_preferences_impl(&root, &style, &locale)
+}
+
+#[tauri::command]
+fn set_execution_preferences(
+    root: String,
+    preferences: ProjectExecutionPreferences,
+) -> Result<ProjectSnapshot, HostError> {
+    set_execution_preferences_impl(&root, preferences)
 }
 
 #[tauri::command]
@@ -2362,6 +2441,7 @@ pub fn run() {
             document_status,
             set_main_document,
             set_citation_preferences,
+            set_execution_preferences,
             zotero_status,
             zotero_search,
             crossref_search,
@@ -2744,6 +2824,53 @@ mod tests {
         let error = set_citation_preferences_impl(root.to_str().unwrap(), "remote-style", "fr-FR")
             .unwrap_err();
         assert!(matches!(error, HostError::InvalidProject(_)));
+    }
+
+    #[test]
+    fn persists_valid_execution_preferences_and_rejects_unsafe_kernel_names() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("execution-preferences");
+        create_project(root.to_string_lossy().into_owned(), "Execution".into()).unwrap();
+        let preferences = ProjectExecutionPreferences {
+            python: ProjectExecutionLanguagePreferences {
+                provider: ProjectExecutionProvider::Kernel,
+                kernel: Some("python-research-3".to_string()),
+            },
+            r: ProjectExecutionLanguagePreferences {
+                provider: ProjectExecutionProvider::Direct,
+                kernel: Some("ir-4.5".to_string()),
+            },
+            julia: ProjectExecutionLanguagePreferences::default(),
+        };
+
+        let updated =
+            set_execution_preferences_impl(root.to_str().unwrap(), preferences.clone()).unwrap();
+        assert_eq!(updated.config.execution, preferences);
+        assert_eq!(
+            open_project_impl(root.to_str().unwrap())
+                .unwrap()
+                .config
+                .execution,
+            preferences
+        );
+
+        let before = fs::read(root.join(".draftmatter/project.json")).unwrap();
+        let error = set_execution_preferences_impl(
+            root.to_str().unwrap(),
+            ProjectExecutionPreferences {
+                python: ProjectExecutionLanguagePreferences {
+                    provider: ProjectExecutionProvider::Kernel,
+                    kernel: Some("../outside".to_string()),
+                },
+                ..ProjectExecutionPreferences::default()
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(error, HostError::InvalidProject(_)));
+        assert_eq!(
+            fs::read(root.join(".draftmatter/project.json")).unwrap(),
+            before
+        );
     }
 
     #[test]

@@ -5,7 +5,7 @@ import type { JupyterKernelInventory, RuntimeExecutableProbe, RuntimeLanguage } 
 import { EXECUTION_TRUST_ACKNOWLEDGEMENT, type ExecutionTrustStatus } from './executionTrust'
 import type { DirectHostExecutionRequest } from './directExecutionTransport'
 import type { KernelHostExecutionRequest } from './kernelExecutionTransport'
-import type { RawDirectExecution, RawKernelExecution } from './executionProvider'
+import type { ExecutionProviderKind, RawDirectExecution, RawKernelExecution } from './executionProvider'
 import type { ExecutionLanguage } from './executionCells'
 
 export interface ProjectConfig {
@@ -15,6 +15,18 @@ export interface ProjectConfig {
   citationStyle: 'draftmatter-author-date' | 'draftmatter-numeric'
   citationLocale: 'en-US' | 'fr-FR'
   citationBibliography?: string
+  execution?: ProjectExecutionPreferences
+}
+
+export interface ProjectExecutionLanguagePreferences {
+  provider: ExecutionProviderKind
+  kernel?: string
+}
+
+export interface ProjectExecutionPreferences {
+  python: ProjectExecutionLanguagePreferences
+  r: ProjectExecutionLanguagePreferences
+  julia: ProjectExecutionLanguagePreferences
 }
 
 export interface ProjectEntry {
@@ -372,6 +384,9 @@ export function createDesktopHost(
     },
     setCitationPreferences(root: string, style: ProjectConfig['citationStyle'], locale: ProjectConfig['citationLocale']) {
       return invokeBridge<ProjectSnapshot>('set_citation_preferences', { root, style, locale })
+    },
+    setExecutionPreferences(root: string, preferences: ProjectExecutionPreferences) {
+      return invokeBridge<ProjectSnapshot>('set_execution_preferences', { root, preferences })
     },
     zoteroStatus() {
       return invokeBridge<ZoteroStatus>('zotero_status')

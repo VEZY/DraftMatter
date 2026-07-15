@@ -53,6 +53,7 @@ describe('document execution workspace', () => {
     vi.spyOn(desktopHost, 'readExecutionManifests').mockResolvedValue([])
     vi.spyOn(desktopHost, 'saveCitationLock').mockResolvedValue({ path: '.draftmatter/citations.lock.json', content: '{"schemaVersion":1,"entries":[]}\n', hash: 'lock-old', modifiedMs: 1 })
     vi.spyOn(desktopHost, 'setCitationPreferences').mockResolvedValue(project)
+    vi.spyOn(desktopHost, 'setExecutionPreferences').mockResolvedValue(project)
     vi.spyOn(desktopHost, 'documentStatus').mockResolvedValue({ kind: 'current', hash: 'document-old', modifiedMs: 1 })
     vi.spyOn(desktopHost, 'probeRuntime').mockImplementation(async (language) => ({
       language,
@@ -232,6 +233,11 @@ describe('document execution workspace', () => {
       await new Promise((resolve) => window.setTimeout(resolve, 0))
     })
     expect(provider.value).toBe('kernel')
+    expect(desktopHost.setExecutionPreferences).toHaveBeenCalledWith(rootPath, {
+      python: { provider: 'kernel', kernel: 'python-fixture' },
+      r: { provider: 'direct' },
+      julia: { provider: 'direct' },
+    })
     vi.mocked(desktopHost.executeDirect).mockClear()
     vi.mocked(desktopHost.executeKernel).mockClear()
 
@@ -250,6 +256,74 @@ describe('document execution workspace', () => {
       kernelName: 'python-fixture',
     }))
     expect(container.textContent).toContain('kernel:py-prepare')
+  })
+
+  it('restores the project provider and exact kernel without silently choosing another environment', async () => {
+    await act(async () => appRoot.unmount())
+    vi.mocked(desktopHost.openProject).mockResolvedValue({
+      ...project,
+      config: {
+        ...project.config,
+        execution: {
+          python: { provider: 'kernel', kernel: 'python-fixture' },
+          r: { provider: 'direct' },
+          julia: { provider: 'direct' },
+        },
+      },
+    })
+    appRoot = createRoot(container)
+    await act(async () => {
+      appRoot.render(<App />)
+      await new Promise((resolve) => window.setTimeout(resolve, 20))
+    })
+    vi.mocked(desktopHost.executeDirect).mockClear()
+    vi.mocked(desktopHost.executeKernel).mockClear()
+
+    const runPython = [...container.querySelectorAll<HTMLButtonElement>('.structured-execution-bar button')]
+      .find((button) => button.textContent?.includes('Run Python'))!
+    await act(async () => {
+      runPython.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 100))
+    })
+
+    expect(desktopHost.executeDirect).not.toHaveBeenCalled()
+    expect(desktopHost.executeKernel).toHaveBeenCalledWith(expect.objectContaining({
+      kernelName: 'python-fixture',
+      cellId: 'py-prepare',
+    }))
+  })
+
+  it('keeps an unavailable project kernel selected until the author chooses a replacement', async () => {
+    await act(async () => appRoot.unmount())
+    vi.mocked(desktopHost.openProject).mockResolvedValue({
+      ...project,
+      config: {
+        ...project.config,
+        execution: {
+          python: { provider: 'kernel', kernel: 'python-from-another-machine' },
+          r: { provider: 'direct' },
+          julia: { provider: 'direct' },
+        },
+      },
+    })
+    appRoot = createRoot(container)
+    await act(async () => {
+      appRoot.render(<App />)
+      await new Promise((resolve) => window.setTimeout(resolve, 20))
+    })
+    vi.mocked(desktopHost.executeKernel).mockClear()
+
+    const runPython = [...container.querySelectorAll<HTMLButtonElement>('.structured-execution-bar button')]
+      .find((button) => button.textContent?.includes('Run Python'))!
+    await act(async () => {
+      runPython.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 30))
+    })
+
+    expect(desktopHost.executeKernel).not.toHaveBeenCalled()
+    const dialog = container.querySelector<HTMLElement>('[aria-labelledby="execution-environment-title"]')!
+    expect(dialog.textContent).toContain('python-from-another-machine · unavailable')
+    expect(dialog.textContent).toContain('No healthy Python Jupyter kernel is selected')
   })
 
   it('marks the affected language stale when a declared input changes on disk', async () => {
