@@ -56,7 +56,7 @@ describe('keyboard citation cluster workflow', () => {
     await press(search, 'Enter', { ctrlKey: true })
 
     expect(container.querySelector('[role="dialog"][aria-label="Insert citation"]')).toBeNull()
-    expect(normalizedText(container.querySelector('.citation-chip'))).toBe('(Vezy et al., 2024; Martin & Chen, 2023)')
+    expect(normalizedText(container.querySelector('.citation-chip'))).toBe('(Martin and Chen, 2023; Vezy et al., 2024)')
 
     await click(container.querySelector('.citation-chip')!)
     const fields = [...container.querySelectorAll<HTMLInputElement>('.citation-modifiers input')]

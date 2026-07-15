@@ -15,6 +15,13 @@ import { queryZoteroLibrary, type ZoteroVersionStamp } from './zotero'
 import { citationItemsForDraft, normalizeCitationItems } from './citation'
 import { buildCitationLock, diagnoseCitationLock, parseCitationLock, serializeCitationLock, type CitationLock } from './citationLock'
 import { createCitationCache, hydrateCitationsFromCache, readCitationCache, writeCitationCache, type CitationCache } from './citationCache'
+import {
+  citationLocaleOptions,
+  citationStyleOptions,
+  renderCslDocument,
+  type CitationLocale,
+  type CitationStyleId,
+} from './cslRenderer'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
@@ -31,9 +38,24 @@ interface DesktopSession {
 
 function getInitialProjectMeta() {
   try {
-    return { filename: 'canopy-drought.qmd', projectName: 'Canopy drought study', ...JSON.parse(localStorage.getItem(PROJECT_META_KEY) ?? '{}') }
+    const saved = JSON.parse(localStorage.getItem(PROJECT_META_KEY) ?? '{}')
+    return {
+      filename: typeof saved.filename === 'string' ? saved.filename : 'canopy-drought.qmd',
+      projectName: typeof saved.projectName === 'string' ? saved.projectName : 'Canopy drought study',
+      citationStyle: citationStyleOptions.some((option) => option.id === saved.citationStyle)
+        ? saved.citationStyle as CitationStyleId
+        : 'draftmatter-author-date' as CitationStyleId,
+      citationLocale: citationLocaleOptions.some((option) => option.id === saved.citationLocale)
+        ? saved.citationLocale as CitationLocale
+        : 'en-US' as CitationLocale,
+    }
   } catch {
-    return { filename: 'canopy-drought.qmd', projectName: 'Canopy drought study' }
+    return {
+      filename: 'canopy-drought.qmd',
+      projectName: 'Canopy drought study',
+      citationStyle: 'draftmatter-author-date' as CitationStyleId,
+      citationLocale: 'en-US' as CitationLocale,
+    }
   }
 }
 
@@ -66,6 +88,18 @@ function getInitialZoteroVersion(): ZoteroVersionStamp {
   }
 }
 
+function readableError(error: unknown) {
+  if (error instanceof Error) return error.message
+  if (typeof error === 'object' && error !== null) {
+    try {
+      return JSON.stringify(error)
+    } catch {
+      return 'The formatter returned an unreadable error.'
+    }
+  }
+  return String(error)
+}
+
 function Avatar({ initials, tone = 'sage', small = false }: { initials: string; tone?: 'sage' | 'blue' | 'clay'; small?: boolean }) {
   return <span className={`avatar avatar-${tone} ${small ? 'avatar-small' : ''}`}>{initials}</span>
 }
@@ -81,6 +115,27 @@ function CitationChip({ onClick, label }: { onClick: () => void; label: string }
 function StatusPill({ status }: { status: SuggestionStatus }) {
   const label = status === 'needs-rebase' ? 'Needs rebase' : status[0].toUpperCase() + status.slice(1)
   return <span className={`status-pill status-${status}`}>{label}</span>
+}
+
+function CitationFormattingControls({
+  style,
+  locale,
+  onStyleChange,
+  onLocaleChange,
+  compact = false,
+}: {
+  style: CitationStyleId
+  locale: CitationLocale
+  onStyleChange: (style: CitationStyleId) => void
+  onLocaleChange: (locale: CitationLocale) => void
+  compact?: boolean
+}) {
+  return (
+    <div className={`citation-format-controls ${compact ? 'compact' : ''}`}>
+      <label><span>Style</span><select aria-label="Citation style" value={style} onChange={(event) => onStyleChange(event.target.value as CitationStyleId)}>{citationStyleOptions.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}</select></label>
+      <label><span>Locale</span><select aria-label="Citation locale" value={locale} onChange={(event) => onLocaleChange(event.target.value as CitationLocale)}>{citationLocaleOptions.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}</select></label>
+    </div>
+  )
 }
 
 function App() {
@@ -119,6 +174,13 @@ function App() {
   const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [filename, setFilename] = useState(initialProjectMeta.filename)
   const [projectName, setProjectName] = useState(initialProjectMeta.projectName)
+  const [citationStyle, setCitationStyle] = useState<CitationStyleId>(initialProjectMeta.citationStyle)
+  const [citationLocale, setCitationLocale] = useState<CitationLocale>(initialProjectMeta.citationLocale)
+  const [renderedCitations, setRenderedCitations] = useState<Record<string, string>>({})
+  const [renderedBibliography, setRenderedBibliography] = useState<Array<{ id: string; value: string }>>([])
+  const [cslState, setCslState] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [cslDiagnostics, setCslDiagnostics] = useState<DocumentDiagnostic[]>([])
+  const [citationPreferenceDiagnostics, setCitationPreferenceDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [diagnostics, setDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [bibliographyDiagnostics, setBibliographyDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [citationLockDiagnostics, setCitationLockDiagnostics] = useState<DocumentDiagnostic[]>([])
@@ -173,10 +235,11 @@ function App() {
     : 'lowered leaf expansion during the treatment period'
   const citationResults = useMemo(() => searchCitations(citations, citationQuery).slice(0, 8), [citations, citationQuery])
   const draftCitationItems = citationItemsForDraft(draft)
-  const citationLabel = formatCitationCluster(citations, draftCitationItems)
+  const citationLabel = renderedCitations.introduction ?? formatCitationCluster(citations, draftCitationItems)
+  const resultsCitationLabel = renderedCitations.results ?? formatCitationCluster(citations, [{ citekey: 'coutellier2022' }])
   const activeCitationItem = draftCitationItems.find((item) => item.citekey === citationEditKey) ?? draftCitationItems[0]
   const activeCitationRecord = citations.find((record) => record.citekey === activeCitationItem?.citekey)
-  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics]
+  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics]
 
   const replaceDesktopSession = (next: DesktopSession | null) => {
     desktopSessionRef.current = next
@@ -347,8 +410,39 @@ function App() {
   }, [draft, filename])
 
   useEffect(() => {
-    localStorage.setItem(PROJECT_META_KEY, JSON.stringify({ filename, projectName }))
-  }, [filename, projectName])
+    localStorage.setItem(PROJECT_META_KEY, JSON.stringify({ filename, projectName, citationStyle, citationLocale }))
+  }, [filename, projectName, citationStyle, citationLocale])
+
+  useEffect(() => {
+    let disposed = false
+    setCslState('loading')
+    setRenderedCitations({})
+    setRenderedBibliography([])
+    void renderCslDocument({
+      records: citations,
+      clusters: [
+        { id: 'introduction', items: draftCitationItems },
+        { id: 'results', items: [{ citekey: 'coutellier2022' }] },
+      ],
+      style: citationStyle,
+      locale: citationLocale,
+    }).then((result) => {
+      if (disposed) return
+      setRenderedCitations(result.clusters)
+      setRenderedBibliography(result.bibliography)
+      setCslDiagnostics(result.diagnostics)
+      setCslState('ready')
+    }).catch((error) => {
+      if (disposed) return
+      setCslDiagnostics([{
+        code: 'csl-render-failed',
+        level: 'error',
+        message: `Citation formatting is temporarily unavailable: ${readableError(error)}`,
+      }])
+      setCslState('error')
+    })
+    return () => { disposed = true }
+  }, [citations, citationStyle, citationLocale, draft.citationItems, draft.citationKeys])
 
   useEffect(() => {
     try {
@@ -696,6 +790,9 @@ function App() {
     resetDraftHistory(parsed.draft)
     setFilename(displayName)
     setProjectName(project.config.name)
+    setCitationStyle(project.config.citationStyle)
+    setCitationLocale(project.config.citationLocale)
+    setCitationPreferenceDiagnostics([])
     setDiagnostics(parsed.diagnostics)
     setCitations(projectCitations)
     setBibliographyDiagnostics(projectBibliography.diagnostics)
@@ -893,6 +990,26 @@ function App() {
     setToast(`Indexed ${added} new source${added === 1 ? '' : 's'} from ${file.name}`)
   }
 
+  const updateCitationPreferences = (style: CitationStyleId, locale: CitationLocale) => {
+    setCitationStyle(style)
+    setCitationLocale(locale)
+    const root = desktopSessionRef.current?.root
+    if (!root || !desktopHost.available) return
+    void desktopHost.setCitationPreferences(root, style, locale).then(() => {
+      if (desktopSessionRef.current?.root === root) setCitationPreferenceDiagnostics([])
+    }).catch((error) => {
+      if (desktopSessionRef.current?.root !== root) return
+      setCitationPreferenceDiagnostics([{
+        code: 'citation-preferences-save',
+        level: 'warning',
+        message: `${normaliseHostFailure(error).message} The current citation format remains active for this session.`,
+      }])
+    })
+  }
+
+  const changeCitationStyle = (style: CitationStyleId) => updateCitationPreferences(style, citationLocale)
+  const changeCitationLocale = (locale: CitationLocale) => updateCitationPreferences(citationStyle, locale)
+
   useEffect(() => {
     if (!desktopHost.available || reopenAttemptedRef.current) return
     reopenAttemptedRef.current = true
@@ -1038,6 +1155,7 @@ function App() {
               <button className="outline-nested" onClick={() => scrollTo('code-cell')}><span>Canopy response</span><small>Fig. 1</small></button>
               <button onClick={() => scrollTo('results')}><span>Results</span><small>164</small></button>
               <button onClick={() => scrollTo('conclusion')}><span>Conclusion</span><small>88</small></button>
+              <button onClick={() => scrollTo('references')}><span>References</span><small>{renderedBibliography.length}</small></button>
               <button className="add-section"><Icon name="plus" size={15} /> Add section</button>
             </div>
 
@@ -1045,7 +1163,7 @@ function App() {
 
             <div className="project-health">
               <div className="project-health-title"><Icon name="spark" size={16} /> Project health</div>
-              <div><span><i className="health-dot okay" /> Citations</span><small>{draft.citationKeys.length} cited · {citations.length} indexed{citations.some((record) => record.availability === 'cached') ? ' · offline cache active' : ''}</small></div>
+              <div><span><i className={`health-dot ${cslState === 'error' ? 'warning' : 'okay'}`} /> Citations</span><small>{draft.citationKeys.length} cited · {citations.length} indexed{cslState === 'loading' ? ' · formatting' : ''}{citations.some((record) => record.availability === 'cached') ? ' · offline cache active' : ''}</small></div>
               <div><span><i className={`health-dot ${draft.cellStatus === 'current' ? 'okay' : 'warning'}`} /> Figures</span><small>{draft.cellStatus === 'current' ? 'Up to date' : draft.cellStatus}</small></div>
               <div><span><i className={`health-dot ${allDiagnostics.some((item) => item.level === 'error') ? 'warning' : 'okay'}`} /> Source</span><small>{allDiagnostics.length ? `${allDiagnostics.length} check${allDiagnostics.length === 1 ? '' : 's'}` : 'Portable'}</small></div>
             </div>
@@ -1122,6 +1240,7 @@ function App() {
                       <label className="citation-suppress"><input type="checkbox" checked={activeCitationItem.suppressAuthor ?? false} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { suppressAuthor: event.target.checked })} /><span>Suppress author</span></label>
                     </div>
                   )}
+                  <CitationFormattingControls style={citationStyle} locale={citationLocale} onStyleChange={changeCitationStyle} onLocaleChange={changeCitationLocale} compact />
                   <div className="citation-actions"><button onClick={() => setCitationOpen(false)}>Done</button><button onClick={openCitationPicker}>Add or remove sources</button></div>
                 </div>
               )}
@@ -1192,7 +1311,7 @@ function App() {
                     <span className="insertion" onClick={showReviewPanel}>{activeReplacement}</span>
                   </>
                 )}
-                , while root allocation <mark onClick={showReviewPanel}>increased modestly</mark> <button className="citation-inline" onClick={() => setCitationOpen(true)}>(Coutellier et al., 2022)</button>.
+                , while root allocation <mark onClick={showReviewPanel}>increased modestly</mark> <button className="citation-inline" onClick={() => setCitationOpen(true)}>{resultsCitationLabel}</button>.
                 <button className="comment-anchor" onClick={showReviewPanel} aria-label="Open comment">1</button>
               </p>
               <p>
@@ -1203,6 +1322,22 @@ function App() {
             <section id="conclusion">
               <h2><span>4</span> Conclusion</h2>
               <ManuscriptTextEditor value={draft.conclusion} onChange={(conclusion) => updateManuscriptText('conclusion', conclusion)} ariaLabel="Conclusion" />
+            </section>
+
+            <section id="references" className="bibliography-section" aria-labelledby="references-heading">
+              <div className="bibliography-heading">
+                <div><span className="eyebrow">Live CSL bibliography</span><h2 id="references-heading">References</h2></div>
+                <CitationFormattingControls style={citationStyle} locale={citationLocale} onStyleChange={changeCitationStyle} onLocaleChange={changeCitationLocale} />
+              </div>
+              <div className="bibliography-status" aria-live="polite">
+                <i className={cslState} />
+                {cslState === 'loading' ? 'Formatting citations and references…' : cslState === 'error' ? 'Using readable fallback citations' : `${citationStyleOptions.find((option) => option.id === citationStyle)?.label} · ${citationLocaleOptions.find((option) => option.id === citationLocale)?.label}`}
+              </div>
+              {renderedBibliography.length ? (
+                <div className="bibliography-entries">{renderedBibliography.map((entry) => <p key={entry.id} data-citekey={entry.id}>{entry.value}</p>)}</div>
+              ) : cslState === 'ready' ? (
+                <p className="bibliography-empty">Cited works will appear here.</p>
+              ) : null}
             </section>
 
             <button className="end-insert" onClick={() => setCommandOpen(true)}><Icon name="plus" size={15} /> Add block or type /</button>

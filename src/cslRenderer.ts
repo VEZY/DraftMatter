@@ -40,6 +40,22 @@ const styles: Record<CitationStyleId, string> = {
   'draftmatter-numeric': numericStyle,
 }
 
+let browserCiteproc: Promise<typeof import('@citeproc-rs/wasm/_web/citeproc_rs_wasm.js')> | undefined
+
+async function loadCiteproc() {
+  if (import.meta.env.MODE === 'test') return import('@citeproc-rs/wasm')
+  if (!browserCiteproc) {
+    browserCiteproc = Promise.all([
+      import('@citeproc-rs/wasm/_web/citeproc_rs_wasm.js'),
+      import('@citeproc-rs/wasm/_web/citeproc_rs_wasm_bg.wasm?url'),
+    ]).then(async ([module, wasmUrl]) => {
+      await module.default(wasmUrl.default)
+      return module
+    })
+  }
+  return browserCiteproc
+}
+
 function authorToCsl(author: string) {
   const value = author.trim()
   if (!value) return undefined
@@ -131,12 +147,13 @@ export async function renderCslDocument(options: CslRenderOptions): Promise<CslR
   }))
   if (!clusters.some((cluster) => cluster.cites.length)) return { clusters: {}, bibliography: [], diagnostics }
 
-  const module = await import('@citeproc-rs/wasm')
+  const module = await loadCiteproc()
   const driver = new module.Driver({
     style: styles[options.style],
     format: 'plain',
     localeOverride: options.locale,
-    ...(options.locale === 'fr-FR' ? { fetcher: { fetchLocale } } : {}),
+    // The browser WASM bridge reads this property eagerly, even when en-US is bundled.
+    fetcher: { fetchLocale },
   })
   try {
     if (options.locale === 'fr-FR') await driver.fetchLocales()

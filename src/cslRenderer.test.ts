@@ -51,7 +51,7 @@ describe('CSL rendering', () => {
       locale: 'en-US',
     })
 
-    expect(result.clusters['cluster-1']).toBe('(see Martin and Chen, 2024, p. 18 emphasis added; Nguyen, Smith, and Dubois, 2021)')
+    expect(result.clusters['cluster-1']).toBe('(see Martin and Chen, 2024, p. 18 emphasis added; Nguyen et al., 2021)')
     expect(result.bibliography).toEqual([
       {
         id: 'martin2024',
@@ -80,5 +80,20 @@ describe('CSL rendering', () => {
 
     expect(numeric.clusters.numeric).toBe('[1, 2]')
     expect(french.clusters.french).toBe('(Martin et Chen, 2024)')
+  })
+
+  it('disambiguates same-author, same-year works with stable year suffixes', async () => {
+    const sameYear: CitationRecord[] = [
+      { ...records[0], citekey: 'martin2024field', title: 'Field methods' },
+      { ...records[0], citekey: 'martin2024lab', title: 'Laboratory methods' },
+    ]
+    const result = await renderCslDocument({
+      records: sameYear,
+      clusters: [{ id: 'ambiguous', items: [{ citekey: 'martin2024field' }, { citekey: 'martin2024lab' }] }],
+      style: 'draftmatter-author-date',
+      locale: 'en-US',
+    })
+
+    expect(result.clusters.ambiguous).toBe('(Martin and Chen, 2024a, 2024b)')
   })
 })

@@ -17,7 +17,7 @@
   <macro name="issued-year">
     <date variable="issued"><date-part name="year"/></date>
   </macro>
-  <citation disambiguate-add-year-suffix="true" collapse="year">
+  <citation disambiguate-add-year-suffix="true" collapse="year" et-al-min="3" et-al-use-first="1">
     <sort><key macro="author"/><key macro="issued-year"/></sort>
     <layout prefix="(" suffix=")" delimiter="; ">
       <group delimiter=", ">

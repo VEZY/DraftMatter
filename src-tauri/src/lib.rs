@@ -21,6 +21,32 @@ pub struct ProjectConfig {
     pub schema_version: u32,
     pub name: String,
     pub main_document: String,
+    #[serde(default = "default_citation_style")]
+    pub citation_style: String,
+    #[serde(default = "default_citation_locale")]
+    pub citation_locale: String,
+}
+
+fn default_citation_style() -> String {
+    "draftmatter-author-date".to_string()
+}
+
+fn default_citation_locale() -> String {
+    "en-US".to_string()
+}
+
+fn validate_citation_preferences(style: &str, locale: &str) -> Result<(), HostError> {
+    if !matches!(style, "draftmatter-author-date" | "draftmatter-numeric") {
+        return Err(HostError::InvalidProject(format!(
+            "Unsupported citation style: {style}."
+        )));
+    }
+    if !matches!(locale, "en-US" | "fr-FR") {
+        return Err(HostError::InvalidProject(format!(
+            "Unsupported citation locale: {locale}."
+        )));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -323,6 +349,8 @@ fn default_config(root: &Path, documents: &[ProjectEntry]) -> ProjectConfig {
             .first()
             .map(|entry| entry.path.clone())
             .unwrap_or_else(|| "paper.qmd".to_string()),
+        citation_style: default_citation_style(),
+        citation_locale: default_citation_locale(),
     }
 }
 
@@ -346,6 +374,7 @@ fn load_config(root: &Path, documents: &[ProjectEntry]) -> Result<ProjectConfig,
             path.display()
         )));
     }
+    validate_citation_preferences(&config.citation_style, &config.citation_locale)?;
     Ok(config)
 }
 
@@ -740,6 +769,20 @@ fn set_main_document_impl(raw_root: &str, relative: &str) -> Result<ProjectSnaps
     open_project_impl(raw_root)
 }
 
+fn set_citation_preferences_impl(
+    raw_root: &str,
+    style: &str,
+    locale: &str,
+) -> Result<ProjectSnapshot, HostError> {
+    validate_citation_preferences(style, locale)?;
+    let mut snapshot = open_project_impl(raw_root)?;
+    snapshot.config.citation_style = style.to_string();
+    snapshot.config.citation_locale = locale.to_string();
+    let root = canonical_root(raw_root)?;
+    persist_config(&root, &snapshot.config)?;
+    open_project_impl(raw_root)
+}
+
 #[derive(Debug)]
 struct ZoteroHttpResponse {
     status: u16,
@@ -1031,6 +1074,8 @@ fn create_project(root: String, name: String) -> Result<ProjectSnapshot, HostErr
         schema_version: PROJECT_SCHEMA,
         name,
         main_document: main_document.clone(),
+        citation_style: default_citation_style(),
+        citation_locale: default_citation_locale(),
     };
     persist_config(&canonical, &config)?;
     let document = canonical.join(&main_document);
@@ -1084,6 +1129,15 @@ fn set_main_document(root: String, path: String) -> Result<ProjectSnapshot, Host
 }
 
 #[tauri::command]
+fn set_citation_preferences(
+    root: String,
+    style: String,
+    locale: String,
+) -> Result<ProjectSnapshot, HostError> {
+    set_citation_preferences_impl(&root, &style, &locale)
+}
+
+#[tauri::command]
 fn zotero_status() -> ZoteroStatus {
     zotero_status_impl()
 }
@@ -1107,6 +1161,7 @@ pub fn run() {
             save_document,
             document_status,
             set_main_document,
+            set_citation_preferences,
             zotero_status,
             zotero_search
         ])
@@ -1164,9 +1219,32 @@ mod tests {
         let snapshot =
             create_project(root.to_string_lossy().into_owned(), "Canopy study".into()).unwrap();
         assert_eq!(snapshot.config.main_document, "paper.qmd");
+        assert_eq!(snapshot.config.citation_style, "draftmatter-author-date");
+        assert_eq!(snapshot.config.citation_locale, "en-US");
         assert_eq!(snapshot.documents.len(), 1);
         assert_eq!(snapshot.documents[0].path, "paper.qmd");
         assert!(root.join(".draftmatter/project.json").is_file());
+    }
+
+    #[test]
+    fn persists_valid_citation_preferences_and_rejects_unknown_values() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("citation-preferences");
+        create_project(root.to_string_lossy().into_owned(), "Citations".into()).unwrap();
+
+        let updated =
+            set_citation_preferences_impl(root.to_str().unwrap(), "draftmatter-numeric", "fr-FR")
+                .unwrap();
+        assert_eq!(updated.config.citation_style, "draftmatter-numeric");
+        assert_eq!(updated.config.citation_locale, "fr-FR");
+        assert_eq!(
+            open_project_impl(root.to_str().unwrap()).unwrap().config,
+            updated.config
+        );
+
+        let error = set_citation_preferences_impl(root.to_str().unwrap(), "remote-style", "fr-FR")
+            .unwrap_err();
+        assert!(matches!(error, HostError::InvalidProject(_)));
     }
 
     #[test]

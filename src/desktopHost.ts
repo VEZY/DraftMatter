@@ -5,6 +5,8 @@ export interface ProjectConfig {
   schemaVersion: number
   name: string
   mainDocument: string
+  citationStyle: 'draftmatter-author-date' | 'draftmatter-numeric'
+  citationLocale: 'en-US' | 'fr-FR'
 }
 
 export interface ProjectEntry {
@@ -156,6 +158,9 @@ export function createDesktopHost(
     },
     setMainDocument(root: string, path: string) {
       return invokeBridge<ProjectSnapshot>('set_main_document', { root, path })
+    },
+    setCitationPreferences(root: string, style: ProjectConfig['citationStyle'], locale: ProjectConfig['citationLocale']) {
+      return invokeBridge<ProjectSnapshot>('set_citation_preferences', { root, style, locale })
     },
     zoteroStatus() {
       return invokeBridge<ZoteroStatus>('zotero_status')
