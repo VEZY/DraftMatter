@@ -36,19 +36,21 @@ function uniqueQuote(source: string, quote: string) {
 export function PortableReviewItems({
   source,
   excludeIds = [],
+  authorId,
   selectedTarget,
   onApply,
 }: {
   source: string
   excludeIds?: string[]
+  authorId?: string
   selectedTarget?: { quote: string; occurrence: number } | null
   onApply: (source: string, message: string) => void
 }) {
   const document = useMemo(() => parseReviewMarkup(source), [source])
   const queue = useMemo(() => {
     const excluded = new Set(excludeIds)
-    return buildReviewQueue(document).filter((item) => !excluded.has(item.id))
-  }, [document, excludeIds])
+    return buildReviewQueue(document, authorId ? { authorIds: [authorId] } : {}).filter((item) => !excluded.has(item.id))
+  }, [authorId, document, excludeIds])
   const [activeId, setActiveId] = useState<string>()
   const [reply, setReply] = useState('')
   const [problem, setProblem] = useState('')

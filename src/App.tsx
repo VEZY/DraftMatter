@@ -270,6 +270,7 @@ function App() {
     canRedo,
   } = useDraftHistory(initialDraftState)
   const [markupView, setMarkupView] = useState<MarkupView>('all')
+  const [reviewAuthorFilter, setReviewAuthorFilter] = useState('all')
   const [activeNav, setActiveNav] = useState<'manuscript' | 'review' | 'sources' | 'history'>('manuscript')
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
@@ -406,7 +407,6 @@ function App() {
     }
   }
 
-  const activeStatus = draft.activeProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
   const activeReplacement = draft.activeProposal === 'alice'
     ? 'reduced leaf area by 18%'
     : 'lowered leaf expansion during the treatment period'
@@ -900,8 +900,8 @@ function App() {
   const displayedSource = sourceEditing ? sourceBuffer : source
   const executionProjection = useMemo(() => cleanExecutionProjection(manuscriptSource), [manuscriptSource])
   const executionSource = executionProjection.ok ? executionProjection.source : manuscriptSource
-  const reviewDocument = parseReviewMarkup(manuscriptSource)
-  const reviewQueue = buildReviewQueue(reviewDocument)
+  const reviewDocument = useMemo(() => parseReviewMarkup(manuscriptSource), [manuscriptSource])
+  const reviewQueue = buildReviewQueue(reviewDocument, reviewAuthorFilter === 'all' ? {} : { authorIds: [reviewAuthorFilter] })
   const structuredReviewProjection = useMemo(() => {
     if (!structuredMode || (markupView !== 'original' && markupView !== 'final')) return null
     return projectPortableReviewSource(manuscriptSource, { view: markupView })
@@ -911,6 +911,8 @@ function App() {
     && reviewDocument.changes.some((change) => change.id === 'dm-c02')
     && reviewDocument.threads.some((thread) => thread.id === 'dm-comment-01')
   const openReviewCount = reviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
+  const reviewProposal = reviewAuthorFilter === 'dm-a01' ? 'alice' : reviewAuthorFilter === 'dm-a02' ? 'marcus' : draft.activeProposal
+  const reviewProposalStatus = reviewProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
   const executableCells = extractExecutableCells(executionSource).cells
   const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL) ?? executableCells[0]
   const retainedOutputs = parseRetainedOutputs(executionSource).outputs
@@ -925,6 +927,12 @@ function App() {
   const executionView = primaryCell ? executionViews.find((view) => view.cellId === primaryCell.id) : undefined
   const pythonRuntimeUnavailable = runtimeInventory?.executables.python.health !== undefined
     && runtimeInventory.executables.python.health !== 'available'
+
+  useEffect(() => {
+    if (reviewAuthorFilter !== 'all' && !reviewDocument.authors.some((author) => author.id === reviewAuthorFilter)) {
+      setReviewAuthorFilter('all')
+    }
+  }, [reviewAuthorFilter, reviewDocument.authors])
 
   useEffect(() => {
     const trackerRoot = desktopSession?.root ?? `browser:${filename}`
@@ -1583,8 +1591,8 @@ function App() {
     }
   }
 
-  const acceptProposal = () => {
-    if (draft.activeProposal === 'alice') {
+  const acceptProposal = (proposal = draft.activeProposal) => {
+    if (proposal === 'alice') {
       updateDraft({ aliceStatus: 'accepted', marcusStatus: draft.marcusStatus === 'open' ? 'needs-rebase' : draft.marcusStatus })
     } else {
       updateDraft({ marcusStatus: 'accepted', aliceStatus: draft.aliceStatus === 'open' ? 'needs-rebase' : draft.aliceStatus })
@@ -1592,8 +1600,8 @@ function App() {
     setToast('Suggestion accepted · intersecting proposal preserved')
   }
 
-  const rejectProposal = () => {
-    if (draft.activeProposal === 'alice') updateDraft({ aliceStatus: 'rejected', activeProposal: 'marcus' })
+  const rejectProposal = (proposal = draft.activeProposal) => {
+    if (proposal === 'alice') updateDraft({ aliceStatus: 'rejected', activeProposal: 'marcus' })
     else updateDraft({ marcusStatus: 'rejected', activeProposal: 'alice' })
     setToast('Suggestion rejected · accepted text unchanged')
   }
@@ -2878,38 +2886,50 @@ function App() {
               <Icon name="chevronDown" size={13} />
             </div>
 
+            <div className="markup-view-control review-author-control">
+              <Icon name="users" size={16} />
+              <select value={reviewAuthorFilter} onChange={(event) => setReviewAuthorFilter(event.target.value)} aria-label="Review author">
+                <option value="all">All authors</option>
+                {reviewDocument.authors.map((author) => <option value={author.id} key={author.id}>{author.name}</option>)}
+              </select>
+              <Icon name="chevronDown" size={13} />
+            </div>
+
             <div className="review-scroll">
               <div className="review-location"><span>RESULTS · PARAGRAPH 1</span><button aria-label="Review item options"><Icon name="more" /></button></div>
 
-              {demoReviewAvailable && <>
+              {demoReviewAvailable && (reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a01' || reviewAuthorFilter === 'dm-a02') && <>
               <div className="conflict-card">
-                <div className="conflict-heading"><Icon name="branch" size={16} /><span>2 overlapping alternatives</span><small>Compare one at a time</small></div>
+                <div className="conflict-heading"><Icon name="branch" size={16} /><span>{reviewAuthorFilter === 'all' ? '2 overlapping alternatives' : 'Filtered alternative'}</span><small>{reviewAuthorFilter === 'all' ? 'Compare one at a time' : 'Author filter active'}</small></div>
 
-                <button className={`proposal-option ${draft.activeProposal === 'alice' ? 'selected' : ''}`} onClick={() => updateDraft({ activeProposal: 'alice' })}>
+                {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a01') &&
+                <button className={`proposal-option ${reviewProposal === 'alice' ? 'selected' : ''}`} onClick={() => updateDraft({ activeProposal: 'alice' })}>
                   <Avatar initials="AM" tone="blue" small />
                   <span className="proposal-author"><strong>Alice Martin</strong><small>12 minutes ago</small></span>
                   <StatusPill status={draft.aliceStatus} />
                   <span className="proposal-copy"><del>did not substantially alter leaf expansion</del><ins>reduced leaf area by 18%</ins></span>
-                </button>
+                </button>}
 
-                <button className={`proposal-option ${draft.activeProposal === 'marcus' ? 'selected' : ''}`} onClick={() => updateDraft({ activeProposal: 'marcus' })}>
+                {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
+                <button className={`proposal-option ${reviewProposal === 'marcus' ? 'selected' : ''}`} onClick={() => updateDraft({ activeProposal: 'marcus' })}>
                   <Avatar initials="MC" tone="clay" small />
                   <span className="proposal-author"><strong>Marcus Chen</strong><small>8 minutes ago</small></span>
                   <StatusPill status={draft.marcusStatus} />
                   <span className="proposal-copy"><del>did not substantially alter leaf expansion</del><ins>lowered leaf expansion during the treatment period</ins></span>
-                </button>
+                </button>}
 
                 <div className="proposal-rationale">
-                  “{draft.activeProposal === 'alice' ? 'State the measured effect directly.' : 'Keep the interpretation conservative until the model comparison is final.'}”
+                  “{reviewProposal === 'alice' ? 'State the measured effect directly.' : 'Keep the interpretation conservative until the model comparison is final.'}”
                 </div>
 
-                {activeStatus === 'open' ? (
-                  <div className="review-actions"><button className="accept" onClick={acceptProposal}><Icon name="check" size={15} /> Accept</button><button className="reject" onClick={rejectProposal}><Icon name="x" size={15} /> Reject</button><button className="icon-button" aria-label="Suggestion options"><Icon name="more" /></button></div>
+                {reviewProposalStatus === 'open' ? (
+                  <div className="review-actions"><button className="accept" onClick={() => acceptProposal(reviewProposal)}><Icon name="check" size={15} /> Accept</button><button className="reject" onClick={() => rejectProposal(reviewProposal)}><Icon name="x" size={15} /> Reject</button><button className="icon-button" aria-label="Suggestion options"><Icon name="more" /></button></div>
                 ) : (
-                  <div className="decision-note"><Icon name={activeStatus === 'accepted' ? 'check' : activeStatus === 'rejected' ? 'x' : 'branch'} size={15} /> This proposal is {activeStatus === 'needs-rebase' ? 'preserved and needs rebase' : activeStatus}.</div>
+                  <div className="decision-note"><Icon name={reviewProposalStatus === 'accepted' ? 'check' : reviewProposalStatus === 'rejected' ? 'x' : 'branch'} size={15} /> This proposal is {reviewProposalStatus === 'needs-rebase' ? 'preserved and needs rebase' : reviewProposalStatus}.</div>
                 )}
               </div>
 
+              {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
               <div className={`comment-card ${draft.commentResolved ? 'resolved' : ''}`}>
                 <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small>5 minutes ago</small></span><button className="icon-button subtle" aria-label="Comment options"><Icon name="more" /></button></div>
                 <div className="comment-quote">“increased modestly”</div>
@@ -2919,12 +2939,13 @@ function App() {
                   <div className="reply-box"><input value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addReply() }} placeholder="Reply…" aria-label="Reply to comment" /><button onClick={addReply} disabled={!reply.trim()} aria-label="Send reply"><Icon name="arrowRight" size={15} /></button></div>
                 )}
                 <button className="resolve-button" onClick={() => updateDraft({ commentResolved: !draft.commentResolved })}><Icon name="check" size={14} /> {draft.commentResolved ? 'Reopen thread' : 'Resolve thread'}</button>
-              </div>
+              </div>}
               </>}
 
               <PortableReviewItems
                 source={manuscriptSource}
                 excludeIds={demoReviewAvailable ? ['dm-c01', 'dm-c02', 'dm-comment-01'] : []}
+                authorId={reviewAuthorFilter === 'all' ? undefined : reviewAuthorFilter}
                 selectedTarget={structuredMode ? structuredReviewSelection : null}
                 onApply={applyPortableReviewSource}
               />

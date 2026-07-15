@@ -75,6 +75,15 @@ describe('portable review panel items', () => {
     expect(notices.at(-1)).toContain('overlapping alternative')
   })
 
+  it('filters the portable queue by author without changing source records', async () => {
+    await act(async () => root.render(<PortableReviewItems source={identicalSource} authorId="dm-a01" onApply={() => undefined} />))
+
+    expect(container.querySelectorAll('.proposal-option')).toHaveLength(1)
+    expect(container.textContent).toContain('Alice Martin')
+    expect(container.textContent).not.toContain('Marcus Chen')
+    expect(parseReviewMarkup(identicalSource).changes).toHaveLength(2)
+  })
+
   it('creates a new portable comment from a unique manuscript quote', async () => {
     await click(button(container, 'New comment'))
     const composer = container.querySelector('.portable-review-composer')!

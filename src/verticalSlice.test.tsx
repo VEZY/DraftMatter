@@ -19,6 +19,13 @@ async function click(element: Element) {
   await act(async () => element.dispatchEvent(new MouseEvent('click', { bubbles: true })))
 }
 
+async function select(element: HTMLSelectElement, value: string) {
+  await act(async () => {
+    element.value = value
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+}
+
 describe('rendered Phase 0 vertical slice', () => {
   let container: HTMLDivElement
   let root: ReturnType<typeof createRoot>
@@ -67,6 +74,15 @@ describe('rendered Phase 0 vertical slice', () => {
     expect(container.textContent).not.toContain('.dm-anchor')
     expect(container.textContent).not.toContain('.draftmatter-reviews')
     expect(container.textContent).not.toContain(':::::')
+
+    const authorFilter = container.querySelector<HTMLSelectElement>('[aria-label="Review author"]')!
+    await select(authorFilter, 'dm-a01')
+    expect([...container.querySelectorAll('.proposal-option')].map((option) => normalizedText(option))).toEqual([
+      expect.stringContaining('Alice Martin'),
+    ])
+    expect(container.querySelector('.comment-card')).toBeNull()
+    expect(normalizedText(container.querySelector('.review-panel-header h2'))).toContain('1')
+    await select(authorFilter, 'all')
 
     await click(buttonWithText(container, 'View source'))
     await click(buttonWithText(container.querySelector('.source-tabs')!, 'Clean final'))
