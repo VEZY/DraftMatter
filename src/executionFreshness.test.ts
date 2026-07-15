@@ -72,6 +72,18 @@ describe('execution freshness and provenance', () => {
     expect(tracker.snapshot().find((state) => state.cellId === 'r-1')?.status).toBe('current')
   })
 
+  it('propagates a missing declared input through the same-language suffix', async () => {
+    const tracker = await currentTracker()
+
+    tracker.inputsUnavailable('py-1', 'Declared input data/observations.csv is missing.')
+
+    expect(tracker.snapshot().filter((state) => state.language === 'python').map((state) => [state.status, state.reason])).toEqual([
+      ['stale', 'Declared input data/observations.csv is missing.'],
+      ['stale', 'Declared input data/observations.csv is missing.'],
+    ])
+    expect(tracker.snapshot().find((state) => state.cellId === 'r-1')?.status).toBe('current')
+  })
+
   it('retains the last successful provenance when a later run fails', async () => {
     const tracker = await currentTracker()
     const before = tracker.snapshot()[0].lastSuccessful

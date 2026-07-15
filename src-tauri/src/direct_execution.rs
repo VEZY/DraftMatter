@@ -5,7 +5,7 @@ use crate::runtime::{
 use crate::{canonical_root, now_millis, safe_relative, HostError};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
 use std::fs::{self, File};
 use std::io::Read;
@@ -245,6 +245,37 @@ fn verify_inputs(root: &Path, inputs: &[DirectExecutionInput]) -> Result<(), Hos
         }
     }
     Ok(())
+}
+
+pub fn fingerprint_execution_inputs_impl(
+    root: &str,
+    paths: Vec<String>,
+) -> Result<Vec<DirectExecutionInput>, HostError> {
+    if paths.len() > MAX_INPUTS {
+        return Err(HostError::InvalidProject(format!(
+            "A cell may declare at most {MAX_INPUTS} input files."
+        )));
+    }
+    let root = canonical_root(root)?;
+    let mut seen = HashSet::new();
+    paths
+        .into_iter()
+        .map(|path| {
+            if !seen.insert(path.clone()) {
+                return Err(HostError::InvalidProject(format!(
+                    "Declared input appears more than once: {path}"
+                )));
+            }
+            let absolute = project_path(&root, &path, false)?;
+            if !absolute.is_file() {
+                return Err(HostError::NotFound(format!(
+                    "Declared input is missing: {path}"
+                )));
+            }
+            let (hash, _) = sha256_file(&absolute)?;
+            Ok(DirectExecutionInput { path, hash })
+        })
+        .collect()
 }
 
 fn declared_artifacts(
@@ -701,6 +732,24 @@ mod tests {
             &fs::canonicalize(project.path()).unwrap(),
             "../outside.svg",
             true
+        )
+        .is_err());
+
+        let inputs = fingerprint_execution_inputs_impl(
+            project.path().to_str().unwrap(),
+            vec!["input.csv".to_string()],
+        )
+        .unwrap();
+        assert_eq!(
+            inputs,
+            vec![DirectExecutionInput {
+                path: "input.csv".to_string(),
+                hash: sha256_file(&project.path().join("input.csv")).unwrap().0,
+            }]
+        );
+        assert!(fingerprint_execution_inputs_impl(
+            project.path().to_str().unwrap(),
+            vec!["../outside.csv".to_string()],
         )
         .is_err());
         assert!(project_path(

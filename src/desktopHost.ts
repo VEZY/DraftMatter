@@ -429,6 +429,11 @@ export function createDesktopHost(
         ? invokeBridge<ExecutionTrustStatus>('revoke_project_trust', { root })
         : executionUnavailable()
     },
+    fingerprintExecutionInputs(root: string, paths: string[]) {
+      return available
+        ? invokeBridge<Array<{ path: string; hash: string }>>('fingerprint_execution_inputs', { root, paths })
+        : executionUnavailable()
+    },
     executeDirect(request: DirectHostExecutionRequest) {
       return available
         ? invokeBridge<RawDirectExecution>('execute_direct', { request })

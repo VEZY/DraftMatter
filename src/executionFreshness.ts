@@ -255,6 +255,12 @@ export class ExecutionFreshnessTracker {
     }
   }
 
+  inputsUnavailable(cellId: string, reason = 'A declared input is missing or unreadable.') {
+    const index = this.cells.findIndex((cell) => cell.id === cellId)
+    if (index < 0) throw new Error(`Executable cell ${cellId} was not found.`)
+    this.invalidateSuffix(this.cells[index].language, index, reason)
+  }
+
   verifyArtifacts(available: ReadonlyMap<string, string>) {
     for (const cell of this.cells) {
       const state = this.states.get(cell.id)!

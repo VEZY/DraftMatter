@@ -13,7 +13,7 @@ title: Multi-language execution
 
 # Analysis
 
-\`\`\`python {#py-prepare .execute output="text"}
+\`\`\`python {#py-prepare .execute output="text" inputs="data/observations.csv"}
 print("python")
 \`\`\`
 
@@ -62,6 +62,7 @@ describe('document execution workspace', () => {
     }))
     vi.spyOn(desktopHost, 'discoverJupyterKernels').mockResolvedValue({ health: 'missing', kernels: [], searchedLocations: [] })
     vi.spyOn(desktopHost, 'executionTrustStatus').mockResolvedValue({ trusted: true, scope: 'session', warning: 'trusted' })
+    vi.spyOn(desktopHost, 'fingerprintExecutionInputs').mockResolvedValue([{ path: 'data/observations.csv', hash: `sha256:${'9'.repeat(64)}` }])
     vi.spyOn(desktopHost, 'executeDirect').mockImplementation(async (request) => ({
       exitCode: request.language === failingLanguage ? 1 : 0,
       interrupted: false,
@@ -110,6 +111,11 @@ describe('document execution workspace', () => {
     })
 
     expect(vi.mocked(desktopHost.executeDirect).mock.calls.map(([request]) => request.cellId)).toEqual(['py-prepare', 'r-model'])
+    expect(desktopHost.fingerprintExecutionInputs).toHaveBeenCalledWith(rootPath, ['data/observations.csv'])
+    expect(desktopHost.executeDirect).toHaveBeenCalledWith(expect.objectContaining({
+      cellId: 'py-prepare',
+      inputs: [{ path: 'data/observations.csv', hash: `sha256:${'9'.repeat(64)}` }],
+    }))
     expect(container.textContent).toContain('ran:py-prepare')
     expect(container.textContent).toContain('ran:r-model')
     expect(container.textContent).not.toContain('ran:jl-report')
@@ -179,5 +185,31 @@ describe('document execution workspace', () => {
     expect(container.textContent).toContain('output:py-prepare')
     expect(container.textContent).toContain('output:r-model')
     expect(container.textContent).toContain('output:jl-report')
+  })
+
+  it('marks the affected language stale when a declared input changes on disk', async () => {
+    const cleanRun = [...container.querySelectorAll<HTMLButtonElement>('.structured-execution-bar button')]
+      .find((button) => button.textContent?.includes('Clean run'))!
+    await act(async () => {
+      cleanRun.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 180))
+    })
+    expect(container.textContent).toContain('Clean run certified · 3 outputs from one ordered run')
+
+    vi.mocked(desktopHost.fingerprintExecutionInputs).mockResolvedValue([{ path: 'data/observations.csv', hash: `sha256:${'8'.repeat(64)}` }])
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 2600))
+    })
+
+    const statuses = [...container.querySelectorAll<HTMLElement>('.execution-cell-row')].map((row) => [
+      row.querySelector('strong')?.textContent,
+      row.querySelector('.cell-status')?.textContent,
+    ])
+    expect(statuses).toEqual([
+      ['py-prepare', 'Stale'],
+      ['r-model', 'Current'],
+      ['jl-report', 'Current'],
+    ])
+    expect(container.textContent).not.toContain('Clean run certified · 3 outputs from one ordered run')
   })
 })

@@ -50,6 +50,7 @@ describe('desktop host adapter', () => {
     await host.executionTrustStatus('/research/canopy')
     await host.trustProjectForSession('/research/canopy', 'run-project-code-with-user-permissions')
     await host.revokeProjectTrust('/research/canopy')
+    await host.fingerprintExecutionInputs('/research/canopy', ['data/input.csv'])
     await host.executeDirect({
       root: '/research/canopy',
       cellId: 'cell-1',
@@ -102,6 +103,7 @@ describe('desktop host adapter', () => {
       ['execution_trust_status', { root: '/research/canopy' }],
       ['trust_project_for_session', { root: '/research/canopy', acknowledgement: 'run-project-code-with-user-permissions' }],
       ['revoke_project_trust', { root: '/research/canopy' }],
+      ['fingerprint_execution_inputs', { root: '/research/canopy', paths: ['data/input.csv'] }],
       ['execute_direct', { request: { root: '/research/canopy', cellId: 'cell-1', language: 'python', code: 'print(1)', attributes: {}, inputs: [] } }],
       ['interrupt_direct', { language: 'python' }],
       ['restart_direct', { language: 'r' }],

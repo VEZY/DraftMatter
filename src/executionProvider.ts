@@ -169,6 +169,10 @@ export function executionEnvironmentFingerprint(
   }))
 }
 
+export function executionInputsFingerprint(inputs: ExecutionInput[]) {
+  return sha256(stableJson([...inputs].sort((left, right) => left.path.localeCompare(right.path))))
+}
+
 export async function sha256(value: string) {
   const digest = await globalThis.crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
   return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
@@ -240,7 +244,7 @@ async function normalizeResult(input: {
   }
   const [codeHash, inputHash, environmentHash] = await Promise.all([
     sha256(input.request.code),
-    sha256(stableJson([...input.request.inputs].sort((left, right) => left.path.localeCompare(right.path)))),
+    executionInputsFingerprint(input.request.inputs),
     executionEnvironmentFingerprint(input.kind, input.request.language, input.environment),
   ])
   const resultHash = await sha256(stableJson({

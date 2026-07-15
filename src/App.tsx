@@ -31,7 +31,7 @@ import { DEFAULT_ACQUISITION_BIBLIOGRAPHY, canonicalizeAcquisitionRecord, citati
 import { createDesktopDirectExecutionTransport } from './directExecutionTransport'
 import { extractExecutableCells, type ExecutableCell, type ExecutionLanguage } from './executionCells'
 import { ExecutionFreshnessTracker, parseExecutionManifest, serializeExecutionManifest, type CleanRunCertification, type ExecutionCellFreshness, type ExecutionManifest } from './executionFreshness'
-import { createDirectExecutionProvider, executionEnvironmentFingerprint, sha256, type NormalizedExecutionResult } from './executionProvider'
+import { createDirectExecutionProvider, executionEnvironmentFingerprint, executionInputsFingerprint, sha256, type NormalizedExecutionResult } from './executionProvider'
 import { cleanExecutePortableDocument } from './cleanExecution'
 import { EXECUTION_TRUST_ACKNOWLEDGEMENT, createTrustedExecutionBroker } from './executionTrust'
 import { ExecutionOutputView } from './ExecutionOutputView'
@@ -112,6 +112,27 @@ function cleanExecutionProjection(source: string) {
   const final = projectPortableReviewSource(source, { view: 'final' })
   if (final.ok) return final
   return projectPortableReviewSource(source, { view: 'original' })
+}
+
+function declaredInputPaths(cell: ExecutableCell) {
+  const declared = cell.attributes.inputs
+  if (declared === undefined) return []
+  if (typeof declared !== 'string') {
+    throw new Error(`${cell.id} must declare inputs as a comma-separated path list.`)
+  }
+  return declared.split(',').map((path) => path.trim()).filter(Boolean)
+}
+
+async function executionRequestForCell(cell: ExecutableCell, root: string) {
+  const paths = declaredInputPaths(cell)
+  return {
+    cellId: cell.id,
+    language: cell.language,
+    code: cell.source,
+    workingDirectory: root,
+    attributes: cell.attributes,
+    inputs: paths.length ? await desktopHost.fingerprintExecutionInputs(root, paths) : [],
+  }
 }
 
 function getInitialProjectMeta() {
@@ -925,6 +946,48 @@ function App() {
     return () => { cancelled = true }
   }, [desktopSession?.root, filename, manuscriptSource])
 
+  useEffect(() => {
+    const root = desktopSession?.root
+    if (!root) return
+    let disposed = false
+    let running = false
+    const verifyDeclaredInputs = async () => {
+      if (running || disposed) return
+      const tracker = executionTrackerRef.current
+      if (!tracker || executionTrackerRootRef.current !== root) return
+      running = true
+      try {
+        const cellById = new Map(executableCells.map((cell) => [cell.id, cell]))
+        for (const state of tracker.snapshot()) {
+          if (!state.lastSuccessful) continue
+          const cell = cellById.get(state.cellId)
+          if (!cell) continue
+          let paths: string[]
+          try {
+            paths = declaredInputPaths(cell)
+            if (paths.length === 0) continue
+            const inputs = await desktopHost.fingerprintExecutionInputs(root, paths)
+            tracker.inputsChanged(cell.id, await executionInputsFingerprint(inputs))
+          } catch (error) {
+            tracker.inputsUnavailable(cell.id, `Declared input check failed: ${normaliseHostFailure(error).message}`)
+          }
+        }
+        if (!disposed && executionTrackerRef.current === tracker) {
+          setExecutionCellStates(tracker.snapshot())
+          setCleanRunCertification(tracker.cleanRunCertification())
+        }
+      } finally {
+        running = false
+      }
+    }
+    void verifyDeclaredInputs()
+    const interval = window.setInterval(() => void verifyDeclaredInputs(), 2500)
+    return () => {
+      disposed = true
+      window.clearInterval(interval)
+    }
+  }, [desktopSession?.root, manuscriptSource])
+
   const openSourceInspector = () => {
     setSourceTab('reviewed')
     setSourceBuffer(manuscriptSource)
@@ -1181,14 +1244,12 @@ function App() {
     setExecutionProblem('')
     setExecutionDiagnostics((current) => current.filter((diagnostic) => !diagnostic.code.startsWith('execution-run-')))
     try {
-      const result = await executionBroker.run(session.root, 'direct', {
-        cellId: cell.id,
-        language: cell.language,
-        code: cell.source,
-        workingDirectory: session.root,
-        attributes: cell.attributes,
-        inputs: [],
-      }, controller.signal)
+      const result = await executionBroker.run(
+        session.root,
+        'direct',
+        await executionRequestForCell(cell, session.root),
+        controller.signal,
+      )
       if (desktopSessionRef.current?.root !== session.root) return undefined
       setExecutionResult(result)
       setExecutionResults((current) => ({ ...current, [cell.id]: result }))
@@ -1288,6 +1349,7 @@ function App() {
           broker: executionBroker,
           existingManifests,
           presentation,
+          requestFactory: executionRequestForCell,
           onLifecycleChange: (states) => {
             const previous = new Map(previousStates.map((state) => [state.cellId, state]))
             setExecutionCellStates(states.map((state) => ({
