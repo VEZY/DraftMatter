@@ -12,6 +12,14 @@ This is an arbitrary manuscript with a citation [@vezy2024] and **editable prose
 
 See @sec-background for context.
 
+The fitted response was $y = \\frac{x}{2}$; see @eq-fit.
+
+$$
+R^2 = \\frac{a}{b}
+$$ {#eq-fit .unnumbered}
+
+A dedicated citation insertion target.
+
 A uniquely selected review sentence.
 
 A uniquely selected suggestion sentence.
@@ -46,6 +54,10 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(manuscript.getByRole('heading', { level: 2, name: 'Background' })).toBeVisible()
     await expect(manuscript.getByRole('button', { name: 'Edit citation @vezy2024' })).toHaveText('(Vezy et al., 2024)')
     await expect(manuscript.getByRole('link', { name: 'Section background' })).toHaveAttribute('href', '#sec-background')
+    await expect(manuscript.getByRole('link', { name: 'Equation fit' })).toHaveAttribute('href', '#eq-fit')
+    await expect(manuscript.locator('.structured-equation-inline .katex')).toBeVisible()
+    await expect(manuscript.locator('#eq-fit .katex')).toBeVisible()
+    await expect(manuscript.locator('.structured-equation math')).toHaveCount(2)
     await expect(manuscript.getByRole('button', { name: 'Go to footnote 1' })).toHaveText('1')
     await expect(manuscript.getByText('Footnote 1', { exact: true })).toBeVisible()
     await expect(manuscript.getByText('Calibration details stay portable.', { exact: true })).toBeVisible()
@@ -54,6 +66,12 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(renderedEditor).not.toContainText('[^methods]')
     await expect(renderedEditor).not.toContainText('Keep this opaque block exactly.')
     await expect(manuscript.getByText('Preserved source')).toBeVisible()
+
+    await manuscript.getByRole('button', { name: 'Edit display equation eq-fit' }).click()
+    await manuscript.getByRole('textbox', { name: 'Display equation eq-fit TeX' }).fill(String.raw`R^2 = \frac{c}{d}`)
+    await manuscript.getByRole('button', { name: 'Save equation' }).click()
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain(String.raw`R^2 = \frac{c}{d}`)
+    await expect(manuscript.locator('#eq-fit .katex-html')).toContainText('R')
 
     await manuscript.getByRole('button', { name: 'Edit footnote 1' }).click()
     await manuscript.getByRole('textbox', { name: 'Footnote 1 content' }).fill('Calibration details were **independently checked**.')
@@ -67,13 +85,24 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
 
     await page.reload()
     await expect(page.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveValue('println("after")')
+    await expect(page.locator('#eq-fit .katex')).toBeVisible()
     await expect(page.getByText('Calibration details were independently checked.', { exact: true })).toBeVisible()
     let saved = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))
     expect(saved).toContain('::: {.future-extension data-owner="research-team"}\nKeep this opaque block exactly.\n:::')
     expect(saved).toContain('See @sec-background for context.')
 
-    await manuscript.locator('.structured-editor-content p').first().click()
-    await page.keyboard.press('End')
+    await manuscript.getByText('A dedicated citation insertion target.', { exact: true }).evaluate((element) => {
+      const editor = element.closest<HTMLElement>('[contenteditable="true"]')
+      const selection = window.getSelection()
+      if (!editor || !selection) throw new Error('Rendered editor selection is unavailable')
+      editor.focus()
+      const range = document.createRange()
+      range.selectNodeContents(element)
+      range.collapse(false)
+      selection.removeAllRanges()
+      selection.addRange(range)
+      document.dispatchEvent(new Event('selectionchange'))
+    })
     await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k')
     const commandMenu = page.getByRole('dialog', { name: 'Command menu' })
     await expect(commandMenu.getByRole('button', { name: /Add section/ })).toBeVisible()
@@ -89,6 +118,9 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('[@martin2023]')
     saved = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))
     expect(saved).toContain('[@martin2023]')
+    expect(saved).toContain('# Portable field notes\n\n## Background')
+    expect(saved).toContain('@eq-fit')
+    expect(saved).not.toMatch(/^#\s+\[@martin2023/m)
 
     await page.getByRole('button', { name: 'Edit citation @martin2023' }).click()
     const citationDetails = page.locator('.structured-citation-detail')
@@ -139,6 +171,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(page.getByRole('complementary', { name: 'Manuscript outline' }).getByText('Discussion')).toBeVisible()
     await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('## Discussion')
 
+    await manuscript.locator('#eq-fit').evaluate((element) => element.scrollIntoView({ block: 'center' }))
     await expect(page).toHaveScreenshot('generic-manuscript-editor.png')
   })
 })

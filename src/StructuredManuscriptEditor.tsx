@@ -10,6 +10,7 @@ import { Decoration, DecorationSet, EditorView, type NodeView } from 'prosemirro
 import { baseKeymap } from 'prosemirror-commands'
 import { serializeCitationCluster } from './citation'
 import { formatCrossReferenceTarget, isCrossReferenceTarget } from './crossReference'
+import { renderEquation } from './equationRenderer'
 import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
 import { captureReviewSuggestion } from './reviewSuggestionCapture'
@@ -262,6 +263,131 @@ function citationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   return {
     dom,
     stopEvent: (event) => event.target === dom,
+    update(next) {
+      if (next.type !== node.type) return false
+      node = next
+      updateDom()
+      return true
+    },
+  }
+}
+
+function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () => number | undefined, displayMode: boolean, isEditable: () => boolean): NodeView {
+  let node = initialNode
+  let editing = false
+  const dom = document.createElement(displayMode ? 'figure' : 'span')
+  dom.className = displayMode ? 'structured-equation structured-equation-display' : 'structured-equation structured-equation-inline'
+
+  const header = document.createElement('div')
+  header.className = 'structured-equation-header'
+  const label = document.createElement('span')
+  label.className = 'structured-equation-label'
+  const edit = document.createElement('button')
+  edit.type = 'button'
+  edit.className = 'structured-equation-edit'
+  edit.textContent = 'Edit'
+  if (displayMode) header.append(label, edit)
+
+  const rendered = document.createElement(displayMode ? 'div' : 'span')
+  rendered.className = 'structured-equation-render'
+  const error = document.createElement(displayMode ? 'p' : 'span')
+  error.className = 'structured-equation-error'
+
+  const editor = document.createElement(displayMode ? 'div' : 'span')
+  editor.className = 'structured-equation-editor'
+  editor.hidden = true
+  const input = document.createElement(displayMode ? 'textarea' : 'input')
+  input.className = 'structured-equation-input'
+  if (input instanceof HTMLInputElement) input.type = 'text'
+  input.spellcheck = false
+  input.autocapitalize = 'none'
+  const actions = document.createElement('span')
+  actions.className = 'structured-equation-actions'
+  const cancel = document.createElement('button')
+  cancel.type = 'button'
+  cancel.textContent = 'Cancel'
+  const save = document.createElement('button')
+  save.type = 'button'
+  save.className = 'primary-button'
+  save.textContent = 'Save equation'
+  actions.append(cancel, save)
+  editor.append(input, actions)
+
+  const updateSave = () => { save.disabled = !isEditable() || !input.value.trim() }
+  const updateDom = () => {
+    const tex = String(node.attrs.tex)
+    const equationLabel = displayMode && node.attrs.label ? String(node.attrs.label) : ''
+    const description = displayMode ? (equationLabel ? `display equation ${equationLabel}` : 'display equation') : 'inline equation'
+    const result = renderEquation(tex, displayMode)
+    dom.dataset.dmNode = displayMode ? 'equation' : 'equation-inline'
+    dom.dataset.dmId = String(node.attrs.id)
+    if (displayMode) {
+      dom.id = equationLabel
+      dom.dataset.label = equationLabel
+      label.textContent = equationLabel ? `Equation · ${equationLabel}` : 'Display equation'
+    }
+    rendered.innerHTML = result.html
+    rendered.hidden = Boolean(result.error)
+    error.textContent = result.error ?? ''
+    error.hidden = !result.error
+    dom.classList.toggle('has-error', Boolean(result.error))
+    edit.disabled = !isEditable()
+    edit.setAttribute('aria-label', `Edit ${description}`)
+    input.setAttribute('aria-label', `${description[0].toUpperCase()}${description.slice(1)} TeX`)
+    input.readOnly = !isEditable()
+    if (!editing) input.value = tex
+    updateSave()
+  }
+  const closeEditor = () => {
+    editing = false
+    editor.hidden = true
+    rendered.hidden = dom.classList.contains('has-error')
+    error.hidden = !dom.classList.contains('has-error')
+    edit.hidden = false
+    input.value = String(node.attrs.tex)
+    updateSave()
+    edit.focus()
+  }
+  const saveEditor = () => {
+    const tex = input.value.trim()
+    const position = getPos()
+    if (!tex || typeof position !== 'number' || !isEditable()) return
+    view.dispatch(view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, tex }))
+    closeEditor()
+  }
+  edit.addEventListener('click', () => {
+    if (!isEditable()) return
+    editing = true
+    rendered.hidden = true
+    error.hidden = true
+    edit.hidden = true
+    editor.hidden = false
+    input.value = String(node.attrs.tex)
+    updateSave()
+    input.focus()
+    input.select()
+  })
+  cancel.addEventListener('click', closeEditor)
+  save.addEventListener('click', saveEditor)
+  input.addEventListener('input', updateSave)
+  input.addEventListener('keydown', (event) => {
+    const keyboard = event as KeyboardEvent
+    if (keyboard.key === 'Escape') {
+      keyboard.preventDefault()
+      closeEditor()
+    } else if (keyboard.key === 'Enter' && (keyboard.metaKey || keyboard.ctrlKey)) {
+      keyboard.preventDefault()
+      saveEditor()
+    }
+  })
+
+  if (displayMode) dom.append(header, rendered, error, editor)
+  else dom.append(rendered, error, edit, editor)
+  updateDom()
+  return {
+    dom,
+    stopEvent: (event) => dom.contains(event.target as Node),
+    ignoreMutation: () => true,
     update(next) {
       if (next.type !== node.type) return false
       node = next
@@ -850,6 +976,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         code_cell: (node, editorView, getPos) => codeCellNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         raw_block: (node) => rawNodeView(node, (nodeId) => onInspectRawRef.current?.(nodeId)),
         citation: (node, editorView, getPos) => citationNodeView(node, editorView, getPos, (id, items) => onCitationSelectRef.current?.(id, items)),
+        equation_inline: (node, editorView, getPos) => equationNodeView(node, editorView, getPos, false, () => !readOnlyRef.current),
+        equation_block: (node, editorView, getPos) => equationNodeView(node, editorView, getPos, true, () => !readOnlyRef.current),
         footnote_reference: (node, editorView) => footnoteReferenceNodeView(node, editorView),
         footnote_definition: (node, editorView, getPos) => footnoteDefinitionNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         output_block: (node) => outputNodeView(node, (path) => resolveAssetUrlRef.current?.(path) ?? path),
@@ -945,6 +1073,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     hostRef.current?.querySelectorAll<HTMLTextAreaElement>('.structured-code-editor').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLTextAreaElement>('.structured-footnote-textarea').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-footnote-edit').forEach((button) => { button.disabled = readOnly })
+    hostRef.current?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('.structured-equation-input').forEach((editor) => { editor.readOnly = readOnly })
+    hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-equation-edit').forEach((button) => { button.disabled = readOnly })
   }, [readOnly])
 
   return <div ref={hostRef} className={`structured-manuscript-editor ${className}`.trim()} data-read-only={readOnly ? 'true' : 'false'} />

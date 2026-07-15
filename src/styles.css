@@ -3924,6 +3924,35 @@ kbd {
 .structured-editor-content figcaption { color: var(--muted); font-family: Inter, ui-sans-serif, sans-serif; font-size: 12px; line-height: 1.55; margin-top: 9px; }
 .structured-citation { background: #e7eef2; border: 0; border-radius: 4px; color: #365a6f; cursor: pointer; display: inline; font-family: Inter, ui-sans-serif, sans-serif; font-size: .86em; line-height: inherit; margin: 0; padding: 2px 5px; }
 .structured-citation:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.structured-equation { position: relative; }
+.structured-equation-inline { align-items: baseline; display: inline-flex; margin: 0 .08em; vertical-align: baseline; }
+.structured-equation-inline .structured-equation-render { display: inline-block; }
+.structured-equation-render[hidden] { display: none; }
+.structured-equation-inline .katex { font-size: 1.02em; }
+.structured-equation-display { background: #fbfcfb; border: 1px solid #e3e8e5; border-radius: 7px; margin: 1.5em 0; padding: 8px 14px 12px; }
+.structured-equation-header { align-items: center; display: flex; justify-content: space-between; min-height: 24px; }
+.structured-equation-label { color: #839089; font-family: Inter, ui-sans-serif, sans-serif; font-size: 8px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.structured-equation-display .katex-display { margin: .55em 0 .3em; overflow-x: auto; overflow-y: hidden; padding: 3px 0; }
+.structured-equation-edit { background: transparent; border: 0; color: #67776e; font-size: 9px; font-weight: 700; padding: 3px 4px; }
+.structured-equation-edit:hover { color: var(--sage-dark); text-decoration: underline; text-underline-offset: 2px; }
+.structured-equation-inline > .structured-equation-edit { opacity: 0; pointer-events: none; position: absolute; right: -22px; top: -1.2em; z-index: 2; }
+.structured-equation-inline:hover > .structured-equation-edit,
+.structured-equation-inline > .structured-equation-edit:focus-visible { background: #fff; border: 1px solid #dce3df; border-radius: 4px; opacity: 1; pointer-events: auto; }
+.structured-equation-edit:disabled { cursor: default; opacity: 0; pointer-events: none; text-decoration: none; }
+.structured-equation-error { background: #fff6f2; border: 1px solid #ead7ce; border-radius: 5px; color: #8d5945; font-family: Inter, ui-sans-serif, sans-serif; font-size: 10px; line-height: 1.45; margin: 5px 0; padding: 7px 9px; }
+.structured-equation-inline .structured-equation-error { display: inline-block; margin: 0 2px; padding: 2px 5px; }
+.structured-equation-error[hidden] { display: none; }
+.structured-equation-editor { display: grid; gap: 7px; }
+.structured-equation-editor[hidden] { display: none; }
+.structured-equation-inline .structured-equation-editor { align-items: center; display: inline-flex; gap: 5px; vertical-align: middle; }
+.structured-equation-inline .structured-equation-editor[hidden] { display: none; }
+.structured-equation-input { background: #fff; border: 1px solid #d7dfda; border-radius: 5px; color: #3e4b44; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5; min-height: 34px; padding: 7px 8px; resize: vertical; width: 100%; }
+.structured-equation-inline input.structured-equation-input { min-width: 260px; width: 28vw; }
+.structured-equation-display textarea.structured-equation-input { min-height: 82px; }
+.structured-equation-input:focus { border-color: #88a193; outline: 2px solid rgba(63, 104, 89, .14); }
+.structured-equation-actions { display: flex; gap: 5px; justify-content: flex-end; }
+.structured-equation-actions button { font-size: 9px; padding: 6px 8px; white-space: nowrap; }
+img.ProseMirror-separator { border: 0 !important; display: inline !important; height: 1em !important; margin: 0 !important; opacity: 0; vertical-align: text-bottom; width: 1px !important; }
 .structured-footnote-reference { line-height: 0; margin-left: 1px; }
 .structured-footnote-reference button { background: transparent; border: 0; color: var(--sage-dark); cursor: pointer; font-family: Inter, ui-sans-serif, sans-serif; font-size: .68rem; font-weight: 700; line-height: 1; padding: 0 2px; vertical-align: super; }
 .structured-footnote-reference button:hover { color: #294d3d; text-decoration: underline; text-underline-offset: 2px; }

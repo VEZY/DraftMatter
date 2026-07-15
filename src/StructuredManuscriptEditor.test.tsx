@@ -11,7 +11,11 @@ title: Generic
 
 # Generic manuscript
 
-Evidence [@vezy2024] points to @fig-growth and note[^one].
+Evidence [@vezy2024] points to @fig-growth, follows $x^2 + y^2$, and includes note[^one].
+
+$$
+R^2 = \\frac{a}{b}
+$$ {#eq-fit .unnumbered}
 
 | Treatment | Mean |
 | --- | ---: |
@@ -83,6 +87,10 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector<HTMLButtonElement>('.structured-footnote-reference button')?.getAttribute('aria-label')).toBe('Go to footnote 1')
     expect(container.querySelector('.structured-footnote-number')?.textContent).toBe('Footnote 1')
     expect(container.querySelector('.structured-footnote-preview')?.textContent).toBe('A footnote.')
+    expect(container.querySelector('.structured-equation-inline .katex')).not.toBeNull()
+    expect(container.querySelector('.structured-equation-display')?.id).toBe('eq-fit')
+    expect(container.querySelectorAll('.structured-equation math')).toHaveLength(2)
+    expect(container.querySelector('.structured-equation-display .katex-html')?.textContent).not.toContain('\\frac')
     expect(container.querySelector('table')?.textContent).toContain('Drought')
     expect(container.querySelector('.structured-code-editor')).toHaveProperty('value', 'print("before")')
     expect(container.querySelector('img')?.getAttribute('src')).toBe('asset://figures/growth.svg')
@@ -238,6 +246,35 @@ describe('full structured manuscript editor', () => {
     expect(beta.querySelector<HTMLElement>('.structured-footnote-editor')?.hidden).toBe(true)
   })
 
+  it('edits rendered inline and display equations while malformed TeX fails closed', async () => {
+    const changed: string[] = []
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={source} onChange={(next) => changed.push(next)} />,
+    ))
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit inline equation"]')?.click())
+    const inline = container.querySelector<HTMLInputElement>('[aria-label="Inline equation TeX"]')!
+    inline.value = String.raw`z = \sqrt{x}`
+    inline.dispatchEvent(new Event('input', { bubbles: true }))
+    await act(async () => inline.closest('.structured-equation-editor')?.querySelector<HTMLButtonElement>('.primary-button')?.click())
+    expect(changed.at(-1)).toContain(String.raw`$z = \sqrt{x}$`)
+    expect(container.querySelector('.structured-equation-inline .katex-html')?.textContent).toContain('z')
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit display equation eq-fit"]')?.click())
+    const display = container.querySelector<HTMLTextAreaElement>('[aria-label="Display equation eq-fit TeX"]')!
+    display.value = String.raw`R^2 = \frac{c}{d}`
+    display.dispatchEvent(new Event('input', { bubbles: true }))
+    await act(async () => display.closest('.structured-equation-editor')?.querySelector<HTMLButtonElement>('.primary-button')?.click())
+    expect(changed.at(-1)).toContain(String.raw`R^2 = \frac{c}{d}`)
+    expect(changed.at(-1)).toContain('$$ {#eq-fit .unnumbered}')
+
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={'Malformed $\\frac{a}{$ expression.\n'} onChange={vi.fn()} />,
+    ))
+    expect(container.querySelector('.structured-equation-error')?.textContent).toContain('could not be rendered')
+    expect(container.querySelector('.structured-equation-inline')?.textContent).not.toContain('\\frac')
+  })
+
   it.each([
     ['table', (editor: StructuredManuscriptEditorHandle) => editor.insertTable(), '| --- | --- |'],
     ['figure', (editor: StructuredManuscriptEditorHandle) => editor.insertFigure('figures/growth.svg', 'Growth', 'Growth response.', 'fig-growth'), '![Growth](figures/growth.svg){#fig-growth}'],
@@ -261,5 +298,6 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector('.structured-editor-content')?.getAttribute('contenteditable')).toBe('false')
     expect(container.querySelector<HTMLTextAreaElement>('.structured-code-editor')?.readOnly).toBe(true)
     expect(container.querySelector<HTMLButtonElement>('.structured-footnote-edit')?.disabled).toBe(true)
+    expect([...container.querySelectorAll<HTMLButtonElement>('.structured-equation-edit')].every((button) => button.disabled)).toBe(true)
   })
 })
