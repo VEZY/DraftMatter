@@ -2045,8 +2045,7 @@ function App() {
     const cacheResult = cacheSnapshot
       ? parseCitationCache(cacheSnapshot.content)
       : readCitationCache(localStorage, project.root)
-    const liveProjectCitations = mergeCitationRecords(projectBibliography.records, sampleCitations)
-    const projectCitations = hydrateCitationsFromCache(liveProjectCitations, cacheResult.cache)
+    const projectCitations = hydrateCitationsFromCache(projectBibliography.records, cacheResult.cache)
     const lockResult = lockSnapshot
       ? parseCitationLock(lockSnapshot.content)
       : { lock: buildCitationLock([]), diagnostics: [] }

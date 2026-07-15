@@ -86,6 +86,14 @@ describe('rendered portable citation acquisition', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('.crossref-result')!.click())
   }
 
+  it('keeps demonstration references out of an opened desktop project', async () => {
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, shiftKey: true, bubbles: true })))
+
+    expect(container.querySelectorAll('.source-result:not(.crossref-result)')).toHaveLength(0)
+    expect(container.textContent).not.toContain('Growth coordination under fluctuating water availability')
+    expect(container.textContent).toContain('Project and cached sources')
+  })
+
   it('writes the portable files before closing the picker or exposing the citation', async () => {
     await selectDynacof()
     expect(localStorage.getItem('draftmatter.citations.v1')).not.toContain(dynacof.doi)
