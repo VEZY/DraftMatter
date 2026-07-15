@@ -16,6 +16,7 @@ export interface PortableDraftBaseline {
   code: string
   conclusion: string
   citationKeys: string[]
+  citationItems: CitationItem[]
   aliceStatus: SuggestionStatus
   marcusStatus: SuggestionStatus
   commentResolved: boolean
@@ -37,6 +38,7 @@ export interface DraftState {
   conclusion: string
   citationInserted: boolean
   citationKeys: string[]
+  citationItems: CitationItem[]
   activeProposal: 'alice' | 'marcus'
   aliceStatus: SuggestionStatus
   marcusStatus: SuggestionStatus
@@ -47,6 +49,14 @@ export interface DraftState {
   frontmatterSource?: string
   preservedSections?: PreservedSection[]
   portableEnvelope?: PortableDraftEnvelope
+}
+
+export interface CitationItem {
+  citekey: string
+  prefix?: string
+  suffix?: string
+  locator?: string
+  suppressAuthor?: boolean
 }
 
 export interface CitationRecord {

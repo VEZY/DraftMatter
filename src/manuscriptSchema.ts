@@ -141,6 +141,7 @@ const nodes: Record<string, NodeSpec> = {
     attrs: {
       ...identified,
       keys: { default: [] },
+      items: { default: [] },
       prefix: { default: '' },
       suffix: { default: '' },
       locator: { default: null },

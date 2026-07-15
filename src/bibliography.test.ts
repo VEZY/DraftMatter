@@ -62,6 +62,10 @@ describe('local bibliography', () => {
 
   it('formats compact author-year clusters', () => {
     expect(formatCitationCluster(sampleCitations, ['vezy2024', 'martin2023'])).toBe('(Vezy et al., 2024; Martin & Chen, 2023)')
+    expect(formatCitationCluster(sampleCitations, [
+      { citekey: 'vezy2024', prefix: 'see', locator: 'p. 18' },
+      { citekey: 'martin2023', suppressAuthor: true, suffix: 'supporting data' },
+    ])).toBe('(see, Vezy et al., 2024, p. 18; 2023, supporting data)')
   })
 
   it('loads every discovered project bibliography without making one bad file fatal', async () => {

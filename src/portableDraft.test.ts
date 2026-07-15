@@ -73,4 +73,18 @@ describe('portable draft source envelope', () => {
       commentReplies: edited.commentReplies,
     })
   })
+
+  it('patches citation modifiers even when the cluster citekeys stay unchanged', () => {
+    const source = reviewedProjection(initialDraft)
+    const parsed = parsePortableDocument(source, initialDraft)
+    const saved = reviewedProjection({
+      ...parsed.draft,
+      citationItems: [{ citekey: 'vezy2024', prefix: 'compare', locator: 'p. 18', suppressAuthor: true }],
+    })
+
+    expect(saved).toContain('[compare -@vezy2024, p. 18]')
+    expect(parsePortableDocument(saved, initialDraft).draft.citationItems).toEqual([
+      { citekey: 'vezy2024', prefix: 'compare', locator: 'p. 18', suppressAuthor: true },
+    ])
+  })
 })

@@ -14,6 +14,7 @@ export const initialDraft: DraftState = {
     'Architectural acclimation was detectable before final biomass differences emerged. Linking repeated phenotyping with explicit provenance makes this response easier to inspect, reproduce, and review.',
   citationInserted: false,
   citationKeys: ['vezy2024'],
+  citationItems: [{ citekey: 'vezy2024' }],
   activeProposal: 'alice',
   aliceStatus: 'open',
   marcusStatus: 'open',

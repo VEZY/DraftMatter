@@ -6,6 +6,7 @@ import type {
   SectionKey,
   SuggestionStatus,
 } from './types'
+import { citationKeys, parseCitationCluster } from './citation'
 
 const REVIEW_MARKER = '::::: {.draftmatter-reviews'
 const KNOWN_SECTIONS: Record<string, Exclude<SectionKey, 'frontmatter'>> = {
@@ -87,10 +88,11 @@ function parseStatus(review: string, id: string, fallback: SuggestionStatus): Su
 
 function cleanCitation(section: string) {
   const citationGroups = [...section.matchAll(/\[([^\]]*@[a-zA-Z0-9_:.+-]+[^\]]*)\]/g)]
-  const citationKeys = citationGroups.flatMap((match) => [...match[1].matchAll(/@([a-zA-Z0-9_:.+-]+)/g)].map((keyMatch) => keyMatch[1]))
-  const citationInserted = citationKeys.length > 1
+  const citationItems = citationGroups.flatMap((match) => parseCitationCluster(match[0]))
+  const keys = citationKeys(citationItems)
+  const citationInserted = keys.length > 1
   const introduction = section.replace(/\s+\[(?:[^\]]*@[a-zA-Z0-9_:.+-]+[^\]]*)\]\s*$/, '').trim()
-  return { introduction, citationInserted, citationKeys }
+  return { introduction, citationInserted, citationKeys: keys, citationItems }
 }
 
 function parseMethods(section: string, fallback: DraftState, diagnostics: DocumentDiagnostic[]) {
@@ -153,6 +155,7 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
     introduction: intro.introduction,
     citationInserted: intro.citationInserted,
     citationKeys: intro.citationKeys.length ? intro.citationKeys : fallback.citationKeys,
+    citationItems: intro.citationItems.length ? intro.citationItems : fallback.citationItems,
     methods: methods.methods,
     code: methods.code,
     resultsLead: parseResults(sectionContent(sections, 'results', fallback.resultsLead, diagnostics), fallback.resultsLead),
@@ -178,6 +181,7 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
       code: draft.code,
       conclusion: draft.conclusion,
       citationKeys: [...draft.citationKeys],
+      citationItems: structuredClone(draft.citationItems),
       aliceStatus: draft.aliceStatus,
       marcusStatus: draft.marcusStatus,
       commentResolved: draft.commentResolved,

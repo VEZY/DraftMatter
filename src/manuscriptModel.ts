@@ -1,7 +1,8 @@
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
 import { EditorState } from 'prosemirror-state'
+import { citationItemsForDraft, citationKeys, normalizeCitationItems } from './citation'
 import { manuscriptSchema } from './manuscriptSchema'
-import type { DraftState } from './types'
+import type { CitationItem, DraftState } from './types'
 
 export type ManuscriptTextField = 'title' | 'abstract' | 'introduction' | 'methods' | 'resultsLead' | 'conclusion'
 
@@ -40,9 +41,11 @@ function preservedRawBlocks(draft: DraftState, section: string) {
 }
 
 export function draftToManuscriptDocument(draft: DraftState) {
+  const citationItems = citationItemsForDraft(draft)
   const citation = manuscriptSchema.nodes.citation.createChecked({
     id: 'introduction-citation',
-    keys: [...draft.citationKeys],
+    keys: citationKeys(citationItems),
+    items: citationItems,
     rendered: '',
   })
   const reviewSentence = manuscriptSchema.nodes.paragraph.createChecked(
@@ -151,6 +154,7 @@ export function manuscriptDocumentToDraftPatch(document: ProseMirrorNode, fallba
   const citation = findNode(document, 'introduction-citation')?.node
   const codeCell = findNode(document, 'fig-canopy')?.node
   const keys = Array.isArray(citation?.attrs.keys) ? citation.attrs.keys.filter((key): key is string => typeof key === 'string') : fallback.citationKeys
+  const items = normalizeCitationItems(citation?.attrs.items, keys)
 
   return {
     title: value('title'),
@@ -159,8 +163,9 @@ export function manuscriptDocumentToDraftPatch(document: ProseMirrorNode, fallba
     methods: value('methods'),
     resultsLead: value('resultsLead'),
     conclusion: value('conclusion'),
-    citationKeys: keys,
-    citationInserted: keys.length > 1,
+    citationKeys: citationKeys(items),
+    citationItems: items,
+    citationInserted: items.length > 1,
     code: typeof codeCell?.attrs.code === 'string' ? codeCell.attrs.code : fallback.code,
   }
 }
@@ -175,8 +180,11 @@ export function applyDraftCodeTransaction(draft: DraftState, code: string) {
   return { ...manuscriptDocumentToDraftPatch(document, draft), cellStatus: 'stale' as const }
 }
 
-export function applyDraftCitationTransaction(draft: DraftState, citationKeys: string[]) {
-  const document = setManuscriptNodeAttributes(draftToManuscriptDocument(draft), 'introduction-citation', { keys: [...citationKeys] })
+export function applyDraftCitationTransaction(draft: DraftState, value: CitationItem[] | string[]) {
+  const items = typeof value[0] === 'string'
+    ? normalizeCitationItems(undefined, value as string[])
+    : normalizeCitationItems(value)
+  const document = setManuscriptNodeAttributes(draftToManuscriptDocument(draft), 'introduction-citation', { keys: citationKeys(items), items })
   return manuscriptDocumentToDraftPatch(document, draft)
 }
 

@@ -1,6 +1,7 @@
 import { parseLosslessPortableSource } from './portableSource'
 import { parseReviewMarkup, serializeReviewMarkup, updateReviewRecordStatus, updateReviewThreadMessages } from './reviewMarkup'
 import type { DraftState, PortableDraftBaseline } from './types'
+import { citationItemsForDraft, sameCitationItems, serializeCitationCluster } from './citation'
 
 interface SourcePatch {
   start: number
@@ -99,11 +100,11 @@ function patchCitationCluster(
   draft: DraftState,
   patches: SourcePatch[],
 ) {
-  if (!section || sameStrings(baseline.citationKeys, draft.citationKeys)) return
+  if (!section || sameCitationItems(baseline.citationItems, citationItemsForDraft(draft))) return
   const sectionSource = source.slice(section.contentStart, section.end)
   const matches = [...sectionSource.matchAll(/\[[^\]\r\n]*@[a-zA-Z0-9_:.+-]+[^\]\r\n]*\]/g)]
   const citation = matches.at(-1)
-  const replacement = `[${draft.citationKeys.map((key) => `@${key}`).join('; ')}]`
+  const replacement = serializeCitationCluster(citationItemsForDraft(draft))
   if (citation?.index !== undefined) {
     const start = section.contentStart + citation.index
     patches.push({ start, end: start + citation[0].length, replacement })
@@ -134,7 +135,7 @@ function hasModeledChanges(draft: DraftState, baseline: PortableDraftBaseline) {
     || baseline.resultsLead !== draft.resultsLead
     || baseline.code !== draft.code
     || baseline.conclusion !== draft.conclusion
-    || !sameStrings(baseline.citationKeys, draft.citationKeys)
+    || !sameCitationItems(baseline.citationItems, citationItemsForDraft(draft))
     || baseline.aliceStatus !== draft.aliceStatus
     || baseline.marcusStatus !== draft.marcusStatus
     || baseline.commentResolved !== draft.commentResolved

@@ -12,6 +12,7 @@ import { initialDraft } from './sampleDraft'
 import { readRecoverySnapshots, saveRecoverySnapshot, type RecoverySnapshot } from './storage'
 import type { CitationRecord, DocumentDiagnostic, DraftState, MarkupView, SuggestionStatus } from './types'
 import { queryZoteroLibrary, type ZoteroVersionStamp } from './zotero'
+import { citationItemsForDraft, normalizeCitationItems } from './citation'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
@@ -46,7 +47,10 @@ function getInitialCitations(): CitationRecord[] {
 function getInitialDraft(): DraftState {
   try {
     const saved = localStorage.getItem(STORAGE_KEY)
-    return saved ? { ...initialDraft, ...JSON.parse(saved) } : initialDraft
+    if (!saved) return initialDraft
+    const parsed = JSON.parse(saved)
+    const merged = { ...initialDraft, ...parsed }
+    return { ...merged, citationItems: normalizeCitationItems(parsed.citationItems, merged.citationKeys) }
   } catch {
     return initialDraft
   }
@@ -152,7 +156,7 @@ function App() {
     ? 'reduced leaf area by 18%'
     : 'lowered leaf expansion during the treatment period'
   const citationResults = useMemo(() => searchCitations(citations, citationQuery).slice(0, 8), [citations, citationQuery])
-  const citationLabel = useMemo(() => formatCitationCluster(citations, draft.citationKeys), [citations, draft.citationKeys])
+  const citationLabel = useMemo(() => formatCitationCluster(citations, citationItemsForDraft(draft)), [citations, draft])
   const primaryCitation = citations.find((record) => record.citekey === draft.citationKeys[0]) ?? citations[0]
   const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...zoteroDiagnostics]
 
@@ -712,8 +716,8 @@ function App() {
       setCitationSearchOpen(false)
       return
     }
-    const citationKeys = [...draft.citationKeys, record.citekey]
-    updateDraft(applyDraftCitationTransaction(draft, citationKeys))
+    const citationItems = [...citationItemsForDraft(draft), { citekey: record.citekey }]
+    updateDraft(applyDraftCitationTransaction(draft, citationItems))
     setCitationSearchOpen(false)
     setCitationQuery('')
     setToast(`Citation inserted · @${record.citekey}`)

@@ -1,4 +1,5 @@
-import type { BibliographyResult, CitationRecord, DocumentDiagnostic } from './types'
+import { normalizeCitationItems } from './citation'
+import type { BibliographyResult, CitationItem, CitationRecord, DocumentDiagnostic } from './types'
 
 function cleanLatex(value: string) {
   return value
@@ -283,18 +284,25 @@ function familyName(author: string) {
   return author.trim().split(/\s+/).at(-1) ?? author
 }
 
-export function formatCitationCluster(records: CitationRecord[], citekeys: string[]) {
-  const labels = citekeys.flatMap((key) => {
-    const record = records.find((candidate) => candidate.citekey === key)
+export function formatCitationCluster(records: CitationRecord[], citationItems: CitationItem[] | string[]) {
+  const items = typeof citationItems[0] === 'string'
+    ? normalizeCitationItems(undefined, citationItems as string[])
+    : normalizeCitationItems(citationItems)
+  const labels = items.flatMap((item) => {
+    const record = records.find((candidate) => candidate.citekey === item.citekey)
     if (!record) return []
-    const author = record.authors.length > 2
+    const author = item.suppressAuthor
+      ? ''
+      : record.authors.length > 2
       ? `${familyName(record.authors[0])} et al.`
       : record.authors.length === 2
         ? `${familyName(record.authors[0])} & ${familyName(record.authors[1])}`
         : record.authors.length === 1
           ? familyName(record.authors[0])
           : record.citekey
-    return [`${author}${record.year ? `, ${record.year}` : ''}`]
+    const year = record.year ?? (item.suppressAuthor ? record.citekey : '')
+    const core = item.suppressAuthor ? year : `${author}${year ? `, ${year}` : ''}`
+    return [[item.prefix, core, item.locator, item.suffix].filter(Boolean).join(', ')]
   })
   return `(${labels.join('; ')})`
 }

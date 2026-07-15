@@ -42,6 +42,24 @@ describe('portable document core', () => {
     expect(exported).toContain('## Data availability\n\nRaw measurements are archived under accession 1234.')
   })
 
+  it('reopens semantic citation modifiers from portable Pandoc syntax', () => {
+    const source = reviewedProjection({
+      ...initialDraft,
+      citationKeys: ['vezy2024', 'martin2023'],
+      citationItems: [
+        { citekey: 'vezy2024', prefix: 'see', locator: 'pp. 18–21' },
+        { citekey: 'martin2023', suppressAuthor: true, suffix: 'supporting data' },
+      ],
+    })
+    const reopened = parsePortableDocument(source, initialDraft)
+
+    expect(source).toContain('[see @vezy2024, pp. 18–21; -@martin2023, supporting data]')
+    expect(reopened.draft.citationItems).toEqual([
+      { citekey: 'vezy2024', prefix: 'see', locator: 'pp. 18–21' },
+      { citekey: 'martin2023', suffix: 'supporting data', suppressAuthor: true },
+    ])
+  })
+
   it('produces clean projections with no review structures', () => {
     const clean = cleanProjection({ ...initialDraft, aliceStatus: 'accepted' }, 'final')
 

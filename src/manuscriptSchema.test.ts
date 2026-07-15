@@ -134,11 +134,18 @@ describe('manuscript schema and transactions', () => {
 
     const titlePatch = applyDraftTextTransaction(draft, 'title', 'Schema-backed title')
     const codePatch = applyDraftCodeTransaction({ ...draft, ...titlePatch }, 'print("schema")')
-    const citationPatch = applyDraftCitationTransaction({ ...draft, ...titlePatch, ...codePatch }, ['vezy2024', 'martin2023'])
+    const citationPatch = applyDraftCitationTransaction({ ...draft, ...titlePatch, ...codePatch }, [
+      { citekey: 'vezy2024', locator: 'p. 18' },
+      { citekey: 'martin2023', suppressAuthor: true },
+    ])
     expect({ ...draft, ...titlePatch, ...codePatch, ...citationPatch }).toMatchObject({
       title: 'Schema-backed title',
       code: 'print("schema")',
       citationKeys: ['vezy2024', 'martin2023'],
+      citationItems: [
+        { citekey: 'vezy2024', locator: 'p. 18' },
+        { citekey: 'martin2023', suppressAuthor: true },
+      ],
       aliceStatus: 'accepted',
       marcusStatus: 'needs-rebase',
     })
