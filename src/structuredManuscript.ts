@@ -100,6 +100,7 @@ function inlineNodes(value: string, idPrefix: string): ProseMirrorNode[] {
         anchorId: attributes.match(/\bdata-anchor="([^"]+)"/)?.[1] ?? id,
         edge: attributes.match(/\bdata-edge="(start|end|point)"/)?.[1] ?? 'point',
         affinity: attributes.match(/\bdata-affinity="([^"]+)"/)?.[1] ?? 'after',
+        sourceAttributes: attributes,
       }))
     } else if (candidate.kind === 'citation') {
       const items = parseCitationCluster(candidate.raw)
@@ -443,6 +444,7 @@ function serializeInline(node: ProseMirrorNode) {
   if (node.type === manuscriptSchema.nodes.cross_reference) return `@${node.attrs.target}`
   if (node.type === manuscriptSchema.nodes.footnote_reference) return `[^${node.attrs.label}]`
   if (node.type === manuscriptSchema.nodes.review_anchor) {
+    if (node.attrs.sourceAttributes) return `[]{${node.attrs.sourceAttributes}}`
     const edge = node.attrs.edge ?? 'point'
     const affinity = node.attrs.affinity ? ` data-affinity="${node.attrs.affinity}"` : ''
     return `[]{#${node.attrs.id} .dm-anchor data-anchor="${node.attrs.anchorId}" data-edge="${edge}"${affinity}}`

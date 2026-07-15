@@ -175,7 +175,7 @@ const nodes: Record<string, NodeSpec> = {
     leafText: (node) => `[${node.attrs.label}]`,
   },
   review_anchor: {
-    attrs: { ...identified, anchorId: {}, edge: { default: 'point' }, affinity: { default: 'after' } },
+    attrs: { ...identified, anchorId: {}, edge: { default: 'point' }, affinity: { default: 'after' }, sourceAttributes: { default: null } },
     inline: true,
     group: 'inline',
     atom: true,

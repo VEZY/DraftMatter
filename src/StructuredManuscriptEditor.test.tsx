@@ -108,7 +108,7 @@ describe('full structured manuscript editor', () => {
     expect(changed.at(-1)).toContain('print("after")')
     expect(changed.at(-1)).toContain('::: {.future-widget}\nOpaque raw payload.\n:::')
     expect(changed.at(-1)).toContain('::::: {.draftmatter-reviews .hidden data-schema="1"}')
-    expect(changed.at(-1)).toContain('[]{#dm-point .dm-anchor data-anchor="dm-comment" data-edge="point" data-affinity="after"}')
+    expect(changed.at(-1)).toContain('[]{#dm-point .dm-anchor data-anchor="dm-comment" data-edge="point"}')
 
     await act(async () => { expect(editorRef.current?.setHeading(2)).toBe(true) })
     expect(changed.at(-1)).toContain('## Generic manuscript')

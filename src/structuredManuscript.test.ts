@@ -147,6 +147,15 @@ describe('generic structured manuscript bridge', () => {
     expect(saved.replaceAll('\r\n', '')).not.toContain('\n')
   })
 
+  it('preserves unknown review-anchor classes and attributes during unrelated edits', () => {
+    const source = '# Reviewable\n\nClaim[]{#dm-point .dm-anchor .vendor-anchor data-anchor="dm-comment" data-edge="point" data-vendor="keep:exactly" aria-label="Review point"}.\n'
+    const parsed = parseStructuredManuscript(source)
+    const edited = replaceFirstText(parsed.document, 'Claim', 'Revised claim')
+    const saved = serializeStructuredManuscript(edited, parsed.metadata)
+
+    expect(saved).toContain('[]{#dm-point .dm-anchor .vendor-anchor data-anchor="dm-comment" data-edge="point" data-vendor="keep:exactly" aria-label="Review point"}')
+  })
+
   it('keeps non-executable fences as visible preserved raw nodes', () => {
     const source = '```text\n[@literal] []{#literal .dm-anchor}\n```\n'
     const parsed = parseStructuredManuscript(source)
