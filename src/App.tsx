@@ -6,6 +6,7 @@ import { parsePortableDocument, parseReviewMarkup } from './sharedEditor'
 import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
 import { ManuscriptTextEditor } from './ManuscriptTextEditor'
+import { StructuredManuscriptEditor, type StructuredManuscriptEditorHandle, type StructuredOutlineItem } from './StructuredManuscriptEditor'
 import { applyDraftCitationTransaction, applyDraftCodeTransaction, applyDraftTextTransaction, type ManuscriptTextField } from './manuscriptModel'
 import { downloadBlob, downloadText, projectCleanSource, reviewedProjection } from './projections'
 import { sampleCitations } from './sampleCitations'
@@ -46,6 +47,8 @@ import { CollaborationDialog } from './CollaborationDialog'
 import type { CollaborationCheckpoint, CollaborationClientStatus } from './sharedEditor'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
+const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
+const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
 const CITATIONS_KEY = 'draftmatter.citations.v1'
 const LAST_PROJECT_ROOT_KEY = 'draftmatter.last-project-root.v1'
@@ -130,6 +133,13 @@ function getInitialDraft(): DraftState {
   }
 }
 
+function getInitialDraftState(): DraftState {
+  const draft = getInitialDraft()
+  const source = localStorage.getItem(STRUCTURED_SOURCE_KEY)
+  const structuredMode = localStorage.getItem(STRUCTURED_MODE_KEY) === 'true'
+  return structuredMode && source ? parsePortableDocument(source, draft).draft : draft
+}
+
 function getInitialZoteroVersion(): ZoteroVersionStamp {
   try {
     return JSON.parse(localStorage.getItem(ZOTERO_VERSION_KEY) ?? '{}')
@@ -201,7 +211,7 @@ function CitationFormattingControls({
 
 function App() {
   const initialProjectMeta = useMemo(getInitialProjectMeta, [])
-  const initialDraftState = useMemo(getInitialDraft, [])
+  const initialDraftState = useMemo(getInitialDraftState, [])
   const {
     draft,
     update: updateDraftHistory,
@@ -278,6 +288,9 @@ function App() {
   const [runtimeInventory, setRuntimeInventory] = useState<RuntimeInventory>()
   const [runtimeDiscoveryState, setRuntimeDiscoveryState] = useState<'idle' | 'discovering' | 'ready'>('idle')
   const [environmentOpen, setEnvironmentOpen] = useState(false)
+  const [manuscriptSource, setManuscriptSource] = useState(() => localStorage.getItem(STRUCTURED_SOURCE_KEY) ?? reviewedProjection(initialDraftState))
+  const [structuredMode, setStructuredMode] = useState(() => localStorage.getItem(STRUCTURED_MODE_KEY) === 'true')
+  const [structuredOutline, setStructuredOutline] = useState<StructuredOutlineItem[]>([])
   const [externalExportSource, setExternalExportSource] = useState<string>()
   const [executionResult, setExecutionResult] = useState<NormalizedExecutionResult>()
   const [executionManifest, setExecutionManifest] = useState<ExecutionManifest>()
@@ -288,6 +301,8 @@ function App() {
   const [executionTrustBusy, setExecutionTrustBusy] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bibliographyInputRef = useRef<HTMLInputElement>(null)
+  const structuredEditorRef = useRef<StructuredManuscriptEditorHandle>(null)
+  const manuscriptSourceRef = useRef(manuscriptSource)
   const desktopSessionRef = useRef<DesktopSession | null>(null)
   const draftRevisionRef = useRef(0)
   const desktopSaveBlockedRef = useRef(false)
@@ -364,6 +379,11 @@ function App() {
     setDesktopSession(next)
   }
 
+  const replaceManuscriptSource = (next: string) => {
+    manuscriptSourceRef.current = next
+    setManuscriptSource(next)
+  }
+
   const resetDraftRevision = () => {
     draftRevisionRef.current = 0
     setDraftRevision(0)
@@ -402,11 +422,27 @@ function App() {
     redoDraftHistory()
   }
 
+  const updateStructuredManuscript = (next: string) => {
+    if (next === manuscriptSourceRef.current) return
+    replaceManuscriptSource(next)
+    const parsed = parsePortableDocument(next, draft)
+    markDraftChanged()
+    commitDraftHistory({ ...parsed.draft, cellStatus: draft.cellStatus })
+    setDiagnostics(parsed.diagnostics)
+  }
+
+  useEffect(() => {
+    const next = reviewedProjection(draft)
+    if (next !== manuscriptSourceRef.current) replaceManuscriptSource(next)
+  }, [draft])
+
   useEffect(() => {
     const timeout = window.setTimeout(() => {
       const next = { ...draft, lastSavedAt: new Date().toISOString() }
       try {
         localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+        localStorage.setItem(STRUCTURED_SOURCE_KEY, manuscriptSourceRef.current)
+        localStorage.setItem(STRUCTURED_MODE_KEY, String(structuredMode))
         if (!desktopSession) setSaveState('saved')
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error)
@@ -415,13 +451,13 @@ function App() {
       }
     }, 380)
     return () => window.clearTimeout(timeout)
-  }, [draft, desktopSession])
+  }, [draft, desktopSession, structuredMode])
 
   useEffect(() => {
     if (!desktopSession || draftRevision === 0 || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current
       || collaborationSessionActiveRef.current) return
     const revision = draftRevision
-    const content = reviewedProjection(draft)
+    const content = manuscriptSource
     const root = desktopSession.root
     const path = desktopSession.path
     const timeout = window.setTimeout(() => {
@@ -448,7 +484,7 @@ function App() {
       })
     }, 900)
     return () => window.clearTimeout(timeout)
-  }, [draft, draftRevision, desktopSession?.path, desktopSession?.root])
+  }, [draftRevision, desktopSession?.path, desktopSession?.root, manuscriptSource])
 
   useEffect(() => {
     if (!desktopSession) return
@@ -499,6 +535,7 @@ function App() {
           return
         }
         const parsed = parsePortableDocument(document.content, initialDraft)
+        replaceManuscriptSource(document.content)
         resetDraftHistory(parsed.draft)
         resetDraftRevision()
         replaceDesktopSession({ ...current, hash: document.hash, savedRevision: 0 })
@@ -524,10 +561,10 @@ function App() {
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
-      writeRecoverySnapshot(draft, filename, reviewedProjection(draft))
+      writeRecoverySnapshot(draft, filename, manuscriptSource)
     }, 1800)
     return () => window.clearTimeout(timeout)
-  }, [draft, filename])
+  }, [draft, filename, manuscriptSource])
 
   useEffect(() => {
     localStorage.setItem(PROJECT_META_KEY, JSON.stringify({ filename, projectName, citationStyle, citationLocale }))
@@ -767,20 +804,21 @@ function App() {
   }, [toast])
 
   const words = useMemo(() => {
+    if (structuredMode) return manuscriptSource.replace(/---[\s\S]*?---|<!--[^]*?-->|```[^]*?```|:::::[^]*$/g, ' ').trim().split(/\s+/).filter(Boolean).length
     const text = [draft.title, draft.abstract, draft.introduction, draft.methods, draft.resultsLead, draft.conclusion].join(' ')
     return text.trim().split(/\s+/).length
-  }, [draft])
+  }, [draft, manuscriptSource, structuredMode])
 
   const cleanSourceResult = sourceTab === 'reviewed' ? null : projectCleanSource(draft, sourceTab)
   const sourceDiagnostics = cleanSourceResult && !cleanSourceResult.ok ? cleanSourceResult.diagnostics : []
   const sourceBlocked = sourceDiagnostics.length > 0
   const source = sourceTab === 'reviewed'
-    ? reviewedProjection(draft)
+    ? manuscriptSource
     : cleanSourceResult?.ok
       ? cleanSourceResult.source
       : `Final projection unavailable.\n\n${sourceDiagnostics.map((diagnostic) => `- ${diagnostic.message}`).join('\n')}`
   const displayedSource = sourceEditing ? sourceBuffer : source
-  const executionSource = reviewedProjection(draft)
+  const executionSource = manuscriptSource
   const reviewDocument = parseReviewMarkup(executionSource)
   const reviewQueue = buildReviewQueue(reviewDocument)
   const demoReviewAvailable = reviewDocument.changes.some((change) => change.id === 'dm-c01')
@@ -788,7 +826,7 @@ function App() {
     && reviewDocument.threads.some((thread) => thread.id === 'dm-comment-01')
   const openReviewCount = reviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
   const executableCells = extractExecutableCells(executionSource).cells
-  const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL)
+  const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL) ?? executableCells[0]
   const retainedOutputs = parseRetainedOutputs(executionSource).outputs
   const latestAttemptManifest = executionResult
     ? executionManifest?.resultHash === executionResult.hashes.result
@@ -817,7 +855,7 @@ function App() {
 
   const openSourceInspector = () => {
     setSourceTab('reviewed')
-    setSourceBuffer(reviewedProjection(draft))
+    setSourceBuffer(manuscriptSource)
     setSourceEditing(false)
     setSourceOpen(true)
   }
@@ -829,17 +867,18 @@ function App() {
 
   const startSourceEditing = () => {
     setSourceTab('reviewed')
-    setSourceBuffer(reviewedProjection(draft))
+    setSourceBuffer(manuscriptSource)
     setSourceEditing(true)
   }
 
   const cancelSourceEditing = () => {
-    setSourceBuffer(reviewedProjection(draft))
+    setSourceBuffer(manuscriptSource)
     setSourceEditing(false)
   }
 
   const applySourceEditing = () => {
     const parsed = parsePortableDocument(sourceBuffer, initialDraft)
+    replaceManuscriptSource(sourceBuffer)
     markDraftChanged()
     commitDraftHistory(parsed.draft)
     setDiagnostics(parsed.diagnostics)
@@ -852,6 +891,7 @@ function App() {
   const applyCollaborativeSource = (remoteSource: string) => {
     if (remoteSource === executionSource) return
     const parsed = parsePortableDocument(remoteSource, initialDraft)
+    replaceManuscriptSource(remoteSource)
     markDraftChanged()
     commitDraftHistory(parsed.draft)
     setDiagnostics(parsed.diagnostics)
@@ -870,6 +910,7 @@ function App() {
 
   const checkpointCollaboration = async (checkpoint: CollaborationCheckpoint) => {
     const parsed = parsePortableDocument(checkpoint.source, initialDraft)
+    replaceManuscriptSource(checkpoint.source)
     setDiagnostics(parsed.diagnostics)
     if (!desktopHost.available || !desktopSessionRef.current) {
       downloadText(filename, checkpoint.source)
@@ -912,6 +953,28 @@ function App() {
 
   const scrollTo = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+  }
+
+  const runStructuredCommand = (command: (editor: StructuredManuscriptEditorHandle) => boolean, label: string) => {
+    const editor = structuredEditorRef.current
+    if (!structuredMode || !editor) {
+      setToast(`${label} is available in the full portable manuscript editor`)
+      return
+    }
+    if (!command(editor)) setToast(`Select manuscript content before using ${label.toLowerCase()}`)
+  }
+
+  const addStructuredLink = () => {
+    const href = window.prompt('Link destination (https://… or a project-relative path)')?.trim()
+    if (href) runStructuredCommand((editor) => editor.setLink(href), 'Add link')
+  }
+
+  const insertStructuredFigure = () => {
+    const path = window.prompt('Project-relative image path (for example figures/result.svg)')?.trim()
+    if (!path) return
+    const alt = window.prompt('Accessible description for the figure')?.trim() ?? ''
+    const caption = window.prompt('Figure caption (optional)')?.trim() || undefined
+    runStructuredCommand((editor) => editor.insertFigure(path, alt, caption), 'Insert image')
   }
 
   const discoverExecutionEnvironments = async (showDialog = false) => {
@@ -961,8 +1024,9 @@ function App() {
 
   const executeTrustedCell = async () => {
     const session = desktopSessionRef.current
-    const currentSource = reviewedProjection(draft)
-    const cell = extractExecutableCells(currentSource).cells.find((candidate) => candidate.id === PRIMARY_EXECUTION_CELL)
+    const currentSource = manuscriptSourceRef.current
+    const availableCells = extractExecutableCells(currentSource).cells
+    const cell = availableCells.find((candidate) => candidate.id === PRIMARY_EXECUTION_CELL) ?? availableCells[0]
     if (!session || !cell) {
       setExecutionProblem('No explicit Python executable cell is available in this project source.')
       setToast('No explicit Python executable cell is available')
@@ -1000,6 +1064,7 @@ function App() {
         if (materialized.ok) {
           const parsed = parsePortableDocument(materialized.source, draft)
           const nextDraft = { ...parsed.draft, cellStatus: 'current' as const }
+          replaceManuscriptSource(materialized.source)
           markDraftChanged()
           commitDraftHistory(nextDraft)
           setDiagnostics(parsed.diagnostics)
@@ -1140,6 +1205,7 @@ function App() {
 
   const applyPortableReviewSource = (source: string, message: string) => {
     const parsed = parsePortableDocument(source, initialDraft)
+    replaceManuscriptSource(source)
     markDraftChanged()
     commitDraftHistory(parsed.draft)
     setDiagnostics(parsed.diagnostics)
@@ -1149,7 +1215,7 @@ function App() {
   const download = (kind: 'reviewed' | 'final' | 'original') => {
     let content: string
     if (kind === 'reviewed') {
-      content = reviewedProjection(draft)
+      content = manuscriptSource
     } else {
       const projection = projectCleanSource(draft, kind)
       if (!projection.ok) {
@@ -1283,6 +1349,8 @@ function App() {
     setCitations((current) => hydrateCitationsFromCache(current, cacheResult.cache))
     desktopSaveBlockedRef.current = false
     resetDraftRevision()
+    replaceManuscriptSource(parsed.draft.portableEnvelope?.source ?? reviewedProjection(parsed.draft))
+    setStructuredMode(true)
     resetDraftHistory(parsed.draft)
     setFilename(file.name)
     setProjectName(nextName.replaceAll(/[-_]+/g, ' '))
@@ -1373,6 +1441,8 @@ function App() {
       hash: project.bibliographies.find((entry) => entry.path === acquisitionPath)?.hash ?? null,
     }
     replaceDesktopSession({ root: project.root, path: mainPath, hash: document.hash, savedRevision: 0 })
+    replaceManuscriptSource(document.content)
+    setStructuredMode(true)
     resetDraftHistory(openedDraft)
     setFilename(displayName)
     setProjectName(project.config.name)
@@ -1483,12 +1553,14 @@ function App() {
   }
 
   const createSnapshot = () => {
-    const next = writeRecoverySnapshot(draft, filename, reviewedProjection(draft), new Date().toISOString())
+    const next = writeRecoverySnapshot(draft, filename, manuscriptSource, new Date().toISOString())
     setProjectMenuOpen(false)
     setToast(next ? 'Recovery snapshot saved locally' : 'Could not save a local recovery snapshot')
   }
 
   const restoreSnapshot = (snapshot: RecoverySnapshot) => {
+    replaceManuscriptSource(snapshot.source)
+    setStructuredMode(true)
     commitDraftHistory(snapshot.draft)
     if (desktopSession) {
       setDraftRevision((current) => {
@@ -1963,15 +2035,24 @@ function App() {
             </div>
 
             <div className="outline-tree">
-              <button className="outline-title active" onClick={() => scrollTo('title')}>{draft.title}</button>
-              <button onClick={() => scrollTo('abstract')}><span>Abstract</span><small>112</small></button>
-              <button onClick={() => scrollTo('introduction')}><span>Introduction</span><small>146</small></button>
-              <button onClick={() => scrollTo('methods')}><span>Methods</span><small>185</small></button>
-              <button className="outline-nested" onClick={() => scrollTo('code-cell')}><span>Canopy response</span><small>Fig. 1</small></button>
-              <button onClick={() => scrollTo('results')}><span>Results</span><small>164</small></button>
-              <button onClick={() => scrollTo('conclusion')}><span>Conclusion</span><small>88</small></button>
-              <button onClick={() => scrollTo('references')}><span>References</span><small>{renderedBibliography.length}</small></button>
-              <button className="add-section"><Icon name="plus" size={15} /> Add section</button>
+              {structuredMode ? <>
+                {structuredOutline.length ? structuredOutline.map((item, index) => (
+                  <button className={`${item.level === 1 ? 'outline-title' : ''} ${item.level > 2 ? 'outline-nested' : ''} ${index === 0 ? 'active' : ''}`.trim()} onClick={() => structuredEditorRef.current?.scrollToNode(item.id)} key={item.id}>
+                    <span>{item.title}</span><small>H{item.level}</small>
+                  </button>
+                )) : <p className="outline-empty">Add a heading to build the outline.</p>}
+                <button className="add-section" onClick={() => setCommandOpen(true)}><Icon name="plus" size={15} /> Add section</button>
+              </> : <>
+                <button className="outline-title active" onClick={() => scrollTo('title')}>{draft.title}</button>
+                <button onClick={() => scrollTo('abstract')}><span>Abstract</span><small>112</small></button>
+                <button onClick={() => scrollTo('introduction')}><span>Introduction</span><small>146</small></button>
+                <button onClick={() => scrollTo('methods')}><span>Methods</span><small>185</small></button>
+                <button className="outline-nested" onClick={() => scrollTo('code-cell')}><span>Canopy response</span><small>Fig. 1</small></button>
+                <button onClick={() => scrollTo('results')}><span>Results</span><small>164</small></button>
+                <button onClick={() => scrollTo('conclusion')}><span>Conclusion</span><small>88</small></button>
+                <button onClick={() => scrollTo('references')}><span>References</span><small>{renderedBibliography.length}</small></button>
+                <button className="add-section"><Icon name="plus" size={15} /> Add section</button>
+              </>}
             </div>
 
             <div className="left-panel-spacer" />
@@ -1992,21 +2073,62 @@ function App() {
 
         <main className="editor-area">
           <div className="format-toolbar" aria-label="Formatting toolbar">
-            <button className="style-select">Body text <Icon name="chevronDown" size={13} /></button>
+            <button className="style-select" onClick={() => runStructuredCommand((editor) => editor.setParagraph(), 'Body text')}>Body text <Icon name="chevronDown" size={13} /></button>
             <span className="toolbar-divider" />
-            <button aria-label="Bold"><strong>B</strong></button>
-            <button aria-label="Italic"><em>I</em></button>
-            <button aria-label="Add link"><Icon name="link" size={16} /></button>
+            <button aria-label="Bold" onClick={() => runStructuredCommand((editor) => editor.toggleBold(), 'Bold')}><strong>B</strong></button>
+            <button aria-label="Italic" onClick={() => runStructuredCommand((editor) => editor.toggleItalic(), 'Italic')}><em>I</em></button>
+            <button aria-label="Add link" onClick={addStructuredLink}><Icon name="link" size={16} /></button>
             <span className="toolbar-divider" />
-            <button aria-label="Block quote"><Icon name="quote" size={17} /></button>
-            <button aria-label="Insert image"><Icon name="image" size={17} /></button>
-            <button aria-label="Insert table"><Icon name="table" size={17} /></button>
-            <button aria-label="Insert code cell"><Icon name="code" size={17} /></button>
+            <button aria-label="Block quote" onClick={() => runStructuredCommand((editor) => editor.wrapBlockquote(), 'Block quote')}><Icon name="quote" size={17} /></button>
+            <button aria-label="Insert image" onClick={insertStructuredFigure}><Icon name="image" size={17} /></button>
+            <button aria-label="Insert table" onClick={() => runStructuredCommand((editor) => editor.insertTable(), 'Insert table')}><Icon name="table" size={17} /></button>
+            <button aria-label="Insert code cell" onClick={() => runStructuredCommand((editor) => editor.insertCodeCell('python'), 'Insert code cell')}><Icon name="code" size={17} /></button>
             <span className="toolbar-divider" />
-            <button aria-label="Undo" onClick={undoDraft} disabled={!canUndo}><Icon name="undo" size={16} /></button>
-            <button aria-label="Redo" onClick={redoDraft} disabled={!canRedo}><Icon name="redo" size={16} /></button>
+            <button aria-label="Undo" onClick={() => structuredMode ? structuredEditorRef.current?.undo() : undoDraft()} disabled={!structuredMode && !canUndo}><Icon name="undo" size={16} /></button>
+            <button aria-label="Redo" onClick={() => structuredMode ? structuredEditorRef.current?.redo() : redoDraft()} disabled={!structuredMode && !canRedo}><Icon name="redo" size={16} /></button>
           </div>
 
+          {structuredMode ? (
+          <article className="manuscript structured-manuscript" aria-label="Editable manuscript">
+            <div className="paper-meta">PORTABLE RESEARCH MANUSCRIPT · MARKDOWN / QUARTO</div>
+            {!structuredOutline.some((item) => item.level === 1) && (
+              <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" />
+            )}
+            {primaryCell && (
+              <div className="structured-execution-bar">
+                <span><Icon name="code" size={15} /><strong>{primaryCell.language === 'r' ? 'R' : runtimeName(primaryCell.language)} cell</strong><small>{primaryCell.id} · execution is explicit</small><em className={`cell-status ${draft.cellStatus}`}><i />{cellStatusLabel(draft.cellStatus)}</em></span>
+                {draft.cellStatus === 'running'
+                  ? <button onClick={() => void interruptExecution()}><Icon name="close" size={13} /> Interrupt</button>
+                  : <button className="run-button" onClick={() => void runCell()} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}><Icon name="play" size={13} /> Run first cell</button>}
+                <button className="subtle" onClick={() => void discoverExecutionEnvironments(true)} disabled={!desktopSession}><Icon name="more" size={14} /> Environments</button>
+              </div>
+            )}
+            {executionResult && (
+              <div className="structured-live-result" aria-label="Latest execution result">
+                <ExecutionOutputView result={executionResult} artifactUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) : path} />
+              </div>
+            )}
+            <StructuredManuscriptEditor
+              ref={structuredEditorRef}
+              source={manuscriptSource}
+              onChange={updateStructuredManuscript}
+              onDiagnostics={setDiagnostics}
+              onOutlineChange={setStructuredOutline}
+              onInspectRaw={openSourceInspector}
+              resolveAssetUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) : path}
+            />
+            {renderedBibliography.length > 0 && (
+              <section id="references" className="bibliography-section" aria-labelledby="references-heading">
+                <div className="bibliography-heading">
+                  <div><span className="eyebrow">Live CSL bibliography</span><h2 id="references-heading">References</h2></div>
+                  <CitationFormattingControls style={citationStyle} locale={citationLocale} onStyleChange={changeCitationStyle} onLocaleChange={changeCitationLocale} />
+                </div>
+                <div className="bibliography-entries">{renderedBibliography.map((entry) => <p key={entry.id} data-citekey={entry.id}>{entry.value}</p>)}</div>
+              </section>
+            )}
+            <button className="end-insert" onClick={() => setCommandOpen(true)}><Icon name="plus" size={15} /> Add block or type /</button>
+          </article>
+          ) : (
           <article className="manuscript" aria-label="Editable manuscript">
             <div className="paper-meta">RESEARCH ARTICLE · PLANT ECOLOGY</div>
             <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" />
@@ -2168,6 +2290,7 @@ function App() {
 
             <button className="end-insert" onClick={() => setCommandOpen(true)}><Icon name="plus" size={15} /> Add block or type /</button>
           </article>
+          )}
 
           <div className="editor-statusbar">
             <span><Icon name="eye" size={14} /> Page 1 of 3</span>
