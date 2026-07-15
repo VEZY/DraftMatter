@@ -271,6 +271,203 @@ function citationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   }
 }
 
+function footnoteNumbers(document: ProseMirrorNode) {
+  const numbers = new Map<string, number>()
+  document.descendants((node) => {
+    if (node.type === manuscriptSchema.nodes.footnote_reference) {
+      const label = String(node.attrs.label)
+      if (!numbers.has(label)) numbers.set(label, numbers.size + 1)
+    }
+    return true
+  })
+  return numbers
+}
+
+function footnotePreviewText(value: string) {
+  return value
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
+    .replace(/\[([^\]\r\n]*?)@([a-zA-Z0-9_:.+-]+)([^\]\r\n]*)\]/g, '$1$2$3')
+    .replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, '$1$2')
+    .replace(/(?<!\*)\*([^*]+)\*(?!\*)|(?<!_)_([^_]+)_(?!_)/g, '$1$2')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\$([^$\r\n]+)\$/g, '$1')
+    .replace(/\[\^([a-zA-Z0-9_.:-]+)\]/g, 'footnote $1')
+    .trim()
+}
+
+function footnoteDomId(label: string) {
+  return `dm-footnote-${label.replace(/[^a-zA-Z0-9_.:-]+/g, '-') || 'note'}`
+}
+
+function refreshFootnotePresentation(view: EditorView) {
+  const numbers = footnoteNumbers(view.state.doc)
+  view.dom.querySelectorAll<HTMLElement>('[data-footnote-label]').forEach((element) => {
+    const label = element.dataset.footnoteLabel ?? ''
+    const number = numbers.get(label)
+    const descriptor = number ? `Footnote ${number}` : `Unreferenced footnote ${label}`
+    if (element.classList.contains('structured-footnote-reference')) {
+      const button = element.querySelector('button')
+      if (button) {
+        button.textContent = number ? String(number) : '?'
+        button.setAttribute('aria-label', number ? `Go to footnote ${number}` : `Go to footnote ${label}`)
+        button.setAttribute('aria-controls', footnoteDomId(label))
+      }
+    } else if (element.classList.contains('structured-footnote-definition')) {
+      element.id = footnoteDomId(label)
+      element.setAttribute('aria-label', descriptor)
+      element.querySelector<HTMLElement>('.structured-footnote-number')?.replaceChildren(descriptor)
+      const edit = element.querySelector<HTMLButtonElement>('.structured-footnote-edit')
+      if (edit) edit.setAttribute('aria-label', number ? `Edit footnote ${number}` : `Edit unreferenced footnote ${label}`)
+      element.querySelector<HTMLTextAreaElement>('.structured-footnote-textarea')
+        ?.setAttribute('aria-label', number ? `Footnote ${number} content` : `Footnote ${label} content`)
+    }
+  })
+}
+
+function footnoteReferenceNodeView(initialNode: ProseMirrorNode, view: EditorView): NodeView {
+  let node = initialNode
+  const dom = document.createElement('sup')
+  dom.className = 'structured-footnote-reference'
+  dom.dataset.dmNode = 'footnote-reference'
+  const button = document.createElement('button')
+  button.type = 'button'
+  const updateDom = () => {
+    dom.dataset.dmId = String(node.attrs.id)
+    dom.dataset.footnoteLabel = String(node.attrs.label)
+    const number = footnoteNumbers(view.state.doc).get(String(node.attrs.label))
+    button.textContent = number ? String(number) : '?'
+    button.setAttribute('aria-label', number ? `Go to footnote ${number}` : `Go to footnote ${String(node.attrs.label)}`)
+    button.setAttribute('aria-controls', footnoteDomId(String(node.attrs.label)))
+  }
+  updateDom()
+  button.addEventListener('mousedown', (event) => event.preventDefault())
+  button.addEventListener('click', () => {
+    const definition = [...view.dom.querySelectorAll<HTMLElement>('.structured-footnote-definition')]
+      .find((candidate) => candidate.dataset.footnoteLabel === String(node.attrs.label))
+    definition?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    definition?.focus({ preventScroll: true })
+  })
+  dom.append(button)
+  return {
+    dom,
+    stopEvent: () => true,
+    ignoreMutation: () => true,
+    update(next) {
+      if (next.type !== node.type) return false
+      node = next
+      updateDom()
+      return true
+    },
+  }
+}
+
+function footnoteDefinitionNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () => number | undefined, isEditable: () => boolean): NodeView {
+  let node = initialNode
+  let editing = false
+  const dom = document.createElement('aside')
+  dom.className = 'structured-footnote-definition'
+  dom.dataset.dmNode = 'footnote'
+  dom.tabIndex = -1
+
+  const header = document.createElement('div')
+  header.className = 'structured-footnote-header'
+  const numberLabel = document.createElement('span')
+  numberLabel.className = 'structured-footnote-number'
+  const edit = document.createElement('button')
+  edit.type = 'button'
+  edit.className = 'structured-footnote-edit'
+  edit.textContent = 'Edit'
+  header.append(numberLabel, edit)
+
+  const preview = document.createElement('p')
+  preview.className = 'structured-footnote-preview'
+  const editor = document.createElement('div')
+  editor.className = 'structured-footnote-editor'
+  editor.hidden = true
+  const textarea = document.createElement('textarea')
+  textarea.className = 'structured-footnote-textarea'
+  const actions = document.createElement('div')
+  const cancel = document.createElement('button')
+  cancel.type = 'button'
+  cancel.textContent = 'Cancel'
+  const save = document.createElement('button')
+  save.type = 'button'
+  save.className = 'primary-button'
+  save.textContent = 'Save note'
+  actions.append(cancel, save)
+  editor.append(textarea, actions)
+
+  const descriptor = () => footnoteNumbers(view.state.doc).get(String(node.attrs.label))
+  const updateSave = () => { save.disabled = !isEditable() || !textarea.value.trim() }
+  const updateDom = () => {
+    const number = descriptor()
+    dom.dataset.dmId = String(node.attrs.id)
+    dom.dataset.footnoteLabel = String(node.attrs.label)
+    dom.id = footnoteDomId(String(node.attrs.label))
+    numberLabel.textContent = number ? `Footnote ${number}` : `Unreferenced footnote ${String(node.attrs.label)}`
+    dom.setAttribute('aria-label', number ? `Footnote ${number}` : `Unreferenced footnote ${String(node.attrs.label)}`)
+    preview.textContent = footnotePreviewText(String(node.attrs.contentMarkdown)) || 'Empty footnote'
+    edit.disabled = !isEditable()
+    edit.setAttribute('aria-label', number ? `Edit footnote ${number}` : `Edit unreferenced footnote ${String(node.attrs.label)}`)
+    textarea.setAttribute('aria-label', number ? `Footnote ${number} content` : `Footnote ${String(node.attrs.label)} content`)
+    textarea.readOnly = !isEditable()
+    if (!editing) textarea.value = String(node.attrs.contentMarkdown)
+    updateSave()
+  }
+  const closeEditor = () => {
+    editing = false
+    editor.hidden = true
+    preview.hidden = false
+    edit.hidden = false
+    textarea.value = String(node.attrs.contentMarkdown)
+    updateSave()
+    edit.focus()
+  }
+  const saveEditor = () => {
+    const content = textarea.value.trim()
+    const position = getPos()
+    if (!content || typeof position !== 'number' || !isEditable()) return
+    view.dispatch(view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, contentMarkdown: content }))
+    closeEditor()
+  }
+  edit.addEventListener('click', () => {
+    if (!isEditable()) return
+    editing = true
+    preview.hidden = true
+    edit.hidden = true
+    editor.hidden = false
+    textarea.value = String(node.attrs.contentMarkdown)
+    updateSave()
+    textarea.focus()
+    textarea.select()
+  })
+  cancel.addEventListener('click', closeEditor)
+  save.addEventListener('click', saveEditor)
+  textarea.addEventListener('input', updateSave)
+  textarea.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeEditor()
+    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault()
+      saveEditor()
+    }
+  })
+  dom.append(header, preview, editor)
+  updateDom()
+  return {
+    dom,
+    stopEvent: (event) => dom.contains(event.target as Node),
+    ignoreMutation: () => true,
+    update(next) {
+      if (next.type !== node.type) return false
+      node = next
+      updateDom()
+      return true
+    },
+  }
+}
+
 function outputNodeView(node: ProseMirrorNode, resolveAssetUrl: (path: string) => string): NodeView {
   const dom = document.createElement('section')
   dom.className = 'structured-output'
@@ -397,6 +594,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     onDiagnosticsRef.current?.(parsed.diagnostics)
     onOutlineRef.current?.(outlineFor(parsed.document))
     view.updateState(editorState(parsed.document))
+    refreshFootnotePresentation(view)
     emitReviewSelection(view)
   }
 
@@ -652,6 +850,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         code_cell: (node, editorView, getPos) => codeCellNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         raw_block: (node) => rawNodeView(node, (nodeId) => onInspectRawRef.current?.(nodeId)),
         citation: (node, editorView, getPos) => citationNodeView(node, editorView, getPos, (id, items) => onCitationSelectRef.current?.(id, items)),
+        footnote_reference: (node, editorView) => footnoteReferenceNodeView(node, editorView),
+        footnote_definition: (node, editorView, getPos) => footnoteDefinitionNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         output_block: (node) => outputNodeView(node, (path) => resolveAssetUrlRef.current?.(path) ?? path),
         image: (node) => imageNodeView(node, (path) => resolveAssetUrlRef.current?.(path) ?? path),
       },
@@ -666,6 +866,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         }
         const next = view.state.apply(transaction)
         view.updateState(next)
+        refreshFootnotePresentation(view)
         emitReviewSelection(view)
         onOutlineRef.current?.(outlineFor(next.doc))
         if (transaction.docChanged && !transaction.getMeta('dm-presentation-only') && metadataRef.current) {
@@ -681,6 +882,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       },
     })
     viewRef.current = view
+    refreshFootnotePresentation(view)
     emitReviewSelection(view)
     return () => {
       if (pendingSuggestionRef.current) window.clearTimeout(pendingSuggestionRef.current.timeout)
@@ -709,6 +911,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     onOutlineRef.current?.(outlineFor(parsed.document))
     if (!view.state.doc.eq(parsed.document)) {
       view.updateState(editorState(parsed.document))
+      refreshFootnotePresentation(view)
       emitReviewSelection(view)
     } else {
       view.dispatch(view.state.tr.setMeta('dm-decoration-refresh', true))
@@ -740,6 +943,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   useEffect(() => {
     viewRef.current?.setProps({ editable: () => !readOnly })
     hostRef.current?.querySelectorAll<HTMLTextAreaElement>('.structured-code-editor').forEach((editor) => { editor.readOnly = readOnly })
+    hostRef.current?.querySelectorAll<HTMLTextAreaElement>('.structured-footnote-textarea').forEach((editor) => { editor.readOnly = readOnly })
+    hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-footnote-edit').forEach((button) => { button.disabled = readOnly })
   }, [readOnly])
 
   return <div ref={hostRef} className={`structured-manuscript-editor ${className}`.trim()} data-read-only={readOnly ? 'true' : 'false'} />

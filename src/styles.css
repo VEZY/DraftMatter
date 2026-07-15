@@ -3924,6 +3924,24 @@ kbd {
 .structured-editor-content figcaption { color: var(--muted); font-family: Inter, ui-sans-serif, sans-serif; font-size: 12px; line-height: 1.55; margin-top: 9px; }
 .structured-citation { background: #e7eef2; border: 0; border-radius: 4px; color: #365a6f; cursor: pointer; display: inline; font-family: Inter, ui-sans-serif, sans-serif; font-size: .86em; line-height: inherit; margin: 0; padding: 2px 5px; }
 .structured-citation:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.structured-footnote-reference { line-height: 0; margin-left: 1px; }
+.structured-footnote-reference button { background: transparent; border: 0; color: var(--sage-dark); cursor: pointer; font-family: Inter, ui-sans-serif, sans-serif; font-size: .68rem; font-weight: 700; line-height: 1; padding: 0 2px; vertical-align: super; }
+.structured-footnote-reference button:hover { color: #294d3d; text-decoration: underline; text-underline-offset: 2px; }
+.structured-footnote-reference button:focus-visible { border-radius: 3px; outline: 2px solid var(--focus); outline-offset: 2px; }
+.structured-footnote-definition { background: #fbfcfb; border-left: 2px solid #cbd8d1; color: #4e5c55; margin: 1.2em 0; padding: 10px 12px 11px; }
+.structured-footnote-definition:focus { border-left-color: #759484; outline: 2px solid rgba(63, 104, 89, .16); outline-offset: 2px; }
+.structured-footnote-header { align-items: center; display: flex; font-family: Inter, ui-sans-serif, sans-serif; justify-content: space-between; margin-bottom: 5px; }
+.structured-footnote-number { color: #738078; font-size: 9px; font-weight: 750; letter-spacing: .06em; text-transform: uppercase; }
+.structured-footnote-edit { background: transparent; border: 0; color: #67776e; font-size: 9px; font-weight: 700; padding: 3px 4px; }
+.structured-footnote-edit:hover { color: var(--sage-dark); text-decoration: underline; text-underline-offset: 2px; }
+.structured-footnote-edit:disabled { cursor: default; opacity: .45; text-decoration: none; }
+.structured-footnote-preview { font-size: .9rem; line-height: 1.55; margin: 0 !important; }
+.structured-footnote-editor { display: grid; gap: 7px; }
+.structured-footnote-editor[hidden] { display: none; }
+.structured-footnote-textarea { background: #fff; border: 1px solid #d8dfdb; border-radius: 5px; color: #3f4b45; font-family: Georgia, serif; font-size: 12px; line-height: 1.5; min-height: 74px; padding: 8px 9px; resize: vertical; width: 100%; }
+.structured-footnote-textarea:focus { border-color: #89a294; outline: 2px solid rgba(63, 104, 89, .14); }
+.structured-footnote-editor > div { display: flex; gap: 6px; justify-content: flex-end; }
+.structured-footnote-editor button { font-size: 9px; padding: 6px 9px; }
 .toolbar-symbol { font-family: Georgia, serif; font-size: 16px; line-height: 1; }
 .dm-review-thread { background: rgba(230, 194, 83, .18); border-bottom: 1px solid rgba(178, 139, 34, .55); }
 .dm-review-change { background: rgba(91, 145, 112, .14); border-bottom: 1px solid rgba(69, 119, 88, .58); }

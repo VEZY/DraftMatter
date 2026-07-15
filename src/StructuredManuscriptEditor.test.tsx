@@ -79,6 +79,10 @@ describe('full structured manuscript editor', () => {
     expect(editor?.getAttribute('contenteditable')).toBe('true')
     expect(container.querySelector('h1')?.textContent).toBe('Generic manuscript')
     expect(container.querySelector('.structured-citation')?.textContent).toBe('(vezy2024)')
+    expect(container.querySelector<HTMLButtonElement>('.structured-footnote-reference button')?.textContent).toBe('1')
+    expect(container.querySelector<HTMLButtonElement>('.structured-footnote-reference button')?.getAttribute('aria-label')).toBe('Go to footnote 1')
+    expect(container.querySelector('.structured-footnote-number')?.textContent).toBe('Footnote 1')
+    expect(container.querySelector('.structured-footnote-preview')?.textContent).toBe('A footnote.')
     expect(container.querySelector('table')?.textContent).toContain('Drought')
     expect(container.querySelector('.structured-code-editor')).toHaveProperty('value', 'print("before")')
     expect(container.querySelector('img')?.getAttribute('src')).toBe('asset://figures/growth.svg')
@@ -88,6 +92,7 @@ describe('full structured manuscript editor', () => {
     expect(container.textContent).not.toContain('Opaque raw payload')
     expect(container.textContent).not.toContain('.dm-anchor')
     expect(container.textContent).not.toContain('.draftmatter-reviews')
+    expect(container.textContent).not.toContain('[^one]')
     expect(container.querySelector('.dm-review-point')?.getAttribute('aria-label')).toBe('Open point comment')
 
     await act(async () => (container.querySelector('.structured-raw-node button') as HTMLButtonElement).click())
@@ -209,6 +214,30 @@ describe('full structured manuscript editor', () => {
     expect(changed.at(-1)).toContain('[^method]: Calibration details.')
   })
 
+  it('numbers repeated references by first use and edits definitions without exposing punctuation', async () => {
+    const changed: string[] = []
+    const numberedSource = '# Notes\n\nBeta first[^beta], alpha next[^alpha], and beta again[^beta].\n\n[^alpha]: Alpha **details**.\n[^beta]: Beta details.\n'
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={numberedSource} onChange={(next) => changed.push(next)} />,
+    ))
+
+    expect([...container.querySelectorAll('.structured-footnote-reference button')].map((button) => button.textContent)).toEqual(['1', '2', '1'])
+    const definitions = [...container.querySelectorAll<HTMLElement>('.structured-footnote-definition')]
+    expect(definitions.map((definition) => definition.querySelector('.structured-footnote-number')?.textContent)).toEqual(['Footnote 2', 'Footnote 1'])
+    expect(definitions[0].querySelector('.structured-footnote-preview')?.textContent).toBe('Alpha details.')
+    expect(container.textContent).not.toContain('**details**')
+
+    const beta = definitions[1]
+    await act(async () => beta.querySelector<HTMLButtonElement>('.structured-footnote-edit')?.click())
+    const textarea = beta.querySelector<HTMLTextAreaElement>('.structured-footnote-textarea')!
+    textarea.value = 'Revised **beta** details.'
+    await act(async () => beta.querySelector<HTMLButtonElement>('.structured-footnote-editor .primary-button')?.click())
+
+    expect(changed.at(-1)).toContain('[^beta]: Revised **beta** details.')
+    expect(beta.querySelector('.structured-footnote-preview')?.textContent).toBe('Revised beta details.')
+    expect(beta.querySelector<HTMLElement>('.structured-footnote-editor')?.hidden).toBe(true)
+  })
+
   it.each([
     ['table', (editor: StructuredManuscriptEditorHandle) => editor.insertTable(), '| --- | --- |'],
     ['figure', (editor: StructuredManuscriptEditorHandle) => editor.insertFigure('figures/growth.svg', 'Growth', 'Growth response.', 'fig-growth'), '![Growth](figures/growth.svg){#fig-growth}'],
@@ -231,5 +260,6 @@ describe('full structured manuscript editor', () => {
 
     expect(container.querySelector('.structured-editor-content')?.getAttribute('contenteditable')).toBe('false')
     expect(container.querySelector<HTMLTextAreaElement>('.structured-code-editor')?.readOnly).toBe(true)
+    expect(container.querySelector<HTMLButtonElement>('.structured-footnote-edit')?.disabled).toBe(true)
   })
 })

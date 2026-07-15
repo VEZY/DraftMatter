@@ -8,13 +8,15 @@ title: "Portable field notes"
 
 ## Background {#sec-background}
 
-This is an arbitrary manuscript with a citation [@vezy2024] and **editable prose**.
+This is an arbitrary manuscript with a citation [@vezy2024] and **editable prose**.[^methods]
 
 See @sec-background for context.
 
 A uniquely selected review sentence.
 
 A uniquely selected suggestion sentence.
+
+[^methods]: Calibration details stay portable.
 
 ~~~julia {#cell-growth .execute output="table"}
 println("before")
@@ -44,10 +46,20 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(manuscript.getByRole('heading', { level: 2, name: 'Background' })).toBeVisible()
     await expect(manuscript.getByRole('button', { name: 'Edit citation @vezy2024' })).toHaveText('(Vezy et al., 2024)')
     await expect(manuscript.getByRole('link', { name: 'Section background' })).toHaveAttribute('href', '#sec-background')
+    await expect(manuscript.getByRole('button', { name: 'Go to footnote 1' })).toHaveText('1')
+    await expect(manuscript.getByText('Footnote 1', { exact: true })).toBeVisible()
+    await expect(manuscript.getByText('Calibration details stay portable.', { exact: true })).toBeVisible()
     await expect(renderedEditor).not.toContainText(':::')
     await expect(renderedEditor).not.toContainText('@sec-background')
+    await expect(renderedEditor).not.toContainText('[^methods]')
     await expect(renderedEditor).not.toContainText('Keep this opaque block exactly.')
     await expect(manuscript.getByText('Preserved source')).toBeVisible()
+
+    await manuscript.getByRole('button', { name: 'Edit footnote 1' }).click()
+    await manuscript.getByRole('textbox', { name: 'Footnote 1 content' }).fill('Calibration details were **independently checked**.')
+    await manuscript.getByRole('button', { name: 'Save note' }).click()
+    await expect(manuscript.getByText('Calibration details were independently checked.', { exact: true })).toBeVisible()
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('[^methods]: Calibration details were **independently checked**.')
 
     const code = manuscript.getByRole('textbox', { name: 'julia code cell cell-growth' })
     await code.fill('println("after")')
@@ -55,6 +67,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
 
     await page.reload()
     await expect(page.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveValue('println("after")')
+    await expect(page.getByText('Calibration details were independently checked.', { exact: true })).toBeVisible()
     let saved = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))
     expect(saved).toContain('::: {.future-extension data-owner="research-team"}\nKeep this opaque block exactly.\n:::')
     expect(saved).toContain('See @sec-background for context.')
