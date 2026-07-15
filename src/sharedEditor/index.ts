@@ -29,6 +29,11 @@ export {
   type ReviewDecisionTransaction,
   type TransactionalReviewAction,
 } from './reviewDecisions'
+export {
+  createCollaborationCheckpoint,
+  CollaborationCheckpointError,
+  type CollaborationCheckpoint,
+} from './collaborationCheckpoint'
 
 export { parsePortableDocument } from '../document'
 export { materializePortableDraftSource } from '../portableDraft'

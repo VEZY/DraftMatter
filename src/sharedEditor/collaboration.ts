@@ -160,6 +160,7 @@ export class CollaborativeDocument {
         status: change.status,
         ...(change.proposal === undefined ? {} : { proposal: change.proposal }),
         ...(change.rationale === undefined ? {} : { rationale: change.rationale }),
+        ...(change.attributes['data-base-revision'] ? { baseRevision: change.attributes['data-base-revision'] } : {}),
       })
       for (const thread of review.threads) collaboration.putThread({
         id: thread.id,
@@ -177,6 +178,8 @@ export class CollaborativeDocument {
         authorId: decision.authorId,
         action: decision.action,
         ...(decision.timestamp ? { timestamp: decision.timestamp } : {}),
+        ...(decision.attributes['data-base-revision'] ? { baseRevision: decision.attributes['data-base-revision'] } : {}),
+        ...(decision.attributes['data-resolves'] ? { resolves: decision.attributes['data-resolves'].split(',').filter(Boolean).sort() } : {}),
       })
     }, 'portable-import')
     return collaboration

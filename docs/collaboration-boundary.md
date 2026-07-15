@@ -23,3 +23,7 @@ Review decisions are immutable revision-checked records. A decision starts from 
 The framework-independent workspace service signs short-lived HMAC session tokens only after an upstream identity provider has verified the identity. Its policy layer supports owner, editor, commenter, and viewer roles; one-use expiring guest invitations; immediate membership revocation; per-session rate limits; and an owner-only activity audit. Invitation secrets are stored only as SHA-256 digests and are never written to the audit.
 
 Every project lookup is scoped by workspace membership before the project identifier is resolved. A missing tenant membership, an unknown workspace, and an unknown project all return the same not-found response, preventing project enumeration across tenants. The future WebSocket and HTTP adapters must call `authorizeProject` for the requested capability before loading any collaboration state.
+
+## Owner-controlled portable checkpoints
+
+Checkpoint creation is a pure client operation. It normalizes line endings, materializes missing Yjs-relative anchors, sorts keyed authors/proposals/threads/decisions, preserves the complete decision audit, and emits DraftMatter Review Markup without calling Git or any desktop host. An unresolved concurrent decision blocks checkpoint creation. Two converged clients produce identical UTF-8 bytes, and reopening those bytes produces the same checkpoint again. The owner may then write the returned source into the local project and invoke the existing explicit Git checkpoint flow as a separate action.
