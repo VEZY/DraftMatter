@@ -406,6 +406,40 @@ export function updateReviewRecordStatus(document: ReviewMarkupDocument, recordI
   return parseReviewMarkup(`${document.source.slice(0, record.start)}${updatedRaw}${document.source.slice(record.end)}`)
 }
 
+function anchorContextBlock(className: string, content: string, ending: string) {
+  const longest = Math.max(0, ...[...content.matchAll(/^~+/gm)].map((match) => match[0].length))
+  const fence = '~'.repeat(Math.max(3, longest + 1))
+  return `${fence}{.${className}}${ending}${content}${ending}${fence}${ending}`
+}
+
+export function updateReviewRecordAnchorContext(document: ReviewMarkupDocument, recordId: string, context: ReviewAnchorContext) {
+  const record = [...document.changes, ...document.threads].find((candidate) => candidate.id === recordId)
+  if (!record) throw new Error(`Review record ${recordId} does not support anchor context.`)
+  const blocks = literalBlocks(record.raw)
+  const values = new Map([
+    ['dm-anchor-quote', context.quote],
+    ['dm-anchor-prefix', context.prefix],
+    ['dm-anchor-suffix', context.suffix],
+  ])
+  const contextBlocks = blocks.filter((block) => values.has(block.className))
+  const ending = document.source.includes('\r\n') ? '\r\n' : document.source.includes('\r') ? '\r' : '\n'
+  let updatedRaw = record.raw
+  if (contextBlocks.length === 0) {
+    const headerEnd = record.raw.search(/\r\n|\n|\r/)
+    if (headerEnd < 0) throw new Error(`Review record ${recordId} does not have a writable body.`)
+    const insertion = headerEnd + (record.raw.slice(headerEnd).match(/^(?:\r\n|\n|\r)/)?.[0].length ?? 0)
+    const contextRaw = [...values].map(([className, content]) => anchorContextBlock(className, content, ending)).join('')
+    updatedRaw = `${record.raw.slice(0, insertion)}${contextRaw}${record.raw.slice(insertion)}`
+    return parseReviewMarkup(`${document.source.slice(0, record.start)}${updatedRaw}${document.source.slice(record.end)}`)
+  }
+  if (contextBlocks.length !== values.size) throw new Error(`Review record ${recordId} does not contain complete portable anchor context.`)
+  for (const block of [...contextBlocks].sort((left, right) => right.start - left.start)) {
+    const replacement = anchorContextBlock(block.className, values.get(block.className) ?? '', ending)
+    updatedRaw = `${updatedRaw.slice(0, block.start)}${replacement}${updatedRaw.slice(block.end)}`
+  }
+  return parseReviewMarkup(`${document.source.slice(0, record.start)}${updatedRaw}${document.source.slice(record.end)}`)
+}
+
 function messageFence(message: string) {
   const longest = Math.max(0, ...[...message.matchAll(/^~+/gm)].map((match) => match[0].length))
   return '~'.repeat(Math.max(3, longest + 1))

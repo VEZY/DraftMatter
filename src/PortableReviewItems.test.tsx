@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import identicalSource from './fixtures/portable/25-review-identical.qmd?raw'
 import { PortableReviewItems } from './PortableReviewItems'
 import { parseReviewMarkup } from './reviewMarkup'
+import { createReviewThread } from './reviewOperations'
 
 function text(element: Element | null) {
   return element?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
@@ -82,6 +83,60 @@ describe('portable review panel items', () => {
     expect(container.textContent).toContain('Alice Martin')
     expect(container.textContent).not.toContain('Marcus Chen')
     expect(parseReviewMarkup(identicalSource).changes).toHaveLength(2)
+  })
+
+  it('surfaces ambiguous locations and applies the chosen placement without changing the thread payload', async () => {
+    const manuscript = '## Results\n\nA target phrase here. A target phrase here.\n'
+    const sourceWithReview = createReviewThread(manuscript, {
+      start: manuscript.indexOf('target phrase'),
+      end: manuscript.indexOf('target phrase') + 'target phrase'.length,
+      author: { id: 'dm-author', name: 'Alice Martin' },
+      message: 'Keep this review attached.',
+      threadId: 'dm-thread-ambiguous',
+      anchorId: 'dm-anchor-ambiguous',
+      startMarkerId: 'dm-ambiguous-start',
+      endMarkerId: 'dm-ambiguous-end',
+    }).document.source
+    const parsed = parseReviewMarkup(sourceWithReview)
+    const withoutMarkers = parsed.anchors.sort((left, right) => right.start - left.start)
+      .reduce((current, anchor) => `${current.slice(0, anchor.start)}${current.slice(anchor.end)}`, sourceWithReview)
+    const withoutContextMatch = withoutMarkers.replace('A target phrase here. A target phrase here.', 'target phrase · target phrase')
+    await act(async () => root.render(<PortableReviewItems source={withoutContextMatch} onApply={(next) => { latestSource = next }} />))
+
+    const placements = [...container.querySelectorAll<HTMLButtonElement>('.unplaced-review-candidate button')]
+    expect(placements).toHaveLength(2)
+    await click(placements[1])
+
+    const placed = parseReviewMarkup(latestSource)
+    const range = placed.ranges.find((candidate) => candidate.anchorId === 'dm-anchor-ambiguous')
+    expect(range?.complete).toBe(true)
+    expect(placed.source.slice(range!.start, range!.end)).toBe('target phrase')
+    expect(placed.threads[0].messages).toEqual(['Keep this review attached.'])
+  })
+
+  it('quietly recovers a unique externally shifted review location', async () => {
+    const manuscript = '## Results\n\nA unique recovery phrase belongs here.\n'
+    const created = createReviewThread(manuscript, {
+      start: manuscript.indexOf('unique recovery phrase'),
+      end: manuscript.indexOf('unique recovery phrase') + 'unique recovery phrase'.length,
+      author: { id: 'dm-author', name: 'Alice Martin' },
+      message: 'Retain this comment.',
+      threadId: 'dm-thread-recovery',
+      anchorId: 'dm-anchor-recovery',
+      startMarkerId: 'dm-recovery-start',
+      endMarkerId: 'dm-recovery-end',
+    }).document.source
+    const parsed = parseReviewMarkup(created)
+    const externallyShifted = parsed.anchors.sort((left, right) => right.start - left.start)
+      .reduce((current, anchor) => `${current.slice(0, anchor.start)}${current.slice(anchor.end)}`, created)
+      .replace('## Results\n\n', '## Results\n\nAfter reloading, ')
+
+    await act(async () => root.render(<PortableReviewItems source={externallyShifted} onApply={(next) => { latestSource = next }} />))
+
+    const recovered = parseReviewMarkup(latestSource)
+    expect(recovered.ranges.find((range) => range.anchorId === 'dm-anchor-recovery')?.complete).toBe(true)
+    expect(recovered.threads[0].messages).toEqual(['Retain this comment.'])
+    expect(recovered.threads[0].anchorContext?.prefix).toContain('After reloading')
   })
 
   it('creates a new portable comment from a unique manuscript quote', async () => {

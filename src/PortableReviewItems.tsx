@@ -10,6 +10,7 @@ import {
   setReviewThreadStatus,
 } from './reviewOperations'
 import { buildReviewQueue, navigateReviewQueue, type ReviewQueueItem } from './reviewQueue'
+import { placePortableReviewAtQuote, placePortableReviewCandidate, reanchorPortableReviews } from './reviewReanchor'
 
 const localAuthor = { id: 'dm-local-author', name: 'Remi Vezy' }
 
@@ -53,6 +54,8 @@ export function PortableReviewItems({
   onApply: (source: string, message: string) => void
 }) {
   const document = useMemo(() => parseReviewMarkup(source), [source])
+  const reanchorResult = useMemo(() => reanchorPortableReviews(source), [source])
+  const recoveryByAnchor = useMemo(() => new Map(reanchorResult.items.map((item) => [item.anchorId, item])), [reanchorResult])
   const queue = useMemo(() => {
     const excluded = new Set(excludeIds)
     return buildReviewQueue(document, authorId ? { authorIds: [authorId] } : {}).filter((item) => !excluded.has(item.id))
@@ -70,7 +73,19 @@ export function PortableReviewItems({
   const [quote, setQuote] = useState('')
   const [selectedOccurrence, setSelectedOccurrence] = useState<number>()
   const [body, setBody] = useState('')
+  const [placementAnchorId, setPlacementAnchorId] = useState<string>()
+  const [placementQuote, setPlacementQuote] = useState('')
   const composerRef = useRef<HTMLDivElement>(null)
+  const autoRecoveredSourceRef = useRef<string | undefined>(undefined)
+
+  useEffect(() => {
+    if (reanchorResult.recovered === 0 || reanchorResult.source === source || autoRecoveredSourceRef.current === reanchorResult.source) return
+    autoRecoveredSourceRef.current = reanchorResult.source
+    onApply(
+      reanchorResult.source,
+      `${reanchorResult.recovered} review location${reanchorResult.recovered === 1 ? '' : 's'} recovered${reanchorResult.unresolved ? ` · ${reanchorResult.unresolved} still need manual placement` : ''}`,
+    )
+  }, [onApply, reanchorResult, source])
 
   useEffect(() => {
     if (!navigableQueue.some((item) => item.id === activeId)) setActiveId(navigableQueue[0]?.id)
@@ -146,6 +161,28 @@ export function PortableReviewItems({
     }
   }
 
+  const placeCandidate = (anchorId: string, start: number, end: number) => {
+    try {
+      const result = placePortableReviewCandidate(source, anchorId, { start, end })
+      setPlacementAnchorId(undefined)
+      setPlacementQuote('')
+      apply(result.source, 'Review location placed from the matching text candidates')
+    } catch (error) {
+      fail(error)
+    }
+  }
+
+  const placeAtQuote = (anchorId: string) => {
+    try {
+      const result = placePortableReviewAtQuote(source, anchorId, placementQuote)
+      setPlacementAnchorId(undefined)
+      setPlacementQuote('')
+      apply(result.source, 'Review location placed on the selected manuscript text')
+    } catch (error) {
+      fail(error)
+    }
+  }
+
   const navigate = (direction: 'next' | 'previous') => {
     const next = navigateReviewQueue(navigableQueue, activeId, direction)
     setActiveId(next?.id)
@@ -162,6 +199,7 @@ export function PortableReviewItems({
         const active = item.id === activeId
         if (item.kind === 'change' || item.kind === 'unplaced-change') {
           const change = document.changes.find((candidate) => candidate.id === item.id)!
+          const recovery = recoveryByAnchor.get(item.anchorId)
           return (
             <div className={`conflict-card portable-review-card ${active ? 'active' : ''}`} id={`review-item-${item.id}`} key={item.id}>
               <div className="conflict-heading"><Icon name="branch" size={16} /><span>{item.conflictId ? 'Overlapping suggestion' : item.kind === 'unplaced-change' ? 'Unplaced suggestion' : 'Suggestion'}</span><small>{item.anchorId}</small></div>
@@ -176,11 +214,20 @@ export function PortableReviewItems({
                 <div className="review-actions"><button className="accept" onClick={() => decide(item.id, 'accepted')}><Icon name="check" size={15} /> Accept</button><button className="reject" onClick={() => decide(item.id, 'rejected')}><Icon name="x" size={15} /> Reject</button></div>
               )}
               {active && change.status === 'needs-rebase' && <div className="review-actions"><button className="reject" onClick={() => decide(item.id, 'rejected')}><Icon name="x" size={15} /> Reject alternative</button></div>}
+              {active && item.kind === 'unplaced-change' && recovery && (
+                <div className="unplaced-review-placement">
+                  <p>{recovery.reason}</p>
+                  {recovery.candidates.map((match, index) => <div className="unplaced-review-candidate" key={`${match.start}-${match.end}`}><span>{match.excerpt}</span><button onClick={() => placeCandidate(item.anchorId, match.start, match.end)}>Place here {index + 1}</button></div>)}
+                  <button className="unplaced-review-manual" onClick={() => { setPlacementAnchorId(item.anchorId); setPlacementQuote(selectedTarget?.quote ?? '') }}>Choose different text</button>
+                  {placementAnchorId === item.anchorId && <div className="unplaced-review-form"><label><span>Exact manuscript text</span><input value={placementQuote} onChange={(event) => setPlacementQuote(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') placeAtQuote(item.anchorId) }} /></label><button onClick={() => placeAtQuote(item.anchorId)}>Place review</button></div>}
+                </div>
+              )}
             </div>
           )
         }
 
         const thread = document.threads.find((candidate) => candidate.id === item.id)!
+        const recovery = recoveryByAnchor.get(item.anchorId)
         return (
           <div className={`comment-card portable-review-card ${active ? 'active' : ''} ${thread.status === 'resolved' ? 'resolved' : ''}`} id={`review-item-${item.id}`} key={item.id} onClick={() => setActiveId(item.id)}>
             <div className="comment-author"><span className="avatar avatar-clay avatar-small">{initials(item.authorName)}</span><span><strong>{item.authorName}</strong><small>{item.kind === 'unplaced-thread' ? 'Location needs attention' : statusLabel(thread.status)}</small></span></div>
@@ -192,6 +239,14 @@ export function PortableReviewItems({
               <div className="reply-box"><input value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') sendReply(item.id) }} placeholder="Reply…" aria-label={`Reply to ${item.authorName}`} /><button onClick={() => sendReply(item.id)} disabled={!reply.trim()} aria-label="Send reply"><Icon name="arrowRight" size={15} /></button></div>
             )}
             {active && item.kind !== 'unplaced-thread' && <div className="portable-thread-actions"><button className="resolve-button" onClick={() => changeThreadStatus(item.id, thread.status === 'resolved' ? 'open' : 'resolved')}><Icon name="check" size={14} /> {thread.status === 'resolved' ? 'Reopen thread' : 'Resolve thread'}</button><button className="portable-delete-thread" onClick={() => changeThreadStatus(item.id, 'deleted')}><Icon name="x" size={13} /> Remove</button></div>}
+            {active && item.kind === 'unplaced-thread' && recovery && (
+              <div className="unplaced-review-placement">
+                <p>{recovery.reason}</p>
+                {recovery.candidates.map((match, index) => <div className="unplaced-review-candidate" key={`${match.start}-${match.end}`}><span>{match.excerpt}</span><button onClick={() => placeCandidate(item.anchorId, match.start, match.end)}>Place here {index + 1}</button></div>)}
+                <button className="unplaced-review-manual" onClick={() => { setPlacementAnchorId(item.anchorId); setPlacementQuote(selectedTarget?.quote ?? '') }}>Choose different text</button>
+                {placementAnchorId === item.anchorId && <div className="unplaced-review-form"><label><span>Exact manuscript text</span><input value={placementQuote} onChange={(event) => setPlacementQuote(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') placeAtQuote(item.anchorId) }} /></label><button onClick={() => placeAtQuote(item.anchorId)}>Place review</button></div>}
+              </div>
+            )}
           </div>
         )
       })}

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import identicalSource from './fixtures/portable/25-review-identical.qmd?raw'
 import { createReviewThread } from './reviewOperations'
 import { parseReviewMarkup } from './reviewMarkup'
-import { reanchorPortableReviews } from './reviewReanchor'
+import { placePortableReviewAtQuote, placePortableReviewCandidate, reanchorPortableReviews } from './reviewReanchor'
 
 const source = `## Results
 
@@ -43,6 +43,7 @@ describe('review re-anchoring after external edits', () => {
     expect(range?.complete).toBe(true)
     expect(recovered.source.slice(range!.start, range!.end)).toBe('increased modestly')
     expect(recovered.document.threads[0].messages).toEqual(['Please quantify this response.'])
+    expect(recovered.document.threads[0].anchorContext?.prefix).toContain('After irrigation')
     expect(recovered.document.diagnostics.filter((diagnostic) => diagnostic.level === 'error')).toEqual([])
   })
 
@@ -78,6 +79,12 @@ describe('review re-anchoring after external edits', () => {
     expect(result.items).toEqual([expect.objectContaining({ status: 'ambiguous', candidates: expect.any(Array) })])
     expect(result.items[0].candidates).toHaveLength(2)
     expect(result).toMatchObject({ recovered: 0, unresolved: 1 })
+
+    const placed = placePortableReviewCandidate(without, 'dm-anchor-ambiguous', result.items[0].candidates[1])
+    const range = placed.document.ranges.find((candidate) => candidate.anchorId === 'dm-anchor-ambiguous')
+    expect(placed.source.slice(range!.start, range!.end)).toBe('target phrase')
+    expect(placed.source.slice(0, range!.start)).toContain('target phrase · ')
+    expect(placed.document.threads[0].anchorContext?.quote).toBe('target phrase')
   })
 
   it('queues missing text and legacy records without quote context as unplaced', () => {
@@ -87,12 +94,20 @@ describe('review re-anchoring after external edits', () => {
     expect(result.source).toBe(missing)
     expect(result.items[0]).toMatchObject({ status: 'unplaced', candidates: [expect.objectContaining({ excerpt: expect.stringContaining('biomass') })] })
 
+    const placedOnChangedText = placePortableReviewAtQuote(missing, 'dm-anchor-response', 'changed externally')
+    const changedRange = placedOnChangedText.document.ranges.find((range) => range.anchorId === 'dm-anchor-response')
+    expect(placedOnChangedText.source.slice(changedRange!.start, changedRange!.end)).toBe('changed externally')
+    expect(placedOnChangedText.document.threads[0].anchorContext?.quote).toBe('changed externally')
+
     const legacy = parseReviewMarkup(identicalSource)
     const legacyWithout = legacy.anchors.sort((left, right) => right.start - left.start)
       .reduce((current, anchor) => `${current.slice(0, anchor.start)}${current.slice(anchor.end)}`, identicalSource)
     const legacyResult = reanchorPortableReviews(legacyWithout)
     expect(legacyResult.source).toBe(legacyWithout)
     expect(legacyResult.items).toEqual([expect.objectContaining({ anchorId: 'dm-r-identical', status: 'unplaced', reason: expect.stringContaining('No portable quote context') })])
+
+    const placedLegacy = placePortableReviewAtQuote(legacyWithout, 'dm-r-identical', 'leaf area declined')
+    expect(placedLegacy.document.changes.every((change) => change.anchorContext?.quote === 'leaf area declined')).toBe(true)
   })
 
   it('recovers point comments from their surrounding context', () => {

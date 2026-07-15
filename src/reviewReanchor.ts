@@ -1,4 +1,4 @@
-import { parseReviewMarkup, type ReviewAnchor, type ReviewAnchorContext, type ReviewMarkupDocument } from './reviewMarkup'
+import { parseReviewMarkup, updateReviewRecordAnchorContext, type ReviewAnchor, type ReviewAnchorContext, type ReviewMarkupDocument } from './reviewMarkup'
 
 export type ReviewReanchorStatus = 'recovered' | 'ambiguous' | 'unplaced'
 
@@ -39,6 +39,11 @@ interface Match {
   end: number
   score: number
   exactContext: boolean
+}
+
+export interface ReviewReanchorSelection {
+  start: number
+  end: number
 }
 
 function withoutSpans(source: string, spans: Span[]): OffsetView {
@@ -184,6 +189,32 @@ function recordsFor(document: ReviewMarkupDocument, anchorId: string) {
     .map((record) => record.id)
 }
 
+function refreshedContext(document: ReviewMarkupDocument, anchorId: string): ReviewAnchorContext | undefined {
+  const range = document.ranges.find((candidate) => candidate.anchorId === anchorId && candidate.complete)
+  if (!range) return undefined
+  const stripMarkers = (value: string) => value.replace(/\[\]\{[^}\r\n]*\.dm-anchor\b[^}\r\n]*\}/g, '')
+  const manuscriptEnd = document.sectionStart ?? document.source.length
+  return {
+    quote: stripMarkers(document.source.slice(range.start, range.end)),
+    prefix: stripMarkers(document.source.slice(Math.max(0, range.start - 256), range.start)).slice(-64),
+    suffix: stripMarkers(document.source.slice(range.end, Math.min(manuscriptEnd, range.end + 256))).slice(0, 64),
+  }
+}
+
+function refreshRecordContexts(document: ReviewMarkupDocument, anchorIds: string[]) {
+  let updated = document
+  for (const anchorId of anchorIds) {
+    const context = refreshedContext(updated, anchorId)
+    if (!context) continue
+    const recordIds = recordsFor(updated, anchorId)
+    for (const recordId of recordIds) {
+      const record = [...updated.changes, ...updated.threads].find((candidate) => candidate.id === recordId)
+      if (record) updated = updateReviewRecordAnchorContext(updated, recordId, context)
+    }
+  }
+  return updated
+}
+
 function idsForRecoveredAnchor(anchorId: string, existing: ReviewAnchor[], quote: string, used: Set<string>) {
   if (!quote) {
     return { kind: 'point' as const, point: existing.find((anchor) => anchor.edge === 'point')?.markerId ?? recoveredMarkerId(anchorId, 'point', used) }
@@ -195,7 +226,7 @@ function idsForRecoveredAnchor(anchorId: string, existing: ReviewAnchor[], quote
   }
 }
 
-export function reanchorPortableReviews(source: string): ReviewReanchorResult {
+function reanchorPortableReviewsWithSelections(source: string, selections = new Map<string, ReviewReanchorSelection>()): ReviewReanchorResult {
   const document = parseReviewMarkup(source)
   const complete = new Set(document.ranges.filter((range) => range.complete).map((range) => range.anchorId))
   const referenced = new Set([...document.changes, ...document.threads]
@@ -215,11 +246,16 @@ export function reanchorPortableReviews(source: string): ReviewReanchorResult {
   for (const anchorId of targets) {
     const recordIds = recordsFor(document, anchorId)
     const context = contextFor(document, anchorId)
-    if (!context) {
+    const selection = selections.get(anchorId)
+    if (!context && !selection) {
       items.push({ anchorId, recordIds, status: 'unplaced', reason: 'No portable quote context is available for this review.', candidates: [] })
       continue
     }
-    const chosen = chooseMatch(searchable.source, context)
+    const automatic = context ? chooseMatch(searchable.source, context) : { matches: [] as Match[] }
+    const manualMatch = selection
+      ? candidate(searchable.source, selection.start, selection.end, context ?? { quote: searchable.source.slice(selection.start, selection.end), prefix: '', suffix: '' })
+      : undefined
+    const chosen = manualMatch ? { match: manualMatch, matches: automatic.matches.length ? automatic.matches : [manualMatch] } : automatic
     const candidates = chosen.matches.map((match) => ({
       start: match.start,
       end: match.end,
@@ -242,24 +278,63 @@ export function reanchorPortableReviews(source: string): ReviewReanchorResult {
     const endInIntermediate = searchable.toOriginal(chosen.match.end)
     const start = intermediate.toOriginal(startInIntermediate)
     const end = intermediate.toOriginal(endInIntermediate)
-    const ids = idsForRecoveredAnchor(anchorId, existing, context.quote, usedMarkerIds)
+    const quote = searchable.source.slice(chosen.match.start, chosen.match.end)
+    const ids = idsForRecoveredAnchor(anchorId, existing, quote, usedMarkerIds)
     if (ids.kind === 'point') {
       patches.push({ start, end: start, replacement: marker(ids.point, anchorId, 'point') })
     } else {
       patches.push({ start, end: start, replacement: marker(ids.start, anchorId, 'start') })
       patches.push({ start: end, end, replacement: marker(ids.end, anchorId, 'end') })
     }
-    items.push({ anchorId, recordIds, status: 'recovered', reason: 'The review was re-anchored from its portable quote context.', candidates })
+    items.push({ anchorId, recordIds, status: 'recovered', reason: selection ? 'The review was placed at the selected manuscript text.' : 'The review was re-anchored from its portable quote context.', candidates })
   }
 
   const updatedSource = applyPatches(source, patches)
-  const updated = parseReviewMarkup(updatedSource)
+  const recoveredAnchorIds = items.filter((item) => item.status === 'recovered').map((item) => item.anchorId)
+  const updated = refreshRecordContexts(parseReviewMarkup(updatedSource), recoveredAnchorIds)
   const recovered = items.filter((item) => item.status === 'recovered').length
   return {
-    source: updatedSource,
+    source: updated.source,
     document: updated,
     items,
     recovered,
     unresolved: items.length - recovered,
   }
+}
+
+export function reanchorPortableReviews(source: string): ReviewReanchorResult {
+  return reanchorPortableReviewsWithSelections(source)
+}
+
+export function placePortableReviewCandidate(source: string, anchorId: string, selection: ReviewReanchorSelection) {
+  const preview = reanchorPortableReviews(source)
+  const item = preview.items.find((candidate) => candidate.anchorId === anchorId)
+  if (!item) throw new Error(`Review anchor ${anchorId} is already placed or does not exist.`)
+  if (!item.candidates.some((candidate) => candidate.start === selection.start && candidate.end === selection.end)) {
+    throw new Error(`The selected location is no longer a candidate for review anchor ${anchorId}.`)
+  }
+  return reanchorPortableReviewsWithSelections(source, new Map([[anchorId, selection]]))
+}
+
+export function placePortableReviewAtQuote(source: string, anchorId: string, quote: string, occurrence?: number) {
+  const selected = quote.trim()
+  if (!selected) throw new Error('Enter exact manuscript text for the review location.')
+  const document = parseReviewMarkup(source)
+  const complete = document.ranges.some((range) => range.anchorId === anchorId && range.complete)
+  const referenced = [...document.changes, ...document.threads].some((record) => record.anchorId === anchorId && record.status !== 'deleted')
+  if (complete || !referenced) throw new Error(`Review anchor ${anchorId} is already placed or does not exist.`)
+  const incomplete = document.anchors.filter((anchor) => !document.ranges.some((range) => range.anchorId === anchor.anchorId && range.complete))
+  const intermediate = withoutSpans(source, incomplete)
+  const searchable = manuscriptView(intermediate.source)
+  const starts: number[] = []
+  let offset = searchable.source.indexOf(selected)
+  while (offset >= 0) {
+    starts.push(offset)
+    offset = searchable.source.indexOf(selected, offset + Math.max(1, selected.length))
+  }
+  if (starts.length === 0) throw new Error('That text was not found in the manuscript.')
+  if (occurrence === undefined && starts.length !== 1) throw new Error('That text occurs more than once; enter a longer selection.')
+  const start = starts[occurrence ?? 0]
+  if (start === undefined) throw new Error('The selected text occurrence is no longer available.')
+  return reanchorPortableReviewsWithSelections(source, new Map([[anchorId, { start, end: start + selected.length }]]))
 }
