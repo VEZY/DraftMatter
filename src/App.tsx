@@ -25,7 +25,7 @@ import {
   type CitationLocale,
   type CitationStyleId,
 } from './cslRenderer'
-import { previewCitationIntake, type CitationIntakePreview } from './citationIntake'
+import { assignCollisionSafeCitekeys, CITATION_INTAKE_MAX_BYTES, previewCitationIntake, type CitationIntakePreview } from './citationIntake'
 import { CrossrefSearchSession, crossrefCandidateToCitationRecord, crossrefDuplicateCitekeys, type CrossrefCandidate } from './crossref'
 import { DEFAULT_ACQUISITION_BIBLIOGRAPHY, canonicalizeAcquisitionRecord, citationRecordToAcquisitionCsl, ensureBibliographyReference, persistedAcquisitionRecord } from './citationAcquisition'
 import { createDesktopDirectExecutionTransport } from './directExecutionTransport'
@@ -459,22 +459,32 @@ function App() {
   const activeReplacement = draft.activeProposal === 'alice'
     ? 'reduced leaf area by 18%'
     : 'lowered leaf expansion during the treatment period'
-  const localPickerRecords = useMemo(
-    () => mergeCitationRecords(citations, [...stagedCitationRecords, ...zoteroRecords]),
+  const collisionSafeZoteroRecords = useMemo(
+    () => assignCollisionSafeCitekeys(zoteroRecords, mergeCitationRecords(citations, stagedCitationRecords)).records,
     [citations, stagedCitationRecords, zoteroRecords],
   )
+  const localPickerRecords = useMemo(
+    () => mergeCitationRecords(citations, [...stagedCitationRecords, ...collisionSafeZoteroRecords]),
+    [citations, stagedCitationRecords, collisionSafeZoteroRecords],
+  )
   const citationResults = useMemo(() => searchCitations(localPickerRecords, citationQuery).slice(0, 8), [localPickerRecords, citationQuery])
-  const crossrefRecords = useMemo(() => {
+  const rankedCrossrefRecords = useMemo(() => {
     const occupied = [...localPickerRecords]
     return crossrefCandidates.slice(0, 8).map((candidate) => {
-      const record = crossrefCandidateToCitationRecord(candidate, occupied)
+      const generated = crossrefCandidateToCitationRecord(candidate, occupied)
+      const record = assignCollisionSafeCitekeys([generated], occupied).records[0]
       occupied.push(record)
-      return record
+      return { candidate, record }
     })
   }, [localPickerRecords, crossrefCandidates])
+  const crossrefPickerResults = useMemo(
+    () => rankedCrossrefRecords.filter(({ record }) => !citationResults.some((local) => local.citekey.toLowerCase() === record.citekey.toLowerCase())),
+    [citationResults, rankedCrossrefRecords],
+  )
+  const crossrefRecords = useMemo(() => crossrefPickerResults.map(({ record }) => record), [crossrefPickerResults])
   const transientAcquisitionRecords = useMemo(
-    () => mergeCitationRecords([], [...stagedCitationRecords, ...zoteroRecords, ...crossrefRecords]),
-    [stagedCitationRecords, zoteroRecords, crossrefRecords],
+    () => mergeCitationRecords([], [...stagedCitationRecords, ...collisionSafeZoteroRecords, ...crossrefRecords]),
+    [stagedCitationRecords, collisionSafeZoteroRecords, crossrefRecords],
   )
   const pickerResults = [...citationResults, ...crossrefRecords]
   const draftCitationItems = citationItemsForDraft(draft)
@@ -2296,17 +2306,22 @@ function App() {
 
   const acceptCitationIntake = () => {
     if (!citationIntakePreview) return
-    const accepted = citationIntakePreview.records.filter((item) => citationIntakeSelected.includes(item.id)).map((item) => item.record)
-    if (!accepted.length) {
+    const selected = citationIntakePreview.records.filter((item) => citationIntakeSelected.includes(item.id)).map((item) => item.record)
+    if (!selected.length) {
       setToast('Select at least one valid record from the preview')
       return
     }
+    const assignment = assignCollisionSafeCitekeys(selected, localPickerRecords)
+    const accepted = assignment.records
     setStagedCitationRecords((current) => mergeCitationRecords(current, accepted))
     setCitationPickerItems((current) => [
       ...current,
       ...accepted.filter((record) => !current.some((item) => item.citekey === record.citekey)).map((record) => ({ citekey: record.citekey })),
     ])
-    setToast(`${accepted.length} imported record${accepted.length === 1 ? '' : 's'} staged for this citation`)
+    const renameNotice = assignment.renamed.length
+      ? ` · ${assignment.renamed.map(({ from, to }) => `@${from} → @${to}`).join(', ')}`
+      : ''
+    setToast(`${accepted.length} imported record${accepted.length === 1 ? '' : 's'} staged for this citation${renameNotice}`)
     dismissCitationIntake()
   }
 
@@ -2319,8 +2334,8 @@ function App() {
         setToast('Drop a BibTeX, CSL JSON, RIS, EndNote, or plain-text citation file')
         return
       }
-      if (file.size > 10 * 1024 * 1024) {
-        setToast('Citation intake accepts files up to 10 MB')
+      if (file.size > CITATION_INTAKE_MAX_BYTES) {
+        setToast(`Citation intake accepts files up to ${CITATION_INTAKE_MAX_BYTES / 1024 / 1024} MB`)
         return
       }
       showCitationIntake(await file.text(), file.name)
@@ -3553,7 +3568,7 @@ function App() {
                       <div className="citation-preview-records">{citationIntakePreview.records.map((item) => (
                         <label key={item.id} className={item.duplicateCitekeys.length ? 'duplicate' : ''}>
                           <input type="checkbox" checked={citationIntakeSelected.includes(item.id)} onChange={(event) => setCitationIntakeSelected((current) => event.target.checked ? [...current, item.id] : current.filter((id) => id !== item.id))} />
-                          <span><strong>{item.record.title}</strong><small>{item.record.authors.join(' · ') || 'Unknown creator'}{item.record.year ? ` · ${item.record.year}` : ''} · @{item.record.citekey}</small>{item.duplicateCitekeys.length > 0 && <em>Possible duplicate of {item.duplicateCitekeys.map((key) => `@${key}`).join(', ')} · kept separate unless selected</em>}{item.diagnostics.map((diagnostic) => <em key={diagnostic.code}>{diagnostic.message}</em>)}</span>
+                          <span><strong>{item.record.title}</strong><small>{item.record.authors.join(' · ') || 'Unknown creator'}{item.record.year ? ` · ${item.record.year}` : ''} · @{item.record.citekey}</small>{item.duplicateCitekeys.length > 0 && <em>Possible duplicate of {item.duplicateCitekeys.map((key) => `@${key}`).join(', ')} · an explicit selection receives a collision-safe key</em>}{item.diagnostics.map((diagnostic) => <em key={diagnostic.code}>{diagnostic.message}</em>)}</span>
                         </label>
                       ))}</div>
                       <div className="citation-preview-footer"><details><summary>Original payload</summary><pre>{citationIntakePreview.originalPayload.slice(0, 10000)}{citationIntakePreview.originalPayload.length > 10000 ? '\n…preview truncated; full payload retained in memory' : ''}</pre></details><button onClick={acceptCitationIntake} disabled={!citationIntakeSelected.length}>Stage selected · {citationIntakeSelected.length}</button></div>
@@ -3617,7 +3632,7 @@ function App() {
                 const isCited = citationPickerItems.some((item) => item.citekey === record.citekey)
                 const resultIndex = citationResults.length + index
                 const isActive = pickerResults[citationActiveIndex]?.citekey === record.citekey
-                const duplicates = crossrefDuplicateCitekeys(crossrefCandidates[index], localPickerRecords)
+                const duplicates = crossrefDuplicateCitekeys(crossrefPickerResults[index].candidate, localPickerRecords)
                 return (
                   <button
                     id={`citation-result-${record.citekey}`}

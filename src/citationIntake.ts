@@ -24,6 +24,11 @@ export interface CitationIntakePreview {
   oversized: boolean
 }
 
+export interface CitationCitekeyAssignment {
+  records: CitationRecord[]
+  renamed: Array<{ from: string; to: string }>
+}
+
 function exactDoi(payload: string) {
   const normalized = payload.trim().replace(/^doi:\s*/i, '').replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '')
   return /^10\.\d{4,9}\/\S+$/i.test(normalized) ? normalized.replace(/[.,;]$/, '') : undefined
@@ -50,6 +55,50 @@ function recordDiagnostics(record: CitationRecord): DocumentDiagnostic[] {
 
 function normalizedDoi(value?: string) {
   return value?.trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '').toLowerCase()
+}
+
+function providerIdentity(record: CitationRecord) {
+  if (record.sourceIdentity?.provider === 'zotero') return `zotero:${record.sourceIdentity.itemKey}`
+  if (record.source === 'crossref' && normalizedDoi(record.doi)) return `crossref:${normalizedDoi(record.doi)}`
+  return undefined
+}
+
+function withCitekey(record: CitationRecord, citekey: string): CitationRecord {
+  if (record.citekey === citekey) return record
+  return {
+    ...record,
+    citekey,
+    ...(record.cslData ? { cslData: { ...record.cslData, id: citekey } } : {}),
+  }
+}
+
+export function assignCollisionSafeCitekeys(
+  incoming: CitationRecord[],
+  existing: CitationRecord[],
+): CitationCitekeyAssignment {
+  const occupied = new Map(existing.map((record) => [record.citekey.toLowerCase(), record]))
+  const identities = new Map(existing.flatMap((record) => {
+    const identity = providerIdentity(record)
+    return identity ? [[identity, record] as const] : []
+  }))
+  const renamed: CitationCitekeyAssignment['renamed'] = []
+  const records = incoming.map((record) => {
+    const identity = providerIdentity(record)
+    const knownIdentity = identity ? identities.get(identity) : undefined
+    let citekey = knownIdentity?.citekey ?? record.citekey
+    if (!knownIdentity && occupied.has(citekey.toLowerCase())) {
+      const base = citekey
+      let suffix = 2
+      while (occupied.has(`${base}-${suffix}`.toLowerCase())) suffix += 1
+      citekey = `${base}-${suffix}`
+    }
+    const assigned = withCitekey(record, citekey)
+    occupied.set(citekey.toLowerCase(), assigned)
+    if (identity) identities.set(identity, assigned)
+    if (citekey !== record.citekey) renamed.push({ from: record.citekey, to: citekey })
+    return assigned
+  })
+  return { records, renamed }
 }
 
 function duplicateKeys(record: CitationRecord, existing: CitationRecord[]) {

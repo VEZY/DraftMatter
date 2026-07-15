@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parseBibTeX } from './bibliography'
-import { CITATION_INTAKE_MAX_BYTES, CITATION_INTAKE_MAX_RECORDS, previewCitationIntake } from './citationIntake'
+import { assignCollisionSafeCitekeys, CITATION_INTAKE_MAX_BYTES, CITATION_INTAKE_MAX_RECORDS, previewCitationIntake } from './citationIntake'
 import endnoteFixture from './fixtures/bibliography/multi-record.enw?raw'
 import risFixture from './fixtures/bibliography/multi-record.ris?raw'
 import { sampleCitations } from './sampleCitations'
@@ -61,5 +61,58 @@ describe('citation paste/drop intake', () => {
     expect(preview.records).toHaveLength(CITATION_INTAKE_MAX_RECORDS)
     expect(preview.originalPayload).toBe(payload)
     expect(preview.diagnostics).toContainEqual(expect.objectContaining({ code: 'citation-intake-record-limit', level: 'error' }))
+  })
+
+  it('assigns deterministic citekeys instead of hiding explicitly selected collisions', () => {
+    const existing = parseBibTeX('@article{shared, title={Existing source}}').records
+    const incoming = parseBibTeX('@article{shared, title={New source}}\n@article{shared-2, title={Another source}}').records
+    // The parser rejects duplicate keys within one payload, so exercise two independently staged records.
+    const second = parseBibTeX('@article{shared, title={Second new source}}').records[0]
+    const result = assignCollisionSafeCitekeys([incoming[0], second], existing)
+
+    expect(result.records.map((record) => record.citekey)).toEqual(['shared-2', 'shared-3'])
+    expect(result.renamed).toEqual([
+      { from: 'shared', to: 'shared-2' },
+      { from: 'shared', to: 'shared-3' },
+    ])
+  })
+
+  it('keeps provider identity on its established key and updates embedded CSL ids', () => {
+    const existing = {
+      ...sampleCitations[0],
+      citekey: 'locked-zotero-key',
+      source: 'zotero' as const,
+      sourceIdentity: { provider: 'zotero' as const, itemKey: 'ITEM-1', itemVersion: 1 },
+    }
+    const refreshed = {
+      ...existing,
+      citekey: 'changed-upstream-key',
+      sourceIdentity: { ...existing.sourceIdentity, itemVersion: 2 },
+      cslData: { id: 'changed-upstream-key', title: existing.title },
+    }
+    const result = assignCollisionSafeCitekeys([refreshed], [existing])
+
+    expect(result.records[0]).toMatchObject({
+      citekey: 'locked-zotero-key',
+      cslData: { id: 'locked-zotero-key' },
+      sourceIdentity: { itemKey: 'ITEM-1', itemVersion: 2 },
+    })
+
+    const lockedCrossref = {
+      ...sampleCitations[0],
+      citekey: 'locked-crossref-key',
+      source: 'crossref' as const,
+      doi: '10.1000/STABLE',
+    }
+    const refreshedCrossref = {
+      ...lockedCrossref,
+      citekey: 'changed-crossref-key',
+      doi: 'https://doi.org/10.1000/stable',
+      cslData: { id: 'changed-crossref-key', DOI: '10.1000/stable' },
+    }
+    expect(assignCollisionSafeCitekeys([refreshedCrossref], [lockedCrossref]).records[0]).toMatchObject({
+      citekey: 'locked-crossref-key',
+      cslData: { id: 'locked-crossref-key' },
+    })
   })
 })

@@ -91,4 +91,21 @@ describe('rendered citation intake', () => {
     expect(container.textContent).toContain('Growth coordination under fluctuating water availability')
     expect(container.querySelectorAll('.source-result')).toHaveLength(3)
   })
+
+  it('keeps an explicitly selected citekey collision as a separately staged source', async () => {
+    await act(async () => root.render(<App />))
+    await openPicker()
+    const intake = container.querySelector('textarea[aria-label="Paste DOI, BibTeX, RIS/EndNote, or CSL JSON"]')!
+    await paste(intake, '@article{vezy2024, title={A distinct imported study}, author={Chen, Marcus}, year={2025}}')
+
+    expect(container.querySelector<HTMLInputElement>('.citation-preview-records input')?.checked).toBe(false)
+    expect(container.querySelector('.citation-preview-records')?.textContent).toContain('collision-safe key')
+    await act(async () => buttonContaining(container, 'Select all').click())
+    await act(async () => buttonContaining(container, 'Stage selected').click())
+
+    const staged = [...container.querySelectorAll<HTMLElement>('.source-result')]
+      .find((result) => result.textContent?.includes('A distinct imported study'))
+    expect(staged?.textContent).toContain('@vezy2024-2')
+    expect(container.textContent).toContain('@vezy2024 → @vezy2024-2')
+  })
 })

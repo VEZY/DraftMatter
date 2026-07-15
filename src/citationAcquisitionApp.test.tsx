@@ -35,6 +35,17 @@ async function enter(input: HTMLInputElement, value: string) {
   })
 }
 
+async function paste(target: Element, payload: string) {
+  const event = new Event('paste', { bubbles: true, cancelable: true })
+  Object.defineProperty(event, 'clipboardData', { value: { getData: () => payload } })
+  await act(async () => target.dispatchEvent(event))
+}
+
+function buttonContaining(container: ParentNode, text: string) {
+  return [...container.querySelectorAll<HTMLButtonElement>('button')]
+    .find((button) => button.textContent?.includes(text))!
+}
+
 describe('rendered portable citation acquisition', () => {
   let container: HTMLDivElement
   let appRoot: ReturnType<typeof createRoot>
@@ -166,6 +177,41 @@ describe('rendered portable citation acquisition', () => {
         _draftmatter: expect.objectContaining({ provider: 'zotero', providerId: 'PXW99EKT', providerVersion: 42, libraryVersion: '902' }),
       })],
       lockContent: expect.stringContaining('PXW99EKT'),
+    }))
+  })
+
+  it('acquires distinct imported and Zotero records even when their requested keys collide', async () => {
+    vi.mocked(desktopHost.zoteroStatus).mockResolvedValue({ available: true, apiVersion: '3', schemaVersion: '31' })
+    vi.mocked(desktopHost.searchZotero).mockResolvedValue({
+      libraryVersion: '903',
+      items: [{
+        itemKey: 'ZOTERO-COLLISION', version: 5, itemType: 'journalArticle', title: 'Independent Zotero evidence',
+        creators: [{ creatorType: 'author', firstName: 'Alice', lastName: 'Martin' }], date: '2026', citationKey: 'sharedKey',
+      }],
+    })
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, shiftKey: true, bubbles: true })))
+    const intake = container.querySelector('textarea[aria-label="Paste DOI, BibTeX, RIS/EndNote, or CSL JSON"]')!
+    await paste(intake, '@article{sharedKey, title={Independent imported evidence}, author={Chen, Marcus}, year={2025}}')
+    await act(async () => buttonContaining(container, 'Stage selected').click())
+
+    const search = container.querySelector<HTMLInputElement>('input[aria-label="Search citation sources"]')!
+    await enter(search, 'independent')
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 330)) })
+    const zoteroResult = [...container.querySelectorAll<HTMLButtonElement>('.source-result')]
+      .find((button) => button.textContent?.includes('Independent Zotero evidence'))!
+    expect(zoteroResult.textContent).toContain('@sharedKey-2')
+    await act(async () => zoteroResult.click())
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.confirm-citation')!.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+
+    expect(desktopHost.acquireCitations).toHaveBeenCalledWith(expect.objectContaining({
+      bibliographyRecords: expect.arrayContaining([
+        expect.objectContaining({ id: 'sharedKey', title: 'Independent imported evidence' }),
+        expect.objectContaining({ id: 'sharedKey-2', title: 'Independent Zotero evidence' }),
+      ]),
+      lockContent: expect.stringContaining('sharedKey-2'),
     }))
   })
 })
