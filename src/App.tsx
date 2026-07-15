@@ -41,6 +41,7 @@ import { GitHistoryPanel } from './GitHistoryPanel'
 import { parseReviewMarkup } from './reviewMarkup'
 import { buildReviewQueue } from './reviewQueue'
 import { printNativeHtml, renderNativeHtmlExport } from './nativeHtmlExport'
+import { renderDocxExport } from './docxExport'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
@@ -1130,6 +1131,27 @@ function App() {
     }
   }
 
+  const exportDocx = () => {
+    const projection = projectCleanSource(draft, 'final')
+    if (!projection.ok) {
+      setExportOpen(false)
+      setToast('DOCX export blocked · resolve the overlapping alternatives')
+      return
+    }
+    try {
+      const result = renderDocxExport(projection.source)
+      const base = filename.replace(/\.(qmd|md)$/i, '')
+      downloadBlob(`${base}.docx`, result.bytes, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
+      setExportOpen(false)
+      setToast(result.diagnostics.length
+        ? `Clean DOCX exported · ${result.diagnostics.length} figure note${result.diagnostics.length === 1 ? '' : 's'} retained as path references`
+        : 'Clean DOCX exported')
+    } catch (error) {
+      setExportOpen(false)
+      setToast(`DOCX export blocked · ${readableError(error)}`)
+    }
+  }
+
   const showReviewPanel = () => {
     setActiveNav('review')
     setRightPanelOpen(true)
@@ -1792,6 +1814,7 @@ function App() {
               <div className="popover export-menu">
                 <button onClick={() => exportPublication('html')}><span><strong>Native HTML</strong><small>Semantic, styled, and script-free</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => exportPublication('pdf')}><span><strong>Print / PDF</strong><small>Browser print with clean page styling</small></span><Icon name="arrowRight" /></button>
+                <button onClick={exportDocx}><span><strong>Clean DOCX</strong><small>Native Word document, no tracked-change claim</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => download('final')}><span><strong>Clean final</strong><small>Resolved manuscript, no review data</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => download('original')}><span><strong>Clean original</strong><small>Accepted base before open suggestions</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => download('reviewed')}><span><strong>Portable source</strong><small>QMD with anchors and review records</small></span><Icon name="arrowRight" /></button>
