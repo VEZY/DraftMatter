@@ -13,6 +13,8 @@ All four projections reject or assert the absence of DraftMatter anchors, review
 
 The native Git suite completes the remaining gate step in real temporary repositories: it creates a root checkpoint when needed, commits only selected paths, preserves unrelated staged and unstaged work, disables repository hooks/filesystem monitors, and exercises fetch/pull/push plus divergence against local bare remotes.
 
+The rendered DM-P4-02 browser path switches a generic portable manuscript from Editing to Suggesting, then types a replacement, pastes a second replacement, deletes a selection, and inserts at a caret. The short grouping window emits exactly one attributed portable proposal per gesture, restores the unchanged accepted prose after each capture, and verifies the resulting replace/delete/insert records in the autosaved source.
+
 Run the full local gate with:
 
 ```sh

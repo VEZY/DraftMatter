@@ -11,6 +11,7 @@ import { baseKeymap } from 'prosemirror-commands'
 import { serializeCitationCluster } from './citation'
 import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
+import { captureReviewSuggestion } from './reviewSuggestionCapture'
 import { parseStructuredManuscript, serializeStructuredManuscript, type StructuredManuscriptMetadata } from './structuredManuscript'
 import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
 
@@ -62,6 +63,9 @@ export interface StructuredManuscriptEditorProps {
   onCitationSelect?: (id: string, items: CitationItem[]) => void
   onReviewSelectionChange?: (selection: StructuredReviewSelection | null) => void
   onReviewAnchorSelect?: (anchorId: string) => void
+  suggestionMode?: boolean
+  suggestionAuthor?: { id: string; name: string }
+  onSuggestionCapture?: (message: string, error?: boolean) => void
   resolveAssetUrl?: (path: string) => string
   citationLabels?: Record<string, string>
   markupView?: MarkupView
@@ -330,6 +334,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   onCitationSelect,
   onReviewSelectionChange,
   onReviewAnchorSelect,
+  suggestionMode = false,
+  suggestionAuthor = { id: 'dm-local-author', name: 'Local author' },
+  onSuggestionCapture,
   resolveAssetUrl,
   citationLabels,
   markupView = 'all',
@@ -349,6 +356,10 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const onCitationSelectRef = useRef(onCitationSelect)
   const onReviewSelectionRef = useRef(onReviewSelectionChange)
   const onReviewAnchorSelectRef = useRef(onReviewAnchorSelect)
+  const suggestionModeRef = useRef(suggestionMode)
+  const suggestionAuthorRef = useRef(suggestionAuthor)
+  const onSuggestionCaptureRef = useRef(onSuggestionCapture)
+  const pendingSuggestionRef = useRef<{ acceptedSource: string; draftSource: string; timeout: number } | undefined>(undefined)
   const reviewSelectionSignatureRef = useRef('')
   const resolveAssetUrlRef = useRef(resolveAssetUrl)
   const readOnlyRef = useRef(readOnly)
@@ -361,6 +372,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   onCitationSelectRef.current = onCitationSelect
   onReviewSelectionRef.current = onReviewSelectionChange
   onReviewAnchorSelectRef.current = onReviewAnchorSelect
+  suggestionModeRef.current = suggestionMode
+  suggestionAuthorRef.current = suggestionAuthor
+  onSuggestionCaptureRef.current = onSuggestionCapture
   resolveAssetUrlRef.current = resolveAssetUrl
   readOnlyRef.current = readOnly
   markupViewRef.current = markupView
@@ -371,6 +385,54 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     if (signature === reviewSelectionSignatureRef.current) return
     reviewSelectionSignatureRef.current = signature
     onReviewSelectionRef.current?.(selection)
+  }
+
+  const replaceEditorSource = (view: EditorView, nextSource: string) => {
+    const parsed = parseStructuredManuscript(nextSource)
+    loadedSourceRef.current = nextSource
+    sourceRef.current = nextSource
+    reviewDecorationRef.current = reviewDecorationIndex(nextSource)
+    metadataRef.current = parsed.metadata
+    onDiagnosticsRef.current?.(parsed.diagnostics)
+    onOutlineRef.current?.(outlineFor(parsed.document))
+    view.updateState(editorState(parsed.document))
+    emitReviewSelection(view)
+  }
+
+  const finishPendingSuggestion = (view: EditorView) => {
+    const pending = pendingSuggestionRef.current
+    if (!pending) return
+    window.clearTimeout(pending.timeout)
+    pendingSuggestionRef.current = undefined
+    try {
+      const captured = captureReviewSuggestion(pending.acceptedSource, pending.draftSource, suggestionAuthorRef.current)
+      if (!captured) {
+        replaceEditorSource(view, pending.acceptedSource)
+        return
+      }
+      replaceEditorSource(view, captured.document.source)
+      onChangeRef.current(captured.document.source)
+      const label = captured.change.changeKind === 'insert'
+        ? 'Insertion captured as one portable suggestion'
+        : captured.change.changeKind === 'delete'
+          ? 'Deletion captured as one portable suggestion'
+          : 'Replacement captured as one portable suggestion'
+      onSuggestionCaptureRef.current?.(label)
+    } catch (error) {
+      replaceEditorSource(view, pending.acceptedSource)
+      onSuggestionCaptureRef.current?.(
+        error instanceof Error ? `Suggestion was not captured: ${error.message}` : 'Suggestion was not captured.',
+        true,
+      )
+    }
+  }
+
+  const queueSuggestion = (view: EditorView, draftSource: string) => {
+    const current = pendingSuggestionRef.current
+    if (current) window.clearTimeout(current.timeout)
+    const acceptedSource = current?.acceptedSource ?? sourceRef.current
+    const timeout = window.setTimeout(() => finishPendingSuggestion(view), 450)
+    pendingSuggestionRef.current = { acceptedSource, draftSource, timeout }
   }
 
   const run = (command: Command) => {
@@ -580,6 +642,10 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           if (target?.dataset.reviewAnchor) onReviewAnchorSelectRef.current?.(target.dataset.reviewAnchor)
           return false
         },
+        blur: (editorView) => {
+          if (pendingSuggestionRef.current) finishPendingSuggestion(editorView)
+          return false
+        },
       },
       nodeViews: {
         code_cell: (node, editorView, getPos) => codeCellNodeView(node, editorView, getPos, () => !readOnlyRef.current),
@@ -589,12 +655,24 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         image: (node) => imageNodeView(node, (path) => resolveAssetUrlRef.current?.(path) ?? path),
       },
       dispatchTransaction(transaction) {
+        const capturesTextSuggestion = transaction.docChanged
+          && suggestionModeRef.current
+          && transaction.steps.every((step) => step.toJSON().stepType === 'replace')
+        if (transaction.docChanged && pendingSuggestionRef.current && !capturesTextSuggestion) {
+          finishPendingSuggestion(view)
+          onSuggestionCaptureRef.current?.('The text suggestion was captured first. Repeat the separate formatting action.')
+          return
+        }
         const next = view.state.apply(transaction)
         view.updateState(next)
         emitReviewSelection(view)
         onOutlineRef.current?.(outlineFor(next.doc))
         if (transaction.docChanged && !transaction.getMeta('dm-presentation-only') && metadataRef.current) {
           const serialized = serializeStructuredManuscript(next.doc, metadataRef.current)
+          if (capturesTextSuggestion) {
+            queueSuggestion(view, serialized)
+            return
+          }
           loadedSourceRef.current = serialized
           sourceRef.current = serialized
           onChangeRef.current(serialized)
@@ -604,10 +682,18 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     viewRef.current = view
     emitReviewSelection(view)
     return () => {
+      if (pendingSuggestionRef.current) window.clearTimeout(pendingSuggestionRef.current.timeout)
+      pendingSuggestionRef.current = undefined
       viewRef.current = null
       view.destroy()
     }
   }, [ariaLabel])
+
+  useEffect(() => {
+    if (suggestionMode) return
+    const view = viewRef.current
+    if (view && pendingSuggestionRef.current) finishPendingSuggestion(view)
+  }, [suggestionMode])
 
   useEffect(() => {
     sourceRef.current = source

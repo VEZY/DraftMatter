@@ -2553,6 +2553,59 @@ button:disabled {
 .portable-review-footer button:first-child { margin-right: 0; }
 .portable-review-footer span { margin-left: auto; }
 
+.suggestion-mode-control {
+  align-items: center;
+  background: #fbfcfb;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  color: #64716a;
+  display: grid;
+  gap: 8px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  margin: 0 13px 8px;
+  min-height: 42px;
+  padding: 7px 9px;
+  text-align: left;
+  width: calc(100% - 26px);
+}
+
+.suggestion-mode-control:hover:not(:disabled),
+.suggestion-mode-control.active {
+  background: #f3f7f4;
+  border-color: #b9cbbf;
+  color: var(--sage-dark);
+}
+
+.suggestion-mode-control > span:nth-child(2) {
+  display: grid;
+  gap: 2px;
+}
+
+.suggestion-mode-control strong { font-size: 9px; }
+.suggestion-mode-control small { color: #87918c; font-size: 7.5px; font-weight: 400; }
+
+.suggestion-mode-switch {
+  background: #dce2de;
+  border-radius: 999px;
+  height: 16px;
+  padding: 2px;
+  transition: background 140ms ease;
+  width: 28px;
+}
+
+.suggestion-mode-switch i {
+  background: white;
+  border-radius: 50%;
+  box-shadow: 0 1px 3px rgba(46, 61, 53, 0.18);
+  display: block;
+  height: 12px;
+  transition: transform 140ms ease;
+  width: 12px;
+}
+
+.suggestion-mode-control.active .suggestion-mode-switch { background: #73927f; }
+.suggestion-mode-control.active .suggestion-mode-switch i { transform: translateX(12px); }
+
 .export-menu {
   right: 0;
   top: 40px;
@@ -3804,6 +3857,7 @@ kbd {
 .structured-editor-content {
   min-height: 70vh;
   outline: none;
+  white-space: pre-wrap;
 }
 
 .structured-editor-content > *:first-child { margin-top: 0; }

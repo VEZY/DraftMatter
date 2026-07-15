@@ -300,6 +300,7 @@ function App() {
     canRedo,
   } = useDraftHistory(initialDraftState)
   const [markupView, setMarkupView] = useState<MarkupView>('all')
+  const [suggestionMode, setSuggestionMode] = useState(false)
   const [reviewAuthorFilter, setReviewAuthorFilter] = useState('all')
   const [activeReviewId, setActiveReviewId] = useState<string>()
   const [activeNav, setActiveNav] = useState<'manuscript' | 'review' | 'sources' | 'history'>('manuscript')
@@ -2860,6 +2861,9 @@ function App() {
               onCitationSelect={openStructuredCitationDetails}
               onReviewSelectionChange={setStructuredReviewSelection}
               onReviewAnchorSelect={() => showReviewPanel()}
+              suggestionMode={suggestionMode && markupView !== 'original' && markupView !== 'final'}
+              suggestionAuthor={{ id: 'dm-local-author', name: 'Remi Vezy' }}
+              onSuggestionCapture={(message) => setToast(message)}
               citationLabels={structuredCitationLabels}
               markupView={markupView}
               readOnly={Boolean(structuredReviewProjection)}
@@ -3094,6 +3098,21 @@ function App() {
               </select>
               <Icon name="chevronDown" size={13} />
             </div>
+
+            <button
+              type="button"
+              className={`suggestion-mode-control ${suggestionMode ? 'active' : ''}`}
+              aria-pressed={suggestionMode}
+              onClick={() => {
+                setSuggestionMode((active) => !active)
+                if (!rightPanelOpen) setRightPanelOpen(true)
+              }}
+              disabled={!structuredMode || markupView === 'original' || markupView === 'final'}
+            >
+              <Icon name="spark" size={15} />
+              <span><strong>{suggestionMode ? 'Suggesting' : 'Editing'}</strong><small>{suggestionMode ? 'Typing creates portable proposals' : structuredMode ? 'Changes apply directly' : 'Open a portable manuscript to suggest'}</small></span>
+              <span className="suggestion-mode-switch" aria-hidden="true"><i /></span>
+            </button>
 
             <div className="markup-view-control review-author-control">
               <Icon name="users" size={16} />
