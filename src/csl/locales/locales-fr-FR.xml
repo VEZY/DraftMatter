@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<locale xmlns="http://purl.org/net/xbiblio/csl" xml:lang="fr-FR">
+  <style-options punctuation-in-quote="false"/>
+  <terms>
+    <term name="and">et</term>
+    <term name="et-al">et al.</term>
+    <term name="page"><single>page</single><multiple>pages</multiple></term>
+    <term name="page" form="short"><single>p.</single><multiple>p.</multiple></term>
+    <term name="chapter"><single>chapitre</single><multiple>chapitres</multiple></term>
+    <term name="chapter" form="short"><single>chap.</single><multiple>chap.</multiple></term>
+    <term name="section"><single>section</single><multiple>sections</multiple></term>
+    <term name="section" form="short"><single>sect.</single><multiple>sect.</multiple></term>
+    <term name="figure"><single>figure</single><multiple>figures</multiple></term>
+    <term name="figure" form="short"><single>fig.</single><multiple>fig.</multiple></term>
+    <term name="open-quote">«</term>
+    <term name="close-quote">»</term>
+    <term name="open-inner-quote">“</term>
+    <term name="close-inner-quote">”</term>
+  </terms>
+</locale>

@@ -68,6 +68,7 @@ export interface CitationRecord {
   container?: string
   doi?: string
   url?: string
+  cslData?: Record<string, unknown>
   source: 'bibtex' | 'csl-json' | 'zotero' | 'sample'
   availability?: 'live' | 'cached'
   provenance?: {

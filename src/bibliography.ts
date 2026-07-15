@@ -187,6 +187,7 @@ export function parseCslJson(source: string): BibliographyResult {
         container: typeof value['container-title'] === 'string' ? value['container-title'] : undefined,
         doi: typeof value.DOI === 'string' ? value.DOI : undefined,
         url: typeof value.URL === 'string' ? value.URL : undefined,
+        cslData: value,
         source: 'csl-json',
       }]
     })
