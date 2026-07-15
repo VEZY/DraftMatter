@@ -12,7 +12,7 @@ author:
 
 ## Results {#results}
 
-Leaf area declined by **18%** [@vezy2020]. See @fig-response and the model $y = ax + b$.
+Leaf area declined by **18%** [@vezy2020].[^methods] See @fig-response and the model $y = ax + b$.
 
 $$
 R^2 = 0.94
@@ -28,6 +28,8 @@ $$ {#eq-fit .unnumbered}
 \`\`\`python {#fit .execute}
 print("must remain inert")
 \`\`\`
+
+[^methods]: Calibration details were checked with **manual review**.
 `
 
 describe('native HTML export', () => {
@@ -42,6 +44,10 @@ describe('native HTML export', () => {
     expect(html).not.toContain('<main><h1')
     expect(html).toContain('<h2 id="results">Results</h2>')
     expect(html).toContain('data-citekeys="vezy2020"')
+    expect(html).toContain('<sup id="fnref-methods"><a class="footnote-reference" href="#fn-methods" role="doc-noteref" aria-label="Footnote 1">1</a></sup>')
+    expect(html).toContain('<section class="footnotes" role="doc-endnotes" aria-label="Footnotes">')
+    expect(html).toContain('<li id="fn-methods">Calibration details were checked with <strong>manual review</strong>.')
+    expect(html).not.toContain('[^methods]')
     expect(html).toContain('<a class="cross-reference" href="#fig-response">Figure response</a>')
     expect(html).not.toContain('>@fig-response<')
     expect(html).toContain('role="math"')
@@ -69,5 +75,11 @@ describe('native HTML export', () => {
     const html = renderNativeHtmlExport('$$\nE = mc^2\nText after the missing close.\n')
     expect(html).toContain('aria-label="Unclosed display equation"')
     expect(html).toContain('Text after the missing close.')
+  })
+
+  it('keeps a missing footnote definition explicit', () => {
+    const html = renderNativeHtmlExport('Claim[^missing].\n')
+    expect(html).toContain('<li id="fn-missing" class="missing-footnote">Missing footnote definition for “missing”.')
+    expect(html).not.toContain('[^missing]')
   })
 })

@@ -14,7 +14,7 @@ author:
 
 ## Results {#results}
 
-Canopy area differed by **18%** [@field2026]. The fitted response was $y = ax + b$; see @fig-response.
+Canopy area differed by **18%** [@field2026].[^methods] The fitted response was $y = ax + b$; see @fig-response.
 
 $$
 R^2 = 0.94
@@ -30,6 +30,8 @@ $$ {#eq-fit .unnumbered}
 \`\`\`python {#fit .execute}
 print("must remain inert")
 \`\`\`
+
+[^methods]: Canopy area was checked against independent field measurements.
 `
 
 test.describe('DM-P5-01/02 native publication exports', () => {
@@ -73,6 +75,10 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(html).not.toContain('<main><h1')
     expect(html).toContain('Canopy area differed by <strong>18%</strong>')
     expect(html).toContain('<cite class="citation" data-citekeys="field2026">(Field and Stone, 2026)</cite>')
+    expect(html).toContain('role="doc-noteref" aria-label="Footnote 1">1</a></sup>')
+    expect(html).toContain('<section class="footnotes" role="doc-endnotes" aria-label="Footnotes">')
+    expect(html).toContain('Canopy area was checked against independent field measurements.')
+    expect(html).not.toContain('[^methods]')
     expect(html).toContain('<a class="cross-reference" href="#fig-response">Figure response</a>')
     expect(html).not.toContain('>@fig-response<')
     expect(html).toContain('Independent measurements of canopy area')
@@ -134,6 +140,12 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(readableDocx).toContain('(Field and Stone, 2026)')
     expect(readableDocx).toContain('Independent measurements of canopy area')
     expect(readableDocx).not.toContain('[@field2026]')
+    expect(readableDocx).toContain('word/footnotes.xml')
+    expect(readableDocx).toContain('relationships/footnotes')
+    expect(readableDocx).toContain('<w:footnoteReference w:id="1"/>')
+    expect(readableDocx).toContain('<w:footnote w:id="1">')
+    expect(readableDocx).toContain('Canopy area was checked against independent field measurements.')
+    expect(readableDocx).not.toContain('[^methods]')
     expect(readableDocx).toContain('Figure: Canopy response through time — embedded image not included in native DOCX')
     expect(readableDocx).not.toContain('data:image/svg+xml;base64')
     expect(readableDocx).not.toContain('$y = ax + b$')

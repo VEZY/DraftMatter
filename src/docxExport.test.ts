@@ -11,7 +11,7 @@ author:
 
 ## Results
 
-Leaf area declined by **18%** [@vezy2020]. The relationship was $y = ax + b$; see @fig-response.
+Leaf area declined by **18%** [@vezy2020].[^methods] The relationship was $y = ax + b$; see @fig-response.
 
 $$
 R^2 = 0.91
@@ -27,6 +27,8 @@ $$ {#eq-fit .unnumbered}
 \`\`\`python
 print("inert")
 \`\`\`
+
+[^methods]: Calibration details were checked against field measurements.
 `
 
 describe('native DOCX export', () => {
@@ -43,6 +45,9 @@ describe('native DOCX export', () => {
     expect(first.bytes).toEqual(second.bytes)
     expect(readable).toContain('word/document.xml')
     expect(readable).toContain('word/styles.xml')
+    expect(readable).toContain('word/footnotes.xml')
+    expect(readable).toContain('application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml')
+    expect(readable).toContain('relationships/footnotes')
     expect(readable).toContain('Canopy response')
     expect(readable.match(/Canopy response/g)).toHaveLength(1)
     expect(readable).toContain('Remi Vezy')
@@ -50,6 +55,12 @@ describe('native DOCX export', () => {
     expect(readable).toContain('References')
     expect(readable).toContain('Portable canopy science')
     expect(readable).not.toContain('[@vezy2020]')
+    expect(readable).toContain('<w:footnoteReference w:id="1"/>')
+    expect(readable).toContain('<w:footnote w:type="separator" w:id="-1">')
+    expect(readable).toContain('<w:footnote w:type="continuationSeparator" w:id="0">')
+    expect(readable).toContain('<w:footnote w:id="1">')
+    expect(readable).toContain('Calibration details were checked against field measurements.')
+    expect(readable).not.toContain('[^methods]')
     expect(readable).toContain('y = ax + b; see Figure response')
     expect(readable).not.toContain('$y = ax + b$')
     expect(readable).not.toContain('@fig-response')
