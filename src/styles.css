@@ -1509,6 +1509,77 @@ button:disabled {
   padding: 2px 5px;
 }
 
+.execution-output-stack {
+  display: grid;
+  gap: 12px;
+}
+
+.execution-stream,
+.execution-text,
+.execution-markdown pre,
+.execution-error pre {
+  background: #f7f9f8;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: #35423c;
+  font: 11px/1.55 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  margin: 0;
+  overflow: auto;
+  padding: 10px 12px;
+  white-space: pre-wrap;
+}
+
+.execution-stream.stderr { color: #7b5b49; }
+
+.execution-error {
+  background: #fff8f5;
+  border: 1px solid #ecd8ce;
+  border-radius: 6px;
+  color: #7d4b3b;
+  display: grid;
+  gap: 4px;
+  padding: 11px 13px;
+}
+
+.execution-error strong,
+.execution-error span { font: 600 11px/1.4 Inter, ui-sans-serif, sans-serif; }
+.execution-error span { font-weight: 400; }
+
+.execution-html {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  min-height: 150px;
+  width: 100%;
+}
+
+.execution-image { margin: 0; }
+.execution-image img { display: block; height: auto; max-width: 100%; }
+.execution-image figcaption { color: var(--muted); font: 9px/1.4 Inter, sans-serif; margin-top: 5px; }
+
+.execution-markdown { color: #35423c; font: 13px/1.6 Georgia, serif; }
+.execution-markdown > :first-child { margin-top: 0; }
+.execution-markdown > :last-child { margin-bottom: 0; }
+
+.execution-table-wrap { border: 1px solid var(--line); border-radius: 6px; overflow: auto; }
+.execution-table-wrap table { border-collapse: collapse; font: 10px/1.45 Inter, sans-serif; width: 100%; }
+.execution-table-wrap th,
+.execution-table-wrap td { border-bottom: 1px solid var(--line); padding: 7px 9px; text-align: left; }
+.execution-table-wrap th { background: #f7f9f8; color: #53615a; font-weight: 650; }
+
+.execution-artifact {
+  align-items: center;
+  background: #f7f9f8;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  display: flex;
+  font: 10px/1.4 Inter, sans-serif;
+  justify-content: space-between;
+  padding: 8px 10px;
+}
+
+.execution-artifact small { color: var(--muted); }
+
 .provenance-bar {
   align-items: center;
   background: #f7f9f7;
