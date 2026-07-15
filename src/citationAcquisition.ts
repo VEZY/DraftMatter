@@ -46,7 +46,6 @@ export function persistedAcquisitionRecord(record: CitationRecord, bibliographyP
   return {
     ...record,
     cslData,
-    source: 'csl-json',
     provenance: { origin: 'project-file', locator: bibliographyPath },
     sourceIdentity: undefined,
   }

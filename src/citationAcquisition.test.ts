@@ -69,4 +69,19 @@ describe('portable citation acquisition planning', () => {
       provenance: { origin: 'project-file', locator: 'references.json' },
     })
   })
+
+  it.each([
+    ['bibtex', '@article{imported, title={Imported study}}'],
+    ['ris', 'TY  - JOUR\nID  - imported\nTI  - Imported study\nER  -'],
+    ['endnote', '%0 Journal Article\n%F imported\n%T Imported study'],
+    ['csl-json', '{"id":"imported","type":"article-journal","title":"Imported study"}'],
+  ] as const)('retains %s intake provenance after conversion to the project CSL bibliography', (sourceKind, payload) => {
+    const imported = parseBibliographyFile(`source.${sourceKind === 'bibtex' ? 'bib' : sourceKind === 'endnote' ? 'enw' : sourceKind === 'csl-json' ? 'json' : sourceKind}`, payload).records[0]
+    const stored = persistedAcquisitionRecord(imported, 'references.json')
+    const reopened = parseBibliographyFile('references.json', JSON.stringify([stored.cslData]), 'project-file').records[0]
+
+    expect(stored).toMatchObject({ source: sourceKind, provenance: { origin: 'project-file', locator: 'references.json' } })
+    expect(stored.cslData?._draftmatter).toMatchObject({ provider: 'import', source: sourceKind })
+    expect(reopened).toMatchObject({ source: sourceKind, provenance: { origin: 'project-file', locator: 'references.json' } })
+  })
 })

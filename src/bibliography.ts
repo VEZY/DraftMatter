@@ -346,11 +346,15 @@ export function parseCslJson(source: string): BibliographyResult {
       const acquisition = value._draftmatter && typeof value._draftmatter === 'object'
         ? value._draftmatter as Record<string, unknown>
         : undefined
+      const importedSource = acquisition?.provider === 'import'
+        && (acquisition.source === 'bibtex' || acquisition.source === 'csl-json' || acquisition.source === 'ris' || acquisition.source === 'endnote')
+        ? acquisition.source
+        : undefined
       const acquiredSource = acquisition?.provider === 'crossref'
         ? 'crossref' as const
         : acquisition?.provider === 'zotero'
           ? 'zotero' as const
-          : 'csl-json' as const
+          : importedSource ?? 'csl-json' as const
       const zoteroIdentity = acquisition?.provider === 'zotero'
         && typeof acquisition.providerId === 'string'
         && typeof acquisition.providerVersion === 'number'
