@@ -302,8 +302,11 @@ describe('full structured manuscript editor', () => {
 
   it('edits rendered inline and display equations while malformed TeX fails closed', async () => {
     const changed: string[] = []
+    const equationSource = source
+      .replace('and includes note', 'and references @eq-fit and includes note')
+      .concat('\n$$\ny = 1\n$$ {#eq-other}\n')
     await act(async () => root.render(
-      <StructuredManuscriptEditor source={source} onChange={(next) => changed.push(next)} />,
+      <StructuredManuscriptEditor source={equationSource} onChange={(next) => changed.push(next)} />,
     ))
 
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit inline equation"]')?.click())
@@ -316,11 +319,30 @@ describe('full structured manuscript editor', () => {
 
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit display equation eq-fit"]')?.click())
     const display = container.querySelector<HTMLTextAreaElement>('[aria-label="Display equation eq-fit TeX"]')!
+    const displayLabel = container.querySelector<HTMLInputElement>('[aria-label="Display equation label"]')!
+    const displaySave = display.closest('.structured-equation-editor')?.querySelector<HTMLButtonElement>('.primary-button')!
+    displayLabel.value = ''
+    displayLabel.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(container.querySelector('.structured-equation-validation')?.textContent).toContain('referenced in the manuscript')
+    expect(displaySave.disabled).toBe(true)
+
+    displayLabel.value = 'eq-other'
+    displayLabel.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(container.querySelector('.structured-equation-validation')?.textContent).toContain('already belongs')
+    expect(displaySave.disabled).toBe(true)
+
+    displayLabel.value = 'eq-response'
+    displayLabel.dispatchEvent(new Event('input', { bubbles: true }))
     display.value = String.raw`R^2 = \frac{c}{d}`
     display.dispatchEvent(new Event('input', { bubbles: true }))
-    await act(async () => display.closest('.structured-equation-editor')?.querySelector<HTMLButtonElement>('.primary-button')?.click())
+    expect(displaySave.disabled).toBe(false)
+    await act(async () => displaySave.click())
     expect(changed.at(-1)).toContain(String.raw`R^2 = \frac{c}{d}`)
-    expect(changed.at(-1)).toContain('$$ {#eq-fit .unnumbered}')
+    expect(changed.at(-1)).toContain('$$ {#eq-response .unnumbered}')
+    expect(changed.at(-1)).toContain('@eq-response')
+    expect(changed.at(-1)).not.toContain('@eq-fit')
+    expect(container.querySelector('#eq-response .katex-html')?.textContent).toContain('R')
+    expect(container.querySelector<HTMLAnchorElement>('a[href="#eq-response"]')?.textContent).toBe('Equation response')
 
     await act(async () => root.render(
       <StructuredManuscriptEditor source={'Malformed $\\frac{a}{$ expression.\n'} onChange={vi.fn()} />,
@@ -467,6 +489,7 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector<HTMLButtonElement>('.structured-code-toggle')?.disabled).toBe(false)
     expect(container.querySelector<HTMLButtonElement>('.structured-footnote-edit')?.disabled).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-equation-edit')].every((button) => button.disabled)).toBe(true)
+    expect([...container.querySelectorAll<HTMLInputElement>('.structured-equation-label-input')].every((input) => input.readOnly)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-figure-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-table-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-heading-edit')].every((button) => button.disabled)).toBe(true)

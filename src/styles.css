@@ -4014,6 +4014,13 @@ textarea.structured-table-input { min-height: 62px; }
 .structured-equation-error[hidden] { display: none; }
 .structured-equation-editor { display: grid; gap: 7px; }
 .structured-equation-editor[hidden] { display: none; }
+.structured-equation-label-field { display: grid; gap: 4px; }
+.structured-equation-label-field > span { color: #53625b; font-family: Inter, ui-sans-serif, sans-serif; font-size: 9px; font-weight: 700; }
+.structured-equation-label-field > small { color: #87928c; font-family: Inter, ui-sans-serif, sans-serif; font-size: 8px; }
+.structured-equation-label-input { background: #fff; border: 1px solid #d7dfda; border-radius: 5px; color: #3e4b44; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 7px 8px; }
+.structured-equation-label-input:focus { border-color: #88a193; outline: 2px solid rgba(63, 104, 89, .14); }
+.structured-equation-validation { color: #9a5e4a; font-family: Inter, ui-sans-serif, sans-serif; font-size: 8px; line-height: 1.45; margin: 0 !important; }
+.structured-equation-validation[hidden] { display: none; }
 .structured-equation-inline .structured-equation-editor { align-items: center; display: inline-flex; gap: 5px; vertical-align: middle; }
 .structured-equation-inline .structured-equation-editor[hidden] { display: none; }
 .structured-equation-input { background: #fff; border: 1px solid #d7dfda; border-radius: 5px; color: #3e4b44; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 11px; line-height: 1.5; min-height: 34px; padding: 7px 8px; resize: vertical; width: 100%; }

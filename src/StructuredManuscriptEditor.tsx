@@ -379,6 +379,22 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   if (input instanceof HTMLInputElement) input.type = 'text'
   input.spellcheck = false
   input.autocapitalize = 'none'
+  const labelField = document.createElement('label')
+  labelField.className = 'structured-equation-label-field'
+  const labelText = document.createElement('span')
+  labelText.textContent = 'Cross-reference label'
+  const labelInput = document.createElement('input')
+  labelInput.type = 'text'
+  labelInput.className = 'structured-equation-label-input'
+  labelInput.setAttribute('aria-label', 'Display equation label')
+  labelInput.placeholder = 'eq-model'
+  labelInput.spellcheck = false
+  const labelHint = document.createElement('small')
+  labelHint.textContent = 'Optional; changing it also updates matching equation references.'
+  labelField.append(labelText, labelInput, labelHint)
+  const validation = document.createElement('p')
+  validation.className = 'structured-equation-validation'
+  validation.hidden = true
   const actions = document.createElement('span')
   actions.className = 'structured-equation-actions'
   const cancel = document.createElement('button')
@@ -389,9 +405,33 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   save.className = 'primary-button'
   save.textContent = 'Save equation'
   actions.append(cancel, save)
-  editor.append(input, actions)
+  if (displayMode) editor.append(labelField, input, validation, actions)
+  else editor.append(input, actions)
 
-  const updateSave = () => { save.disabled = !isEditable() || !input.value.trim() }
+  const normalizedLabel = () => labelInput.value.trim().replace(/^#/, '')
+  const updateSave = () => {
+    const nextLabel = normalizedLabel()
+    const previousLabel = displayMode && node.attrs.label ? String(node.attrs.label) : ''
+    const validSyntax = !nextLabel || /^[a-zA-Z][\w.:-]*$/.test(nextLabel)
+    const validEquationLabel = !displayMode
+      || !nextLabel
+      || nextLabel === previousLabel
+      || (nextLabel.startsWith('eq-') && isCrossReferenceTarget(nextLabel))
+    const referenced = displayMode && hasCrossReferences(view.state.doc, previousLabel)
+    const keepsReferences = !referenced || (Boolean(nextLabel) && nextLabel.startsWith('eq-') && isCrossReferenceTarget(nextLabel))
+    const unique = !displayMode || !nextLabel || !labelUsedByAnotherNode(view.state.doc, nextLabel, String(node.attrs.id))
+    validation.textContent = !validSyntax
+      ? 'Labels must start with a letter and contain only letters, numbers, dots, colons, underscores, or hyphens.'
+      : !validEquationLabel
+        ? 'New equation labels must use the portable eq-… form.'
+        : !keepsReferences
+          ? 'This equation is referenced in the manuscript. Keep a valid eq-… label so those links remain portable.'
+          : !unique
+            ? 'That label already belongs to another manuscript object.'
+            : ''
+    validation.hidden = validSyntax && validEquationLabel && keepsReferences && unique
+    save.disabled = !isEditable() || !input.value.trim() || !validSyntax || !validEquationLabel || !keepsReferences || !unique
+  }
   const updateDom = () => {
     const tex = String(node.attrs.tex)
     const equationLabel = displayMode && node.attrs.label ? String(node.attrs.label) : ''
@@ -400,7 +440,8 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
     dom.dataset.dmNode = displayMode ? 'equation' : 'equation-inline'
     dom.dataset.dmId = String(node.attrs.id)
     if (displayMode) {
-      dom.id = equationLabel
+      if (equationLabel) dom.id = equationLabel
+      else dom.removeAttribute('id')
       dom.dataset.label = equationLabel
       label.textContent = equationLabel ? `Equation · ${equationLabel}` : 'Display equation'
     }
@@ -413,7 +454,11 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
     edit.setAttribute('aria-label', `Edit ${description}`)
     input.setAttribute('aria-label', `${description[0].toUpperCase()}${description.slice(1)} TeX`)
     input.readOnly = !isEditable()
-    if (!editing) input.value = tex
+    labelInput.readOnly = !isEditable()
+    if (!editing) {
+      input.value = tex
+      labelInput.value = equationLabel
+    }
     updateSave()
   }
   const closeEditor = () => {
@@ -423,14 +468,33 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
     error.hidden = !dom.classList.contains('has-error')
     edit.hidden = false
     input.value = String(node.attrs.tex)
+    labelInput.value = displayMode && node.attrs.label ? String(node.attrs.label) : ''
     updateSave()
     edit.focus()
   }
   const saveEditor = () => {
     const tex = input.value.trim()
     const position = getPos()
-    if (!tex || typeof position !== 'number' || !isEditable()) return
-    view.dispatch(view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, tex }))
+    const nextLabel = normalizedLabel()
+    const previousLabel = displayMode && node.attrs.label ? String(node.attrs.label) : ''
+    const referenced = displayMode && hasCrossReferences(view.state.doc, previousLabel)
+    if (
+      !tex
+      || typeof position !== 'number'
+      || !isEditable()
+      || (displayMode && nextLabel && !/^[a-zA-Z][\w.:-]*$/.test(nextLabel))
+      || (displayMode && nextLabel !== previousLabel && nextLabel && (!nextLabel.startsWith('eq-') || !isCrossReferenceTarget(nextLabel)))
+      || (referenced && (!nextLabel || !nextLabel.startsWith('eq-') || !isCrossReferenceTarget(nextLabel)))
+      || (displayMode && nextLabel && labelUsedByAnotherNode(view.state.doc, nextLabel, String(node.attrs.id)))
+    ) return
+    let transaction = view.state.tr.setNodeMarkup(position, undefined, displayMode ? {
+      ...node.attrs,
+      tex,
+      label: nextLabel || null,
+      sourceAttributes: updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
+    } : { ...node.attrs, tex })
+    if (displayMode) transaction = retargetCrossReferences(transaction, previousLabel, nextLabel)
+    view.dispatch(transaction)
     closeEditor()
   }
   edit.addEventListener('click', () => {
@@ -448,7 +512,8 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   cancel.addEventListener('click', closeEditor)
   save.addEventListener('click', saveEditor)
   input.addEventListener('input', updateSave)
-  input.addEventListener('keydown', (event) => {
+  labelInput.addEventListener('input', updateSave)
+  const handleEditorKeydown = (event: Event) => {
     const keyboard = event as KeyboardEvent
     if (keyboard.key === 'Escape') {
       keyboard.preventDefault()
@@ -457,7 +522,9 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
       keyboard.preventDefault()
       saveEditor()
     }
-  })
+  }
+  input.addEventListener('keydown', handleEditorKeydown)
+  labelInput.addEventListener('keydown', handleEditorKeydown)
 
   if (displayMode) dom.append(header, rendered, error, editor)
   else dom.append(rendered, error, edit, editor)
@@ -1835,7 +1902,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     hostRef.current?.querySelectorAll<HTMLTextAreaElement>('.structured-code-editor').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLTextAreaElement>('.structured-footnote-textarea').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-footnote-edit').forEach((button) => { button.disabled = readOnly })
-    hostRef.current?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('.structured-equation-input').forEach((editor) => { editor.readOnly = readOnly })
+    hostRef.current?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('.structured-equation-input, .structured-equation-label-input').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-equation-edit').forEach((button) => { button.disabled = readOnly })
     hostRef.current?.querySelectorAll<HTMLInputElement>('.structured-figure-input').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-figure-edit').forEach((button) => { button.disabled = readOnly })
