@@ -30,6 +30,9 @@ export interface ProjectOperationalMetrics {
   restoreSuccessCount: number
   restoreFailureCount: number
   deletionCount: number
+  backupCount: number
+  backupBytes: number
+  backupVerificationFailureCount: number
   lastActivityAt?: string
 }
 
@@ -42,6 +45,9 @@ const EMPTY_METRICS: ProjectOperationalMetrics = {
   restoreSuccessCount: 0,
   restoreFailureCount: 0,
   deletionCount: 0,
+  backupCount: 0,
+  backupBytes: 0,
+  backupVerificationFailureCount: 0,
 }
 
 export function estimateCollaborationCapacity(
@@ -96,6 +102,19 @@ export class CollaborationOperationsDashboard {
 
   recordDeletion(projectKey: string, at: string) {
     this.mutate(projectKey, (metrics) => { metrics.deletionCount += 1 }, at)
+  }
+
+  recordBackup(projectKey: string, bytes: number, at: string) {
+    this.mutate(projectKey, (metrics) => {
+      metrics.backupCount += 1
+      metrics.backupBytes += bytes
+    }, at)
+  }
+
+  recordBackupVerification(projectKey: string, success: boolean, at: string) {
+    this.mutate(projectKey, (metrics) => {
+      if (!success) metrics.backupVerificationFailureCount += 1
+    }, at)
   }
 
   project(projectKey: string) {

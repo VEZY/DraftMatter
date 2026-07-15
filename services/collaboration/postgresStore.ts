@@ -38,6 +38,24 @@ interface SnapshotRow {
   sha256: string
 }
 
+interface BackupRow {
+  id: string
+  created_at: Date | string
+  object_key: string
+  bytes: string | number
+  sha256: string
+  state_sha256: string
+}
+
+interface BackupEnvelope {
+  schemaVersion: 1
+  workspaceId: string
+  projectId: string
+  createdAt: string
+  stateSha256: string
+  stateBase64: string
+}
+
 function safeId(value: string, label: string) {
   if (!SAFE_ID.test(value)) throw new CollaborationStoreError('invalid-id', `${label} must use a safe identifier.`)
   return value
@@ -64,6 +82,10 @@ function iso(value: Date | string | number) {
 
 function snapshotMetadata(row: SnapshotRow): CollaborationSnapshotMetadata {
   return { id: row.id, createdAt: iso(row.created_at), bytes: Number(row.bytes), sha256: row.sha256 }
+}
+
+function stableJson(value: unknown) {
+  return `${JSON.stringify(value, null, 2)}\n`
 }
 
 async function transaction<T>(pool: Pick<Pool, 'connect'>, run: (client: PoolClient) => Promise<T>) {
@@ -114,6 +136,16 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
     this.key(scope)
     safeId(snapshotId, 'Snapshot ID')
     return `${this.objectPrefix}/workspaces/${scope.workspaceId}/projects/${scope.projectId}/snapshots/${snapshotId}.bin`
+  }
+
+  private projectPrefix(scope: CollaborationProjectScope) {
+    this.key(scope)
+    return `${this.objectPrefix}/workspaces/${scope.workspaceId}/projects/${scope.projectId}/`
+  }
+
+  private backupObjectKey(scope: CollaborationProjectScope, backupId: string) {
+    safeId(backupId, 'Backup ID')
+    return `${this.projectPrefix(scope)}backups/${backupId}.json`
   }
 
   private async lockProject(client: PoolClient, scope: CollaborationProjectScope) {
@@ -295,6 +327,121 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
     return result.rows.map((row) => ({ id: row.id, snapshotId: row.snapshot_id, name: row.name, createdBy: row.created_by, createdAt: iso(row.created_at) }))
   }
 
+  async createBackup(scope: CollaborationProjectScope, backupId: string) {
+    safeId(backupId, 'Backup ID')
+    const loaded = await this.load(scope)
+    const parts = [...(loaded.snapshot ? [loaded.snapshot] : []), ...loaded.updates]
+    let state: Uint8Array
+    if (parts.length) state = Y.mergeUpdates(parts)
+    else {
+      const empty = new Y.Doc()
+      state = Y.encodeStateAsUpdate(empty)
+      empty.destroy()
+    }
+    const createdAt = iso(this.clock())
+    const stateSha256 = hash(state)
+    const envelope: BackupEnvelope = {
+      schemaVersion: 1,
+      workspaceId: scope.workspaceId,
+      projectId: scope.projectId,
+      createdAt,
+      stateSha256,
+      stateBase64: Buffer.from(state).toString('base64'),
+    }
+    const bytes = Buffer.from(stableJson(envelope))
+    const sha256 = hash(bytes)
+    const objectKey = this.backupObjectKey(scope, backupId)
+    let objectWritten = false
+    try {
+      await this.objects.put(objectKey, bytes, {
+        immutable: true,
+        contentType: 'application/vnd.draftmatter.collaboration-backup+json',
+        metadata: { sha256, stateSha256, workspace: scope.workspaceId, project: scope.projectId, backup: backupId },
+      })
+      objectWritten = true
+      await this.pool.query(
+        `INSERT INTO draftmatter_collaboration_backups
+         (workspace_id, project_id, id, created_at, object_key, bytes, sha256, state_sha256)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+        [scope.workspaceId, scope.projectId, backupId, createdAt, objectKey, bytes.byteLength, sha256, stateSha256],
+      )
+      this.dashboard.recordBackup(this.key(scope), bytes.byteLength, createdAt)
+      return { id: backupId, createdAt, bytes: bytes.byteLength, sha256, stateSha256 }
+    } catch (error) {
+      if (objectWritten) await this.objects.delete(objectKey).catch(() => undefined)
+      throw error
+    }
+  }
+
+  async listBackups(scope: CollaborationProjectScope) {
+    this.key(scope)
+    const result = await this.pool.query<BackupRow>(
+      `SELECT id, created_at, object_key, bytes, sha256, state_sha256
+       FROM draftmatter_collaboration_backups
+       WHERE workspace_id = $1 AND project_id = $2 AND state = 'ready'
+       ORDER BY created_at DESC, id DESC`,
+      [scope.workspaceId, scope.projectId],
+    )
+    return result.rows.map((row) => ({ id: row.id, createdAt: iso(row.created_at), bytes: Number(row.bytes), sha256: row.sha256, stateSha256: row.state_sha256 }))
+  }
+
+  private async readVerifiedBackup(scope: CollaborationProjectScope, backupId: string) {
+    this.key(scope)
+    safeId(backupId, 'Backup ID')
+    const result = await this.pool.query<BackupRow>(
+      `SELECT id, created_at, object_key, bytes, sha256, state_sha256
+       FROM draftmatter_collaboration_backups
+       WHERE workspace_id = $1 AND project_id = $2 AND id = $3 AND state = 'ready'`,
+      [scope.workspaceId, scope.projectId, backupId],
+    )
+    const row = result.rows[0]
+    if (!row) throw new CollaborationStoreError('not-found', 'The collaboration backup was not found.')
+    try {
+      const stored = await this.objects.get(row.object_key)
+      if (stored.bytes.byteLength !== Number(row.bytes) || hash(stored.bytes) !== row.sha256) throw new Error('Backup object digest mismatch.')
+      const envelope = JSON.parse(new TextDecoder().decode(stored.bytes)) as BackupEnvelope
+      if (envelope.schemaVersion !== 1 || envelope.workspaceId !== scope.workspaceId || envelope.projectId !== scope.projectId || envelope.stateSha256 !== row.state_sha256) {
+        throw new Error('Backup envelope metadata mismatch.')
+      }
+      const state = Uint8Array.from(Buffer.from(envelope.stateBase64, 'base64'))
+      if (hash(state) !== envelope.stateSha256) throw new Error('Backup state digest mismatch.')
+      const verifiedAt = iso(this.clock())
+      await this.pool.query(
+        `UPDATE draftmatter_collaboration_backups SET verified_at = $4
+         WHERE workspace_id = $1 AND project_id = $2 AND id = $3`,
+        [scope.workspaceId, scope.projectId, backupId, verifiedAt],
+      )
+      this.dashboard.recordBackupVerification(this.key(scope), true, verifiedAt)
+      return { state, metadata: { id: row.id, createdAt: iso(row.created_at), bytes: Number(row.bytes), sha256: row.sha256, stateSha256: row.state_sha256, verifiedAt } }
+    } catch (error) {
+      this.dashboard.recordBackupVerification(this.key(scope), false, iso(this.clock()))
+      if (error instanceof CollaborationStoreError) throw error
+      throw new CollaborationStoreError('backup-invalid', 'The managed collaboration backup failed its integrity check.')
+    }
+  }
+
+  async verifyBackup(scope: CollaborationProjectScope, backupId: string) {
+    return (await this.readVerifiedBackup(scope, backupId)).metadata
+  }
+
+  async restoreBackup(scope: CollaborationProjectScope, backupId: string, target: CollaborationProjectScope = scope, snapshotId = `restore-${backupId}`) {
+    const verified = await this.readVerifiedBackup(scope, backupId)
+    try {
+      const snapshot = await this.createSnapshot(target, snapshotId, verified.state)
+      const restoredAt = iso(this.clock())
+      await this.pool.query(
+        `UPDATE draftmatter_collaboration_backups SET last_restored_at = $4
+         WHERE workspace_id = $1 AND project_id = $2 AND id = $3`,
+        [scope.workspaceId, scope.projectId, backupId, restoredAt],
+      )
+      this.dashboard.recordRestore(this.key(target), true, restoredAt)
+      return snapshot
+    } catch (error) {
+      this.dashboard.recordRestore(this.key(target), false, iso(this.clock()))
+      throw error
+    }
+  }
+
   async applyLifecycle(scope: CollaborationProjectScope, policy: { retainLatest: number; maxAgeMs: number; now?: number }) {
     if (!Number.isSafeInteger(policy.retainLatest) || policy.retainLatest < 1 || policy.maxAgeMs < 0) throw new Error('Snapshot lifecycle policy is invalid.')
     const result = await this.pool.query<SnapshotRow>(
@@ -311,26 +458,72 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
          WHERE workspace_id = $1 AND project_id = $2 AND id = $3 AND state = 'ready'`,
         [scope.workspaceId, scope.projectId, row.id],
       )
-      await this.objects.delete(row.object_key)
-      await this.pool.query('DELETE FROM draftmatter_collaboration_snapshots WHERE workspace_id = $1 AND project_id = $2 AND id = $3', [scope.workspaceId, scope.projectId, row.id])
+      try {
+        await this.objects.delete(row.object_key)
+        await this.pool.query('DELETE FROM draftmatter_collaboration_snapshots WHERE workspace_id = $1 AND project_id = $2 AND id = $3', [scope.workspaceId, scope.projectId, row.id])
+      } catch (error) {
+        await this.pool.query(
+          `UPDATE draftmatter_collaboration_snapshots SET state = 'ready'
+           WHERE workspace_id = $1 AND project_id = $2 AND id = $3 AND state = 'deleting'`,
+          [scope.workspaceId, scope.projectId, row.id],
+        )
+        throw error
+      }
+    }
+    const removed = new Set(remove.map((row) => row.id))
+    return { retained: result.rows.filter((row) => !removed.has(row.id)).map((row) => row.id).sort(), removed: [...removed].sort() }
+  }
+
+  async applyBackupLifecycle(scope: CollaborationProjectScope, policy: { retainLatest: number; maxAgeMs: number; now?: number }) {
+    if (!Number.isSafeInteger(policy.retainLatest) || policy.retainLatest < 1 || policy.maxAgeMs < 0) throw new Error('Backup lifecycle policy is invalid.')
+    const result = await this.pool.query<BackupRow>(
+      `SELECT id, created_at, object_key, bytes, sha256, state_sha256
+       FROM draftmatter_collaboration_backups WHERE workspace_id = $1 AND project_id = $2 AND state = 'ready'
+       ORDER BY created_at DESC, id DESC`,
+      [scope.workspaceId, scope.projectId],
+    )
+    const now = policy.now ?? this.clock()
+    const remove = result.rows.slice(policy.retainLatest).filter((row) => now - new Date(row.created_at).getTime() > policy.maxAgeMs)
+    for (const row of remove) {
+      await this.pool.query(
+        `UPDATE draftmatter_collaboration_backups SET state = 'deleting'
+         WHERE workspace_id = $1 AND project_id = $2 AND id = $3 AND state = 'ready'`,
+        [scope.workspaceId, scope.projectId, row.id],
+      )
+      try {
+        await this.objects.delete(row.object_key)
+        await this.pool.query('DELETE FROM draftmatter_collaboration_backups WHERE workspace_id = $1 AND project_id = $2 AND id = $3', [scope.workspaceId, scope.projectId, row.id])
+      } catch (error) {
+        await this.pool.query(
+          `UPDATE draftmatter_collaboration_backups SET state = 'ready'
+           WHERE workspace_id = $1 AND project_id = $2 AND id = $3 AND state = 'deleting'`,
+          [scope.workspaceId, scope.projectId, row.id],
+        )
+        throw error
+      }
     }
     const removed = new Set(remove.map((row) => row.id))
     return { retained: result.rows.filter((row) => !removed.has(row.id)).map((row) => row.id).sort(), removed: [...removed].sort() }
   }
 
   async deleteProjectState(scope: CollaborationProjectScope) {
-    const rows = await this.pool.query<{ object_key: string }>(
-      'SELECT object_key FROM draftmatter_collaboration_snapshots WHERE workspace_id = $1 AND project_id = $2',
-      [scope.workspaceId, scope.projectId],
-    )
+    const objectKeys = await this.objects.list(this.projectPrefix(scope))
     await this.pool.query(
       `UPDATE draftmatter_collaboration_snapshots SET state = 'deleting'
        WHERE workspace_id = $1 AND project_id = $2`,
       [scope.workspaceId, scope.projectId],
     )
-    for (const row of rows.rows) await this.objects.delete(row.object_key)
+    for (const objectKey of objectKeys) await this.objects.delete(objectKey)
     const deleted = await this.pool.query('DELETE FROM draftmatter_collaboration_projects WHERE workspace_id = $1 AND project_id = $2', [scope.workspaceId, scope.projectId])
     if (!deleted.rowCount) throw new CollaborationStoreError('not-found', 'The collaboration project was not found.')
     this.dashboard.recordDeletion(this.key(scope), iso(this.clock()))
+  }
+
+  async deleteWorkspaceObjects(workspaceId: string) {
+    safeId(workspaceId, 'Workspace ID')
+    const prefix = `${this.objectPrefix}/workspaces/${workspaceId}/`
+    const objects = await this.objects.list(prefix)
+    for (const objectKey of objects) await this.objects.delete(objectKey)
+    return objects.length
   }
 }

@@ -22,6 +22,7 @@ export interface CollaborationServiceConfig {
   maxPayloadBytes: number
   tokenRefreshMs: number
   shutdownTimeoutMs: number
+  maintenanceIntervalMs: number
 }
 
 export class CollaborationConfigError extends Error {
@@ -132,5 +133,6 @@ export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = 
     maxPayloadBytes: integer(environment, 'DM_MAX_PAYLOAD_BYTES', 1024 * 1024, 16 * 1024, 16 * 1024 * 1024),
     tokenRefreshMs: integer(environment, 'DM_TOKEN_REFRESH_MS', 5 * 60_000, 30_000, 60 * 60_000),
     shutdownTimeoutMs: integer(environment, 'DM_SHUTDOWN_TIMEOUT_MS', 15_000, 1_000, 120_000),
+    maintenanceIntervalMs: integer(environment, 'DM_MAINTENANCE_INTERVAL_MS', 24 * 60 * 60_000, 60_000, 7 * 24 * 60 * 60_000),
   }
 }

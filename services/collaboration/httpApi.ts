@@ -3,12 +3,16 @@ import type { IncomingMessage, ServerResponse } from 'node:http'
 import { EntitlementWebhookError, type PostgresEntitlementService, type SignedEntitlementWebhookProcessor } from './entitlements'
 import type { CollaborationOperationsDashboard } from './operations'
 import type { PostgresWorkspaceService } from './postgresWorkspaceService'
+import type { MaintenanceMetrics } from './maintenance'
+import type { PostgresCollaborationStore } from './postgresStore'
 import { WorkspaceAccessError } from '../../src/collaboration/workspaceService'
 
 type WorkspaceApi = Pick<PostgresWorkspaceService,
   'createWorkspace' | 'listWorkspaces' | 'createProject' | 'getProject' | 'listProjects'
   | 'createInvitation' | 'acceptInvitation' | 'revokeInvitation' | 'revokeMember'
   | 'listMembers' | 'listInvitations' | 'listAuditEvents'>
+  & Pick<PostgresWorkspaceService, 'scheduleWorkspaceDeletion' | 'getWorkspaceDeletion' | 'cancelWorkspaceDeletion'>
+  & Pick<PostgresWorkspaceService, 'authorizeProject'>
 
 export interface CollaborationHttpApiOptions {
   workspaces: WorkspaceApi
@@ -19,6 +23,8 @@ export interface CollaborationHttpApiOptions {
   connections: () => number
   allowedOrigins: string[]
   maxBodyBytes?: number
+  maintenanceMetrics?: () => MaintenanceMetrics
+  backups?: Pick<PostgresCollaborationStore, 'createBackup' | 'listBackups' | 'verifyBackup' | 'restoreBackup'>
 }
 
 function safeHeaders(requestId: string, origin?: string) {
@@ -71,7 +77,7 @@ function pathParts(pathname: string) {
   }
 }
 
-function metrics(dashboard: CollaborationOperationsDashboard, connections: number) {
+function metrics(dashboard: CollaborationOperationsDashboard, connections: number, maintenance?: MaintenanceMetrics) {
   const aggregate = dashboard.snapshot().reduce((current, project) => ({
     updates: current.updates + project.updateCount,
     updateBytes: current.updateBytes + project.updateBytes,
@@ -80,8 +86,11 @@ function metrics(dashboard: CollaborationOperationsDashboard, connections: numbe
     compactions: current.compactions + project.compactionCount,
     restoreFailures: current.restoreFailures + project.restoreFailureCount,
     deletions: current.deletions + project.deletionCount,
-  }), { updates: 0, updateBytes: 0, snapshots: 0, snapshotBytes: 0, compactions: 0, restoreFailures: 0, deletions: 0 })
-  return [
+    backups: current.backups + project.backupCount,
+    backupBytes: current.backupBytes + project.backupBytes,
+    backupVerificationFailures: current.backupVerificationFailures + project.backupVerificationFailureCount,
+  }), { updates: 0, updateBytes: 0, snapshots: 0, snapshotBytes: 0, compactions: 0, restoreFailures: 0, deletions: 0, backups: 0, backupBytes: 0, backupVerificationFailures: 0 })
+  const lines = [
     '# HELP draftmatter_collaboration_connections Active WebSocket connections.',
     '# TYPE draftmatter_collaboration_connections gauge',
     `draftmatter_collaboration_connections ${connections}`,
@@ -99,8 +108,27 @@ function metrics(dashboard: CollaborationOperationsDashboard, connections: numbe
     `draftmatter_collaboration_restore_failures_total ${aggregate.restoreFailures}`,
     '# TYPE draftmatter_collaboration_deletions_total counter',
     `draftmatter_collaboration_deletions_total ${aggregate.deletions}`,
-    '',
-  ].join('\n')
+    '# TYPE draftmatter_collaboration_backups_total counter',
+    `draftmatter_collaboration_backups_total ${aggregate.backups}`,
+    '# TYPE draftmatter_collaboration_backup_bytes_total counter',
+    `draftmatter_collaboration_backup_bytes_total ${aggregate.backupBytes}`,
+    '# TYPE draftmatter_collaboration_backup_verification_failures_total counter',
+    `draftmatter_collaboration_backup_verification_failures_total ${aggregate.backupVerificationFailures}`,
+  ]
+  if (maintenance) lines.push(
+    '# TYPE draftmatter_maintenance_runs_total counter',
+    `draftmatter_maintenance_runs_total ${maintenance.runs}`,
+    '# TYPE draftmatter_maintenance_backup_failures_total counter',
+    `draftmatter_maintenance_backup_failures_total ${maintenance.backupFailures}`,
+    '# TYPE draftmatter_maintenance_deletion_failures_total counter',
+    `draftmatter_maintenance_deletion_failures_total ${maintenance.deletionFailures}`,
+    '# TYPE draftmatter_maintenance_lifecycle_failures_total counter',
+    `draftmatter_maintenance_lifecycle_failures_total ${maintenance.lifecycleFailures}`,
+    '# TYPE draftmatter_maintenance_last_successful_backup_timestamp_seconds gauge',
+    `draftmatter_maintenance_last_successful_backup_timestamp_seconds ${maintenance.lastSuccessfulBackupAt ? Math.floor(Date.parse(maintenance.lastSuccessfulBackupAt) / 1_000) : 0}`,
+  )
+  lines.push('')
+  return lines.join('\n')
 }
 
 export class CollaborationHttpError extends Error {
@@ -148,7 +176,7 @@ export function createCollaborationHttpApi(options: CollaborationHttpApiOptions)
       }
       if (request.method === 'GET' && url.pathname === '/metrics') {
         headers.set('content-type', 'text/plain; version=0.0.4; charset=utf-8')
-        return new Response(metrics(options.dashboard, options.connections()), { status: 200, headers })
+        return new Response(metrics(options.dashboard, options.connections(), options.maintenanceMetrics?.()), { status: 200, headers })
       }
       if (request.method === 'POST' && url.pathname === '/api/entitlements/webhook') {
         const raw = new Uint8Array(await request.arrayBuffer())
@@ -174,10 +202,40 @@ export function createCollaborationHttpApi(options: CollaborationHttpApiOptions)
 
       const workspaceId = parts[2]
       if (parts[1] !== 'workspaces' || !workspaceId) throw new CollaborationHttpError(404, 'not-found', 'The requested service endpoint was not found.')
+      if (request.method === 'DELETE' && parts.length === 3) {
+        const delayHours = url.searchParams.get('delayHours')
+        const delayMs = delayHours === null ? undefined : Number(delayHours) * 60 * 60_000
+        return json(202, await options.workspaces.scheduleWorkspaceDeletion(token, workspaceId, delayMs), headers)
+      }
+      if (parts.length === 4 && parts[3] === 'deletion') {
+        if (request.method === 'GET') return json(200, { deletion: await options.workspaces.getWorkspaceDeletion(token, workspaceId) ?? null }, headers)
+      }
+      if (request.method === 'POST' && parts.length === 5 && parts[3] === 'deletion' && parts[4] === 'cancel') {
+        return json(200, await options.workspaces.cancelWorkspaceDeletion(token, workspaceId), headers)
+      }
       if (parts[3] === 'projects') {
         if (request.method === 'GET' && parts.length === 4) return json(200, { projects: await options.workspaces.listProjects(token, workspaceId) }, headers)
         if (request.method === 'POST' && parts.length === 4) return json(201, await options.workspaces.createProject(token, workspaceId, await body(request, maximum)), headers)
         if (request.method === 'GET' && parts.length === 5) return json(200, await options.workspaces.getProject(token, workspaceId, parts[4]), headers)
+        if (parts.length >= 6 && parts[5] === 'backups' && options.backups) {
+          const projectId = parts[4]
+          const scope = { workspaceId, projectId }
+          await options.workspaces.authorizeProject(token, workspaceId, projectId, 'checkpoint')
+          if (request.method === 'GET' && parts.length === 6) return json(200, { backups: await options.backups.listBackups(scope) }, headers)
+          if (request.method === 'POST' && parts.length === 6) {
+            return json(201, await options.backups.createBackup(scope, `backup-${randomUUID()}`), headers)
+          }
+          const backupId = parts[6]
+          if (request.method === 'POST' && backupId && parts.length === 8 && parts[7] === 'verify') {
+            return json(200, await options.backups.verifyBackup(scope, backupId), headers)
+          }
+          if (request.method === 'POST' && backupId && parts.length === 8 && parts[7] === 'restore') {
+            const restore = await body<{ targetProjectId?: string }>(request, maximum)
+            if (!restore.targetProjectId) throw new CollaborationHttpError(400, 'invalid-request', 'A target project is required for a restore drill.')
+            await options.workspaces.authorizeProject(token, workspaceId, restore.targetProjectId, 'checkpoint')
+            return json(200, await options.backups.restoreBackup(scope, backupId, { workspaceId, projectId: restore.targetProjectId }), headers)
+          }
+        }
       }
       if (parts[3] === 'invitations') {
         if (request.method === 'GET' && parts.length === 4) return json(200, { invitations: await options.workspaces.listInvitations(token, workspaceId) }, headers)

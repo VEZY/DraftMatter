@@ -32,6 +32,7 @@ Useful implementation notes:
 - [Collaboration persistence and operations](./docs/collaboration-operations.md)
 - [Collaboration beta core gate](./docs/collaboration-beta-gate.md)
 - [Collaboration service and self-hosting](./docs/self-hosting.md)
+- [Collaboration operations runbook](./docs/collaboration-runbook.md)
 - [Product and architecture brief](./draftmatter-app-design.md)
 
 The collaboration path includes a tested browser-safe editor/reviewer, offline-capable Yjs state, OIDC and tenant-scoped PostgreSQL authorization, authenticated Hocuspocus transport, S3-compatible immutable snapshots, durable entitlements, and a portable self-hosted service image. Browser builds intentionally have no filesystem, process, execution, Git, or external-renderer capability. See [the collaboration boundary](docs/collaboration-boundary.md).

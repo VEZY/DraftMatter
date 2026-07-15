@@ -4,6 +4,7 @@ import type { CollaborationServiceConfig } from './config'
 import { createDraftMatterHocuspocusServer } from './hocuspocusServer'
 import { createCollaborationHttpApi, handleNodeHttpRequest } from './httpApi'
 import { runCollaborationMigrations } from './migrations'
+import { CollaborationMaintenanceCoordinator } from './maintenance'
 import { S3ObjectStorage } from './objectStorage'
 import { OidcIdentityVerifier } from './oidcIdentity'
 import { PostgresCollaborationStore } from './postgresStore'
@@ -30,6 +31,13 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
     onMembershipRevoked: () => server?.hocuspocus.closeConnections(),
   })
   const webhooks = new SignedEntitlementWebhookProcessor({ pool, secret: config.webhookSecret })
+  const maintenance = new CollaborationMaintenanceCoordinator({
+    pool,
+    persistence,
+    objects,
+    objectPrefix: config.objectStorage.prefix,
+    onWorkspaceDeleted: () => server?.hocuspocus.closeConnections(),
+  })
   const readiness = async () => {
     await pool.query('SELECT 1')
     await objects.healthCheck()
@@ -42,6 +50,8 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
     dashboard: persistence.dashboard,
     connections: () => server?.hocuspocus.getConnectionsCount() ?? 0,
     allowedOrigins: config.allowedOrigins,
+    maintenanceMetrics: () => maintenance.snapshot(),
+    backups: persistence,
   })
   server = createDraftMatterHocuspocusServer({
     authorization: workspaces,
@@ -55,6 +65,7 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
   })
 
   let started = false
+  let maintenanceTimer: NodeJS.Timeout | undefined
   return {
     pool,
     objects,
@@ -69,6 +80,12 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
       await readiness()
       await server.listen()
       started = true
+      maintenanceTimer = setInterval(() => {
+        void maintenance.runOnce().catch(() => {
+          process.stderr.write(`${JSON.stringify({ level: 'error', event: 'collaboration.maintenance_failed' })}\n`)
+        })
+      }, config.maintenanceIntervalMs)
+      maintenanceTimer.unref()
       return server.address
     },
     async stop() {
@@ -78,6 +95,8 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
       }
       let timeout: NodeJS.Timeout | undefined
       try {
+        if (maintenanceTimer) clearInterval(maintenanceTimer)
+        maintenanceTimer = undefined
         await Promise.race([
           server.destroy(),
           new Promise<never>((_, reject) => {
@@ -91,5 +110,6 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
         started = false
       }
     },
+    maintenance,
   }
 }

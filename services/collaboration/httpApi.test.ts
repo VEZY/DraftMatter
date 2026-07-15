@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { WorkspaceAccessError } from '../../src/collaboration/workspaceService'
+import { WorkspaceAccessError, type ProjectCapability } from '../../src/collaboration/workspaceService'
 import { createCollaborationHttpApi } from './httpApi'
 import { CollaborationOperationsDashboard } from './operations'
 
@@ -20,11 +20,21 @@ function fixture() {
     listMembers: vi.fn(async () => []),
     listInvitations: vi.fn(async () => []),
     listAuditEvents: vi.fn(async () => []),
+    scheduleWorkspaceDeletion: vi.fn(async (_token: string, workspaceId: string) => ({ id: 'delete-01', workspaceId, requestedBy: 'owner', requestedAt: '2026-07-15T00:00:00.000Z', executeAfter: '2026-07-22T00:00:00.000Z', status: 'scheduled' as const })),
+    getWorkspaceDeletion: vi.fn(async () => undefined),
+    cancelWorkspaceDeletion: vi.fn(async () => ({ id: 'delete-01', status: 'cancelled' as const })),
+    authorizeProject: vi.fn(async (_token: string, _workspaceId: string, _projectId: string, capability: ProjectCapability) => ({ userId: 'owner', sessionId: 'session-owner', role: 'owner' as const, capability })),
   }
   const dashboard = new CollaborationOperationsDashboard()
   dashboard.recordUpdate('private-tenant:private-project', 42, '2026-07-15T00:00:00.000Z')
   const webhooks = { process: vi.fn(async (_raw: Uint8Array | string, _signature: string) => ({ duplicate: false, workspaceId: 'forest' })) }
   const readiness = vi.fn(async () => undefined)
+  const backups = {
+    createBackup: vi.fn(async () => ({ id: 'backup-01', createdAt: '2026-07-15T00:00:00.000Z', bytes: 42, sha256: 'a'.repeat(64), stateSha256: 'b'.repeat(64) })),
+    listBackups: vi.fn(async () => []),
+    verifyBackup: vi.fn(async () => ({ id: 'backup-01', createdAt: '2026-07-15T00:00:00.000Z', bytes: 42, sha256: 'a'.repeat(64), stateSha256: 'b'.repeat(64), verifiedAt: '2026-07-15T00:00:00.000Z' })),
+    restoreBackup: vi.fn(async () => ({ id: 'restore-backup-01', createdAt: '2026-07-15T00:00:00.000Z', bytes: 42, sha256: 'a'.repeat(64) })),
+  }
   const api = createCollaborationHttpApi({
     workspaces,
     entitlements: { get: vi.fn(async () => ({
@@ -42,8 +52,9 @@ function fixture() {
     connections: () => 3,
     allowedOrigins: ['https://app.example.test'],
     maxBodyBytes: 1024,
+    backups,
   })
-  return { api, workspaces, webhooks, readiness }
+  return { api, workspaces, webhooks, readiness, backups }
 }
 
 function request(path: string, options: RequestInit = {}) {
@@ -109,5 +120,39 @@ describe('collaboration HTTP API', () => {
     const missing = await api(request('/api/workspaces'))
     expect(missing.status).toBe(401)
     expect(await missing.text()).not.toContain('stack')
+  })
+
+  it('keeps backup creation and restoration behind the owner checkpoint capability', async () => {
+    const { api, workspaces, backups } = fixture()
+    const response = await api(request('/api/workspaces/forest/projects/paper/backups', {
+      method: 'POST',
+      headers: { authorization: 'Bearer oidc-token' },
+    }))
+    expect(response.status).toBe(201)
+    expect(workspaces.authorizeProject).toHaveBeenCalledWith('oidc-token', 'forest', 'paper', 'checkpoint')
+    expect(backups.createBackup).toHaveBeenCalledWith({ workspaceId: 'forest', projectId: 'paper' }, expect.stringMatching(/^backup-/))
+
+    const restore = await api(request('/api/workspaces/forest/projects/paper/backups/backup-01/restore', {
+      method: 'POST',
+      headers: { authorization: 'Bearer oidc-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ targetProjectId: 'restore-drill' }),
+    }))
+    expect(restore.status).toBe(200)
+    expect(workspaces.authorizeProject).toHaveBeenCalledWith('oidc-token', 'forest', 'restore-drill', 'checkpoint')
+    expect(backups.restoreBackup).toHaveBeenCalledWith(
+      { workspaceId: 'forest', projectId: 'paper' },
+      'backup-01',
+      { workspaceId: 'forest', projectId: 'restore-drill' },
+    )
+  })
+
+  it('schedules and cancels deletion through owner-authenticated routes', async () => {
+    const { api, workspaces } = fixture()
+    const scheduled = await api(request('/api/workspaces/forest?delayHours=24', { method: 'DELETE', headers: { authorization: 'Bearer oidc-token' } }))
+    expect(scheduled.status).toBe(202)
+    expect(workspaces.scheduleWorkspaceDeletion).toHaveBeenCalledWith('oidc-token', 'forest', 24 * 60 * 60_000)
+    const cancelled = await api(request('/api/workspaces/forest/deletion/cancel', { method: 'POST', headers: { authorization: 'Bearer oidc-token' } }))
+    expect(cancelled.status).toBe(200)
+    expect(workspaces.cancelWorkspaceDeletion).toHaveBeenCalledWith('oidc-token', 'forest')
   })
 })

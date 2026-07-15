@@ -4,7 +4,7 @@ import { join } from 'node:path'
 const root = new URL('..', import.meta.url)
 const target = new URL('../dist-service/migrations/', import.meta.url)
 await mkdir(target, { recursive: true })
-for (const file of ['001_managed_collaboration.sql', '002_rate_limits_and_recovery.sql', '003_managed_identity.sql']) {
+for (const file of ['001_managed_collaboration.sql', '002_rate_limits_and_recovery.sql', '003_managed_identity.sql', '004_maintenance_and_backups.sql']) {
   await cp(new URL(`../services/collaboration/migrations/${file}`, import.meta.url), new URL(file, target))
 }
 

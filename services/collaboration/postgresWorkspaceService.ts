@@ -231,6 +231,7 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
           [id, identity.userId, createdAt],
         )
         await client.query('INSERT INTO draftmatter_entitlements(workspace_id) VALUES ($1)', [id])
+        await client.query('INSERT INTO draftmatter_workspace_policies(workspace_id) VALUES ($1)', [id])
         await this.audit(client, id, identity.userId, 'workspace.created', id)
         return { id, name, createdAt }
       })
@@ -470,5 +471,82 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
       at: iso(row.occurred_at),
       metadata: typeof row.metadata === 'string' ? JSON.parse(row.metadata) as Record<string, string> : row.metadata,
     }))
+  }
+
+  async scheduleWorkspaceDeletion(token: string, workspaceId: string, delayMs?: number) {
+    const identity = await this.authenticate(token, 'write')
+    return transaction(this.pool, async (client) => {
+      const current = await this.requireWorkspaceAccess(client, workspaceId, identity.userId, 'manage-members')
+      if (current.role !== 'owner') throw new WorkspaceAccessError('forbidden', 'Only the workspace owner can schedule deletion.')
+      const policy = await client.query<{ deletion_grace_hours: number | string }>(
+        'SELECT deletion_grace_hours FROM draftmatter_workspace_policies WHERE workspace_id = $1',
+        [workspaceId],
+      )
+      const requestedDelay = delayMs ?? Number(policy.rows[0]?.deletion_grace_hours ?? 168) * 60 * 60_000
+      if (!Number.isSafeInteger(requestedDelay) || requestedDelay < 60 * 60_000 || requestedDelay > 30 * 24 * 60 * 60_000) {
+        throw new WorkspaceAccessError('invalid-request', 'Workspace deletion grace must be between one hour and thirty days.')
+      }
+      const id = safeId(`delete-${this.idFactory()}`, 'Deletion request ID')
+      const requestedAt = iso(this.clock())
+      const executeAfter = iso(this.clock() + requestedDelay)
+      try {
+        await client.query(
+          `INSERT INTO draftmatter_deletion_requests(id, workspace_id, requested_by, requested_at, execute_after)
+           VALUES ($1, $2, $3, $4, $5)`,
+          [id, workspaceId, identity.userId, requestedAt, executeAfter],
+        )
+      } catch (error) {
+        if (isUniqueViolation(error)) throw new WorkspaceAccessError('invalid-request', 'Workspace deletion is already pending.')
+        throw error
+      }
+      await this.audit(client, workspaceId, identity.userId, 'workspace.deletion_scheduled', id, { executeAfter })
+      return { id, workspaceId, requestedBy: identity.userId, requestedAt, executeAfter, status: 'scheduled' as const }
+    })
+  }
+
+  async getWorkspaceDeletion(token: string, workspaceId: string) {
+    const identity = await this.authenticate(token, 'read')
+    const current = await this.requireWorkspaceAccess(this.pool, workspaceId, identity.userId, 'manage-members')
+    if (current.role !== 'owner') throw new WorkspaceAccessError('forbidden', 'Only the workspace owner can read deletion status.')
+    const result = await this.pool.query<{
+      id: string
+      requested_by: string
+      requested_at: Date | string
+      execute_after: Date | string
+      status: string
+      failure: string | null
+    }>(
+      `SELECT id, requested_by, requested_at, execute_after, status, failure
+       FROM draftmatter_deletion_requests
+       WHERE workspace_id = $1 AND status IN ('scheduled', 'running', 'failed')
+       ORDER BY requested_at DESC LIMIT 1`,
+      [workspaceId],
+    )
+    const row = result.rows[0]
+    return row ? {
+      id: row.id,
+      workspaceId,
+      requestedBy: row.requested_by,
+      requestedAt: iso(row.requested_at),
+      executeAfter: iso(row.execute_after),
+      status: row.status,
+      ...(row.failure ? { failure: row.failure } : {}),
+    } : undefined
+  }
+
+  async cancelWorkspaceDeletion(token: string, workspaceId: string) {
+    const identity = await this.authenticate(token, 'write')
+    return transaction(this.pool, async (client) => {
+      const current = await this.requireWorkspaceAccess(client, workspaceId, identity.userId, 'manage-members')
+      if (current.role !== 'owner') throw new WorkspaceAccessError('forbidden', 'Only the workspace owner can cancel deletion.')
+      const result = await client.query<{ id: string }>(
+        `UPDATE draftmatter_deletion_requests SET status = 'cancelled'
+         WHERE workspace_id = $1 AND status IN ('scheduled', 'failed') RETURNING id`,
+        [workspaceId],
+      )
+      if (!result.rowCount) throw new WorkspaceAccessError('not-found', 'No cancellable workspace deletion was found.')
+      await this.audit(client, workspaceId, identity.userId, 'workspace.deletion_cancelled', result.rows[0].id)
+      return { id: result.rows[0].id, status: 'cancelled' as const }
+    })
   }
 }

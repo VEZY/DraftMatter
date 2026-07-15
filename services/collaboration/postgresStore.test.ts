@@ -47,7 +47,7 @@ describe('managed PostgreSQL and object-storage persistence', () => {
   it('runs ordered migrations idempotently and enforces one active owner', async () => {
     const { pool } = await database()
     const repeated = await runCollaborationMigrations(pool)
-    expect(repeated).toEqual({ applied: [], alreadyApplied: ['001', '002', '003'] })
+    expect(repeated).toEqual({ applied: [], alreadyApplied: ['001', '002', '003', '004'] })
     await expect(pool.query(`INSERT INTO draftmatter_memberships(workspace_id, user_id, role) VALUES ('forest', 'editor', 'owner')`)).rejects.toThrow()
     const tables = await pool.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'draftmatter_%'`)
     expect(tables.rows.map((row: { table_name: string }) => row.table_name)).toEqual(expect.arrayContaining([
@@ -153,6 +153,38 @@ describe('managed PostgreSQL and object-storage persistence', () => {
     await pool.query(`UPDATE draftmatter_entitlements SET status = 'suspended' WHERE workspace_id = 'forest'`)
     await expect(persistence.appendUpdate(scope, fixture.second)).rejects.toMatchObject({ code: 'forbidden' })
     fixture.document.destroy()
+    await pool.end()
+  })
+
+  it('creates, verifies, restores, and integrity-checks immutable managed backups', async () => {
+    const { pool } = await database()
+    await pool.query(`INSERT INTO draftmatter_projects(workspace_id, id, name) VALUES ('forest', 'restored', 'Restored paper')`)
+    const objects = new MemoryObjectStorage()
+    const persistence = new PostgresCollaborationStore({ pool, objects })
+    const fixture = documentFixture()
+    const source = { workspaceId: 'forest', projectId: 'paper' }
+    const target = { workspaceId: 'forest', projectId: 'restored' }
+    await persistence.appendUpdate(source, fixture.first)
+    const backup = await persistence.createBackup(source, 'backup-01')
+    expect(backup).toMatchObject({ id: 'backup-01', stateSha256: expect.stringMatching(/^[a-f0-9]{64}$/) })
+    await expect(persistence.verifyBackup(source, 'backup-01')).resolves.toMatchObject({ id: 'backup-01', verifiedAt: expect.any(String) })
+
+    await persistence.appendUpdate(target, fixture.second)
+    await persistence.restoreBackup(source, 'backup-01', target)
+    const restored = await persistence.load(target)
+    const document = new Y.Doc()
+    if (restored.snapshot) Y.applyUpdate(document, restored.snapshot)
+    for (const update of restored.updates) Y.applyUpdate(document, update)
+    expect(document.getText('draftmatter:document').toString()).toBe('Canopy response')
+
+    const key = 'draftmatter/workspaces/forest/projects/paper/backups/backup-01.json'
+    await objects.delete(key)
+    await objects.put(key, new Uint8Array([1, 2, 3]))
+    await expect(persistence.verifyBackup(source, 'backup-01')).rejects.toMatchObject({ code: 'backup-invalid' })
+    expect(persistence.dashboard.project('forest:paper')).toMatchObject({ backupCount: 1, backupVerificationFailureCount: 1 })
+    expect(persistence.dashboard.project('forest:restored')).toMatchObject({ restoreSuccessCount: 1 })
+    fixture.document.destroy()
+    document.destroy()
     await pool.end()
   })
 })
