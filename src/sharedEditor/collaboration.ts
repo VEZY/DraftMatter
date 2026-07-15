@@ -112,6 +112,26 @@ function withoutReviewSection(source: string) {
   return `${source.slice(0, review.sectionStart)}${source.slice(review.sectionEnd ?? source.length)}`
 }
 
+function reconcileText(text: Y.Text, next: string) {
+  const current = text.toString()
+  if (current === next) return
+  let prefix = 0
+  const shared = Math.min(current.length, next.length)
+  while (prefix < shared && current[prefix] === next[prefix]) prefix += 1
+  let suffix = 0
+  while (suffix < shared - prefix && current[current.length - 1 - suffix] === next[next.length - 1 - suffix]) suffix += 1
+  const deleteLength = current.length - prefix - suffix
+  const insertion = next.slice(prefix, next.length - suffix)
+  if (deleteLength > 0) text.delete(prefix, deleteLength)
+  if (insertion) text.insert(prefix, insertion)
+}
+
+function reconcileMap<T extends { id: string }>(map: Y.Map<T>, records: T[]) {
+  const retained = new Set(records.map((record) => record.id))
+  for (const key of map.keys()) if (!retained.has(key)) map.delete(key)
+  for (const record of records) map.set(record.id, portableValue(record))
+}
+
 export class CollaborativeDocument {
   readonly doc: Y.Doc
   readonly awareness: Awareness
@@ -137,22 +157,27 @@ export class CollaborativeDocument {
 
   static fromPortableSource(source: string) {
     const collaboration = new CollaborativeDocument()
+    collaboration.reconcilePortableSource(source, 'portable-import')
+    return collaboration
+  }
+
+  reconcilePortableSource(source: string, origin: unknown = 'portable-reconcile') {
     const review = parseReviewMarkup(source)
     const liveSource = withoutReviewSection(source)
-    collaboration.doc.transact(() => {
-      collaboration.meta.set('schemaVersion', 1)
-      collaboration.text.insert(0, liveSource)
-      for (const author of review.authors) collaboration.putAuthor({ id: author.id, name: author.name })
-      for (const range of review.ranges.filter((candidate) => candidate.complete)) {
+    this.doc.transact(() => {
+      this.meta.set('schemaVersion', 1)
+      reconcileText(this.text, liveSource)
+      const authors = review.authors.map((author) => ({ id: author.id, name: author.name }))
+      const anchors = review.ranges.filter((candidate) => candidate.complete).map<CollaborativeAnchor>((range) => {
         const record = [...review.changes, ...review.threads].find((candidate) => candidate.anchorId === range.anchorId)
-        collaboration.putAnchor({
+        return {
           id: range.anchorId,
-          start: collaboration.relativePosition(range.start),
-          end: collaboration.relativePosition(range.end),
+          start: this.relativePosition(range.start),
+          end: this.relativePosition(range.end),
           ...(record?.anchorContext ? { context: record.anchorContext } : {}),
-        })
-      }
-      for (const change of review.changes) collaboration.putProposal({
+        }
+      })
+      const proposals = review.changes.map<CollaborativeProposal>((change) => ({
         id: change.id,
         anchorId: change.anchorId,
         authorId: change.authorId,
@@ -161,8 +186,8 @@ export class CollaborativeDocument {
         ...(change.proposal === undefined ? {} : { proposal: change.proposal }),
         ...(change.rationale === undefined ? {} : { rationale: change.rationale }),
         ...(change.attributes['data-base-revision'] ? { baseRevision: change.attributes['data-base-revision'] } : {}),
-      })
-      for (const thread of review.threads) collaboration.putThread({
+      }))
+      const threads = review.threads.map<CollaborativeThread>((thread) => ({
         id: thread.id,
         anchorId: thread.anchorId,
         authorId: thread.authorId,
@@ -171,8 +196,8 @@ export class CollaborativeDocument {
           ? thread.messageRecords
           : thread.messages.map((content) => ({ content })),
         ...(thread.anchorContext ? { context: thread.anchorContext } : {}),
-      })
-      for (const decision of review.decisions) collaboration.putDecision({
+      }))
+      const decisions = review.decisions.map<CollaborativeDecision>((decision) => ({
         id: decision.id,
         changeId: decision.changeId,
         authorId: decision.authorId,
@@ -180,9 +205,13 @@ export class CollaborativeDocument {
         ...(decision.timestamp ? { timestamp: decision.timestamp } : {}),
         ...(decision.attributes['data-base-revision'] ? { baseRevision: decision.attributes['data-base-revision'] } : {}),
         ...(decision.attributes['data-resolves'] ? { resolves: decision.attributes['data-resolves'].split(',').filter(Boolean).sort() } : {}),
-      })
-    }, 'portable-import')
-    return collaboration
+      }))
+      reconcileMap(this.authors, authors)
+      reconcileMap(this.anchors, anchors)
+      reconcileMap(this.proposals, proposals)
+      reconcileMap(this.threads, threads)
+      reconcileMap(this.decisions, decisions)
+    }, origin)
   }
 
   get source() {

@@ -31,6 +31,7 @@ export {
 } from './reviewDecisions'
 export {
   createCollaborationCheckpoint,
+  projectCollaborationPortableSource,
   CollaborationCheckpointError,
   type CollaborationCheckpoint,
 } from './collaborationCheckpoint'
@@ -42,6 +43,12 @@ export {
   type CollaborativeEditorUser,
   type CollaborativeProseMirrorState,
 } from './prosemirrorCollaboration'
+export {
+  HocuspocusCollaborationClient,
+  validateCollaborationServiceUrl,
+  type CollaborationClientOptions,
+  type CollaborationClientStatus,
+} from './hocuspocusClient'
 
 export { parsePortableDocument } from '../document'
 export { materializePortableDraftSource } from '../portableDraft'

@@ -42,6 +42,8 @@ import { buildReviewQueue } from './reviewQueue'
 import { printNativeHtml, renderNativeHtmlExport } from './nativeHtmlExport'
 import { renderDocxExport } from './docxExport'
 import { ExternalExportDialog } from './ExternalExportDialog'
+import { CollaborationDialog } from './CollaborationDialog'
+import type { CollaborationClientStatus } from './sharedEditor'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
@@ -235,6 +237,8 @@ function App() {
   const [toast, setToast] = useState('')
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
   const [recoveryOpen, setRecoveryOpen] = useState(false)
+  const [collaborationOpen, setCollaborationOpen] = useState(false)
+  const [collaborationStatus, setCollaborationStatus] = useState<CollaborationClientStatus>('disconnected')
   const [filename, setFilename] = useState(initialProjectMeta.filename)
   const [projectName, setProjectName] = useState(initialProjectMeta.projectName)
   const [citationStyle, setCitationStyle] = useState<CitationStyleId>(initialProjectMeta.citationStyle)
@@ -839,6 +843,17 @@ function App() {
     setToast(parsed.diagnostics.some((diagnostic) => diagnostic.level === 'error')
       ? 'Source applied with diagnostics to review'
       : 'Portable source applied · undo is available')
+  }
+
+  const applyCollaborativeSource = (remoteSource: string) => {
+    if (remoteSource === executionSource) return
+    const parsed = parsePortableDocument(remoteSource, initialDraft)
+    markDraftChanged()
+    commitDraftHistory(parsed.draft)
+    setDiagnostics(parsed.diagnostics)
+    setToast(parsed.diagnostics.some((diagnostic) => diagnostic.level === 'error')
+      ? 'Live changes synchronized with diagnostics'
+      : 'Live changes synchronized')
   }
 
   const scrollTo = (id: string) => {
@@ -1811,6 +1826,11 @@ function App() {
         </div>
 
         <div className="topbar-actions">
+          <button className={`collaboration-toggle ${collaborationStatus}`} onClick={() => setCollaborationOpen(true)} aria-label="Open online collaboration">
+            <Icon name="users" size={16} />
+            <span>{collaborationStatus === 'connected' ? 'Live' : 'Collaborate'}</span>
+            <i />
+          </button>
           <button className="icon-button command-button" onClick={() => setCommandOpen(true)} aria-label="Open command menu">
             <Icon name="search" />
             <span className="shortcut"><Icon name="command" size={12} />K</span>
@@ -2237,6 +2257,14 @@ function App() {
           onNotice={setToast}
         />
       )}
+
+      <CollaborationDialog
+        open={collaborationOpen}
+        source={executionSource}
+        onClose={() => setCollaborationOpen(false)}
+        onRemoteSource={applyCollaborativeSource}
+        onStatus={setCollaborationStatus}
+      />
 
       {pendingProject && (
         <div className="modal-backdrop manuscript-picker-backdrop" onMouseDown={() => setPendingProject(null)}>

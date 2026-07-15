@@ -152,10 +152,10 @@ function assertReferences(snapshot: CollaborationSnapshot) {
   }
 }
 
-export function createCollaborationCheckpoint(document: CollaborativeDocument): CollaborationCheckpoint {
+export function createCollaborationCheckpoint(document: CollaborativeDocument, options: { allowDecisionConflicts?: boolean } = {}): CollaborationCheckpoint {
   const snapshot = document.snapshot()
   const conflicts = reviewDecisionConflicts(snapshot)
-  if (conflicts.length > 0) {
+  if (conflicts.length > 0 && !options.allowDecisionConflicts) {
     throw new CollaborationCheckpointError('decision-conflict', `Resolve concurrent decisions for ${conflicts.map((conflict) => conflict.changeId).join(', ')} before checkpointing.`)
   }
   assertReferences(snapshot)
@@ -176,4 +176,8 @@ export function createCollaborationCheckpoint(document: CollaborativeDocument): 
     revision: document.revisionToken(),
     recordCount: records.length,
   }
+}
+
+export function projectCollaborationPortableSource(document: CollaborativeDocument) {
+  return createCollaborationCheckpoint(document, { allowDecisionConflicts: true }).source
 }
