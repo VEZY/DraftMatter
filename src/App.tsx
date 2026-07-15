@@ -7,6 +7,7 @@ import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
 import { ManuscriptTextEditor } from './ManuscriptTextEditor'
 import { StructuredManuscriptEditor, type StructuredManuscriptEditorHandle, type StructuredOutlineItem } from './StructuredManuscriptEditor'
+import { structuredCitationClusters } from './structuredManuscript'
 import { applyDraftCitationTransaction, applyDraftCodeTransaction, applyDraftTextTransaction, type ManuscriptTextField } from './manuscriptModel'
 import { downloadBlob, downloadText, projectCleanSource, reviewedProjection } from './projections'
 import { sampleCitations } from './sampleCitations'
@@ -229,6 +230,8 @@ function App() {
   const [citationOpen, setCitationOpen] = useState(false)
   const [citationSearchOpen, setCitationSearchOpen] = useState(false)
   const [citationPickerItems, setCitationPickerItems] = useState<CitationItem[]>([])
+  const [citationPickerTarget, setCitationPickerTarget] = useState<'legacy-cluster' | 'structured-selection' | 'structured-citation'>('legacy-cluster')
+  const [structuredCitationSelection, setStructuredCitationSelection] = useState<{ id: string; items: CitationItem[] } | null>(null)
   const [citationActiveIndex, setCitationActiveIndex] = useState(0)
   const [citationEditKey, setCitationEditKey] = useState('')
   const [citationIntakeText, setCitationIntakeText] = useState('')
@@ -367,9 +370,27 @@ function App() {
   )
   const pickerResults = [...citationResults, ...crossrefRecords]
   const draftCitationItems = citationItemsForDraft(draft)
+  const manuscriptCitationClusters = useMemo(
+    () => structuredMode ? structuredCitationClusters(manuscriptSource) : [],
+    [manuscriptSource, structuredMode],
+  )
+  const documentCitationKeys = structuredMode
+    ? [...new Set(manuscriptCitationClusters.flatMap((cluster) => cluster.items.map((item) => item.citekey)))]
+    : draft.citationKeys
+  const fallbackCitationLabel = (items: CitationItem[]) => items.every((item) => citations.some((record) => record.citekey === item.citekey))
+    ? formatCitationCluster(citations, items)
+    : `(${items.map((item) => item.citekey).join('; ')})`
+  const structuredCitationLabels = useMemo(() => Object.fromEntries(manuscriptCitationClusters.map((cluster) => [
+    cluster.signature,
+    renderedCitations[cluster.id] || fallbackCitationLabel(cluster.items),
+  ])), [citations, manuscriptCitationClusters, renderedCitations])
+  const detailCitationItems = structuredMode && structuredCitationSelection ? structuredCitationSelection.items : draftCitationItems
   const citationLabel = renderedCitations.introduction ?? formatCitationCluster(citations, draftCitationItems)
+  const detailCitationLabel = structuredMode && structuredCitationSelection
+    ? structuredCitationLabels[serializeCitationCluster(detailCitationItems)] ?? fallbackCitationLabel(detailCitationItems)
+    : citationLabel
   const resultsCitationLabel = renderedCitations.results ?? formatCitationCluster(citations, [{ citekey: 'coutellier2022' }])
-  const activeCitationItem = draftCitationItems.find((item) => item.citekey === citationEditKey) ?? draftCitationItems[0]
+  const activeCitationItem = detailCitationItems.find((item) => item.citekey === citationEditKey) ?? detailCitationItems[0]
   const activeCitationRecord = citations.find((record) => record.citekey === activeCitationItem?.citekey)
   const activeCitationBadge = citationSourceBadge(activeCitationRecord)
   const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics, ...executionDiagnostics]
@@ -577,7 +598,7 @@ function App() {
     setRenderedBibliography([])
     void renderCslDocument({
       records: citations,
-      clusters: [
+      clusters: structuredMode ? manuscriptCitationClusters.map((cluster) => ({ id: cluster.id, items: cluster.items })) : [
         { id: 'introduction', items: draftCitationItems },
         { id: 'results', items: [{ citekey: 'coutellier2022' }] },
       ],
@@ -599,7 +620,7 @@ function App() {
       setCslState('error')
     })
     return () => { disposed = true }
-  }, [citations, citationStyle, citationLocale, draft.citationItems, draft.citationKeys])
+  }, [citations, citationStyle, citationLocale, draft.citationItems, draft.citationKeys, manuscriptCitationClusters, structuredMode])
 
   useEffect(() => {
     try {
@@ -614,7 +635,7 @@ function App() {
   }, [citations])
 
   useEffect(() => {
-    const result = createCitationCache(citations, draft.citationKeys, citationCacheRef.current)
+    const result = createCitationCache(citations, documentCitationKeys, citationCacheRef.current)
     citationCacheRef.current = result.cache
     const projectIdentity = desktopSession?.root ?? `browser:${filename}`
     try {
@@ -627,7 +648,7 @@ function App() {
         { code: 'citation-cache-write-unavailable', level: 'warning', message: 'Citations remain available for this session, but their offline cache could not be stored.' },
       ])
     }
-  }, [citations, desktopSession?.root, draft.citationKeys.join('\u0000'), filename])
+  }, [citations, desktopSession?.root, documentCitationKeys.join('\u0000'), filename])
 
   useEffect(() => {
     const lock = buildCitationLock(citations.filter((record) => record.source !== 'sample'), citationLockRef.current)
@@ -635,7 +656,7 @@ function App() {
     citationLockRef.current = lock
     setCitationLockDiagnostics([
       ...citationLockLoadDiagnosticsRef.current,
-      ...diagnoseCitationLock(citations, draft.citationKeys, lock),
+      ...diagnoseCitationLock(citations, documentCitationKeys, lock),
     ])
 
     const root = desktopSession?.root
@@ -666,7 +687,7 @@ function App() {
       })
     }, 700)
     return () => window.clearTimeout(timeout)
-  }, [citations, desktopSession?.root, draft.citationKeys.join('\u0000')])
+  }, [citations, desktopSession?.root, documentCitationKeys.join('\u0000')])
 
   useEffect(() => {
     if (!citationSearchOpen) {
@@ -1579,8 +1600,10 @@ function App() {
     setToast('Recovered local manuscript version')
   }
 
-  const openCitationPicker = () => {
-    setCitationPickerItems(citationItemsForDraft(draft))
+  const openCitationPicker = (intent: 'insert' | 'edit' = 'insert') => {
+    const editingStructuredCitation = structuredMode && intent === 'edit' && structuredCitationSelection
+    setCitationPickerTarget(editingStructuredCitation ? 'structured-citation' : structuredMode ? 'structured-selection' : 'legacy-cluster')
+    setCitationPickerItems(editingStructuredCitation ? editingStructuredCitation.items : structuredMode ? [] : citationItemsForDraft(draft))
     setCitationActiveIndex(0)
     setCitationQuery('')
     setCitationOpen(false)
@@ -1723,9 +1746,23 @@ function App() {
     }
     const selectedAcquisitions = transientAcquisitionRecords.filter((record) => citationPickerItems.some((item) => item.citekey === record.citekey))
     const session = desktopSessionRef.current
+    const structuredCitationLabel = formatCitationCluster(mergeCitationRecords(citations, selectedAcquisitions), citationPickerItems)
     if (!session || !selectedAcquisitions.length) {
       if (selectedAcquisitions.length) setCitations((current) => mergeCitationRecords(current, selectedAcquisitions))
-      updateDraft(applyDraftCitationTransaction(draft, citationPickerItems))
+      if (citationPickerTarget === 'structured-selection') {
+        if (!structuredEditorRef.current?.insertCitation(citationPickerItems, structuredCitationLabel)) {
+          setToast('Place the cursor in the manuscript before inserting a citation')
+          return
+        }
+      } else if (citationPickerTarget === 'structured-citation') {
+        if (!structuredCitationSelection || !structuredEditorRef.current?.replaceCitation(structuredCitationSelection.id, citationPickerItems, structuredCitationLabel)) {
+          setToast('That citation is no longer present in the manuscript')
+          return
+        }
+        setStructuredCitationSelection({ ...structuredCitationSelection, items: citationPickerItems })
+      } else {
+        updateDraft(applyDraftCitationTransaction(draft, citationPickerItems))
+      }
       setCitationSearchOpen(false)
       setCitationQuery('')
       setCitationEditKey(citationPickerItems[0].citekey)
@@ -1759,11 +1796,25 @@ function App() {
         }
       }))
       const nextCitations = mergeCitationRecords(citations, canonicalRecords)
-      const nextDraft: DraftState = { ...draft, ...applyDraftCitationTransaction(draft, citationPickerItems) }
-      const documentContent = ensureBibliographyReference(reviewedProjection(nextDraft), target.path)
+      const nextDraft: DraftState = citationPickerTarget !== 'legacy-cluster'
+        ? draft
+        : { ...draft, ...applyDraftCitationTransaction(draft, citationPickerItems) }
+      const citationLabel = formatCitationCluster(nextCitations, citationPickerItems)
+      const structuredSource = citationPickerTarget === 'structured-selection'
+        ? structuredEditorRef.current?.citationSource(citationPickerItems, citationLabel)
+        : citationPickerTarget === 'structured-citation' && structuredCitationSelection
+          ? structuredEditorRef.current?.citationReplacementSource(structuredCitationSelection.id, citationPickerItems, citationLabel)
+          : null
+      if (citationPickerTarget !== 'legacy-cluster' && !structuredSource) {
+        throw new Error('Place the cursor in the manuscript before inserting a citation.')
+      }
+      const documentContent = ensureBibliographyReference(structuredSource ?? reviewedProjection(nextDraft), target.path)
       const nextLock = buildCitationLock(nextCitations.filter((record) => record.source !== 'sample'), citationLockRef.current)
       const lockContent = serializeCitationLock(nextLock)
-      const nextCacheResult = createCitationCache(nextCitations, nextDraft.citationKeys, citationCacheRef.current)
+      const citedKeys = citationPickerTarget !== 'legacy-cluster'
+        ? [...new Set(structuredCitationClusters(documentContent).flatMap((cluster) => cluster.items.map((item) => item.citekey)))]
+        : nextDraft.citationKeys
+      const nextCacheResult = createCitationCache(nextCitations, citedKeys, citationCacheRef.current)
       const cacheContent = serializeCitationCache(nextCacheResult.cache)
       const result = await desktopHost.acquireCitations({
         root: currentSession.root,
@@ -1780,6 +1831,11 @@ function App() {
       })
 
       const savedDraft = parsePortableDocument(documentContent, initialDraft)
+      replaceManuscriptSource(documentContent)
+      setStructuredMode(citationPickerTarget !== 'legacy-cluster' || structuredMode)
+      if (citationPickerTarget === 'structured-citation' && structuredCitationSelection) {
+        setStructuredCitationSelection({ ...structuredCitationSelection, items: citationPickerItems })
+      }
       commitDraftHistory(savedDraft.draft)
       setDiagnostics(savedDraft.diagnostics)
       resetDraftRevision()
@@ -1828,22 +1884,43 @@ function App() {
   }
 
   const openCitationDetails = () => {
+    setStructuredCitationSelection(null)
     setCitationEditKey(draftCitationItems[0]?.citekey ?? '')
     setCitationOpen(true)
   }
 
+  const openStructuredCitationDetails = (id: string, items: CitationItem[]) => {
+    setStructuredCitationSelection({ id, items })
+    setCitationEditKey(items[0]?.citekey ?? '')
+    setCitationOpen(true)
+  }
+
   const updateCitationItem = (citekey: string, patch: Partial<CitationItem>) => {
-    const items = citationItemsForDraft(draft).map((item) => item.citekey === citekey ? { ...item, ...patch } : item)
+    const items = detailCitationItems.map((item) => item.citekey === citekey ? { ...item, ...patch } : item)
+    if (structuredMode && structuredCitationSelection) {
+      const rendered = formatCitationCluster(citations, items)
+      if (structuredEditorRef.current?.replaceCitation(structuredCitationSelection.id, items, rendered)) {
+        setStructuredCitationSelection({ ...structuredCitationSelection, items })
+      }
+      return
+    }
     updateDraft(applyDraftCitationTransaction(draft, items))
   }
 
   const removeCitationItem = (citekey: string) => {
-    const items = citationItemsForDraft(draft).filter((item) => item.citekey !== citekey)
+    const items = detailCitationItems.filter((item) => item.citekey !== citekey)
     if (!items.length) {
       setToast('A citation cluster needs at least one source')
       return
     }
-    updateDraft(applyDraftCitationTransaction(draft, items))
+    if (structuredMode && structuredCitationSelection) {
+      const rendered = formatCitationCluster(citations, items)
+      if (structuredEditorRef.current?.replaceCitation(structuredCitationSelection.id, items, rendered)) {
+        setStructuredCitationSelection({ ...structuredCitationSelection, items })
+      }
+    } else {
+      updateDraft(applyDraftCitationTransaction(draft, items))
+    }
     setCitationEditKey(items[0].citekey)
   }
 
@@ -2059,7 +2136,7 @@ function App() {
 
             <div className="project-health">
               <div className="project-health-title"><Icon name="spark" size={16} /> Project health</div>
-              <div><span><i className={`health-dot ${cslState === 'error' ? 'warning' : 'okay'}`} /> Citations</span><small>{draft.citationKeys.length} cited · {citations.length} indexed{cslState === 'loading' ? ' · formatting' : ''}{citations.some((record) => record.availability === 'cached') ? ' · offline cache active' : ''}</small></div>
+              <div><span><i className={`health-dot ${cslState === 'error' ? 'warning' : 'okay'}`} /> Citations</span><small>{documentCitationKeys.length} cited · {citations.length} indexed{cslState === 'loading' ? ' · formatting' : ''}{citations.some((record) => record.availability === 'cached') ? ' · offline cache active' : ''}</small></div>
               <div><span><i className={`health-dot ${draft.cellStatus === 'current' ? 'okay' : 'warning'}`} /> Figures</span><small>{draft.cellStatus === 'current' ? 'Up to date' : cellStatusLabel(draft.cellStatus)}</small></div>
               <div><span><i className={`health-dot ${allDiagnostics.some((item) => item.level === 'error') ? 'warning' : 'okay'}`} /> Source</span><small>{allDiagnostics.length ? `${allDiagnostics.length} check${allDiagnostics.length === 1 ? '' : 's'}` : 'Portable'}</small></div>
             </div>
@@ -2115,8 +2192,40 @@ function App() {
               onDiagnostics={setDiagnostics}
               onOutlineChange={setStructuredOutline}
               onInspectRaw={openSourceInspector}
+              onCitationSelect={openStructuredCitationDetails}
+              citationLabels={structuredCitationLabels}
               resolveAssetUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) : path}
             />
+            {citationOpen && structuredCitationSelection && (
+              <div className="citation-detail popover structured-citation-detail">
+                <div className="citation-detail-top">
+                  <span className={`source-icon ${activeCitationBadge.className}`}>{activeCitationBadge.label}</span>
+                  <div><strong>Citation cluster · {detailCitationItems.length} source{detailCitationItems.length === 1 ? '' : 's'}</strong><p>{detailCitationLabel}</p></div>
+                  <button className="icon-button subtle" onClick={() => setCitationOpen(false)} aria-label="Close citation details"><Icon name="close" size={15} /></button>
+                </div>
+                <div className="citation-cluster-list" aria-label="Works in citation">
+                  {detailCitationItems.map((item) => {
+                    const record = citations.find((candidate) => candidate.citekey === item.citekey)
+                    return (
+                      <div className={item.citekey === activeCitationItem?.citekey ? 'active' : ''} key={item.citekey}>
+                        <button onClick={() => setCitationEditKey(item.citekey)}><strong>{record?.title ?? item.citekey}</strong><small>@{item.citekey}{record?.availability === 'cached' ? ' · cached copy' : ''}</small></button>
+                        <button onClick={() => removeCitationItem(item.citekey)} aria-label={`Remove ${item.citekey} from citation`}><Icon name="close" size={13} /></button>
+                      </div>
+                    )
+                  })}
+                </div>
+                {activeCitationItem && (
+                  <div className="citation-modifiers">
+                    <label><span>Prefix</span><input value={activeCitationItem.prefix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { prefix: event.target.value })} placeholder="e.g. see" /></label>
+                    <label><span>Locator</span><input value={activeCitationItem.locator ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { locator: event.target.value })} placeholder="e.g. p. 18" /></label>
+                    <label className="citation-suffix"><span>Suffix</span><input value={activeCitationItem.suffix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { suffix: event.target.value })} placeholder="e.g. emphasis added" /></label>
+                    <label className="citation-suppress"><input type="checkbox" checked={activeCitationItem.suppressAuthor ?? false} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { suppressAuthor: event.target.checked })} /><span>Suppress author</span></label>
+                  </div>
+                )}
+                <CitationFormattingControls style={citationStyle} locale={citationLocale} onStyleChange={changeCitationStyle} onLocaleChange={changeCitationLocale} compact />
+                <div className="citation-actions"><button onClick={() => setCitationOpen(false)}>Done</button><button onClick={() => openCitationPicker('edit')}>Add or remove sources</button></div>
+              </div>
+            )}
             {renderedBibliography.length > 0 && (
               <section id="references" className="bibliography-section" aria-labelledby="references-heading">
                 <div className="bibliography-heading">
@@ -2178,7 +2287,7 @@ function App() {
                     </div>
                   )}
                   <CitationFormattingControls style={citationStyle} locale={citationLocale} onStyleChange={changeCitationStyle} onLocaleChange={changeCitationLocale} compact />
-                  <div className="citation-actions"><button onClick={() => setCitationOpen(false)}>Done</button><button onClick={openCitationPicker}>Add or remove sources</button></div>
+                  <div className="citation-actions"><button onClick={() => setCitationOpen(false)}>Done</button><button onClick={() => openCitationPicker('edit')}>Add or remove sources</button></div>
                 </div>
               )}
               <p>
@@ -2717,7 +2826,7 @@ function App() {
       {toast && <div className="toast" role="status"><Icon name="check" size={16} /> {toast}</div>}
 
       {!citationSearchOpen && !commandOpen && (
-        <button className="quick-cite" onClick={openCitationPicker} aria-label="Insert citation"><span>@</span> Cite</button>
+        <button className="quick-cite" onClick={() => openCitationPicker()} aria-label="Insert citation"><span>@</span> Cite</button>
       )}
     </div>
   )

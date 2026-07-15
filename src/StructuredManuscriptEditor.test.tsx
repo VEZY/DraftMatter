@@ -115,6 +115,65 @@ describe('full structured manuscript editor', () => {
     expect(editorRef.current?.source()).toBe(changed.at(-1))
   })
 
+  it('previews and inserts a multi-source citation at the retained editor selection', async () => {
+    const changed: string[] = []
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    await act(async () => root.render(
+      <StructuredManuscriptEditor ref={editorRef} source={source} onChange={(next) => changed.push(next)} />,
+    ))
+    const items = [
+      { citekey: 'vezy2024', prefix: 'see' },
+      { citekey: 'coutellier2022', locator: 'p. 4' },
+    ]
+
+    const preview = editorRef.current?.citationSource(items, '(Vezy et al., 2024; Coutellier et al., 2022)')
+    expect(preview).toContain('[see @vezy2024; @coutellier2022, p. 4]')
+    expect(preview).toContain('::: {.future-widget}\nOpaque raw payload.\n:::')
+    expect(changed).toHaveLength(0)
+
+    await act(async () => { expect(editorRef.current?.insertCitation(items, '(Vezy et al., 2024; Coutellier et al., 2022)')).toBe(true) })
+    expect(changed.at(-1)).toContain('[see @vezy2024; @coutellier2022, p. 4]')
+    expect(container.querySelector('.structured-citation')?.textContent).toContain('Vezy et al., 2024')
+  })
+
+  it('selects and replaces an existing citation without changing neighboring source', async () => {
+    const changed: string[] = []
+    const selected = vi.fn()
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    await act(async () => root.render(
+      <StructuredManuscriptEditor ref={editorRef} source={source} onChange={(next) => changed.push(next)} onCitationSelect={selected} />,
+    ))
+
+    await act(async () => (container.querySelector('.structured-citation') as HTMLButtonElement).click())
+    const [id, items] = selected.mock.calls[0] as [string, Array<{ citekey: string }>]
+    expect(id).toContain('citation')
+    expect(items).toEqual([{ citekey: 'vezy2024' }])
+
+    const replacement = [{ citekey: 'vezy2024', locator: 'pp. 8–9', suppressAuthor: true }]
+    expect(editorRef.current?.citationReplacementSource(id, replacement, '(2024, pp. 8–9)')).toContain('[-@vezy2024, pp. 8–9]')
+    expect(changed).toHaveLength(0)
+    await act(async () => { expect(editorRef.current?.replaceCitation(id, replacement, '(2024, pp. 8–9)')).toBe(true) })
+    expect(changed.at(-1)).toContain('[-@vezy2024, pp. 8–9]')
+    expect(changed.at(-1)).toContain('::: {.future-widget}\nOpaque raw payload.\n:::')
+  })
+
+  it('applies live CSL labels as presentation state without changing source bytes', async () => {
+    const changed = vi.fn()
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    await act(async () => root.render(
+      <StructuredManuscriptEditor
+        ref={editorRef}
+        source={source}
+        onChange={changed}
+        citationLabels={{ '[@vezy2024]': '(Vezy et al., 2024)' }}
+      />,
+    ))
+
+    expect(container.querySelector('.structured-citation')?.textContent).toBe('(Vezy et al., 2024)')
+    expect(editorRef.current?.source()).toBe(source)
+    expect(changed).not.toHaveBeenCalled()
+  })
+
   it('makes both prose and embedded code read-only for non-editing roles', async () => {
     await act(async () => root.render(<StructuredManuscriptEditor source={source} onChange={vi.fn()} readOnly />))
 

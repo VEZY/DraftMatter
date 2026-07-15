@@ -1,7 +1,7 @@
 import { EditorState } from 'prosemirror-state'
 import { describe, expect, it } from 'vitest'
 import { manuscriptSchema } from './manuscriptSchema'
-import { parseStructuredManuscript, serializeStructuredManuscript } from './structuredManuscript'
+import { parseStructuredManuscript, serializeStructuredManuscript, structuredCitationClusters } from './structuredManuscript'
 
 const portableFixtures = import.meta.glob<string>('./fixtures/portable/*.{md,qmd}', {
   eager: true,
@@ -107,6 +107,15 @@ describe('generic structured manuscript bridge', () => {
     expect(parsed.metadata.frontmatter).toContain('bibliography: references.bib')
     expect(parsed.metadata.reviewSection).toContain('.draftmatter-reviews')
     expect(parsed.diagnostics.filter((diagnostic) => diagnostic.level === 'error')).toEqual([])
+  })
+
+  it('enumerates citation clusters across arbitrary sections for CSL rendering and cache diagnostics', () => {
+    expect(structuredCitationClusters(representativeSource)).toEqual([
+      expect.objectContaining({
+        items: [{ citekey: 'vezy2024', prefix: 'see', locator: 'p. 18' }],
+        signature: '[see @vezy2024, p. 18]',
+      }),
+    ])
   })
 
   it('returns an untouched manuscript byte-for-byte until a structured transaction changes it', () => {

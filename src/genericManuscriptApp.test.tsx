@@ -77,6 +77,29 @@ describe('generic portable manuscript app workflow', () => {
     const sourceButton = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('View source'))
     await act(async () => sourceButton?.click())
     expect(container.querySelector('.source-drawer pre')?.textContent).toContain('println("after")')
+    await act(async () => (container.querySelector('[aria-label="Close source inspector"]') as HTMLButtonElement).click())
+
+    await act(async () => (container.querySelector('.quick-cite') as HTMLButtonElement).click())
+    const citationResult = [...container.querySelectorAll<HTMLButtonElement>('.source-result')]
+      .find((button) => button.textContent?.includes('Growth coordination under fluctuating water availability'))
+    await act(async () => citationResult?.click())
+    const confirmCitation = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('Insert selected · 1'))
+    await act(async () => confirmCitation?.click())
+    await flush(450)
+    expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('[@martin2023]')
+    expect(container.querySelector('.citation-picker')).toBeNull()
+
+    await act(async () => (container.querySelector('[aria-label="Edit citation @martin2023"]') as HTMLButtonElement).click())
+    expect(container.querySelector('.structured-citation-detail')).not.toBeNull()
+    const locator = container.querySelector<HTMLInputElement>('.structured-citation-detail input[placeholder="e.g. p. 18"]')!
+    const inputSetter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    await act(async () => {
+      inputSetter?.call(locator, 'p. 18')
+      locator.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await flush(450)
+    expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('[@martin2023, p. 18]')
 
     await act(async () => root.unmount())
     container.remove()

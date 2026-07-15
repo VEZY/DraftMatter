@@ -4,13 +4,14 @@ import { history, redo, undo } from 'prosemirror-history'
 import { keymap } from 'prosemirror-keymap'
 import { wrapInList } from 'prosemirror-schema-list'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
-import { EditorState, type Command } from 'prosemirror-state'
+import { EditorState, NodeSelection, type Command } from 'prosemirror-state'
 import { tableEditing } from 'prosemirror-tables'
 import { EditorView, type NodeView } from 'prosemirror-view'
 import { baseKeymap } from 'prosemirror-commands'
+import { serializeCitationCluster } from './citation'
 import { manuscriptSchema } from './manuscriptSchema'
 import { parseStructuredManuscript, serializeStructuredManuscript, type StructuredManuscriptMetadata } from './structuredManuscript'
-import type { DocumentDiagnostic } from './types'
+import type { CitationItem, DocumentDiagnostic } from './types'
 
 export interface StructuredOutlineItem {
   id: string
@@ -33,6 +34,10 @@ export interface StructuredManuscriptEditorHandle {
   redo: () => boolean
   insertCodeCell: (language: 'python' | 'r' | 'julia') => boolean
   insertEquation: (display?: boolean) => boolean
+  insertCitation: (items: CitationItem[], rendered?: string) => boolean
+  citationSource: (items: CitationItem[], rendered?: string) => string | null
+  replaceCitation: (id: string, items: CitationItem[], rendered?: string) => boolean
+  citationReplacementSource: (id: string, items: CitationItem[], rendered?: string) => string | null
   insertTable: (rows?: number, columns?: number) => boolean
   insertFigure: (source: string, alt: string, caption?: string, label?: string) => boolean
   scrollToNode: (id: string) => boolean
@@ -45,7 +50,9 @@ export interface StructuredManuscriptEditorProps {
   onDiagnostics?: (diagnostics: DocumentDiagnostic[]) => void
   onOutlineChange?: (outline: StructuredOutlineItem[]) => void
   onInspectRaw?: (nodeId: string) => void
+  onCitationSelect?: (id: string, items: CitationItem[]) => void
   resolveAssetUrl?: (path: string) => string
+  citationLabels?: Record<string, string>
   readOnly?: boolean
   ariaLabel?: string
   className?: string
@@ -68,6 +75,20 @@ function outlineFor(document: ProseMirrorNode): StructuredOutlineItem[] {
 function randomId(prefix: string) {
   const uuid = globalThis.crypto?.randomUUID?.()
   return `${prefix}-${uuid ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`
+}
+
+function citationNode(items: CitationItem[], rendered?: string) {
+  const keys = items.map((item) => item.citekey)
+  return manuscriptSchema.nodes.citation.createChecked({
+    id: randomId('citation'),
+    keys,
+    items,
+    prefix: '',
+    suffix: '',
+    locator: null,
+    suppressAuthor: false,
+    rendered: rendered || `(${keys.join('; ')})`,
+  })
 }
 
 function codeCellNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () => number | undefined, isEditable: () => boolean): NodeView {
@@ -133,19 +154,29 @@ function rawNodeView(node: ProseMirrorNode, onInspect: (nodeId: string) => void)
   return { dom, stopEvent: (event) => event.target === button }
 }
 
-function citationNodeView(initialNode: ProseMirrorNode): NodeView {
+function citationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () => number | undefined, onSelect: (id: string, items: CitationItem[]) => void): NodeView {
   let node = initialNode
-  const dom = document.createElement('span')
+  const dom = document.createElement('button')
+  dom.type = 'button'
   dom.className = 'structured-citation'
+  dom.contentEditable = 'false'
   const updateDom = () => {
     const keys = Array.isArray(node.attrs.keys) ? node.attrs.keys : []
     dom.textContent = String(node.attrs.rendered || `(${keys.join('; ')})`)
     dom.title = keys.map((key: string) => `@${key}`).join('; ')
+    dom.setAttribute('aria-label', `Edit citation ${keys.map((key: string) => `@${key}`).join(', ')}`)
     dom.dataset.dmId = String(node.attrs.id)
   }
   updateDom()
+  dom.addEventListener('mousedown', (event) => event.preventDefault())
+  dom.addEventListener('click', () => {
+    const position = getPos()
+    if (typeof position === 'number') view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, position)))
+    onSelect(String(node.attrs.id), Array.isArray(node.attrs.items) ? node.attrs.items : [])
+  })
   return {
     dom,
+    stopEvent: (event) => event.target === dom,
     update(next) {
       if (next.type !== node.type) return false
       node = next
@@ -216,7 +247,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   onDiagnostics,
   onOutlineChange,
   onInspectRaw,
+  onCitationSelect,
   resolveAssetUrl,
+  citationLabels,
   readOnly = false,
   ariaLabel = 'Rendered manuscript editor',
   className = '',
@@ -230,12 +263,14 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const onDiagnosticsRef = useRef(onDiagnostics)
   const onOutlineRef = useRef(onOutlineChange)
   const onInspectRawRef = useRef(onInspectRaw)
+  const onCitationSelectRef = useRef(onCitationSelect)
   const resolveAssetUrlRef = useRef(resolveAssetUrl)
   const readOnlyRef = useRef(readOnly)
   onChangeRef.current = onChange
   onDiagnosticsRef.current = onDiagnostics
   onOutlineRef.current = onOutlineChange
   onInspectRawRef.current = onInspectRaw
+  onCitationSelectRef.current = onCitationSelect
   resolveAssetUrlRef.current = resolveAssetUrl
   readOnlyRef.current = readOnly
 
@@ -283,6 +318,65 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       view.dispatch(view.state.tr.replaceSelectionWith(node).scrollIntoView())
       view.focus()
       return true
+    },
+    insertCitation: (items, rendered) => {
+      const view = viewRef.current
+      if (!view || readOnlyRef.current || !items.length) return false
+      view.dispatch(view.state.tr.replaceSelectionWith(citationNode(items, rendered)).scrollIntoView())
+      view.focus()
+      return true
+    },
+    citationSource: (items, rendered) => {
+      const view = viewRef.current
+      const metadata = metadataRef.current
+      if (!view || !metadata || !items.length) return null
+      const transaction = view.state.tr.replaceSelectionWith(citationNode(items, rendered))
+      return serializeStructuredManuscript(transaction.doc, metadata)
+    },
+    replaceCitation: (id, items, rendered) => {
+      const view = viewRef.current
+      if (!view || readOnlyRef.current || !items.length) return false
+      let position: number | undefined
+      let citation: ProseMirrorNode | undefined
+      view.state.doc.descendants((node, offset) => {
+        if (node.type === manuscriptSchema.nodes.citation && node.attrs.id === id) {
+          position = offset
+          citation = node
+          return false
+        }
+        return position === undefined
+      })
+      if (position === undefined || !citation) return false
+      view.dispatch(view.state.tr.setNodeMarkup(position, undefined, {
+        ...citation.attrs,
+        keys: items.map((item) => item.citekey),
+        items,
+        rendered: rendered || `(${items.map((item) => item.citekey).join('; ')})`,
+      }))
+      return true
+    },
+    citationReplacementSource: (id, items, rendered) => {
+      const view = viewRef.current
+      const metadata = metadataRef.current
+      if (!view || !metadata || !items.length) return null
+      let position: number | undefined
+      let citation: ProseMirrorNode | undefined
+      view.state.doc.descendants((node, offset) => {
+        if (node.type === manuscriptSchema.nodes.citation && node.attrs.id === id) {
+          position = offset
+          citation = node
+          return false
+        }
+        return position === undefined
+      })
+      if (position === undefined || !citation) return null
+      const transaction = view.state.tr.setNodeMarkup(position, undefined, {
+        ...citation.attrs,
+        keys: items.map((item) => item.citekey),
+        items,
+        rendered: rendered || `(${items.map((item) => item.citekey).join('; ')})`,
+      })
+      return serializeStructuredManuscript(transaction.doc, metadata)
     },
     insertTable: (rows = 2, columns = 2) => {
       const view = viewRef.current
@@ -341,7 +435,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       nodeViews: {
         code_cell: (node, editorView, getPos) => codeCellNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         raw_block: (node) => rawNodeView(node, (nodeId) => onInspectRawRef.current?.(nodeId)),
-        citation: (node) => citationNodeView(node),
+        citation: (node, editorView, getPos) => citationNodeView(node, editorView, getPos, (id, items) => onCitationSelectRef.current?.(id, items)),
         output_block: (node) => outputNodeView(node, (path) => resolveAssetUrlRef.current?.(path) ?? path),
         image: (node) => imageNodeView(node, (path) => resolveAssetUrlRef.current?.(path) ?? path),
       },
@@ -349,7 +443,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         const next = view.state.apply(transaction)
         view.updateState(next)
         onOutlineRef.current?.(outlineFor(next.doc))
-        if (transaction.docChanged && metadataRef.current) {
+        if (transaction.docChanged && !transaction.getMeta('dm-presentation-only') && metadataRef.current) {
           const serialized = serializeStructuredManuscript(next.doc, metadataRef.current)
           lastEmittedRef.current = serialized
           sourceRef.current = serialized
@@ -375,6 +469,22 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     onOutlineRef.current?.(outlineFor(parsed.document))
     if (!view.state.doc.eq(parsed.document)) view.updateState(editorState(parsed.document))
   }, [source])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (!view || !citationLabels) return
+    let transaction = view.state.tr
+    view.state.doc.descendants((node, position) => {
+      if (node.type !== manuscriptSchema.nodes.citation) return true
+      const items = Array.isArray(node.attrs.items) ? node.attrs.items as CitationItem[] : []
+      const rendered = citationLabels[serializeCitationCluster(items)]
+      if (rendered && rendered !== node.attrs.rendered) {
+        transaction = transaction.setNodeMarkup(position, undefined, { ...node.attrs, rendered })
+      }
+      return true
+    })
+    if (transaction.docChanged) view.dispatch(transaction.setMeta('addToHistory', false).setMeta('dm-presentation-only', true))
+  }, [citationLabels])
 
   useEffect(() => {
     viewRef.current?.setProps({ editable: () => !readOnly })

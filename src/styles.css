@@ -3738,7 +3738,8 @@ kbd {
 .structured-editor-content figure img,
 .structured-output img { display: block; height: auto; margin: 0 auto; max-height: 560px; max-width: 100%; }
 .structured-editor-content figcaption { color: var(--muted); font-family: Inter, ui-sans-serif, sans-serif; font-size: 12px; line-height: 1.55; margin-top: 9px; }
-.structured-citation { background: #e7eef2; border-radius: 4px; color: #365a6f; cursor: default; font-family: Inter, ui-sans-serif, sans-serif; font-size: .86em; padding: 2px 5px; }
+.structured-citation { background: #e7eef2; border: 0; border-radius: 4px; color: #365a6f; cursor: pointer; display: inline; font-family: Inter, ui-sans-serif, sans-serif; font-size: .86em; line-height: inherit; margin: 0; padding: 2px 5px; }
+.structured-citation:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .outline-empty { color: var(--muted); font-size: 11px; line-height: 1.5; margin: 8px 10px 14px; }
 .structured-execution-bar { align-items: center; background: #f6f8f7; border: 1px solid #e0e5e2; border-radius: 8px; display: flex; font-family: Inter, ui-sans-serif, sans-serif; gap: 8px; margin: 0 0 24px; padding: 9px 10px; }
 .structured-execution-bar > span { align-items: center; color: #557065; display: flex; flex: 1; gap: 7px; min-width: 0; }

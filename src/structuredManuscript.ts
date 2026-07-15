@@ -4,7 +4,7 @@ import { sourceHash } from './document'
 import { extractExecutableCells } from './executionCells'
 import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
-import type { DocumentDiagnostic } from './types'
+import type { CitationItem, DocumentDiagnostic } from './types'
 
 interface SourceLine {
   raw: string
@@ -399,6 +399,24 @@ export function parseStructuredManuscript(source: string): StructuredManuscript 
   }
 }
 
+export interface StructuredCitationCluster {
+  id: string
+  items: CitationItem[]
+  signature: string
+}
+
+export function structuredCitationClusters(source: string): StructuredCitationCluster[] {
+  const clusters: StructuredCitationCluster[] = []
+  parseStructuredManuscript(source).document.descendants((node) => {
+    if (node.type === manuscriptSchema.nodes.citation) {
+      const items = Array.isArray(node.attrs.items) ? node.attrs.items as CitationItem[] : []
+      clusters.push({ id: String(node.attrs.id), items, signature: serializeCitationCluster(items) })
+    }
+    return true
+  })
+  return clusters
+}
+
 function escapeText(value: string) {
   return value.replace(/([\\`*_[\]])/g, '\\$1')
 }
@@ -499,7 +517,19 @@ function serializeBlock(node: ProseMirrorNode, ending: string, index = 0): strin
 }
 
 export function serializeStructuredManuscript(document: ProseMirrorNode, metadata: StructuredManuscriptMetadata) {
-  if (JSON.stringify(document.toJSON()) === JSON.stringify(metadata.originalDocumentJson)) return metadata.originalSource
+  const sourceSemanticJson = (value: unknown): unknown => {
+    if (Array.isArray(value)) return value.map(sourceSemanticJson)
+    if (!value || typeof value !== 'object') return value
+    const record = value as Record<string, unknown>
+    const normalized = Object.fromEntries(Object.entries(record).map(([key, item]) => [key, sourceSemanticJson(item)]))
+    if ((record.type === 'citation' || record.type === 'cross_reference') && normalized.attrs && typeof normalized.attrs === 'object') {
+      const attrs = { ...normalized.attrs as Record<string, unknown> }
+      delete attrs.rendered
+      normalized.attrs = attrs
+    }
+    return normalized
+  }
+  if (JSON.stringify(sourceSemanticJson(document.toJSON())) === JSON.stringify(sourceSemanticJson(metadata.originalDocumentJson))) return metadata.originalSource
   const ending = metadata.lineEnding
   const blocks: string[] = []
   document.forEach((node, _offset, index) => blocks.push(serializeBlock(node, ending, index)))
