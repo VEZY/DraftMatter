@@ -47,6 +47,9 @@ describe('desktop host adapter', () => {
     await host.openScholarSearch('vezy et al. 2020 DynACof')
     await host.probeRuntime('julia')
     await host.discoverJupyterKernels()
+    await host.executionTrustStatus('/research/canopy')
+    await host.trustProjectForSession('/research/canopy', 'run-project-code-with-user-permissions')
+    await host.revokeProjectTrust('/research/canopy')
 
     expect(calls).toEqual([
       ['open_project', { root: '/research/canopy' }],
@@ -69,15 +72,22 @@ describe('desktop host adapter', () => {
       ['open_scholar_search', { query: 'vezy et al. 2020 DynACof' }],
       ['probe_runtime_executable', { language: 'julia' }],
       ['discover_jupyter_kernels', undefined],
+      ['execution_trust_status', { root: '/research/canopy' }],
+      ['trust_project_for_session', { root: '/research/canopy', acknowledgement: 'run-project-code-with-user-permissions' }],
+      ['revoke_project_trust', { root: '/research/canopy' }],
     ])
   })
 
   it('does not open a system picker from the browser fallback', async () => {
     const picker = vi.fn()
-    const host = createDesktopHost(vi.fn(), picker, false)
+    const invoke = vi.fn()
+    const host = createDesktopHost(invoke, picker, false)
 
     await expect(host.pickProjectFolder()).resolves.toBeNull()
+    await expect(host.executionTrustStatus('/project')).rejects.toMatchObject({ kind: 'integration' })
+    await expect(host.trustProjectForSession('/project', 'run-project-code-with-user-permissions')).rejects.toMatchObject({ kind: 'integration' })
     expect(picker).not.toHaveBeenCalled()
+    expect(invoke).not.toHaveBeenCalled()
   })
 
   it('normalises structured conflicts without losing their safe message', () => {

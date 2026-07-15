@@ -9,7 +9,12 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri_plugin_opener::OpenerExt;
 
+mod execution_trust;
 mod runtime;
+use execution_trust::{
+    execution_trust_status_impl, revoke_project_trust_impl, trust_project_for_session_impl,
+    ExecutionTrustStatus, ExecutionTrustStore,
+};
 use runtime::{
     discover_jupyter_kernels_impl, probe_runtime_executable_impl, JupyterKernelInventory,
     RuntimeExecutableProbe, RuntimeLanguage,
@@ -2089,9 +2094,35 @@ fn discover_jupyter_kernels() -> JupyterKernelInventory {
     discover_jupyter_kernels_impl()
 }
 
+#[tauri::command]
+fn execution_trust_status(
+    root: String,
+    state: tauri::State<'_, ExecutionTrustStore>,
+) -> Result<ExecutionTrustStatus, HostError> {
+    execution_trust_status_impl(&root, &state)
+}
+
+#[tauri::command]
+fn trust_project_for_session(
+    root: String,
+    acknowledgement: String,
+    state: tauri::State<'_, ExecutionTrustStore>,
+) -> Result<ExecutionTrustStatus, HostError> {
+    trust_project_for_session_impl(&root, &acknowledgement, &state)
+}
+
+#[tauri::command]
+fn revoke_project_trust(
+    root: String,
+    state: tauri::State<'_, ExecutionTrustStore>,
+) -> Result<ExecutionTrustStatus, HostError> {
+    revoke_project_trust_impl(&root, &state)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .manage(ExecutionTrustStore::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -2113,7 +2144,10 @@ pub fn run() {
             resolve_doi_csl,
             open_scholar_search,
             probe_runtime_executable,
-            discover_jupyter_kernels
+            discover_jupyter_kernels,
+            execution_trust_status,
+            trust_project_for_session,
+            revoke_project_trust
         ])
         .run(tauri::generate_context!())
         .expect("error while running DraftMatter");

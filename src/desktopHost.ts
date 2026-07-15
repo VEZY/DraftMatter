@@ -2,6 +2,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
 import { CrossrefTransportError, type CrossrefRequest, type CrossrefWork } from './crossref'
 import type { JupyterKernelInventory, RuntimeExecutableProbe, RuntimeLanguage } from './runtimeDiscovery'
+import { EXECUTION_TRUST_ACKNOWLEDGEMENT, type ExecutionTrustStatus } from './executionTrust'
 
 export interface ProjectConfig {
   schemaVersion: number
@@ -176,6 +177,10 @@ export function createDesktopHost(
   directoryPicker: DirectoryPicker = open as DirectoryPicker,
   available = isTauri(),
 ) {
+  const executionUnavailable = () => Promise.reject<never>({
+    kind: 'integration',
+    message: 'Local code execution is unavailable in browser collaboration sessions.',
+  } satisfies HostFailure)
   return {
     available,
     async pickProjectFolder(title = 'Choose a DraftMatter project folder') {
@@ -260,6 +265,21 @@ export function createDesktopHost(
     },
     discoverJupyterKernels() {
       return invokeBridge<JupyterKernelInventory>('discover_jupyter_kernels')
+    },
+    executionTrustStatus(root: string) {
+      return available
+        ? invokeBridge<ExecutionTrustStatus>('execution_trust_status', { root })
+        : executionUnavailable()
+    },
+    trustProjectForSession(root: string, acknowledgement: typeof EXECUTION_TRUST_ACKNOWLEDGEMENT) {
+      return available
+        ? invokeBridge<ExecutionTrustStatus>('trust_project_for_session', { root, acknowledgement })
+        : executionUnavailable()
+    },
+    revokeProjectTrust(root: string) {
+      return available
+        ? invokeBridge<ExecutionTrustStatus>('revoke_project_trust', { root })
+        : executionUnavailable()
     },
   }
 }
