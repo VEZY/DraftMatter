@@ -14,7 +14,7 @@ const MAX_PROBE_OUTPUT_BYTES: u64 = 64 * 1024;
 const MAX_KERNEL_SPEC_BYTES: u64 = 128 * 1024;
 const MAX_KERNEL_SPECS: usize = 128;
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
 pub enum RuntimeLanguage {
     Python,
@@ -163,6 +163,10 @@ fn resolve_runtime(language: RuntimeLanguage, paths: &[PathBuf]) -> Option<PathB
     candidate_names(language)
         .iter()
         .find_map(|name| resolve_executable_in_paths(OsStr::new(name), paths))
+}
+
+pub fn resolve_runtime_executable(language: RuntimeLanguage) -> Option<PathBuf> {
+    resolve_runtime(language, &search_paths())
 }
 
 struct ProbeOutput {

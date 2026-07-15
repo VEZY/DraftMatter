@@ -50,6 +50,17 @@ describe('desktop host adapter', () => {
     await host.executionTrustStatus('/research/canopy')
     await host.trustProjectForSession('/research/canopy', 'run-project-code-with-user-permissions')
     await host.revokeProjectTrust('/research/canopy')
+    await host.executeDirect({
+      root: '/research/canopy',
+      cellId: 'cell-1',
+      language: 'python',
+      code: 'print(1)',
+      attributes: {},
+      inputs: [],
+    })
+    await host.interruptDirect('python')
+    await host.restartDirect('r')
+    await host.terminateDirect('julia')
 
     expect(calls).toEqual([
       ['open_project', { root: '/research/canopy' }],
@@ -75,6 +86,10 @@ describe('desktop host adapter', () => {
       ['execution_trust_status', { root: '/research/canopy' }],
       ['trust_project_for_session', { root: '/research/canopy', acknowledgement: 'run-project-code-with-user-permissions' }],
       ['revoke_project_trust', { root: '/research/canopy' }],
+      ['execute_direct', { request: { root: '/research/canopy', cellId: 'cell-1', language: 'python', code: 'print(1)', attributes: {}, inputs: [] } }],
+      ['interrupt_direct', { language: 'python' }],
+      ['restart_direct', { language: 'r' }],
+      ['terminate_direct', { language: 'julia' }],
     ])
   })
 

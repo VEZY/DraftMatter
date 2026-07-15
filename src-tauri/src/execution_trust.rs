@@ -2,14 +2,14 @@ use crate::{canonical_root, HostError};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
 pub const TRUST_ACKNOWLEDGEMENT: &str = "run-project-code-with-user-permissions";
 const TRUST_WARNING: &str = "Project code can read and change files and use the network with your user permissions. Local execution is not a sandbox.";
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ExecutionTrustStore {
-    roots: Mutex<HashSet<PathBuf>>,
+    roots: Arc<Mutex<HashSet<PathBuf>>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -70,8 +70,6 @@ pub fn revoke_project_trust_impl(
     Ok(status(false))
 }
 
-// The native runners call this guard before creating any child process.
-#[allow(dead_code)]
 pub fn require_execution_trust(root: &Path, store: &ExecutionTrustStore) -> Result<(), HostError> {
     if store
         .roots

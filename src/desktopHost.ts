@@ -3,6 +3,9 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { CrossrefTransportError, type CrossrefRequest, type CrossrefWork } from './crossref'
 import type { JupyterKernelInventory, RuntimeExecutableProbe, RuntimeLanguage } from './runtimeDiscovery'
 import { EXECUTION_TRUST_ACKNOWLEDGEMENT, type ExecutionTrustStatus } from './executionTrust'
+import type { DirectHostExecutionRequest } from './directExecutionTransport'
+import type { RawDirectExecution } from './executionProvider'
+import type { ExecutionLanguage } from './executionCells'
 
 export interface ProjectConfig {
   schemaVersion: number
@@ -279,6 +282,26 @@ export function createDesktopHost(
     revokeProjectTrust(root: string) {
       return available
         ? invokeBridge<ExecutionTrustStatus>('revoke_project_trust', { root })
+        : executionUnavailable()
+    },
+    executeDirect(request: DirectHostExecutionRequest) {
+      return available
+        ? invokeBridge<RawDirectExecution>('execute_direct', { request })
+        : executionUnavailable()
+    },
+    interruptDirect(language: ExecutionLanguage) {
+      return available
+        ? invokeBridge<boolean>('interrupt_direct', { language })
+        : executionUnavailable()
+    },
+    restartDirect(language: ExecutionLanguage) {
+      return available
+        ? invokeBridge<boolean>('restart_direct', { language })
+        : executionUnavailable()
+    },
+    terminateDirect(language: ExecutionLanguage) {
+      return available
+        ? invokeBridge<boolean>('terminate_direct', { language })
         : executionUnavailable()
     },
   }

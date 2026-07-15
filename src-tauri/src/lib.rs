@@ -9,7 +9,12 @@ use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 use tauri_plugin_opener::OpenerExt;
 
+mod direct_execution;
 mod execution_trust;
+use direct_execution::{
+    execute_direct_impl, interrupt_direct_impl, restart_direct_impl, terminate_direct_impl,
+    DirectExecutionRequest, DirectExecutionResult, DirectProcessRegistry,
+};
 mod runtime;
 use execution_trust::{
     execution_trust_status_impl, revoke_project_trust_impl, trust_project_for_session_impl,
@@ -2119,10 +2124,50 @@ fn revoke_project_trust(
     revoke_project_trust_impl(&root, &state)
 }
 
+#[tauri::command]
+async fn execute_direct(
+    request: DirectExecutionRequest,
+    trust: tauri::State<'_, ExecutionTrustStore>,
+    processes: tauri::State<'_, DirectProcessRegistry>,
+) -> Result<DirectExecutionResult, HostError> {
+    let trust = trust.inner().clone();
+    let processes = processes.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || execute_direct_impl(request, &trust, &processes))
+        .await
+        .map_err(|error| {
+            HostError::Integration(format!("The direct runner task failed: {error}"))
+        })?
+}
+
+#[tauri::command]
+fn interrupt_direct(
+    language: RuntimeLanguage,
+    processes: tauri::State<'_, DirectProcessRegistry>,
+) -> Result<bool, HostError> {
+    interrupt_direct_impl(language, &processes)
+}
+
+#[tauri::command]
+fn restart_direct(
+    language: RuntimeLanguage,
+    processes: tauri::State<'_, DirectProcessRegistry>,
+) -> Result<bool, HostError> {
+    restart_direct_impl(language, &processes)
+}
+
+#[tauri::command]
+fn terminate_direct(
+    language: RuntimeLanguage,
+    processes: tauri::State<'_, DirectProcessRegistry>,
+) -> Result<bool, HostError> {
+    terminate_direct_impl(language, &processes)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .manage(ExecutionTrustStore::default())
+        .manage(DirectProcessRegistry::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -2147,7 +2192,11 @@ pub fn run() {
             discover_jupyter_kernels,
             execution_trust_status,
             trust_project_for_session,
-            revoke_project_trust
+            revoke_project_trust,
+            execute_direct,
+            interrupt_direct,
+            restart_direct,
+            terminate_direct
         ])
         .run(tauri::generate_context!())
         .expect("error while running DraftMatter");
