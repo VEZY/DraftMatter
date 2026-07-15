@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { readRecoverySnapshots } from './storage'
 
 const source = `---
 title: "A real portable paper"
@@ -60,6 +61,8 @@ describe('generic portable manuscript app workflow', () => {
     expect(container.querySelector('.structured-citation')?.textContent).toBe('(real2026)')
     expect(container.querySelector('.structured-code-editor')).toHaveProperty('value', 'println("before")')
     expect(container.textContent).not.toContain('Keep this opaque block exactly')
+    expect(readRecoverySnapshots(localStorage)[0]?.source).toBe(source)
+    expect(readRecoverySnapshots(localStorage)[0]?.source).not.toContain('Drought acclimation reshapes canopy development')
 
     const code = container.querySelector('.structured-code-editor') as HTMLTextAreaElement
     const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set

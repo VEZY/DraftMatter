@@ -1939,7 +1939,8 @@ function App() {
       return
     }
 
-    const parsed = parsePortableDocument(await file.text(), initialDraft)
+    const source = await file.text()
+    const parsed = parsePortableDocument(source, initialDraft)
     const nextName = file.name.replace(/\.(qmd|md)$/i, '')
     const cacheResult = readCitationCache(localStorage, `browser:${file.name}`)
     const executionTracker = await ExecutionFreshnessTracker.create(parsed.executableCells)
@@ -1982,7 +1983,7 @@ function App() {
     setCitations((current) => hydrateCitationsFromCache(current, cacheResult.cache))
     desktopSaveBlockedRef.current = false
     resetDraftRevision()
-    replaceManuscriptSource(parsed.draft.portableEnvelope?.source ?? reviewedProjection(parsed.draft))
+    replaceManuscriptSource(source)
     setStructuredMode(true)
     resetDraftHistory(parsed.draft)
     setFilename(file.name)
@@ -1990,7 +1991,7 @@ function App() {
     setDiagnostics(parsed.diagnostics)
     setProjectMenuOpen(false)
     setSaveState('saved')
-    const recoveryAvailable = writeRecoverySnapshot(parsed.draft, file.name, reviewedProjection(parsed.draft)) !== null
+    const recoveryAvailable = writeRecoverySnapshot(parsed.draft, file.name, source) !== null
     const warnings = parsed.diagnostics.filter((item) => item.level !== 'info').length
     setToast(`${warnings ? `Opened ${file.name} · ${warnings} check${warnings === 1 ? '' : 's'} to review` : `Opened ${file.name}`}${recoveryAvailable ? '' : ' · local recovery unavailable'}`)
   }

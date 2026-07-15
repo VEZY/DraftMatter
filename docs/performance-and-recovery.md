@@ -15,6 +15,7 @@ Interactive editing remains section-oriented; expensive publication exports run 
 ## Recovery invariants
 
 - Browser recovery uses a schema-versioned journal and reads the legacy array format.
+- Opening a portable manuscript writes its exact source bytes to the first recovery snapshot; it does not rebuild the file through the legacy draft model, so unknown sections and raw extensions remain recoverable.
 - Unchanged snapshots are deduplicated.
 - At most eight snapshots are retained, with a second 4 MB encoded-size ceiling for long manuscripts.
 - If storage rejects a write, the previous valid journal remains untouched and the editor keeps the live draft.
