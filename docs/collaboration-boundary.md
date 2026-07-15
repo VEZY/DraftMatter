@@ -17,3 +17,9 @@ The future synchronization transport must depend on this browser-safe surface. D
 The transport seam exchanges incremental updates, state vectors, and awareness updates. It has no WebSocket or service dependency, which lets reconnect and offline convergence run in deterministic local tests before an authenticated Hocuspocus transport is attached.
 
 Review decisions are immutable revision-checked records. A decision starts from a Yjs state-vector token; a stale sequential decision is rejected before it is written. If two offline clients decide incompatibly from the same base, both records survive the merge and the derived proposal state becomes `decision-conflict`. Resolving it requires a new decision that names the exact conflicting records and is based on the merged revision. Proposal text or status is never silently chosen by last-writer-wins behavior.
+
+## Workspace authorization seam
+
+The framework-independent workspace service signs short-lived HMAC session tokens only after an upstream identity provider has verified the identity. Its policy layer supports owner, editor, commenter, and viewer roles; one-use expiring guest invitations; immediate membership revocation; per-session rate limits; and an owner-only activity audit. Invitation secrets are stored only as SHA-256 digests and are never written to the audit.
+
+Every project lookup is scoped by workspace membership before the project identifier is resolved. A missing tenant membership, an unknown workspace, and an unknown project all return the same not-found response, preventing project enumeration across tenants. The future WebSocket and HTTP adapters must call `authorizeProject` for the requested capability before loading any collaboration state.
