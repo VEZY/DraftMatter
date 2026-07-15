@@ -97,6 +97,9 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector('.structured-table-caption')?.textContent).toBe('Treatment means.')
     expect(container.querySelector<HTMLTableCellElement>('th:nth-child(2)')?.dataset.alignment).toBe('right')
     expect(container.querySelector('.structured-code-editor')).toHaveProperty('value', 'print("before")')
+    expect(container.querySelector<HTMLTextAreaElement>('.structured-code-editor')?.hidden).toBe(true)
+    expect(container.querySelector('.structured-code-summary')?.textContent).toBe('Code hidden · 1 line · figure output')
+    expect(container.querySelector<HTMLButtonElement>('.structured-code-toggle')?.getAttribute('aria-expanded')).toBe('false')
     expect(container.querySelector('img')?.getAttribute('src')).toBe('asset://figures/growth.svg')
     expect(container.querySelector('.structured-output pre')?.textContent).toContain('<script>window.__unsafe = true</script>')
     expect(container.querySelector('.structured-output script')).toBeNull()
@@ -121,7 +124,11 @@ describe('full structured manuscript editor', () => {
       <StructuredManuscriptEditor ref={editorRef} source={source} onChange={(next) => changed.push(next)} />,
     ))
 
+    await act(async () => { expect(editorRef.current?.setHeading(2)).toBe(true) })
+    expect(changed.at(-1)).toContain('## Generic manuscript')
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show python code for cell-growth"]')?.click())
     const code = container.querySelector('.structured-code-editor') as HTMLTextAreaElement
+    expect(code.hidden).toBe(false)
     const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
     await act(async () => {
       setValue?.call(code, 'print("after")')
@@ -136,8 +143,6 @@ describe('full structured manuscript editor', () => {
     expect(changed.at(-1)).toContain('| :--- | ---: |')
     expect(changed.at(-1)).toContain(': Treatment **means**. {#tbl-means .striped data-owner="field-team"}')
 
-    await act(async () => { expect(editorRef.current?.setHeading(2)).toBe(true) })
-    expect(changed.at(-1)).toContain('## Generic manuscript')
     expect(editorRef.current?.source()).toBe(changed.at(-1))
 
     const editedSource = changed.at(-1)!
@@ -209,6 +214,33 @@ describe('full structured manuscript editor', () => {
     ))
 
     expect(container.querySelector('.structured-citation')?.textContent).toBe('(Vezy et al., 2024)')
+    expect(editorRef.current?.source()).toBe(source)
+    expect(changed).not.toHaveBeenCalled()
+  })
+
+  it('applies execution freshness as presentation state without changing portable source', async () => {
+    const changed = vi.fn()
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    await act(async () => root.render(
+      <StructuredManuscriptEditor
+        ref={editorRef}
+        source={source}
+        onChange={changed}
+        codeCellStatuses={{ 'cell-growth': 'current' }}
+      />,
+    ))
+
+    expect(container.querySelector('.structured-cell-status')?.textContent).toBe('Current')
+    expect(container.querySelector('.structured-code-cell')?.getAttribute('data-status')).toBe('current')
+    await act(async () => root.render(
+      <StructuredManuscriptEditor
+        ref={editorRef}
+        source={source}
+        onChange={changed}
+        codeCellStatuses={{ 'cell-growth': 'running' }}
+      />,
+    ))
+    expect(container.querySelector('.structured-cell-status')?.textContent).toBe('Running')
     expect(editorRef.current?.source()).toBe(source)
     expect(changed).not.toHaveBeenCalled()
   })
@@ -379,6 +411,7 @@ describe('full structured manuscript editor', () => {
 
     expect(container.querySelector('.structured-editor-content')?.getAttribute('contenteditable')).toBe('false')
     expect(container.querySelector<HTMLTextAreaElement>('.structured-code-editor')?.readOnly).toBe(true)
+    expect(container.querySelector<HTMLButtonElement>('.structured-code-toggle')?.disabled).toBe(false)
     expect(container.querySelector<HTMLButtonElement>('.structured-footnote-edit')?.disabled).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-equation-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-figure-edit')].every((button) => button.disabled)).toBe(true)

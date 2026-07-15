@@ -15,6 +15,7 @@ import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
 import { captureReviewSuggestion } from './reviewSuggestionCapture'
 import { parseStructuredManuscript, serializeStructuredManuscript, type StructuredManuscriptMetadata } from './structuredManuscript'
+import type { ExecutionFreshnessStatus } from './executionFreshness'
 import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
 
 export interface StructuredOutlineItem {
@@ -70,6 +71,7 @@ export interface StructuredManuscriptEditorProps {
   onSuggestionCapture?: (message: string, error?: boolean) => void
   resolveAssetUrl?: (path: string) => string
   citationLabels?: Record<string, string>
+  codeCellStatuses?: Record<string, ExecutionFreshnessStatus>
   markupView?: MarkupView
   readOnly?: boolean
   ariaLabel?: string
@@ -177,11 +179,30 @@ function reviewDecorations(document: ProseMirrorNode, records: Map<string, Revie
   return DecorationSet.create(document, decorations)
 }
 
-function codeCellNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () => number | undefined, isEditable: () => boolean): NodeView {
+function codeCellStatusLabel(status: string) {
+  if (status === 'environment-changed') return 'Environment changed'
+  if (status === 'output-missing') return 'Output missing'
+  if (status === 'never-run') return 'Not run'
+  if (status === 'stale') return 'Needs run'
+  return status[0].toUpperCase() + status.slice(1).replaceAll('-', ' ')
+}
+
+function updateCodeCellStatus(dom: HTMLElement, status: string) {
+  dom.dataset.status = status
+  dom.querySelector<HTMLElement>('.structured-cell-status')?.replaceChildren(codeCellStatusLabel(status))
+}
+
+function codeCellNodeView(
+  initialNode: ProseMirrorNode,
+  view: EditorView,
+  getPos: () => number | undefined,
+  isEditable: () => boolean,
+  presentationStatus: (cellId: string) => ExecutionFreshnessStatus | undefined,
+): NodeView {
   let node = initialNode
+  let expanded = false
   const dom = document.createElement('section')
   dom.className = 'structured-code-cell'
-  dom.dataset.dmId = String(node.attrs.id)
 
   const header = document.createElement('div')
   header.className = 'structured-code-cell-header'
@@ -191,28 +212,70 @@ function codeCellNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   label.textContent = String(node.attrs.id)
   const status = document.createElement('span')
   status.className = 'structured-cell-status'
-  header.append(language, label, status)
+  const toggle = document.createElement('button')
+  toggle.type = 'button'
+  toggle.className = 'structured-code-toggle'
+  header.append(language, label, status, toggle)
+
+  const summary = document.createElement('p')
+  summary.className = 'structured-code-summary'
 
   const textarea = document.createElement('textarea')
   textarea.className = 'structured-code-editor'
   textarea.spellcheck = false
-  textarea.setAttribute('aria-label', `${String(node.attrs.language)} code cell ${String(node.attrs.id)}`)
   const updateDom = () => {
-    language.textContent = String(node.attrs.language === 'r' ? 'R' : node.attrs.language)
-    status.textContent = String(node.attrs.status === 'stale' ? 'Needs run' : node.attrs.status)
-    if (textarea.value !== node.attrs.code) textarea.value = String(node.attrs.code)
+    const code = String(node.attrs.code)
+    const cellId = String(node.attrs.id)
+    const cellLanguage = String(node.attrs.language)
+    const lines = code ? code.split(/\r\n|\r|\n/).length : 0
+    const output = node.attrs.outputKind ? ` · ${String(node.attrs.outputKind)} output` : ''
+    dom.dataset.dmId = cellId
+    dom.dataset.expanded = expanded ? 'true' : 'false'
+    dom.dataset.sourceStatus = String(node.attrs.status)
+    language.textContent = cellLanguage === 'r' ? 'R' : cellLanguage
+    label.textContent = cellId
+    const presentedStatus = presentationStatus(cellId) ?? String(node.attrs.status)
+    dom.dataset.status = presentedStatus
+    status.textContent = codeCellStatusLabel(presentedStatus)
+    summary.textContent = `Code hidden · ${lines} ${lines === 1 ? 'line' : 'lines'}${output}`
+    summary.hidden = expanded
+    textarea.hidden = !expanded
+    textarea.id = `dm-code-${cellId.replace(/[^a-zA-Z0-9_.:-]+/g, '-')}`
+    textarea.setAttribute('aria-label', `${cellLanguage} code cell ${cellId}`)
+    toggle.textContent = expanded ? 'Hide code' : 'Show code'
+    toggle.setAttribute('aria-label', `${expanded ? 'Hide' : 'Show'} ${cellLanguage} code for ${cellId}`)
+    toggle.setAttribute('aria-controls', textarea.id)
+    toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false')
+    if (textarea.value !== code) textarea.value = code
     textarea.readOnly = !isEditable()
   }
   updateDom()
+  toggle.addEventListener('click', () => {
+    expanded = !expanded
+    updateDom()
+    if (expanded) {
+      textarea.focus()
+      textarea.setSelectionRange(0, 0)
+    } else toggle.focus()
+  })
   textarea.addEventListener('input', () => {
     const position = getPos()
-    if (typeof position !== 'number') return
+    if (typeof position !== 'number' || !isEditable()) return
     view.dispatch(view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, code: textarea.value, status: 'stale' }))
   })
-  dom.append(header, textarea)
+  textarea.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      expanded = false
+      updateDom()
+      toggle.focus()
+    }
+  })
+  dom.append(header, summary, textarea)
   return {
     dom,
-    stopEvent: (event) => event.target === textarea,
+    stopEvent: (event) => dom.contains(event.target as Node),
+    ignoreMutation: () => true,
     update(next) {
       if (next.type !== node.type) return false
       node = next
@@ -1089,6 +1152,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   onSuggestionCapture,
   resolveAssetUrl,
   citationLabels,
+  codeCellStatuses,
   markupView = 'all',
   readOnly = false,
   ariaLabel = 'Rendered manuscript editor',
@@ -1112,6 +1176,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const pendingSuggestionRef = useRef<{ acceptedSource: string; draftSource: string; timeout: number } | undefined>(undefined)
   const reviewSelectionSignatureRef = useRef('')
   const resolveAssetUrlRef = useRef(resolveAssetUrl)
+  const codeCellStatusesRef = useRef(codeCellStatuses)
   const readOnlyRef = useRef(readOnly)
   const markupViewRef = useRef(markupView)
   const reviewDecorationRef = useRef(reviewDecorationIndex(source))
@@ -1126,6 +1191,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   suggestionAuthorRef.current = suggestionAuthor
   onSuggestionCaptureRef.current = onSuggestionCapture
   resolveAssetUrlRef.current = resolveAssetUrl
+  codeCellStatusesRef.current = codeCellStatuses
   readOnlyRef.current = readOnly
   markupViewRef.current = markupView
 
@@ -1414,7 +1480,13 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         },
       },
       nodeViews: {
-        code_cell: (node, editorView, getPos) => codeCellNodeView(node, editorView, getPos, () => !readOnlyRef.current),
+        code_cell: (node, editorView, getPos) => codeCellNodeView(
+          node,
+          editorView,
+          getPos,
+          () => !readOnlyRef.current,
+          (cellId) => codeCellStatusesRef.current?.[cellId],
+        ),
         raw_block: (node) => rawNodeView(node, (nodeId) => onInspectRawRef.current?.(nodeId)),
         citation: (node, editorView, getPos) => citationNodeView(node, editorView, getPos, (id, items) => onCitationSelectRef.current?.(id, items)),
         equation_inline: (node, editorView, getPos) => equationNodeView(node, editorView, getPos, false, () => !readOnlyRef.current),
@@ -1528,6 +1600,13 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     hostRef.current?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('.structured-table-input').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-table-edit').forEach((button) => { button.disabled = readOnly })
   }, [readOnly])
+
+  useEffect(() => {
+    hostRef.current?.querySelectorAll<HTMLElement>('.structured-code-cell').forEach((cell) => {
+      const cellId = cell.dataset.dmId ?? ''
+      updateCodeCellStatus(cell, codeCellStatuses?.[cellId] ?? cell.dataset.sourceStatus ?? 'stale')
+    })
+  }, [codeCellStatuses])
 
   return <div ref={hostRef} className={`structured-manuscript-editor ${className}`.trim()} data-read-only={readOnly ? 'true' : 'false'} />
 })

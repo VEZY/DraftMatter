@@ -62,6 +62,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
   test('renders, edits, and reopens an arbitrary QMD without exposing opaque source', async ({ page }) => {
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
     const renderedEditor = page.getByRole('textbox', { name: 'Rendered manuscript editor' })
+    const codeCell = manuscript.locator('.structured-code-cell[data-dm-id="cell-growth"]')
 
     await expect(manuscript.getByRole('heading', { level: 1 })).toHaveText('Portable field notes')
     await expect(manuscript.getByRole('heading', { level: 2, name: 'Background' })).toBeVisible()
@@ -79,6 +80,8 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(manuscript.locator('#eq-fit .katex')).toBeVisible()
     await expect(manuscript.locator('.structured-equation math')).toHaveCount(2)
     await expect(manuscript.getByRole('button', { name: 'Go to footnote 1' })).toHaveText('1')
+    await expect(codeCell.getByRole('button', { name: 'Show julia code for cell-growth' })).toHaveAttribute('aria-expanded', 'false')
+    await expect(codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveCount(0)
     await expect(manuscript.getByText('Footnote 1', { exact: true })).toBeVisible()
     await expect(manuscript.getByText('Calibration details stay portable.', { exact: true })).toBeVisible()
     await expect(renderedEditor).not.toContainText(':::')
@@ -128,12 +131,19 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(manuscript.getByText('Calibration details were independently checked.', { exact: true })).toBeVisible()
     await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('[^methods]: Calibration details were **independently checked**.')
 
-    const code = manuscript.getByRole('textbox', { name: 'julia code cell cell-growth' })
+    await expect(codeCell).toHaveScreenshot('semantic-code-cell.png')
+    await codeCell.getByRole('button', { name: 'Show julia code for cell-growth' }).click()
+    await expect(codeCell).toHaveScreenshot('semantic-code-editor.png')
+    const code = codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' })
     await code.fill('println("after")')
     await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('println("after")')
+    await code.press('Escape')
+    await expect(codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveCount(0)
 
     await page.reload()
-    await expect(page.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveValue('println("after")')
+    await codeCell.getByRole('button', { name: 'Show julia code for cell-growth' }).click()
+    await expect(codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveValue('println("after")')
+    await codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' }).press('Escape')
     await expect(page.getByRole('img', { name: 'Revised canopy response' })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Figure trajectory' })).toHaveAttribute('href', '#fig-trajectory')
     await expect(page.getByRole('link', { name: 'Table response' })).toHaveAttribute('href', '#tbl-response')

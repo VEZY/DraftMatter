@@ -2882,6 +2882,7 @@ function App() {
               suggestionAuthor={{ id: 'dm-local-author', name: 'Remi Vezy' }}
               onSuggestionCapture={(message) => setToast(message)}
               citationLabels={structuredCitationLabels}
+              codeCellStatuses={Object.fromEntries(executionCellStates.map((state) => [state.cellId, state.status] as const))}
               markupView={markupView}
               readOnly={Boolean(structuredReviewProjection)}
               resolveAssetUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) : path}
