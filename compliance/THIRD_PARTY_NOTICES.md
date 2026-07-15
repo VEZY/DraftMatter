@@ -286,7 +286,11 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | @emnapi/runtime | 1.11.1 | MIT | required |
 | npm | @emnapi/wasi-threads | 1.2.2 | MIT | required |
 | npm | @exodus/bytes | 1.15.1 | MIT | development |
+| npm | @hocuspocus/common | 4.4.0 | MIT | required |
+| npm | @hocuspocus/provider | 4.4.0 | MIT | required |
+| npm | @hocuspocus/server | 4.4.0 | MIT | required |
 | npm | @jridgewell/sourcemap-codec | 1.5.5 | MIT | development |
+| npm | @lifeomic/attempt | 3.1.0 | MIT | required |
 | npm | @napi-rs/wasm-runtime | 1.1.6 | MIT | required |
 | npm | @oxc-project/types | 0.139.0 | MIT | required |
 | npm | @rolldown/binding-android-arm64 | 1.1.5 | MIT | required |
@@ -360,12 +364,14 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | @vitest/spy | 4.1.10 | MIT | development |
 | npm | @vitest/utils | 4.1.10 | MIT | development |
 | npm | assertion-error | 2.0.1 | MIT | development |
+| npm | async-mutex | 0.5.0 | MIT | required |
 | npm | axe-core | 4.12.1 | MPL-2.0 | development |
 | npm | bail | 2.0.2 | MIT | required |
 | npm | bidi-js | 1.0.3 | MIT | development |
 | npm | chai | 6.2.2 | MIT | development |
 | npm | character-entities | 2.0.2 | MIT | required |
 | npm | convert-source-map | 2.0.0 | MIT | development |
+| npm | crossws | 0.4.10 | MIT | required |
 | npm | css-tree | 3.2.1 | MIT | development |
 | npm | csstype | 3.2.3 | MIT | development |
 | npm | data-urls | 7.0.0 | MIT | development |
@@ -387,6 +393,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | is-potential-custom-element-name | 1.0.1 | MIT | development |
 | npm | isomorphic.js | 0.2.5 | MIT | required |
 | npm | jsdom | 29.1.1 | MIT | development |
+| npm | kleur | 4.1.5 | MIT | required |
 | npm | lib0 | 0.2.117 | MIT | required |
 | npm | lightningcss | 1.32.0 | MPL-2.0 | required |
 | npm | lightningcss-android-arm64 | 1.32.0 | MPL-2.0 | required |
@@ -485,5 +492,6 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | why-is-node-running | 2.3.0 | MIT | development |
 | npm | xml-name-validator | 5.0.0 | Apache-2.0 | development |
 | npm | xmlchars | 2.2.0 | MIT | development |
+| npm | y-prosemirror | 1.3.7 | MIT | required |
 | npm | y-protocols | 1.0.7 | MIT | required |
 | npm | yjs | 13.6.31 | MIT | required |

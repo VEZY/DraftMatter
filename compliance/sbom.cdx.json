@@ -20,7 +20,7 @@
       },
       {
         "name": "draftmatter:dependency-fingerprint",
-        "value": "sha256:679b581896b962710d6e316aa748198553ca1c7d4bbd7b9b5b18ccfc1b5398e6"
+        "value": "sha256:a1443c1bedf06330a8086cd0c80d22bd10527a6df143eaebe17df93120e9983f"
       }
     ]
   },
@@ -6563,6 +6563,93 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:npm/%40hocuspocus%2Fcommon@4.4.0",
+      "name": "@hocuspocus/common",
+      "version": "4.4.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40hocuspocus%2Fcommon@4.4.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@hocuspocus/common/-/common-4.4.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40hocuspocus%2Fprovider@4.4.0",
+      "name": "@hocuspocus/provider",
+      "version": "4.4.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40hocuspocus%2Fprovider@4.4.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@hocuspocus/provider/-/provider-4.4.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40hocuspocus%2Fserver@4.4.0",
+      "name": "@hocuspocus/server",
+      "version": "4.4.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40hocuspocus%2Fserver@4.4.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@hocuspocus/server/-/server-4.4.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:npm/%40jridgewell%2Fsourcemap-codec@1.5.5",
       "name": "@jridgewell/sourcemap-codec",
       "version": "1.5.5",
@@ -6577,6 +6664,35 @@
         {
           "type": "distribution",
           "url": "https://registry.npmjs.org/@jridgewell/sourcemap-codec/-/sourcemap-codec-1.5.5.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40lifeomic%2Fattempt@3.1.0",
+      "name": "@lifeomic/attempt",
+      "version": "3.1.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40lifeomic%2Fattempt@3.1.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@lifeomic/attempt/-/attempt-3.1.0.tgz"
         }
       ],
       "properties": [
@@ -8709,6 +8825,35 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:npm/async-mutex@0.5.0",
+      "name": "async-mutex",
+      "version": "0.5.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/async-mutex@0.5.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/async-mutex/-/async-mutex-0.5.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:npm/axe-core@4.12.1",
       "name": "axe-core",
       "version": "4.12.1",
@@ -8868,6 +9013,35 @@
         {
           "type": "distribution",
           "url": "https://registry.npmjs.org/convert-source-map/-/convert-source-map-2.0.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/crossws@0.4.10",
+      "name": "crossws",
+      "version": "0.4.10",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/crossws@0.4.10",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/crossws/-/crossws-0.4.10.tgz"
         }
       ],
       "properties": [
@@ -9477,6 +9651,35 @@
         {
           "type": "distribution",
           "url": "https://registry.npmjs.org/jsdom/-/jsdom-29.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/kleur@4.1.5",
+      "name": "kleur",
+      "version": "4.1.5",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/kleur@4.1.5",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/kleur/-/kleur-4.1.5.tgz"
         }
       ],
       "properties": [
@@ -12319,6 +12522,35 @@
         {
           "type": "distribution",
           "url": "https://registry.npmjs.org/xmlchars/-/xmlchars-2.2.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/y-prosemirror@1.3.7",
+      "name": "y-prosemirror",
+      "version": "1.3.7",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/y-prosemirror@1.3.7",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/y-prosemirror/-/y-prosemirror-1.3.7.tgz"
         }
       ],
       "properties": [

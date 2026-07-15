@@ -19,3 +19,9 @@ Each persisted write updates `lastActivityAt`; inactive projects can therefore b
 `estimateCollaborationCapacity` keeps unit costs vendor-neutral and explicit. It estimates monthly update volume, retained storage, active service hours, and cost from configured storage, egress, and active-service rates. Before charging users, deployment owners should replace example rates with their contracted prices and validate the model against observed dashboard data.
 
 Operational alerts should cover failed integrity checks, restore failures, unusual update size/rate, snapshot lag, backup age, storage growth, authorization denials, and sustained WebSocket saturation. Secrets, invitation tokens, manuscript text, and raw Yjs updates must not appear in metrics or logs.
+
+## Hocuspocus transport
+
+The server adapter accepts only strict `workspace:project` document names and authenticates every connection through the tenant-scoped workspace service before loading state. Viewer connections are protocol-level read-only. Commenters may create attributed threads and append attributed replies; a candidate-update comparison rejects changes to manuscript text, anchors, proposals, decisions, metadata, unknown shared roots, other authors, or existing message history. Editors and owners can submit normal Yjs updates.
+
+Hocuspocus changes append compact update tails to the persistence contract, while debounced stores create immutable full snapshots. Unauthenticated queues, pending documents, and WebSocket payloads have explicit bounds. Managed deployments must terminate TLS at the service edge and use the same authorization hook after verifying short-lived session tokens.
