@@ -30,6 +30,7 @@ Useful implementation notes:
 - [Performance and recovery budgets](./docs/performance-and-recovery.md)
 - [Release, diagnostics, and compliance](./docs/release-compliance.md)
 - [Collaboration persistence and operations](./docs/collaboration-operations.md)
+- [Collaboration beta core gate](./docs/collaboration-beta-gate.md)
 - [Product and architecture brief](./draftmatter-app-design.md)
 
 Paid browser collaboration is a later phase. Its shared editor/reviewer surface now has a tested browser-safe entrypoint, an offline-capable Yjs state model, a tenant-isolated authorization core, and an authenticated Hocuspocus transport; browser builds intentionally have no filesystem, process, execution, Git, or external-renderer capability. See [the collaboration boundary](docs/collaboration-boundary.md).
