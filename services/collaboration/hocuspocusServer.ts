@@ -1,7 +1,8 @@
 import { Server, type ServerConfiguration } from '@hocuspocus/server'
 import * as Y from 'yjs'
 import { AuthenticatedWorkspaceService, type WorkspaceRole } from '../../src/collaboration/workspaceService'
-import { CollaborationStoreError, FileCollaborationStore, type CollaborationProjectScope } from './fileStore'
+import { CollaborationStoreError, type CollaborationProjectScope } from './fileStore'
+import type { CollaborationPersistence } from './persistence'
 
 const SAFE_ID = /^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/
 const ROOTS = {
@@ -23,7 +24,7 @@ export interface CollaborationConnectionContext extends CollaborationProjectScop
 
 export interface DraftMatterHocuspocusOptions {
   authorization: AuthenticatedWorkspaceService
-  persistence: FileCollaborationStore
+  persistence: CollaborationPersistence
   port?: number
   address?: string
   snapshotIdFactory?: () => string

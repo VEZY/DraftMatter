@@ -3,6 +3,7 @@ import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/p
 import { dirname, join } from 'node:path'
 import * as Y from 'yjs'
 import { CollaborationOperationsDashboard } from './operations'
+import type { CollaborationPersistence } from './persistence'
 
 const SAFE_ID = /^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/
 
@@ -90,7 +91,7 @@ function stableJson(value: unknown) {
   return `${JSON.stringify(value, null, 2)}\n`
 }
 
-export class FileCollaborationStore {
+export class FileCollaborationStore implements CollaborationPersistence {
   private readonly root: string
   private readonly clock: () => number
   private readonly idFactory: () => string

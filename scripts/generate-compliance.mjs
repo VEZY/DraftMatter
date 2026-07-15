@@ -7,6 +7,9 @@ import { fileURLToPath } from 'node:url'
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const verifyOnly = process.argv.includes('--verify')
 const allowlist = new Set(JSON.parse(readFileSync(join(root, 'compliance/license-allowlist.json'), 'utf8')))
+const licenseAliases = new Map([
+  ['Public Domain', 'LicenseRef-Public-Domain'],
+])
 
 function command(commandName, args) {
   return execFileSync(commandName, args, {
@@ -77,6 +80,7 @@ function cargoComponents(target) {
 }
 
 function licenseTokens(expression) {
+  expression = normalizedLicense(expression)
   if (expression === 'NOASSERTION') return ['NOASSERTION']
   return expression
     .replaceAll('/', ' OR ')
@@ -85,7 +89,7 @@ function licenseTokens(expression) {
 }
 
 function normalizedLicense(expression) {
-  return expression.replaceAll('/', ' OR ')
+  return (licenseAliases.get(expression) ?? expression).replaceAll('/', ' OR ')
 }
 
 function verifyLicenses(components) {
