@@ -1,0 +1,45 @@
+---
+title: Adversarial execution fixtures
+---
+
+```python {#real-python .execute output="figure"}
+print("real python")
+```
+
+```{r} #real-r
+cat("real r")
+```
+
+```julia {#real-julia .execute}
+println("real julia")
+```
+
+```python
+print("ordinary displayed code, never implicit execution")
+```
+
+````markdown
+```python {#literal-example .execute}
+print("shown as an example")
+```
+````
+
+:::: {.raw}
+```python {#raw-region .execute}
+print("raw region")
+```
+::::
+
+::::: {.draftmatter-reviews .hidden data-schema="1"}
+::::: {#dm-c01 .dm-change}
+~~~{.dm-proposal}
+```python {#review-payload .execute}
+print("review payload")
+```
+~~~
+:::::
+:::::
+
+```{=html}
+<script>not_an_execution_cell()</script>
+```

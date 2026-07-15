@@ -7,6 +7,7 @@ import type {
   SuggestionStatus,
 } from './types'
 import { citationKeys, parseCitationCluster } from './citation'
+import { extractExecutableCells } from './executionCells'
 
 const REVIEW_MARKER = '::::: {.draftmatter-reviews'
 const KNOWN_SECTIONS: Record<string, Exclude<SectionKey, 'frontmatter'>> = {
@@ -97,14 +98,14 @@ function cleanCitation(section: string) {
 
 function parseMethods(section: string, fallback: DraftState, diagnostics: DocumentDiagnostic[]) {
   const withoutOutputs = section.replace(/<!-- dm-output:start[^>]*-->[\s\S]*?<!-- dm-output:end -->/g, '').trim()
-  const executable = withoutOutputs.match(/^(`{3,}|~{3,})(python|r|julia)\b[^\n]*\.execute[^\n]*\n([\s\S]*?)^\1\s*$/m)
+  const executable = extractExecutableCells(withoutOutputs).cells[0]
   if (!executable) {
     diagnostics.push({ code: 'executable-cell-missing', level: 'warning', message: 'No supported executable cell was found; the sample cell remains available.' })
     return { methods: withoutOutputs, code: fallback.code }
   }
   return {
-    methods: withoutOutputs.replace(executable[0], '').trim(),
-    code: executable[3].replace(/\n$/, ''),
+    methods: `${withoutOutputs.slice(0, executable.position.startOffset)}${withoutOutputs.slice(executable.position.endOffset)}`.trim(),
+    code: executable.source,
   }
 }
 
@@ -140,6 +141,8 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
   const review = reviewIndex >= 0 ? source.slice(reviewIndex) : ''
   const sourceWithoutReview = reviewIndex >= 0 ? source.slice(0, reviewIndex) : source
   if (!review) diagnostics.push({ code: 'review-data-missing', level: 'info', message: 'This manuscript has no embedded DraftMatter review section.' })
+  const execution = extractExecutableCells(sourceWithoutReview)
+  diagnostics.push(...execution.diagnostics)
 
   const { frontmatter, body } = parseFrontmatter(sourceWithoutReview, diagnostics)
   const sections = splitSections(body)
@@ -192,7 +195,7 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
   const preservedCount = draft.preservedSections?.length ?? 0
   if (preservedCount) diagnostics.push({ code: 'sections-preserved', level: 'info', message: `${preservedCount} unsupported section${preservedCount === 1 ? '' : 's'} will be preserved in portable exports.` })
 
-  return { draft, diagnostics, sourceHash: sourceHash(originalSource) }
+  return { draft, diagnostics, sourceHash: sourceHash(originalSource), executableCells: execution.cells }
 }
 
 export function validateCleanProjection(source: string): DocumentDiagnostic[] {

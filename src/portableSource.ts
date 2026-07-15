@@ -1,4 +1,5 @@
 import { sourceHash } from './document'
+import { extractExecutableCells, type ExecutableCell } from './executionCells'
 
 export type PortableSourceNodeKind =
   | 'frontmatter'
@@ -82,7 +83,7 @@ function explicitId(raw: string) {
   return raw.match(/(?:^|[\s{])#([a-zA-Z][a-zA-Z0-9_.:-]*)/)?.[1]
 }
 
-function semanticNodes(source: string, nodes: PortableSourceNode[]): PortableSemanticNode[] {
+function semanticNodes(source: string, nodes: PortableSourceNode[], executableCells: ExecutableCell[]): PortableSemanticNode[] {
   const semantic: PortableSemanticNode[] = []
   const literalRanges = nodes.filter((node) => node.kind === 'executable-fence' || node.kind === 'raw-block' || node.kind === 'output' || node.kind === 'review-section')
   const isLiteralRange = (start: number, end: number) => literalRanges.some((range) => start >= range.start && end <= range.end)
@@ -93,16 +94,20 @@ function semanticNodes(source: string, nodes: PortableSourceNode[]): PortableSem
 
   for (const node of nodes) {
     if (node.kind === 'executable-fence') {
-      const opening = lineContent(sourceLines(node.raw)[0] ?? '')
-      const language = opening.match(/^[ \t]*(?:`{3,}|~{3,})(python|r|julia)\b/)?.[1] ?? 'unknown'
-      const label = explicitId(opening)
+      const cell = executableCells.find((candidate) => candidate.position.startOffset === node.start)
+      if (!cell) continue
       semantic.push({
-        id: label ? `code:${label}` : `code:${semantic.filter((item) => item.kind === 'code-cell').length + 1}`,
+        id: `code:${cell.id}`,
         kind: 'code-cell',
         start: node.start,
         end: node.end,
         raw: node.raw,
-        attributes: { language, ...(label ? { label } : {}) },
+        attributes: {
+          language: cell.language,
+          label: cell.id,
+          ...(cell.classes.length ? { classes: cell.classes } : {}),
+          ...Object.fromEntries(Object.entries(cell.attributes).map(([key, value]) => [key, value === true ? 'true' : value])),
+        },
       })
     }
 
@@ -173,6 +178,8 @@ function semanticNodes(source: string, nodes: PortableSourceNode[]): PortableSem
 
 export function parseLosslessPortableSource(source: string): LosslessPortableSource {
   const lines = sourceLines(source)
+  const executableCells = extractExecutableCells(source).cells
+  const executableStarts = new Set(executableCells.map((cell) => cell.position.startOffset))
   const nodes: PortableSourceNode[] = []
   let index = 0
   let offset = 0
@@ -217,7 +224,7 @@ export function parseLosslessPortableSource(source: string): LosslessPortableSou
     const fence = line.match(/^[ \t]*(`{3,}|~{3,})(.*)$/)
     if (fence) {
       const info = fence[2]
-      const kind = /^(?:python|r|julia)\b[^\n]*\.execute/.test(info.trim())
+      const kind = executableStarts.has(offset)
         ? 'executable-fence'
         : /^\{=\w+\}/.test(info.trim())
           ? 'raw-block'
@@ -233,7 +240,7 @@ export function parseLosslessPortableSource(source: string): LosslessPortableSou
     sourceHash: sourceHash(source),
     lineEnding: source.includes('\r\n') ? '\r\n' : source.includes('\n') ? '\n' : source.includes('\r') ? '\r' : null,
     nodes,
-    semanticNodes: semanticNodes(source, nodes),
+    semanticNodes: semanticNodes(source, nodes, executableCells),
   }
 }
 

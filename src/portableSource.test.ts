@@ -117,4 +117,17 @@ print("[@inside-code] []{#inside-code .dm-anchor}")
     expect(document.semanticNodes.filter((node) => node.kind === 'citation').map((node) => node.raw)).toEqual(['[@visible]'])
     expect(document.semanticNodes.filter((node) => node.kind === 'review-anchor').map((node) => node.id)).toEqual(['anchor:dm-visible'])
   })
+
+  it('uses AST-vetted Quarto cells in the lossless semantic source model', () => {
+    const source = '```{julia #stable-julia}\nprintln(1)\n```\n\n```python\nprint("display only")\n```\n'
+    const document = parseLosslessPortableSource(source)
+
+    expect(document.semanticNodes.filter((node) => node.kind === 'code-cell')).toEqual([
+      expect.objectContaining({
+        id: 'code:stable-julia',
+        attributes: expect.objectContaining({ language: 'julia', label: 'stable-julia' }),
+      }),
+    ])
+    expect(serializeLosslessPortableSource(document)).toBe(source)
+  })
 })

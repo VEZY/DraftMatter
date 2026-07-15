@@ -1,3 +1,5 @@
+import type { ExecutableCell } from './executionCells'
+
 export type MarkupView = 'simple' | 'all' | 'original' | 'final'
 export type SuggestionStatus = 'open' | 'accepted' | 'rejected' | 'needs-rebase'
 export type SectionKey = 'frontmatter' | 'abstract' | 'introduction' | 'methods' | 'results' | 'conclusion'
@@ -98,4 +100,5 @@ export interface ParsedPortableDocument {
   draft: DraftState
   diagnostics: DocumentDiagnostic[]
   sourceHash: string
+  executableCells: ExecutableCell[]
 }

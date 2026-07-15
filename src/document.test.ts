@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parsePortableDocument, sourceHash, validateCleanProjection } from './document'
 import { cleanProjection, projectCleanSource, reviewedProjection } from './projections'
 import { initialDraft } from './sampleDraft'
+import adversarialCells from './fixtures/execution/adversarial-cells.qmd?raw'
 
 describe('portable document core', () => {
   it('parses the reviewed source back into editable state', () => {
@@ -89,5 +90,15 @@ describe('portable document core', () => {
     const source = reviewedProjection(initialDraft)
     expect(sourceHash(source)).toBe(sourceHash(source))
     expect(sourceHash(`${source}\n`)).not.toBe(sourceHash(source))
+  })
+
+  it('exposes the same AST-vetted executable cells to the document core', () => {
+    const parsed = parsePortableDocument(adversarialCells, initialDraft)
+
+    expect(parsed.executableCells.map((cell) => [cell.id, cell.language])).toEqual([
+      ['real-python', 'python'],
+      ['real-r', 'r'],
+      ['real-julia', 'julia'],
+    ])
   })
 })
