@@ -24,6 +24,7 @@ Certification on 2026-07-15 from the locked checkout completed:
 - `npm run build`: collaboration service type-check/bundle and browser type-check/bundle passed;
 - `cargo test --manifest-path src-tauri/Cargo.toml --locked`: 51 host tests passed;
 - `npm run compliance:check`: 566 locked npm/Cargo components verified for `aarch64-apple-darwin`;
-- `docker compose config --quiet`: the portable local service topology validated.
+- `docker compose config --quiet`: the portable local service topology validated;
+- `npm run desktop:build -- --debug --bundles app`: the native macOS application compiled, bundled, and passed strict code-signature verification.
 
-The CI collaboration workflow independently builds the service image on Linux. Installer signing/notarization, production OIDC/TLS configuration, external security review, and operated load/restore drills remain deployment gates rather than repository implementation gaps.
+The CI collaboration workflow independently builds the service image on Linux. Platform distribution signing/notarization, production OIDC/TLS configuration, external security review, and operated load/restore drills remain deployment gates rather than repository implementation gaps.
