@@ -1,4 +1,4 @@
-import { readFile } from 'node:fs/promises'
+import { copyFile, readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
 
 const figure = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 220"><rect width="640" height="220" fill="#fff"/><g stroke="#e5ebe7"><path d="M45 35H610M45 80H610M45 125H610M45 170H610"/></g><polyline points="45,175 135,158 225,132 315,102 405,73 495,51 585,39" fill="none" stroke="#466f5c" stroke-width="5"/><polyline points="45,175 135,164 225,148 315,128 405,111 495,96 585,83" fill="none" stroke="#b9785c" stroke-width="5"/><g fill="#466f5c"><circle cx="45" cy="175" r="5"/><circle cx="315" cy="102" r="5"/><circle cx="585" cy="39" r="5"/></g><g fill="#b9785c"><circle cx="45" cy="175" r="5"/><circle cx="315" cy="128" r="5"/><circle cx="585" cy="83" r="5"/></g></svg>`).toString('base64')
@@ -114,6 +114,12 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     const docxPath = await docxDownload.path()
     expect(docxPath).not.toBeNull()
     const docx = await readFile(docxPath!)
+    const docxArtifactPath = testInfo.outputPath('native-publication.docx')
+    await copyFile(docxPath!, docxArtifactPath)
+    await testInfo.attach('native-publication.docx', {
+      path: docxArtifactPath,
+      contentType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    })
     const readableDocx = docx.toString('utf8')
 
     expect(docxDownload.suggestedFilename()).toBe('canopy-drought.docx')
@@ -121,6 +127,13 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(readableDocx).toContain('Independent canopy synthesis')
     expect(readableDocx.match(/Independent canopy synthesis/g)).toHaveLength(1)
     expect(readableDocx).toContain('Ada Researcher · Lin Reviewer')
+    expect(readableDocx).toContain('(Field and Stone, 2026)')
+    expect(readableDocx).toContain('Independent measurements of canopy area')
+    expect(readableDocx).not.toContain('[@field2026]')
+    expect(readableDocx).toContain('Figure: Canopy response through time — embedded image not included in native DOCX')
+    expect(readableDocx).not.toContain('data:image/svg+xml;base64')
+    expect(readableDocx).not.toContain('$y = ax + b$')
+    expect(readableDocx).not.toContain('@fig-response')
     expect(readableDocx).toContain('word/document.xml')
     expect(readableDocx).not.toContain('Drought acclimation reshapes canopy development')
     expect(readableDocx).not.toMatch(/\.dm-anchor|\.draftmatter-reviews|<w:(?:ins|del)\b/)

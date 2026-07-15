@@ -11,7 +11,7 @@ author:
 
 ## Results
 
-Leaf area declined by **18%** [@vezy2020]. The relationship was $y = ax + b$.
+Leaf area declined by **18%** [@vezy2020]. The relationship was $y = ax + b$; see @fig-response.
 
 ![Response](figures/response.svg){#fig-response}
 
@@ -27,8 +27,12 @@ print("inert")
 
 describe('native DOCX export', () => {
   it('builds deterministic clean OOXML with document styles and real tables', () => {
-    const first = renderDocxExport(article)
-    const second = renderDocxExport(article)
+    const options = {
+      citationLabels: { '[@vezy2020]': '(Vezy et al., 2020)' },
+      bibliography: [{ id: 'vezy2020', value: 'Vezy, R. et al. (2020). Portable canopy science.' }],
+    }
+    const first = renderDocxExport(article, options)
+    const second = renderDocxExport(article, options)
     const readable = new TextDecoder().decode(first.bytes)
 
     expect(first.bytes.slice(0, 4)).toEqual(new Uint8Array([0x50, 0x4b, 0x03, 0x04]))
@@ -38,6 +42,13 @@ describe('native DOCX export', () => {
     expect(readable).toContain('Canopy response')
     expect(readable.match(/Canopy response/g)).toHaveLength(1)
     expect(readable).toContain('Remi Vezy')
+    expect(readable).toContain('(Vezy et al., 2020)')
+    expect(readable).toContain('References')
+    expect(readable).toContain('Portable canopy science')
+    expect(readable).not.toContain('[@vezy2020]')
+    expect(readable).toContain('y = ax + b; see Figure response')
+    expect(readable).not.toContain('$y = ax + b$')
+    expect(readable).not.toContain('@fig-response')
     expect(readable).toContain('<w:tbl>')
     expect(readable).toContain('not executed during export')
     expect(readable).toContain('print(&quot;inert&quot;)')

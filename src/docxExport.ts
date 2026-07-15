@@ -12,6 +12,11 @@ export interface DocxExportResult {
   diagnostics: DocxExportDiagnostic[]
 }
 
+export interface DocxExportOptions {
+  citationLabels?: Record<string, string>
+  bibliography?: Array<{ id: string; value: string }>
+}
+
 interface ZipEntry {
   name: string
   bytes: Uint8Array
@@ -129,16 +134,25 @@ function table(rows: string[][]) {
   return `<w:tbl><w:tblPr><w:tblStyle w:val="DraftMatterTable"/><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="D9E0DC"/><w:left w:val="nil"/><w:bottom w:val="single" w:sz="4" w:color="D9E0DC"/><w:right w:val="nil"/><w:insideH w:val="single" w:sz="4" w:color="E6EBE8"/><w:insideV w:val="nil"/></w:tblBorders></w:tblPr><w:tblGrid>${Array.from({ length: columns }, () => '<w:gridCol w:w="2400"/>').join('')}</w:tblGrid>${rows.map((row, rowIndex) => `<w:tr>${Array.from({ length: columns }, (_unused, index) => `<w:tc><w:tcPr><w:tcW w:w="2400" w:type="dxa"/></w:tcPr>${paragraph(row[index] ?? '', rowIndex === 0 ? 'TableHeader' : undefined)}</w:tc>`).join('')}</w:tr>`).join('')}</w:tbl>`
 }
 
-function stripInlineMarkdown(value: string) {
+function stripInlineMarkdown(value: string, options: DocxExportOptions) {
   return value
+    .replace(/\[[^\]\r\n]*@[a-zA-Z0-9_:.+-]+[^\]\r\n]*\]/g, (cluster) => {
+      const citekeys = [...cluster.matchAll(/@([a-zA-Z0-9_:.+-]+)/g)].map((item) => item[1])
+      return options.citationLabels?.[cluster] ?? '(' + citekeys.join('; ') + ')'
+    })
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '$1')
+    .replace(/\$([^$\r\n]+)\$/g, '$1')
+    .replace(/@(fig|tbl|eq)-([a-zA-Z0-9_.:-]+)/g, (_reference, kind: string, target: string) => {
+      const label = kind === 'fig' ? 'Figure' : kind === 'tbl' ? 'Table' : 'Equation'
+      return label + ' ' + target.replaceAll(/[-_.]+/g, ' ')
+    })
     .replace(/`([^`]+)`/g, '$1')
 }
 
-function documentBody(source: string, diagnostics: DocxExportDiagnostic[]) {
+function documentBody(source: string, diagnostics: DocxExportDiagnostic[], options: DocxExportOptions) {
   const metadata = parsePublicationMetadata(source)
   const body = removeDuplicateLeadingTitle(metadata.body, metadata.title)
   const lines = body.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n')
@@ -154,7 +168,7 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[]) {
     }
     const heading = line.match(/^(#{1,6})\s+(.+?)(?:\s+\{#[^}]+\})?\s*$/)
     if (heading) {
-      parts.push(paragraph(stripInlineMarkdown(heading[2]), `Heading${Math.min(heading[1].length, 3)}`))
+      parts.push(paragraph(stripInlineMarkdown(heading[2], options), `Heading${Math.min(heading[1].length, 3)}`))
       index += 1
       continue
     }
@@ -186,8 +200,16 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[]) {
     }
     const figure = line.match(/^\s*!\[([^\]]*)\]\(([^)]+)\)(?:\{#[^}]+\})?\s*$/)
     if (figure) {
-      parts.push(paragraph(`Figure: ${figure[1]} — ${figure[2]}`, 'Caption'))
-      diagnostics.push({ code: 'figure-reference', level: 'warning', message: `Figure “${figure[1]}” remains a portable path reference (${figure[2]}). Embed it in Word after export if a self-contained DOCX is required.` })
+      const embedded = /^data:image\//i.test(figure[2])
+      const reference = embedded ? 'embedded image not included in native DOCX' : figure[2]
+      parts.push(paragraph(`Figure: ${figure[1]} — ${reference}`, 'Caption'))
+      diagnostics.push({
+        code: 'figure-reference',
+        level: 'warning',
+        message: embedded
+          ? `Figure “${figure[1]}” uses an embedded data image. Reinsert it in Word if a self-contained DOCX is required.`
+          : `Figure “${figure[1]}” remains a portable path reference (${figure[2]}). Embed it in Word after export if a self-contained DOCX is required.`,
+      })
       index += 1
       continue
     }
@@ -206,7 +228,7 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[]) {
       let ordinal = 1
       while (index < lines.length && (ordered ? /^\s*\d+[.)]\s+/.test(lines[index]) : /^\s*[-+*]\s+/.test(lines[index]))) {
         const item = lines[index].replace(/^\s*(?:[-+*]|\d+[.)])\s+/, '')
-        parts.push(paragraph(`${ordered ? `${ordinal}.` : '•'} ${stripInlineMarkdown(item)}`, 'ListParagraph'))
+        parts.push(paragraph(`${ordered ? `${ordinal}.` : '•'} ${stripInlineMarkdown(item, options)}`, 'ListParagraph'))
         ordinal += 1
         index += 1
       }
@@ -229,7 +251,11 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[]) {
       text.push(lines[index])
       index += 1
     }
-    parts.push(paragraph(stripInlineMarkdown(text.join(' '))))
+    parts.push(paragraph(stripInlineMarkdown(text.join(' '), options)))
+  }
+  if (options.bibliography?.length) {
+    parts.push(paragraph('References', 'Heading1'))
+    for (const entry of options.bibliography) parts.push(paragraph(entry.value, 'ListParagraph'))
   }
   return parts.join('')
 }
@@ -246,13 +272,13 @@ const documentRelationships = `<?xml version="1.0" encoding="UTF-8" standalone="
 const styles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Aptos" w:hAnsi="Aptos"/><w:sz w:val="22"/><w:color w:val="26312C"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="140" w:line="320" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults><w:style w:type="paragraph" w:styleId="Title"><w:name w:val="Title"/><w:rPr><w:rFonts w:ascii="Aptos Display"/><w:sz w:val="42"/><w:b/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Subtitle"><w:name w:val="Subtitle"/><w:rPr><w:color w:val="69756F"/><w:sz w:val="20"/></w:rPr></w:style>${[1, 2, 3].map((level) => `<w:style w:type="paragraph" w:styleId="Heading${level}"><w:name w:val="heading ${level}"/><w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="${level + 8}"/><w:qFormat/><w:rPr><w:rFonts w:ascii="Aptos Display"/><w:b/><w:color w:val="33433B"/><w:sz w:val="${34 - level * 4}"/></w:rPr></w:style>`).join('')}<w:style w:type="paragraph" w:styleId="Caption"><w:name w:val="Caption"/><w:rPr><w:i/><w:color w:val="69756F"/><w:sz w:val="18"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="CodeBlock"><w:name w:val="Code Block"/><w:pPr><w:shd w:val="clear" w:fill="F4F6F4"/><w:ind w:left="180" w:right="180"/><w:spacing w:before="100" w:after="100"/></w:pPr><w:rPr><w:rFonts w:ascii="Consolas" w:hAnsi="Consolas"/><w:sz w:val="18"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="Equation"><w:name w:val="Equation"/><w:pPr><w:jc w:val="center"/></w:pPr><w:rPr><w:rFonts w:ascii="Cambria Math"/><w:sz w:val="22"/></w:rPr></w:style><w:style w:type="paragraph" w:styleId="ListParagraph"><w:name w:val="List Paragraph"/><w:pPr><w:ind w:left="360" w:hanging="180"/></w:pPr></w:style><w:style w:type="paragraph" w:styleId="TableHeader"><w:name w:val="Table Header"/><w:rPr><w:b/></w:rPr></w:style><w:style w:type="table" w:styleId="DraftMatterTable"><w:name w:val="DraftMatter Table"/><w:tblPr><w:tblCellMar><w:top w:w="80" w:type="dxa"/><w:left w:w="100" w:type="dxa"/><w:bottom w:w="80" w:type="dxa"/><w:right w:w="100" w:type="dxa"/></w:tblCellMar></w:tblPr></w:style></w:styles>`
 
-export function renderDocxExport(source: string): DocxExportResult {
+export function renderDocxExport(source: string, options: DocxExportOptions = {}): DocxExportResult {
   const cleanDiagnostics = validateCleanProjection(source)
   if (cleanDiagnostics.some((diagnostic) => diagnostic.code === 'clean-anchor-leak' || diagnostic.code === 'clean-review-leak')) {
     throw new Error('DOCX export accepts only a clean DraftMatter projection without review storage markers.')
   }
   const diagnostics: DocxExportDiagnostic[] = []
-  const body = documentBody(source, diagnostics)
+  const body = documentBody(source, diagnostics, options)
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`
   const created = new Date(0).toISOString()
   const core = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:creator>DraftMatter</dc:creator><cp:lastModifiedBy>DraftMatter</cp:lastModifiedBy><dcterms:created xsi:type="dcterms:W3CDTF">${created}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${created}</dcterms:modified><dc:description>Clean resolved manuscript export. DraftMatter review records and Word tracked changes are not included.</dc:description></cp:coreProperties>`

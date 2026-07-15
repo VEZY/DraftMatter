@@ -484,6 +484,12 @@ function App() {
     ? structuredCitationLabels[serializeCitationCluster(detailCitationItems)] ?? fallbackCitationLabel(detailCitationItems)
     : citationLabel
   const resultsCitationLabel = renderedCitations.results ?? formatCitationCluster(citations, [{ citekey: 'coutellier2022' }])
+  const publicationCitationLabels = structuredMode
+    ? structuredCitationLabels
+    : {
+      [serializeCitationCluster(draftCitationItems)]: citationLabel,
+      '[@coutellier2022]': resultsCitationLabel,
+    }
   const activeCitationItem = detailCitationItems.find((item) => item.citekey === citationEditKey) ?? detailCitationItems[0]
   const activeCitationRecord = citations.find((record) => record.citekey === activeCitationItem?.citekey)
   const activeCitationBadge = citationSourceBadge(activeCitationRecord)
@@ -1864,12 +1870,7 @@ function App() {
     try {
       const html = renderNativeHtmlExport(projection.source, {
         title: draft.title,
-        citationLabels: structuredMode
-          ? structuredCitationLabels
-          : {
-            [serializeCitationCluster(draftCitationItems)]: citationLabel,
-            '[@coutellier2022]': resultsCitationLabel,
-          },
+        citationLabels: publicationCitationLabels,
         bibliography: renderedBibliography,
       })
       const base = filename.replace(/\.(qmd|md)$/i, '')
@@ -1891,7 +1892,10 @@ function App() {
       return
     }
     try {
-      const result = renderDocxExport(projection.source)
+      const result = renderDocxExport(projection.source, {
+        citationLabels: publicationCitationLabels,
+        bibliography: renderedBibliography,
+      })
       const base = filename.replace(/\.(qmd|md)$/i, '')
       downloadBlob(`${base}.docx`, result.bytes, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
       setExportOpen(false)
