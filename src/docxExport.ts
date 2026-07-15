@@ -1,4 +1,5 @@
 import { validateCleanProjection } from './document'
+import { formatCrossReferenceTarget } from './crossReference'
 import { parsePublicationMetadata, removeDuplicateLeadingTitle } from './publicationMetadata'
 
 export interface DocxExportDiagnostic {
@@ -145,10 +146,7 @@ function stripInlineMarkdown(value: string, options: DocxExportOptions) {
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '$1')
     .replace(/\$([^$\r\n]+)\$/g, '$1')
-    .replace(/@(fig|tbl|eq)-([a-zA-Z0-9_.:-]+)/g, (_reference, kind: string, target: string) => {
-      const label = kind === 'fig' ? 'Figure' : kind === 'tbl' ? 'Table' : 'Equation'
-      return label + ' ' + target.replaceAll(/[-_.]+/g, ' ')
-    })
+    .replace(/@(fig|tbl|eq|sec)-[a-zA-Z0-9](?:[a-zA-Z0-9_.:-]*[a-zA-Z0-9])?/g, (reference) => formatCrossReferenceTarget(reference))
     .replace(/`([^`]+)`/g, '$1')
 }
 

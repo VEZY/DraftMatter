@@ -11,6 +11,8 @@ One alternative is then selected through the conflict-aware projector. The resul
 
 All four projections reject or assert the absence of DraftMatter anchors, review records, and Word tracked-change elements. Re-rendering the same selection produces the same source hash. Reopening the clean Markdown retains title, citation keys, and executable-cell identity without executing it.
 
+The rendered DM-P1-03 manuscript path treats figure, table, equation, and section references as semantic links: ordinary writing shows labels such as **Section background** instead of `@sec-background`, while autosave retains the exact portable identifier. Heading attribute blocks remain hidden, survive unrelated edits byte-for-byte, and provide the real link target. Native HTML and DOCX apply the same label vocabulary, including punctuation-safe link targets.
+
 The native Git suite completes the remaining gate step in real temporary repositories: it creates a root checkpoint when needed, commits only selected paths, preserves unrelated staged and unstaged work, disables repository hooks/filesystem monitors, and exercises fetch/pull/push plus divergence against local bare remotes.
 
 The rendered DM-P4-02 browser path switches a generic portable manuscript from Editing to Suggesting, then types a replacement, pastes a second replacement, deletes a selection, and inserts at a caret. The short grouping window emits exactly one attributed portable proposal per gesture, restores the unchanged accepted prose after each capture, and verifies the resulting replace/delete/insert records in the autosaved source.

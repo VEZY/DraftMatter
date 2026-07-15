@@ -21,12 +21,22 @@ const nodes: Record<string, NodeSpec> = {
     toDOM: (node) => ['p', { 'data-dm-id': node.attrs.id ?? '', 'data-section': node.attrs.section ?? '' }, 0],
   },
   heading: {
-    attrs: { ...identified, level: { default: 2, validate: 'number' }, section: { default: null } },
+    attrs: {
+      ...identified,
+      level: { default: 2, validate: 'number' },
+      section: { default: null },
+      label: { default: null },
+      sourceAttributes: { default: null },
+    },
     content: 'inline*',
     group: 'block',
     defining: true,
     parseDOM: [1, 2, 3, 4, 5, 6].map((level) => ({ tag: `h${level}`, attrs: { level } })),
-    toDOM: (node) => [`h${Math.min(6, Math.max(1, node.attrs.level))}`, { 'data-dm-id': node.attrs.id ?? '', 'data-section': node.attrs.section ?? '' }, 0],
+    toDOM: (node) => [`h${Math.min(6, Math.max(1, node.attrs.level))}`, {
+      id: node.attrs.label ?? undefined,
+      'data-dm-id': node.attrs.id ?? '',
+      'data-section': node.attrs.section ?? '',
+    }, 0],
   },
   blockquote: {
     attrs: identified,

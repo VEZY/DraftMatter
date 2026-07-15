@@ -204,6 +204,7 @@ describe('full structured manuscript editor', () => {
     await act(async () => { expect(editorRef.current?.insertCrossReference('fig-growth')).toBe(true) })
     await act(async () => { expect(editorRef.current?.insertFootnote('method', 'Calibration details.')).toBe(true) })
 
+    expect(container.querySelector('[data-dm-node="cross-reference"]')?.textContent).toBe('Figure growth')
     expect(changed.at(-1)).toContain('$x^2 + y^2$@fig-growth[^method]')
     expect(changed.at(-1)).toContain('[^method]: Calibration details.')
   })

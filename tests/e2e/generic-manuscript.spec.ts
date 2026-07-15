@@ -6,9 +6,11 @@ title: "Portable field notes"
 
 # Portable field notes
 
-## Background
+## Background {#sec-background}
 
 This is an arbitrary manuscript with a citation [@vezy2024] and **editable prose**.
+
+See @sec-background for context.
 
 A uniquely selected review sentence.
 
@@ -41,7 +43,9 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(manuscript.getByRole('heading', { level: 1 })).toHaveText('Portable field notes')
     await expect(manuscript.getByRole('heading', { level: 2, name: 'Background' })).toBeVisible()
     await expect(manuscript.getByRole('button', { name: 'Edit citation @vezy2024' })).toHaveText('(Vezy et al., 2024)')
+    await expect(manuscript.getByRole('link', { name: 'Section background' })).toHaveAttribute('href', '#sec-background')
     await expect(renderedEditor).not.toContainText(':::')
+    await expect(renderedEditor).not.toContainText('@sec-background')
     await expect(renderedEditor).not.toContainText('Keep this opaque block exactly.')
     await expect(manuscript.getByText('Preserved source')).toBeVisible()
 
@@ -53,6 +57,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(page.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveValue('println("after")')
     let saved = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))
     expect(saved).toContain('::: {.future-extension data-owner="research-team"}\nKeep this opaque block exactly.\n:::')
+    expect(saved).toContain('See @sec-background for context.')
 
     await manuscript.locator('.structured-editor-content p').first().click()
     await page.keyboard.press('End')

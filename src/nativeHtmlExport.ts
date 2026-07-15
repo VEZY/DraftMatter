@@ -1,4 +1,5 @@
 import { validateCleanProjection } from './document'
+import { formatCrossReferenceTarget } from './crossReference'
 import { parsePublicationMetadata, removeDuplicateLeadingTitle } from './publicationMetadata'
 
 export interface NativeHtmlExportOptions {
@@ -30,7 +31,7 @@ function safeAssetUrl(value: string) {
 }
 
 function renderInline(value: string, options: NativeHtmlExportOptions) {
-  const token = /(\[[^\]\r\n]*@[a-zA-Z0-9_:.+-]+[^\]\r\n]*\]|\$[^$\r\n]+\$|@(?:fig|tbl|eq)-[a-zA-Z0-9_.:-]+)/g
+  const token = /(\[[^\]\r\n]*@[a-zA-Z0-9_:.+-]+[^\]\r\n]*\]|\$[^$\r\n]+\$|@(?:fig|tbl|eq|sec)-[a-zA-Z0-9](?:[a-zA-Z0-9_.:-]*[a-zA-Z0-9])?)/g
   let html = ''
   let cursor = 0
   for (const match of value.matchAll(token)) {
@@ -42,7 +43,7 @@ function renderInline(value: string, options: NativeHtmlExportOptions) {
       html += `<span class="equation inline-equation" data-tex="${escapeHtml(equation)}" role="math">${escapeHtml(equation)}</span>`
     } else if (raw.startsWith('@')) {
       const id = raw.slice(1)
-      html += `<a class="cross-reference" href="#${escapeHtml(id)}">${escapeHtml(raw)}</a>`
+      html += `<a class="cross-reference" href="#${escapeHtml(id)}">${escapeHtml(formatCrossReferenceTarget(id))}</a>`
     } else {
       const citekeys = [...raw.matchAll(/@([a-zA-Z0-9_:.+-]+)/g)].map((item) => item[1])
       const label = options.citationLabels?.[raw] ?? `(${citekeys.join('; ')})`

@@ -107,6 +107,27 @@ describe('generic structured manuscript bridge', () => {
     expect(parsed.metadata.frontmatter).toContain('bibliography: references.bib')
     expect(parsed.metadata.reviewSection).toContain('.draftmatter-reviews')
     expect(parsed.diagnostics.filter((diagnostic) => diagnostic.level === 'error')).toEqual([])
+    let reference: typeof parsed.document | undefined
+    parsed.document.descendants((node) => {
+      if (node.type === manuscriptSchema.nodes.cross_reference) reference = node
+      return reference === undefined
+    })
+    expect(reference?.attrs).toMatchObject({ target: 'fig-growth', rendered: 'Figure growth' })
+    expect(parsed.document.textContent).toContain('Figure growth')
+  })
+
+  it('hides heading attributes while preserving their anchor and exact portable source', () => {
+    const source = '## Background {#sec-background .unnumbered}\n'
+    const parsed = parseStructuredManuscript(source)
+
+    expect(parsed.document.firstChild?.textContent).toBe('Background')
+    expect(parsed.document.firstChild?.attrs).toMatchObject({ label: 'sec-background', sourceAttributes: '#sec-background .unnumbered' })
+    expect(serializeStructuredManuscript(replaceFirstText(parsed.document, 'Background', 'Context'), parsed.metadata))
+      .toBe('## Context {#sec-background .unnumbered}\n')
+
+    const literal = parseStructuredManuscript('## Set {A}\n')
+    expect(literal.document.firstChild?.textContent).toBe('Set {A}')
+    expect(literal.document.firstChild?.attrs.sourceAttributes).toBeNull()
   })
 
   it('enumerates citation clusters across arbitrary sections for CSL rendering and cache diagnostics', () => {
@@ -128,6 +149,8 @@ describe('generic structured manuscript bridge', () => {
     const reopened = parseStructuredManuscript(saved)
 
     expect(saved).toContain('Updated evidence with **strong text**')
+    expect(saved).toContain('@fig-growth')
+    expect(saved).not.toContain('Figure growth')
     expect(saved).toContain('::: {#future-widget .future-extension}\nOpaque **future** syntax.\n:::')
     expect(saved).toContain('[]{#dm-comment-point .dm-anchor data-anchor="dm-comment-01" data-edge="point" data-affinity="after"}')
     expect(saved).toContain('::::: {.draftmatter-reviews .hidden data-schema="1"}')

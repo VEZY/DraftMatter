@@ -73,6 +73,8 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(html).not.toContain('<main><h1')
     expect(html).toContain('Canopy area differed by <strong>18%</strong>')
     expect(html).toContain('<cite class="citation" data-citekeys="field2026">(Field and Stone, 2026)</cite>')
+    expect(html).toContain('<a class="cross-reference" href="#fig-response">Figure response</a>')
+    expect(html).not.toContain('>@fig-response<')
     expect(html).toContain('Independent measurements of canopy area')
     expect(html).toContain('<figure id="fig-response">')
     expect(html).toContain('<table>')

@@ -1,5 +1,6 @@
 import type { Mark, Node as ProseMirrorNode } from 'prosemirror-model'
 import { parseCitationCluster, serializeCitationCluster } from './citation'
+import { formatCrossReferenceTarget } from './crossReference'
 import { sourceHash } from './document'
 import { extractExecutableCells } from './executionCells'
 import { manuscriptSchema } from './manuscriptSchema'
@@ -65,7 +66,7 @@ const inlinePatterns: Array<[InlineCandidate['kind'], RegExp]> = [
   ['code', /`([^`\r\n]+)`/],
   ['math', /\$([^$\r\n]+)\$/],
   ['footnote', /\[\^([a-zA-Z0-9_.:-]+)\]/],
-  ['cross-reference', /@((?:fig|tbl|eq|sec)-[a-zA-Z0-9_.:-]+)/],
+  ['cross-reference', /@((?:fig|tbl|eq|sec)-[a-zA-Z0-9](?:[a-zA-Z0-9_.:-]*[a-zA-Z0-9])?)/],
 ]
 
 function nextInlineCandidate(value: string): InlineCandidate | undefined {
@@ -126,7 +127,7 @@ function inlineNodes(value: string, idPrefix: string): ProseMirrorNode[] {
     } else if (candidate.kind === 'footnote') {
       nodes.push(manuscriptSchema.nodes.footnote_reference.createChecked({ id, label: candidate.match[1] }))
     } else {
-      nodes.push(manuscriptSchema.nodes.cross_reference.createChecked({ id, target: candidate.match[1], rendered: candidate.match[1] }))
+      nodes.push(manuscriptSchema.nodes.cross_reference.createChecked({ id, target: candidate.match[1], rendered: formatCrossReferenceTarget(candidate.match[1]) }))
     }
     remaining = remaining.slice(candidate.index + candidate.raw.length)
   }
@@ -202,7 +203,20 @@ function parseBlocks(lines: SourceLine[], diagnostics: DocumentDiagnostic[], ord
     const heading = value.match(/^(#{1,6})\s+(.+?)\s*#*\s*$/)
     if (heading) {
       const raw = lines[index].raw
-      blocks.push(manuscriptSchema.nodes.heading.createChecked({ id: id('heading', raw), level: heading[1].length, section: null }, inlineNodes(heading[2], `heading-${ordinalRef.value}`)))
+      const attributeCandidate = heading[2].match(/^(.*?)(?:\s+\{([^}\r\n]+)\})$/)
+      const attributed = attributeCandidate && /(?:^|\s)(?:#[a-zA-Z]|\.[a-zA-Z]|[a-zA-Z][\w-]*=)/.test(attributeCandidate[2])
+        ? attributeCandidate
+        : null
+      const title = attributed?.[1] ?? heading[2]
+      const sourceAttributes = attributed?.[2] ?? null
+      const label = sourceAttributes?.match(/(?:^|\s)#([a-zA-Z][\w.:-]*)/)?.[1] ?? null
+      blocks.push(manuscriptSchema.nodes.heading.createChecked({
+        id: id('heading', raw),
+        level: heading[1].length,
+        section: null,
+        label,
+        sourceAttributes,
+      }, inlineNodes(title, `heading-${ordinalRef.value}`)))
       index += 1
       continue
     }
@@ -476,7 +490,10 @@ function serializeTable(node: ProseMirrorNode, ending: string) {
 }
 
 function serializeBlock(node: ProseMirrorNode, ending: string, index = 0): string {
-  if (node.type === manuscriptSchema.nodes.heading) return `${'#'.repeat(node.attrs.level)} ${serializeInlineContent(node)}`
+  if (node.type === manuscriptSchema.nodes.heading) {
+    const attributes = node.attrs.sourceAttributes ? ` {${node.attrs.sourceAttributes}}` : ''
+    return `${'#'.repeat(node.attrs.level)} ${serializeInlineContent(node)}${attributes}`
+  }
   if (node.type === manuscriptSchema.nodes.paragraph) return serializeInlineContent(node)
   if (node.type === manuscriptSchema.nodes.blockquote) {
     const content: string[] = []

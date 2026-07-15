@@ -9,6 +9,7 @@ import { tableEditing } from 'prosemirror-tables'
 import { Decoration, DecorationSet, EditorView, type NodeView } from 'prosemirror-view'
 import { baseKeymap } from 'prosemirror-commands'
 import { serializeCitationCluster } from './citation'
+import { formatCrossReferenceTarget, isCrossReferenceTarget } from './crossReference'
 import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
 import { captureReviewSuggestion } from './reviewSuggestionCapture'
@@ -496,11 +497,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     insertCrossReference: (target) => {
       const view = viewRef.current
       const normalized = target.trim().replace(/^@/, '')
-      if (!view || readOnlyRef.current || !/^(fig|tbl|eq|sec)-[a-zA-Z0-9_.:-]+$/.test(normalized)) return false
+      if (!view || readOnlyRef.current || !isCrossReferenceTarget(normalized)) return false
       view.dispatch(view.state.tr.replaceSelectionWith(manuscriptSchema.nodes.cross_reference.createChecked({
         id: randomId('cross-reference'),
         target: normalized,
-        rendered: normalized,
+        rendered: formatCrossReferenceTarget(normalized),
       })))
       view.focus()
       return true
