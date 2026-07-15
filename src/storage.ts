@@ -3,6 +3,13 @@ import type { DraftState } from './types'
 
 const RECOVERY_KEY = 'draftmatter.recovery.v1'
 const MAX_RECOVERIES = 8
+const MAX_RECOVERY_BYTES = 4 * 1024 * 1024
+const RECOVERY_SCHEMA_VERSION = 1
+
+interface RecoveryJournal {
+  schemaVersion: typeof RECOVERY_SCHEMA_VERSION
+  snapshots: RecoverySnapshot[]
+}
 
 export interface RecoverySnapshot {
   id: string
@@ -38,7 +45,12 @@ function isRecoverySnapshot(value: unknown): value is RecoverySnapshot {
 export function readRecoverySnapshots(storage: KeyValueStorage): RecoverySnapshot[] {
   try {
     const parsed = JSON.parse(storage.getItem(RECOVERY_KEY) ?? '[]')
-    return Array.isArray(parsed) ? parsed.filter(isRecoverySnapshot).slice(0, MAX_RECOVERIES) : []
+    const snapshots = Array.isArray(parsed)
+      ? parsed
+      : parsed?.schemaVersion === RECOVERY_SCHEMA_VERSION && Array.isArray(parsed.snapshots)
+        ? parsed.snapshots
+        : []
+    return snapshots.filter(isRecoverySnapshot).slice(0, MAX_RECOVERIES)
   } catch {
     return []
   }
@@ -65,6 +77,15 @@ export function saveRecoverySnapshot(
     draft: structuredClone(draft),
   }
   const next = [snapshot, ...existing].slice(0, MAX_RECOVERIES)
-  storage.setItem(RECOVERY_KEY, JSON.stringify(next))
+  const encode = (snapshots: RecoverySnapshot[]) => JSON.stringify({
+    schemaVersion: RECOVERY_SCHEMA_VERSION,
+    snapshots,
+  } satisfies RecoveryJournal)
+  let serialized = encode(next)
+  while (new TextEncoder().encode(serialized).byteLength > MAX_RECOVERY_BYTES && next.length > 1) {
+    next.pop()
+    serialized = encode(next)
+  }
+  storage.setItem(RECOVERY_KEY, serialized)
   return next
 }
