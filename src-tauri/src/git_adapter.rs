@@ -186,16 +186,21 @@ fn git_command(current_dir: &Path) -> Command {
 
 fn sanitise_message(bytes: &[u8]) -> String {
     let mut message = String::from_utf8_lossy(bytes).trim().to_string();
-    while let Some(scheme) = message.find("://") {
+    let mut search_from = 0;
+    while let Some(relative_scheme) = message[search_from..].find("://") {
+        let scheme = search_from + relative_scheme;
         let credentials_start = scheme + 3;
         let Some(relative_at) = message[credentials_start..].find('@') else {
-            break;
+            search_from = credentials_start;
+            continue;
         };
         let at = credentials_start + relative_at;
         if message[credentials_start..at].contains('/') {
-            break;
+            search_from = credentials_start;
+            continue;
         }
         message.replace_range(credentials_start..at, "[redacted]");
+        search_from = credentials_start + "[redacted]@".len();
     }
     if message.len() > 4_096 {
         message.truncate(4_096);
@@ -1098,6 +1103,207 @@ mod tests {
         assert_eq!(
             fs::read_to_string(project.path().join(".gitignore")).unwrap(),
             "private/\n"
+        );
+    }
+
+    #[test]
+    fn the_first_selected_checkpoint_can_create_the_root_commit() {
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("paper.qmd"), "# First draft\n").unwrap();
+        let checkpoint = git_create_checkpoint_impl(GitCheckpointRequest {
+            root: project.path().to_string_lossy().to_string(),
+            paths: vec!["paper.qmd".to_string()],
+            message: "First draft".to_string(),
+        })
+        .unwrap();
+
+        assert_eq!(checkpoint.files, vec!["paper.qmd"]);
+        assert_eq!(
+            branch_name(&require_repository(&project.path().to_string_lossy()).unwrap())
+                .unwrap()
+                .as_deref(),
+            Some("main")
+        );
+        assert!(git_status_impl(&project.path().to_string_lossy())
+            .unwrap()
+            .entries
+            .is_empty());
+    }
+
+    #[test]
+    fn conflicted_files_are_classified_without_attempting_resolution() {
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("paper.qmd"), "base\n").unwrap();
+        commit_all(project.path(), "base");
+        git(project.path(), ["switch", "-c", "other"]);
+        fs::write(project.path().join("paper.qmd"), "other\n").unwrap();
+        commit_all(project.path(), "other edit");
+        git(project.path(), ["switch", "main"]);
+        fs::write(project.path().join("paper.qmd"), "main\n").unwrap();
+        commit_all(project.path(), "main edit");
+
+        let merge = Command::new("git")
+            .current_dir(project.path())
+            .args(["merge", "other"])
+            .output()
+            .unwrap();
+        assert!(!merge.status.success());
+        let status = git_status_impl(&project.path().to_string_lossy()).unwrap();
+        assert_eq!(status.entries.len(), 1);
+        assert_eq!(status.entries[0].kind, GitChangeKind::Conflicted);
+        assert!(status.entries[0].conflicted);
+    }
+
+    #[test]
+    fn local_bare_remote_supports_explicit_fetch_pull_and_push() {
+        let remote = tempdir().unwrap();
+        git(remote.path(), ["init", "--bare", "-b", "main"]);
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("paper.qmd"), "base\n").unwrap();
+        commit_all(project.path(), "base");
+        git(
+            project.path(),
+            ["remote", "add", "origin", &remote.path().to_string_lossy()],
+        );
+        git(project.path(), ["push", "-u", "origin", "main"]);
+        let root = project.path().to_string_lossy().to_string();
+
+        let fetched = git_fetch_impl(GitRemoteRequest {
+            root: root.clone(),
+            remote: Some("origin".to_string()),
+            branch: None,
+        })
+        .unwrap();
+        assert_eq!(fetched.action, "fetch");
+
+        fs::write(project.path().join("paper.qmd"), "pushed\n").unwrap();
+        commit_all(project.path(), "push change");
+        let pushed = git_push_impl(GitRemoteRequest {
+            root: root.clone(),
+            remote: Some("origin".to_string()),
+            branch: Some("main".to_string()),
+        })
+        .unwrap();
+        assert_eq!(pushed.status.ahead, 0);
+
+        let collaborator = tempdir().unwrap();
+        git(
+            collaborator.path(),
+            [
+                "clone",
+                &remote.path().to_string_lossy(),
+                &collaborator.path().join("clone").to_string_lossy(),
+            ],
+        );
+        let clone = collaborator.path().join("clone");
+        git(&clone, ["config", "user.name", "Collaborator"]);
+        git(
+            &clone,
+            ["config", "user.email", "collaborator@example.invalid"],
+        );
+        fs::write(clone.join("paper.qmd"), "pulled\n").unwrap();
+        commit_all(&clone, "remote change");
+        git(&clone, ["push", "origin", "main"]);
+
+        let pulled = git_pull_impl(GitRemoteRequest {
+            root,
+            remote: Some("origin".to_string()),
+            branch: Some("main".to_string()),
+        })
+        .unwrap();
+        assert_eq!(pulled.action, "pull");
+        assert_eq!(
+            fs::read_to_string(project.path().join("paper.qmd")).unwrap(),
+            "pulled\n"
+        );
+    }
+
+    #[test]
+    fn divergent_pull_stops_and_preserves_local_work() {
+        let remote = tempdir().unwrap();
+        git(remote.path(), ["init", "--bare", "-b", "main"]);
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("paper.qmd"), "base\n").unwrap();
+        commit_all(project.path(), "base");
+        git(
+            project.path(),
+            ["remote", "add", "origin", &remote.path().to_string_lossy()],
+        );
+        git(project.path(), ["push", "-u", "origin", "main"]);
+        let collaborator = tempdir().unwrap();
+        git(
+            collaborator.path(),
+            [
+                "clone",
+                &remote.path().to_string_lossy(),
+                &collaborator.path().join("clone").to_string_lossy(),
+            ],
+        );
+        let clone = collaborator.path().join("clone");
+        git(&clone, ["config", "user.name", "Collaborator"]);
+        git(
+            &clone,
+            ["config", "user.email", "collaborator@example.invalid"],
+        );
+        fs::write(clone.join("paper.qmd"), "remote conflict\n").unwrap();
+        commit_all(&clone, "remote conflict");
+        git(&clone, ["push", "origin", "main"]);
+        fs::write(project.path().join("paper.qmd"), "local conflict\n").unwrap();
+        commit_all(project.path(), "local conflict");
+        let local_head =
+            String::from_utf8_lossy(&git(project.path(), ["rev-parse", "HEAD"]).stdout)
+                .trim()
+                .to_string();
+
+        let result = git_pull_impl(GitRemoteRequest {
+            root: project.path().to_string_lossy().to_string(),
+            remote: Some("origin".to_string()),
+            branch: Some("main".to_string()),
+        });
+        assert!(matches!(result, Err(HostError::Integration(_))));
+        assert_eq!(
+            fs::read_to_string(project.path().join("paper.qmd")).unwrap(),
+            "local conflict\n"
+        );
+        let after = String::from_utf8_lossy(&git(project.path(), ["rev-parse", "HEAD"]).stdout)
+            .trim()
+            .to_string();
+        assert_eq!(after, local_head);
+    }
+
+    #[test]
+    fn remote_failures_are_bounded_and_credentials_are_redacted() {
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("paper.qmd"), "base\n").unwrap();
+        commit_all(project.path(), "base");
+        let missing_remote = project.path().join("missing-remote.git");
+        git(
+            project.path(),
+            [
+                "remote",
+                "add",
+                "private",
+                &missing_remote.to_string_lossy(),
+            ],
+        );
+
+        let result = git_fetch_impl(GitRemoteRequest {
+            root: project.path().to_string_lossy().to_string(),
+            remote: Some("private".to_string()),
+            branch: None,
+        });
+        let Err(HostError::Integration(message)) = result else {
+            panic!("expected an integration error");
+        };
+        assert!(!message.contains("secret"));
+        assert_eq!(
+            sanitise_message(b"fatal: https://user:secret@example.invalid/private.git failed"),
+            "fatal: https://[redacted]@example.invalid/private.git failed"
         );
     }
 
