@@ -300,22 +300,119 @@ function codeCellNodeView(
   }
 }
 
-function rawNodeView(node: ProseMirrorNode, onInspect: (nodeId: string) => void): NodeView {
+function rawNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () => number | undefined, isEditable: () => boolean, onInspect: (nodeId: string) => void): NodeView {
+  let node = initialNode
+  let expanded = false
   const dom = document.createElement('aside')
   dom.className = 'structured-raw-node'
-  dom.dataset.dmId = String(node.attrs.id)
+  dom.contentEditable = 'false'
+  const summary = document.createElement('div')
+  summary.className = 'structured-raw-summary'
   const badge = document.createElement('span')
   badge.textContent = 'Preserved source'
+  const copy = document.createElement('span')
+  copy.className = 'structured-raw-copy'
   const description = document.createElement('strong')
-  description.textContent = `${String(node.attrs.format ?? 'Markdown')} block`
   const detail = document.createElement('small')
   detail.textContent = 'Unsupported syntax is kept byte-for-byte and hidden during normal writing.'
-  const button = document.createElement('button')
-  button.type = 'button'
-  button.textContent = 'Inspect source'
-  button.addEventListener('click', () => onInspect(String(node.attrs.id)))
-  dom.append(badge, description, detail, button)
-  return { dom, stopEvent: (event) => event.target === button }
+  copy.append(description, detail)
+  const toggle = document.createElement('button')
+  toggle.type = 'button'
+  toggle.className = 'structured-raw-toggle'
+  toggle.textContent = 'Inspect source'
+  const inspector = document.createElement('section')
+  inspector.className = 'structured-raw-inspector'
+  inspector.hidden = true
+  const inspectorHead = document.createElement('div')
+  inspectorHead.className = 'structured-raw-inspector-head'
+  const inspectorStatus = document.createElement('small')
+  inspectorHead.append(inspectorStatus)
+  const textarea = document.createElement('textarea')
+  textarea.className = 'structured-raw-editor'
+  textarea.spellcheck = false
+  const actions = document.createElement('div')
+  actions.className = 'structured-raw-actions'
+  const fullSource = document.createElement('button')
+  fullSource.type = 'button'
+  fullSource.textContent = 'Open full source inspector'
+  const close = document.createElement('button')
+  close.type = 'button'
+  close.textContent = 'Close'
+  const save = document.createElement('button')
+  save.type = 'button'
+  save.className = 'primary-button structured-raw-save'
+  save.textContent = 'Save raw block'
+  actions.append(fullSource, close, save)
+  inspector.append(inspectorHead, textarea, actions)
+  summary.append(badge, copy, toggle)
+  dom.append(summary, inspector)
+
+  const updateSave = () => { save.disabled = !isEditable() || textarea.value.length === 0 }
+  const updateDom = () => {
+    const nodeId = String(node.attrs.id)
+    const format = String(node.attrs.format ?? 'Markdown')
+    const raw = String(node.attrs.raw)
+    const inspectorId = `dm-raw-inspector-${nodeId.replace(/[^a-zA-Z0-9_.:-]+/g, '-')}`
+    dom.dataset.dmId = nodeId
+    dom.dataset.format = format
+    description.textContent = `${format} block`
+    toggle.textContent = expanded ? 'Hide source' : 'Inspect source'
+    toggle.setAttribute('aria-expanded', String(expanded))
+    toggle.setAttribute('aria-controls', inspectorId)
+    inspector.id = inspectorId
+    inspector.hidden = !expanded
+    textarea.setAttribute('aria-label', `Preserved ${format} source`)
+    textarea.readOnly = !isEditable()
+    inspectorStatus.textContent = `${raw.split(/\r\n|\r|\n/).length} lines · ${new TextEncoder().encode(raw).length} UTF-8 bytes${isEditable() ? '' : ' · read-only'}`
+    if (!expanded) textarea.value = raw
+    updateSave()
+  }
+  const closeInspector = () => {
+    expanded = false
+    textarea.value = String(node.attrs.raw)
+    updateDom()
+    toggle.focus()
+  }
+  const saveInspector = () => {
+    const position = getPos()
+    if (typeof position !== 'number' || !isEditable() || textarea.value.length === 0) return
+    view.dispatch(view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, raw: textarea.value }))
+    closeInspector()
+  }
+  toggle.addEventListener('click', () => {
+    expanded = !expanded
+    if (expanded) textarea.value = String(node.attrs.raw)
+    updateDom()
+    if (expanded) {
+      textarea.focus()
+      textarea.setSelectionRange(0, 0)
+    } else toggle.focus()
+  })
+  fullSource.addEventListener('click', () => onInspect(String(node.attrs.id)))
+  close.addEventListener('click', closeInspector)
+  save.addEventListener('click', saveInspector)
+  textarea.addEventListener('input', updateSave)
+  textarea.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeInspector()
+    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault()
+      saveInspector()
+    }
+  })
+  updateDom()
+  return {
+    dom,
+    stopEvent: (event) => dom.contains(event.target as Node),
+    ignoreMutation: () => true,
+    update(next) {
+      if (next.type !== node.type) return false
+      node = next
+      updateDom()
+      return true
+    },
+  }
 }
 
 function citationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () => number | undefined, onSelect: (id: string, items: CitationItem[]) => void): NodeView {
@@ -2162,7 +2259,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           () => !readOnlyRef.current,
           (cellId) => codeCellStatusesRef.current?.[cellId],
         ),
-        raw_block: (node) => rawNodeView(node, (nodeId) => onInspectRawRef.current?.(nodeId)),
+        raw_block: (node, editorView, getPos) => rawNodeView(node, editorView, getPos, () => !readOnlyRef.current, (nodeId) => onInspectRawRef.current?.(nodeId)),
         citation: (node, editorView, getPos) => citationNodeView(node, editorView, getPos, (id, items) => onCitationSelectRef.current?.(id, items)),
         cross_reference: (node, editorView, getPos) => crossReferenceNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         equation_inline: (node, editorView, getPos) => equationNodeView(node, editorView, getPos, false, () => !readOnlyRef.current),
@@ -2284,6 +2381,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     document.querySelectorAll<HTMLInputElement>('.structured-link-input').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-link-edit').forEach((button) => { button.disabled = readOnly })
     document.querySelectorAll<HTMLButtonElement>('.structured-link-save').forEach((button) => { button.disabled = readOnly })
+    hostRef.current?.querySelectorAll<HTMLTextAreaElement>('.structured-raw-editor').forEach((editor) => { editor.readOnly = readOnly })
+    hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-raw-save').forEach((button) => { button.disabled = readOnly })
   }, [readOnly])
 
   useEffect(() => {

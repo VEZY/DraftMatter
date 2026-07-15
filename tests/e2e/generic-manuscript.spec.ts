@@ -336,4 +336,33 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1')))
       .toContain('[sampling protocol](notes/field-protocol.md "Field evidence protocol")')
   })
+
+  test('edits one preserved raw block through an explicit focused inspector', async ({ page }) => {
+    const rawSource = '# Raw syntax\n\n::: {.future-widget data-owner="lab"}\nOriginal opaque payload.\n:::\n'
+    await page.evaluate((portableSource) => localStorage.setItem('draftmatter.structured-source.v1', portableSource), rawSource)
+    await page.reload()
+
+    const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
+    const raw = manuscript.locator('.structured-raw-node[data-format="pandoc-div"]')
+    await expect(raw).not.toContainText('Original opaque payload.')
+    await raw.getByRole('button', { name: 'Inspect source' }).click()
+    const editor = raw.getByRole('textbox', { name: 'Preserved pandoc-div source' })
+    await expect(editor).toHaveValue('::: {.future-widget data-owner="lab"}\nOriginal opaque payload.\n:::\n')
+    await editor.fill('::: {.future-widget data-owner="field-team"}\nRevised opaque payload.\n:::')
+    await expect(raw).toHaveScreenshot('semantic-raw-editor.png')
+    await raw.getByRole('button', { name: 'Save raw block' }).click()
+    await expect(raw.getByRole('button', { name: 'Inspect source' })).toHaveAttribute('aria-expanded', 'false')
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1')))
+      .toContain('::: {.future-widget data-owner="field-team"}\nRevised opaque payload.\n:::')
+
+    await page.reload()
+    const reopenedRaw = page.getByRole('article', { name: 'Editable manuscript' }).locator('.structured-raw-node[data-format="pandoc-div"]')
+    await reopenedRaw.getByRole('button', { name: 'Inspect source' }).click()
+    await expect(reopenedRaw.getByRole('textbox', { name: 'Preserved pandoc-div source' }))
+      .toHaveValue('::: {.future-widget data-owner="field-team"}\nRevised opaque payload.\n:::\n')
+    await reopenedRaw.getByRole('button', { name: 'Open full source inspector' }).click()
+    const sourceInspector = page.getByRole('dialog', { name: 'Portable source inspector' })
+    await expect(sourceInspector).toContainText('Revised opaque payload.')
+    await sourceInspector.getByRole('button', { name: 'Close source inspector' }).click()
+  })
 })

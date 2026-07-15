@@ -112,11 +112,48 @@ describe('full structured manuscript editor', () => {
     expect(container.textContent).not.toContain('[^one]')
     expect(container.querySelector('.dm-review-point')?.getAttribute('aria-label')).toBe('Open point comment')
 
-    await act(async () => (container.querySelector('.structured-raw-node button') as HTMLButtonElement).click())
+    const raw = container.querySelector<HTMLElement>('.structured-raw-node')!
+    await act(async () => raw.querySelector<HTMLButtonElement>('.structured-raw-toggle')?.click())
+    expect(raw.querySelector<HTMLElement>('.structured-raw-inspector')?.hidden).toBe(false)
+    expect(raw.querySelector<HTMLTextAreaElement>('.structured-raw-editor')?.value).toContain('Opaque raw payload.')
+    await act(async () => raw.querySelector<HTMLButtonElement>('.structured-raw-actions > button')?.click())
     await act(async () => (container.querySelector('.dm-review-point') as HTMLButtonElement).click())
     expect(inspect).toHaveBeenCalledOnce()
     expect(selectReview).toHaveBeenCalledWith('dm-comment')
     expect(asset).toHaveBeenCalledWith('figures/growth.svg')
+  })
+
+  it('edits one preserved raw block explicitly and cancels later drafts', async () => {
+    const changed: string[] = []
+    const rawSource = '# Raw syntax\n\n::: {.future-widget data-owner="lab"}\nOriginal opaque payload.\n:::\n'
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={rawSource} onChange={(next) => changed.push(next)} />,
+    ))
+
+    const raw = container.querySelector<HTMLElement>('.structured-raw-node')!
+    const toggle = raw.querySelector<HTMLButtonElement>('.structured-raw-toggle')!
+    await act(async () => toggle.click())
+    const textarea = raw.querySelector<HTMLTextAreaElement>('.structured-raw-editor')!
+    const save = raw.querySelector<HTMLButtonElement>('.structured-raw-save')!
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+    expect(textarea.value).toContain('data-owner="lab"')
+
+    textarea.value = '::: {.future-widget data-owner="field-team"}\nRevised opaque payload.\n:::'
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    await act(async () => save.click())
+    expect(changed.at(-1)).toContain('::: {.future-widget data-owner="field-team"}\nRevised opaque payload.\n:::')
+    expect(changed.at(-1)).not.toContain('Original opaque payload.')
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+
+    await act(async () => toggle.click())
+    expect(textarea.value).toContain('Revised opaque payload.')
+    textarea.value = 'Discard this draft.'
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    textarea.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+    await act(async () => toggle.click())
+    expect(textarea.value).toContain('Revised opaque payload.')
+    expect(textarea.value).not.toContain('Discard this draft.')
   })
 
   it('serializes node-view and formatting transactions without losing portable records', async () => {
@@ -574,6 +611,9 @@ describe('full structured manuscript editor', () => {
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-cross-reference-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLInputElement>('.structured-cross-reference-input')].every((input) => input.readOnly)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-link-edit')].every((button) => button.disabled)).toBe(true)
+    await act(async () => container.querySelector<HTMLButtonElement>('.structured-raw-toggle')?.click())
+    expect(container.querySelector<HTMLTextAreaElement>('.structured-raw-editor')?.readOnly).toBe(true)
+    expect(container.querySelector<HTMLButtonElement>('.structured-raw-save')?.disabled).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-figure-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-table-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-heading-edit')].every((button) => button.disabled)).toBe(true)
