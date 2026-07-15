@@ -2,8 +2,10 @@
 
 import { act, createRef } from 'react'
 import { createRoot } from 'react-dom/client'
+import { EditorState } from 'prosemirror-state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { StructuredManuscriptEditor, type StructuredManuscriptEditorHandle } from './StructuredManuscriptEditor'
+import { StructuredManuscriptEditor, shouldRequestStructuredCommands, type StructuredManuscriptEditorHandle } from './StructuredManuscriptEditor'
+import { manuscriptSchema } from './manuscriptSchema'
 
 const source = `---
 title: Generic
@@ -243,6 +245,19 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector('.structured-cell-status')?.textContent).toBe('Running')
     expect(editorRef.current?.source()).toBe(source)
     expect(changed).not.toHaveBeenCalled()
+  })
+
+  it('reserves slash for commands only at an empty rendered paragraph', () => {
+    const emptyParagraph = manuscriptSchema.nodes.paragraph.createChecked({ id: 'empty', section: null })
+    const emptyState = EditorState.create({ schema: manuscriptSchema, doc: manuscriptSchema.nodes.doc.createChecked(null, [emptyParagraph]) })
+    const slash = new KeyboardEvent('keydown', { key: '/' })
+    expect(shouldRequestStructuredCommands(emptyState, slash)).toBe(true)
+    expect(shouldRequestStructuredCommands(emptyState, slash, true)).toBe(false)
+    expect(shouldRequestStructuredCommands(emptyState, new KeyboardEvent('keydown', { key: '/', metaKey: true }))).toBe(false)
+
+    const textParagraph = manuscriptSchema.nodes.paragraph.createChecked({ id: 'text', section: null }, manuscriptSchema.text('notes'))
+    const textState = EditorState.create({ schema: manuscriptSchema, doc: manuscriptSchema.nodes.doc.createChecked(null, [textParagraph]) })
+    expect(shouldRequestStructuredCommands(textState, slash)).toBe(false)
   })
 
   it('inserts equations, cross-references, and a portable footnote at the selection', async () => {

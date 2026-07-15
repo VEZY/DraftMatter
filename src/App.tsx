@@ -2878,6 +2878,7 @@ function App() {
               onCitationSelect={openStructuredCitationDetails}
               onReviewSelectionChange={setStructuredReviewSelection}
               onReviewAnchorSelect={() => showReviewPanel()}
+              onCommandRequest={() => setCommandOpen(true)}
               suggestionMode={suggestionMode && markupView !== 'original' && markupView !== 'final'}
               suggestionAuthor={{ id: 'dm-local-author', name: 'Remi Vezy' }}
               onSuggestionCapture={(message) => setToast(message)}

@@ -30,6 +30,20 @@ export interface StructuredReviewSelection {
   occurrence: number
 }
 
+export function shouldRequestStructuredCommands(state: EditorState, event: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'isComposing'>, readOnly = false) {
+  const selection = state.selection
+  return event.key === '/'
+    && !event.metaKey
+    && !event.ctrlKey
+    && !event.altKey
+    && !event.isComposing
+    && !readOnly
+    && selection.empty
+    && selection.$from.parent.type === manuscriptSchema.nodes.paragraph
+    && selection.$from.parentOffset === 0
+    && selection.$from.parent.content.size === 0
+}
+
 export interface StructuredManuscriptEditorHandle {
   focus: () => void
   toggleBold: () => boolean
@@ -66,6 +80,7 @@ export interface StructuredManuscriptEditorProps {
   onCitationSelect?: (id: string, items: CitationItem[]) => void
   onReviewSelectionChange?: (selection: StructuredReviewSelection | null) => void
   onReviewAnchorSelect?: (anchorId: string) => void
+  onCommandRequest?: () => void
   suggestionMode?: boolean
   suggestionAuthor?: { id: string; name: string }
   onSuggestionCapture?: (message: string, error?: boolean) => void
@@ -1147,6 +1162,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   onCitationSelect,
   onReviewSelectionChange,
   onReviewAnchorSelect,
+  onCommandRequest,
   suggestionMode = false,
   suggestionAuthor = { id: 'dm-local-author', name: 'Local author' },
   onSuggestionCapture,
@@ -1170,6 +1186,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const onCitationSelectRef = useRef(onCitationSelect)
   const onReviewSelectionRef = useRef(onReviewSelectionChange)
   const onReviewAnchorSelectRef = useRef(onReviewAnchorSelect)
+  const onCommandRequestRef = useRef(onCommandRequest)
   const suggestionModeRef = useRef(suggestionMode)
   const suggestionAuthorRef = useRef(suggestionAuthor)
   const onSuggestionCaptureRef = useRef(onSuggestionCapture)
@@ -1187,6 +1204,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   onCitationSelectRef.current = onCitationSelect
   onReviewSelectionRef.current = onReviewSelectionChange
   onReviewAnchorSelectRef.current = onReviewAnchorSelect
+  onCommandRequestRef.current = onCommandRequest
   suggestionModeRef.current = suggestionMode
   suggestionAuthorRef.current = suggestionAuthor
   onSuggestionCaptureRef.current = onSuggestionCapture
@@ -1478,6 +1496,12 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           if (pendingSuggestionRef.current) finishPendingSuggestion(editorView)
           return false
         },
+      },
+      handleKeyDown: (editorView, event) => {
+        if (!shouldRequestStructuredCommands(editorView.state, event, readOnlyRef.current)) return false
+        if (!onCommandRequestRef.current) return false
+        onCommandRequestRef.current()
+        return true
       },
       nodeViews: {
         code_cell: (node, editorView, getPos) => codeCellNodeView(
