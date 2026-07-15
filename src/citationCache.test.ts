@@ -50,6 +50,22 @@ describe('offline cited-record cache', () => {
     })
   })
 
+  it('retains an explicitly selected Crossref record for offline use', () => {
+    const crossref: CitationRecord = {
+      ...zotero,
+      citekey: 'vezy2020dynacof',
+      source: 'crossref',
+      provenance: { origin: 'online-search', locator: 'https://api.crossref.org/works/10.1000%2Fcanopy' },
+      sourceIdentity: undefined,
+    }
+    const reopened = parseCitationCache(serializeCitationCache(createCitationCache([crossref], [crossref.citekey]).cache))
+
+    expect(reopened).toEqual({
+      cache: { schemaVersion: 1, records: [expect.objectContaining({ citekey: crossref.citekey, source: 'crossref', availability: 'cached' })] },
+      diagnostics: [],
+    })
+  })
+
   it('isolates project caches and degrades cleanly for invalid or unavailable storage', () => {
     const values = new Map<string, string>()
     const storage = {

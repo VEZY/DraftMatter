@@ -13,7 +13,11 @@ const MAX_RECOVERY_FILES: usize = 8;
 const MAX_BIBLIOGRAPHY_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CITATION_LOCK_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_ZOTERO_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_CROSSREF_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 const ZOTERO_PORT: u16 = 23119;
+const CROSSREF_WORKS_URL: &str = "https://api.crossref.org/works";
+const CROSSREF_USER_AGENT: &str = "DraftMatter/0.1 (desktop scholarly search)";
+const CROSSREF_MAILTO: Option<&str> = option_env!("DRAFTMATTER_CROSSREF_MAILTO");
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -153,6 +157,60 @@ pub struct ZoteroSearchResult {
     pub api_version: Option<String>,
     pub schema_version: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct CrossrefSearchRequest {
+    pub doi: Option<String>,
+    pub bibliographic: Option<String>,
+    pub author: Option<String>,
+    pub title: Option<String>,
+    pub from_publication_date: Option<String>,
+    pub until_publication_date: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CrossrefAuthor {
+    pub family: String,
+    pub given: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CrossrefWork {
+    pub doi: String,
+    pub title: String,
+    pub authors: Vec<CrossrefAuthor>,
+    pub year: Option<u64>,
+    pub container: Option<String>,
+    #[serde(rename = "type")]
+    pub work_type: String,
+    pub url: Option<String>,
+    pub provider_score: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CrossrefSearchResponse {
+    pub works: Vec<CrossrefWork>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CrossrefCommandError {
+    pub kind: String,
+    pub message: String,
+    pub retry_after_ms: Option<u64>,
+}
+
+impl Display for CrossrefCommandError {
+    fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for CrossrefCommandError {}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(
@@ -1053,6 +1111,294 @@ fn zotero_search_at(
     })
 }
 
+fn crossref_error(kind: &str, message: impl Into<String>) -> CrossrefCommandError {
+    CrossrefCommandError {
+        kind: kind.to_string(),
+        message: message.into(),
+        retry_after_ms: None,
+    }
+}
+
+fn valid_doi(value: &str) -> bool {
+    let doi = value.trim();
+    let Some((registrant, suffix)) = doi.split_once('/') else {
+        return false;
+    };
+    registrant.starts_with("10.")
+        && (7..=12).contains(&registrant.len())
+        && registrant[3..]
+            .chars()
+            .all(|character| character.is_ascii_digit())
+        && !suffix.is_empty()
+        && !suffix.chars().any(char::is_whitespace)
+}
+
+fn valid_crossref_date(value: &str) -> bool {
+    value.len() == 10
+        && value.as_bytes()[4] == b'-'
+        && value.as_bytes()[7] == b'-'
+        && value
+            .chars()
+            .enumerate()
+            .all(|(index, character)| matches!(index, 4 | 7) || character.is_ascii_digit())
+}
+
+fn valid_crossref_mailto(value: &str) -> bool {
+    value.len() <= 254
+        && !value.chars().any(char::is_whitespace)
+        && value
+            .split_once('@')
+            .is_some_and(|(local, domain)| !local.is_empty() && domain.contains('.'))
+}
+
+fn crossref_request_parts(
+    request: &CrossrefSearchRequest,
+) -> Result<(String, Vec<(&'static str, String)>), CrossrefCommandError> {
+    crossref_request_parts_with_mailto(request, CROSSREF_MAILTO)
+}
+
+fn crossref_request_parts_with_mailto(
+    request: &CrossrefSearchRequest,
+    maintainer_email: Option<&str>,
+) -> Result<(String, Vec<(&'static str, String)>), CrossrefCommandError> {
+    let mailto = maintainer_email.filter(|value| valid_crossref_mailto(value));
+    if let Some(doi) = request.doi.as_deref() {
+        if request.bibliographic.is_some()
+            || request.author.is_some()
+            || request.title.is_some()
+            || request.from_publication_date.is_some()
+            || request.until_publication_date.is_some()
+        {
+            return Err(crossref_error(
+                "invalid-request",
+                "A DOI lookup cannot include general Crossref query fields.",
+            ));
+        }
+        let normalized = doi
+            .trim()
+            .strip_prefix("https://doi.org/")
+            .unwrap_or(doi.trim())
+            .to_ascii_lowercase();
+        if normalized.len() > 512 || !valid_doi(&normalized) {
+            return Err(crossref_error("invalid-request", "The DOI is not valid."));
+        }
+        return Ok((
+            format!("{CROSSREF_WORKS_URL}/{}", percent_encode_query(&normalized)),
+            mailto
+                .map(|value| vec![("mailto", value.to_string())])
+                .unwrap_or_default(),
+        ));
+    }
+
+    let bibliographic = request
+        .bibliographic
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let author = request
+        .author
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let title = request
+        .title
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    if bibliographic.is_none() && (author.is_none() || title.is_none()) {
+        return Err(crossref_error(
+            "invalid-request",
+            "Crossref search needs a bibliographic query or both author and title fields.",
+        ));
+    }
+    if bibliographic.is_some_and(|value| value.len() > 512)
+        || author.is_some_and(|value| value.len() > 128)
+        || title.is_some_and(|value| value.len() > 512)
+    {
+        return Err(crossref_error(
+            "invalid-request",
+            "The Crossref query exceeds the bounded field length.",
+        ));
+    }
+    for date in [
+        request.from_publication_date.as_deref(),
+        request.until_publication_date.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if !valid_crossref_date(date) {
+            return Err(crossref_error(
+                "invalid-request",
+                "Crossref publication dates must use YYYY-MM-DD.",
+            ));
+        }
+    }
+
+    let mut query = vec![
+        ("rows", "20".to_string()),
+        (
+            "select",
+            "DOI,title,author,published,container-title,type,URL,score".to_string(),
+        ),
+    ];
+    if let Some(value) = mailto {
+        query.push(("mailto", value.to_string()));
+    }
+    if let Some(value) = bibliographic {
+        query.push(("query.bibliographic", value.to_string()));
+    }
+    if let Some(value) = author {
+        query.push(("query.author", value.to_string()));
+    }
+    if let Some(value) = title {
+        query.push(("query.title", value.to_string()));
+    }
+    let dates = match (
+        request.from_publication_date.as_deref(),
+        request.until_publication_date.as_deref(),
+    ) {
+        (Some(from), Some(until)) => Some(format!("from-pub-date:{from},until-pub-date:{until}")),
+        (Some(from), None) => Some(format!("from-pub-date:{from}")),
+        (None, Some(until)) => Some(format!("until-pub-date:{until}")),
+        (None, None) => None,
+    };
+    if let Some(filter) = dates {
+        query.push(("filter", filter));
+    }
+    Ok((CROSSREF_WORKS_URL.to_string(), query))
+}
+
+fn crossref_string(value: &serde_json::Value, key: &str) -> Option<String> {
+    let field = value.get(key)?;
+    field
+        .as_str()
+        .or_else(|| field.as_array()?.first()?.as_str())
+        .map(str::to_string)
+}
+
+fn crossref_work(value: &serde_json::Value) -> CrossrefWork {
+    let authors = value
+        .get("author")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(|author| {
+            let family = author.get("family")?.as_str()?.trim();
+            if family.is_empty() {
+                return None;
+            }
+            Some(CrossrefAuthor {
+                family: family.to_string(),
+                given: author
+                    .get("given")
+                    .and_then(serde_json::Value::as_str)
+                    .map(str::to_string),
+            })
+        })
+        .collect();
+    let year = value
+        .get("published")
+        .and_then(|published| published.get("date-parts"))
+        .and_then(serde_json::Value::as_array)
+        .and_then(|parts| parts.first())
+        .and_then(serde_json::Value::as_array)
+        .and_then(|date| date.first())
+        .and_then(serde_json::Value::as_u64);
+    CrossrefWork {
+        doi: crossref_string(value, "DOI").unwrap_or_default(),
+        title: crossref_string(value, "title").unwrap_or_else(|| "Untitled record".to_string()),
+        authors,
+        year,
+        container: crossref_string(value, "container-title"),
+        work_type: crossref_string(value, "type").unwrap_or_else(|| "article".to_string()),
+        url: crossref_string(value, "URL"),
+        provider_score: value.get("score").and_then(serde_json::Value::as_f64),
+    }
+}
+
+fn parse_crossref_response(body: &[u8]) -> Result<CrossrefSearchResponse, CrossrefCommandError> {
+    let root = serde_json::from_slice::<serde_json::Value>(body).map_err(|error| {
+        crossref_error(
+            "invalid-response",
+            format!("Crossref returned unreadable JSON: {error}"),
+        )
+    })?;
+    let message = root.get("message").ok_or_else(|| {
+        crossref_error(
+            "invalid-response",
+            "Crossref response has no message object.",
+        )
+    })?;
+    let works = if let Some(items) = message.get("items").and_then(serde_json::Value::as_array) {
+        items.iter().take(20).map(crossref_work).collect()
+    } else if message.is_object() {
+        vec![crossref_work(message)]
+    } else {
+        return Err(crossref_error(
+            "invalid-response",
+            "Crossref response has an invalid message shape.",
+        ));
+    };
+    Ok(CrossrefSearchResponse { works })
+}
+
+fn crossref_search_impl(
+    request: CrossrefSearchRequest,
+) -> Result<CrossrefSearchResponse, CrossrefCommandError> {
+    let (url, query) = crossref_request_parts(&request)?;
+    let agent = ureq::AgentBuilder::new()
+        .timeout_connect(Duration::from_secs(4))
+        .timeout_read(Duration::from_secs(8))
+        .build();
+    let mut http = agent
+        .get(&url)
+        .set("Accept", "application/json")
+        .set("User-Agent", CROSSREF_USER_AGENT);
+    for (name, value) in &query {
+        http = http.query(name, value);
+    }
+    let response = http.call().map_err(|error| match error {
+        ureq::Error::Status(429, response) => {
+            let retry_after_ms = response
+                .header("Retry-After")
+                .and_then(|value| value.parse::<u64>().ok())
+                .map(|seconds| seconds.saturating_mul(1_000))
+                .or(Some(1_000));
+            CrossrefCommandError {
+                kind: "rate-limit".to_string(),
+                message: "Crossref is rate-limiting requests.".to_string(),
+                retry_after_ms,
+            }
+        }
+        ureq::Error::Status(status, _) if (500..=599).contains(&status) => CrossrefCommandError {
+            kind: "http".to_string(),
+            message: format!("Crossref search returned HTTP {status}."),
+            retry_after_ms: Some(1_000),
+        },
+        ureq::Error::Status(status, _) => {
+            crossref_error("http", format!("Crossref search returned HTTP {status}."))
+        }
+        ureq::Error::Transport(_) => crossref_error(
+            "offline",
+            "Crossref is unavailable. Check the network connection and retry.",
+        ),
+    })?;
+    let mut body = Vec::new();
+    response
+        .into_reader()
+        .take(MAX_CROSSREF_RESPONSE_BYTES + 1)
+        .read_to_end(&mut body)
+        .map_err(|error| crossref_error("offline", format!("Crossref response failed: {error}")))?;
+    if body.len() as u64 > MAX_CROSSREF_RESPONSE_BYTES {
+        return Err(crossref_error(
+            "invalid-response",
+            "Crossref response exceeded the 4 MB safety limit.",
+        ));
+    }
+    parse_crossref_response(&body)
+}
+
 #[tauri::command]
 fn open_project(root: String) -> Result<ProjectSnapshot, HostError> {
     open_project_impl(&root)
@@ -1147,6 +1493,13 @@ fn zotero_search(query: String, limit: Option<u8>) -> Result<ZoteroSearchResult,
     zotero_search_impl(&query, limit.unwrap_or(25))
 }
 
+#[tauri::command]
+fn crossref_search(
+    request: CrossrefSearchRequest,
+) -> Result<CrossrefSearchResponse, CrossrefCommandError> {
+    crossref_search_impl(request)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -1163,7 +1516,8 @@ pub fn run() {
             set_main_document,
             set_citation_preferences,
             zotero_status,
-            zotero_search
+            zotero_search,
+            crossref_search
         ])
         .run(tauri::generate_context!())
         .expect("error while running DraftMatter");
@@ -1209,6 +1563,86 @@ mod tests {
         assert_eq!(
             safe_relative("chapters/paper.qmd").unwrap(),
             PathBuf::from("chapters/paper.qmd")
+        );
+    }
+
+    #[test]
+    fn builds_only_bounded_crossref_routes() {
+        let structured = CrossrefSearchRequest {
+            author: Some("vezy".into()),
+            title: Some("DynACof".into()),
+            from_publication_date: Some("2020-01-01".into()),
+            until_publication_date: Some("2020-12-31".into()),
+            ..CrossrefSearchRequest::default()
+        };
+        let (url, query) = crossref_request_parts(&structured).unwrap();
+        assert_eq!(url, CROSSREF_WORKS_URL);
+        assert!(query.contains(&("query.author", "vezy".into())));
+        assert!(query.contains(&("query.title", "DynACof".into())));
+        assert!(query.contains(&(
+            "filter",
+            "from-pub-date:2020-01-01,until-pub-date:2020-12-31".into()
+        )));
+        let (_, polite_query) =
+            crossref_request_parts_with_mailto(&structured, Some("maintainer@example.org"))
+                .unwrap();
+        assert!(polite_query.contains(&("mailto", "maintainer@example.org".into())));
+
+        let (doi_url, doi_query) = crossref_request_parts(&CrossrefSearchRequest {
+            doi: Some("10.1016/j.envsoft.2019.104609".into()),
+            ..CrossrefSearchRequest::default()
+        })
+        .unwrap();
+        assert_eq!(
+            doi_url,
+            "https://api.crossref.org/works/10.1016%2Fj.envsoft.2019.104609"
+        );
+        assert!(doi_query.is_empty());
+
+        assert!(crossref_request_parts(&CrossrefSearchRequest {
+            doi: Some("https://elsewhere.example/work".into()),
+            ..CrossrefSearchRequest::default()
+        })
+        .is_err());
+        assert!(crossref_request_parts(&CrossrefSearchRequest {
+            bibliographic: Some("x".repeat(513)),
+            ..CrossrefSearchRequest::default()
+        })
+        .is_err());
+    }
+
+    #[test]
+    fn normalizes_crossref_list_and_doi_responses() {
+        let list = br#"{
+          "message": {
+            "items": [{
+              "DOI": "10.1016/j.envsoft.2019.104609",
+              "title": ["DynACof: a process-based model"],
+              "author": [{"family":"Vezy","given":"Remi"}],
+              "published": {"date-parts":[[2020,1,1]]},
+              "container-title": ["Environmental Modelling & Software"],
+              "type": "journal-article",
+              "URL": "https://doi.org/10.1016/j.envsoft.2019.104609",
+              "score": 12.5
+            }]
+          }
+        }"#;
+        let parsed = parse_crossref_response(list).unwrap();
+        assert_eq!(parsed.works.len(), 1);
+        assert_eq!(parsed.works[0].authors[0].family, "Vezy");
+        assert_eq!(parsed.works[0].year, Some(2020));
+        assert_eq!(parsed.works[0].provider_score, Some(12.5));
+
+        let single = br#"{"message":{"DOI":"10.1000/one","title":["One"],"type":"book"}}"#;
+        assert_eq!(
+            parse_crossref_response(single).unwrap().works[0].title,
+            "One"
+        );
+        assert_eq!(
+            parse_crossref_response(br#"{"status":"ok"}"#)
+                .unwrap_err()
+                .kind,
+            "invalid-response"
         );
     }
 

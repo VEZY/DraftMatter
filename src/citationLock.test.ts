@@ -29,6 +29,13 @@ const ris: CitationRecord = {
   provenance: { origin: 'project-file', locator: 'library.ris' },
 }
 
+const crossref: CitationRecord = {
+  ...bibtex,
+  citekey: 'vezy2020dynacof',
+  source: 'crossref',
+  provenance: { origin: 'online-search', locator: 'https://api.crossref.org/works/10.1000%2Fcanopy' },
+}
+
 describe('citation lock', () => {
   it('serializes deterministically with durable source identity and normalized identifiers', () => {
     const lock = buildCitationLock([zotero, bibtex])
@@ -58,6 +65,19 @@ describe('citation lock', () => {
 
     expect(source).toContain('"format": "ris"')
     expect(source).toContain('"format": "endnote"')
+    expect(parseCitationLock(source)).toEqual({ lock, diagnostics: [] })
+  })
+
+  it('locks Crossref records by normalized DOI across citekey changes', () => {
+    const previous = buildCitationLock([crossref])
+    const lock = buildCitationLock([{ ...crossref, citekey: 'vezyDynacof2020' }], previous)
+    const source = serializeCitationLock(lock)
+
+    expect(lock.entries).toEqual([expect.objectContaining({
+      citekey: 'vezy2020dynacof',
+      source: { provider: 'crossref', doi: '10.1000/canopy' },
+      aliases: ['vezyDynacof2020'],
+    })])
     expect(parseCitationLock(source)).toEqual({ lock, diagnostics: [] })
   })
 

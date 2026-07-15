@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { CrossrefSearchSession, CrossrefTransportError, crossrefRequest, parseCrossrefQuery, rankCrossrefWorks, type CrossrefTransport, type CrossrefWork } from './crossref'
+import { CrossrefSearchSession, CrossrefTransportError, crossrefCandidateToCitationRecord, crossrefDuplicateCitekeys, crossrefRequest, parseCrossrefQuery, rankCrossrefWorks, type CrossrefTransport, type CrossrefWork } from './crossref'
 
 const dynacof: CrossrefWork = {
   doi: '10.1016/j.envsoft.2019.104609',
@@ -41,6 +41,21 @@ describe('Crossref scholarly search', () => {
     const ranked = rankCrossrefWorks(parseCrossrefQuery('vezy et al. 2020 DynACof'), [distractor, dynacof])
     expect(ranked.map((candidate) => candidate.doi)).toEqual(['10.1016/j.envsoft.2019.104609', '10.1000/other'])
     expect(ranked[0].localScore).toBeGreaterThan(ranked[1].localScore)
+  })
+
+  it('turns a selected provider candidate into a portable, collision-safe citation record', () => {
+    const existing = [{ ...crossrefCandidateToCitationRecord(dynacof), citekey: 'vezy2020dynacof' }]
+    const record = crossrefCandidateToCitationRecord(dynacof, existing)
+
+    expect(record).toMatchObject({
+      citekey: 'vezy2020dynacof2',
+      source: 'crossref',
+      type: 'article',
+      doi: dynacof.doi,
+      provenance: { origin: 'online-search' },
+    })
+    expect(record.cslData).toMatchObject({ type: 'article-journal', DOI: dynacof.doi })
+    expect(crossrefDuplicateCitekeys(dynacof, existing)).toEqual(['vezy2020dynacof'])
   })
 
   it('falls back once from an empty structured request to the unchanged bibliographic query', async () => {
@@ -87,6 +102,23 @@ describe('Crossref scholarly search', () => {
     expect(signals[0].aborted).toBe(true)
   })
 
+  it('can explicitly cancel an in-flight picker search', async () => {
+    let release: ((works: CrossrefWork[]) => void) | undefined
+    let signal: AbortSignal | undefined
+    const session = new CrossrefSearchSession({
+      search: (_request, nextSignal) => {
+        signal = nextSignal
+        return new Promise((resolve) => { release = resolve })
+      },
+    })
+    const pending = session.search('coffee model')
+    session.cancel()
+    release?.([dynacof])
+
+    expect(signal?.aborted).toBe(true)
+    expect((await pending).stale).toBe(true)
+  })
+
   it('degrades cleanly for empty, offline, and HTTP 429 paths', async () => {
     const empty = new CrossrefSearchSession({ search: async () => [] })
     expect((await empty.search('unfindable record')).diagnostics).toEqual([expect.objectContaining({ code: 'crossref-empty' })])
@@ -96,5 +128,24 @@ describe('Crossref scholarly search', () => {
 
     const limited = new CrossrefSearchSession({ search: async () => { throw new CrossrefTransportError('rate-limit', 'slow down', 4_000) } })
     expect((await limited.search('query')).diagnostics).toEqual([expect.objectContaining({ code: 'crossref-rate-limit', message: expect.stringContaining('4 seconds') })])
+  })
+
+  it('backs off exponentially after provider throttling while still serving cached queries', async () => {
+    let now = 1_000
+    const search = vi.fn()
+      .mockRejectedValueOnce(new CrossrefTransportError('rate-limit', 'slow down', 2_000))
+      .mockRejectedValueOnce(new CrossrefTransportError('http', 'server error', 1_000))
+      .mockResolvedValue([dynacof])
+    const session = new CrossrefSearchSession({ search }, 32, () => now)
+
+    expect((await session.search('first')).diagnostics[0].code).toBe('crossref-rate-limit')
+    expect((await session.search('second')).diagnostics[0].code).toBe('crossref-backoff')
+    expect(search).toHaveBeenCalledTimes(1)
+    now += 2_001
+    expect((await session.search('second')).diagnostics[0].code).toBe('crossref-http')
+    now += 2_001
+    expect((await session.search('second')).candidates[0].doi).toBe(dynacof.doi)
+    expect((await session.search('second')).fromCache).toBe(true)
+    expect(search).toHaveBeenCalledTimes(3)
   })
 })

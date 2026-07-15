@@ -4,6 +4,7 @@ export const CITATION_LOCK_SCHEMA = 1 as const
 
 export type CitationLockSource =
   | { provider: 'zotero'; itemKey: string }
+  | { provider: 'crossref'; doi: string }
   | { provider: 'bibliography'; format: 'bibtex' | 'csl-json' | 'ris' | 'endnote'; locator: string; sourceKey: string }
   | { provider: 'sample'; sourceKey: string }
 
@@ -39,6 +40,9 @@ export function citationLockSource(record: CitationRecord): CitationLockSource {
   if (record.sourceIdentity?.provider === 'zotero') {
     return { provider: 'zotero', itemKey: record.sourceIdentity.itemKey }
   }
+  if (record.source === 'crossref' && record.doi) {
+    return { provider: 'crossref', doi: normalizedDoi(record.doi)! }
+  }
   if (record.source === 'bibtex' || record.source === 'csl-json' || record.source === 'ris' || record.source === 'endnote') {
     return {
       provider: 'bibliography',
@@ -59,6 +63,7 @@ function citationVersion(record: CitationRecord) {
 
 function sourceFingerprint(source: CitationLockSource) {
   if (source.provider === 'zotero') return `zotero:${source.itemKey}`
+  if (source.provider === 'crossref') return `crossref:${normalizedDoi(source.doi)}`
   if (source.provider === 'bibliography') return `bibliography:${source.format}:${source.locator}:${source.sourceKey}`
   return `sample:${source.sourceKey}`
 }
@@ -125,6 +130,7 @@ function isLockSource(value: unknown): value is CitationLockSource {
   if (!value || typeof value !== 'object') return false
   const source = value as Partial<CitationLockSource> & Record<string, unknown>
   if (source.provider === 'zotero') return typeof source.itemKey === 'string' && Boolean(source.itemKey)
+  if (source.provider === 'crossref') return typeof source.doi === 'string' && Boolean(normalizedDoi(source.doi))
   if (source.provider === 'bibliography') {
     return (source.format === 'bibtex' || source.format === 'csl-json' || source.format === 'ris' || source.format === 'endnote')
       && typeof source.locator === 'string'

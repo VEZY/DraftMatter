@@ -1039,6 +1039,11 @@ button:disabled {
   color: #8b4945;
 }
 
+.source-icon.crossref {
+  background: #e7eef0;
+  color: #526d75;
+}
+
 .citation-detail-top > div {
   flex: 1;
 }
@@ -2323,7 +2328,8 @@ kbd {
   gap: 3px;
 }
 
-.zotero-state {
+.zotero-state,
+.crossref-state {
   align-items: center;
   color: #7c8781;
   display: flex;
@@ -2334,19 +2340,49 @@ kbd {
   text-transform: none;
 }
 
-.zotero-state i {
+.zotero-state i,
+.crossref-state i {
   background: #b5bdb8;
   border-radius: 50%;
   height: 5px;
   width: 5px;
 }
 
-.zotero-state.available i {
+.zotero-state.available i,
+.crossref-state.available i {
   background: var(--sage);
 }
 
-.zotero-state.unavailable i {
+.zotero-state.unavailable i,
+.crossref-state.unavailable i {
   background: #b98a80;
+}
+
+.crossref-state.searching i {
+  background: #78949c;
+}
+
+.citation-source-group {
+  align-items: center;
+  border-top: 1px solid #edf0ee;
+  color: #89938e;
+  display: flex;
+  font-size: 7.5px;
+  font-weight: 700;
+  justify-content: space-between;
+  letter-spacing: 0.55px;
+  margin-top: 3px;
+  padding: 9px 8px 4px;
+  text-transform: uppercase;
+}
+
+.citation-source-group.crossref {
+  color: #718990;
+}
+
+.citation-source-group small {
+  font-size: 7.5px;
+  font-weight: 500;
 }
 
 .source-result {
@@ -2368,6 +2404,7 @@ kbd {
 .source-result small { color: #77817c; font-size: 8.5px; margin-top: 4px; }
 .source-result em { color: #a0a7a3; font-size: 7.5px; font-style: normal; margin-top: 3px; }
 .source-result > svg { color: var(--sage); }
+.source-result.crossref-result > svg { color: #6f8b93; }
 
 .picker-footer {
   background: #f7f9f7;

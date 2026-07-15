@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createDesktopHost, normaliseHostFailure, resolveMainDocument, type ProjectSnapshot } from './desktopHost'
+import { createDesktopHost, normaliseCrossrefFailure, normaliseHostFailure, resolveMainDocument, type ProjectSnapshot } from './desktopHost'
 
 const project: ProjectSnapshot = {
   root: '/research/canopy',
@@ -28,6 +28,7 @@ describe('desktop host adapter', () => {
     await host.setCitationPreferences('/research/canopy', 'draftmatter-numeric', 'fr-FR')
     await host.zoteroStatus()
     await host.searchZotero('canopy water', 12)
+    await host.searchCrossref({ kind: 'doi', doi: '10.1016/j.envsoft.2019.104609' })
 
     expect(calls).toEqual([
       ['open_project', { root: '/research/canopy' }],
@@ -41,6 +42,7 @@ describe('desktop host adapter', () => {
       ['set_citation_preferences', { root: '/research/canopy', style: 'draftmatter-numeric', locale: 'fr-FR' }],
       ['zotero_status', undefined],
       ['zotero_search', { query: 'canopy water', limit: 12 }],
+      ['crossref_search', { request: { doi: '10.1016/j.envsoft.2019.104609' } }],
     ])
   })
 
@@ -56,6 +58,14 @@ describe('desktop host adapter', () => {
     expect(normaliseHostFailure({ kind: 'conflict', message: 'paper.qmd changed outside DraftMatter.' })).toEqual({
       kind: 'conflict',
       message: 'paper.qmd changed outside DraftMatter.',
+    })
+  })
+
+  it('normalises Crossref rate limits and keeps retry guidance', () => {
+    expect(normaliseCrossrefFailure({ kind: 'rate-limit', message: 'Slow down.', retryAfterMs: 3000 })).toMatchObject({
+      kind: 'rate-limit',
+      message: 'Slow down.',
+      retryAfterMs: 3000,
     })
   })
 

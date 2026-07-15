@@ -1,4 +1,4 @@
-import type { DocumentDiagnostic } from './types'
+import type { CitationRecord, DocumentDiagnostic } from './types'
 
 export const CROSSREF_ROWS = 20
 export const CROSSREF_SELECT = ['DOI', 'title', 'author', 'published', 'container-title', 'type', 'URL', 'score'] as const
@@ -70,6 +70,64 @@ export interface CrossrefSearchResult {
 function normalizedDoi(value: string) {
   const doi = value.trim().replace(/^doi:\s*/i, '').replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '')
   return /^10\.\d{4,9}\/\S+$/i.test(doi) ? doi.replace(/[.,;]$/, '').toLowerCase() : undefined
+}
+
+function citationType(type: string) {
+  if (type === 'journal-article') return 'article'
+  if (type === 'proceedings-article') return 'inproceedings'
+  if (type === 'book-chapter' || type === 'reference-entry') return 'chapter'
+  if (type === 'dissertation') return 'thesis'
+  if (type === 'posted-content' || type === 'peer-review') return 'article'
+  return type || 'article'
+}
+
+function citekeyPart(value: string) {
+  return normalizedText(value).replace(/\s+/g, '')
+}
+
+function crossrefCitekey(work: CrossrefWork, existing: CitationRecord[]) {
+  const family = citekeyPart(work.authors[0]?.family ?? '') || 'crossref'
+  const year = work.year?.toString() ?? 'nd'
+  const titleWord = tokens(work.title).find((token) => !['a', 'an', 'the', 'of', 'on', 'and'].includes(token)) ?? 'record'
+  const base = `${family}${year}${titleWord}`.slice(0, 72)
+  const occupied = new Set(existing.map((record) => record.citekey.toLowerCase()))
+  if (!occupied.has(base.toLowerCase())) return base
+  let suffix = 2
+  while (occupied.has(`${base}${suffix}`.toLowerCase())) suffix += 1
+  return `${base}${suffix}`
+}
+
+export function crossrefDuplicateCitekeys(work: CrossrefWork, existing: CitationRecord[]) {
+  const doi = normalizedDoi(work.doi)
+  if (!doi) return []
+  return existing.filter((record) => record.doi && normalizedDoi(record.doi) === doi).map((record) => record.citekey)
+}
+
+export function crossrefCandidateToCitationRecord(work: CrossrefWork, existing: CitationRecord[] = []): CitationRecord {
+  const citekey = crossrefCitekey(work, existing)
+  const doi = normalizedDoi(work.doi) ?? work.doi.toLowerCase()
+  return {
+    citekey,
+    type: citationType(work.type),
+    title: work.title || 'Untitled Crossref record',
+    authors: work.authors.map((author) => [author.given, author.family].filter(Boolean).join(' ')),
+    ...(work.year ? { year: work.year.toString() } : {}),
+    ...(work.container ? { container: work.container } : {}),
+    doi,
+    ...(work.url ? { url: work.url } : {}),
+    cslData: {
+      id: citekey,
+      type: citationType(work.type) === 'article' ? 'article-journal' : citationType(work.type),
+      title: work.title,
+      author: work.authors.map((author) => ({ family: author.family, ...(author.given ? { given: author.given } : {}) })),
+      ...(work.year ? { issued: { 'date-parts': [[work.year]] } } : {}),
+      ...(work.container ? { 'container-title': work.container } : {}),
+      DOI: doi,
+      ...(work.url ? { URL: work.url } : {}),
+    },
+    source: 'crossref',
+    provenance: { origin: 'online-search', locator: `https://api.crossref.org/works/${encodeURIComponent(doi)}` },
+  }
 }
 
 function normalizedText(value: string) {
@@ -166,20 +224,45 @@ export class CrossrefSearchSession {
   private readonly cache = new Map<string, CrossrefCandidate[]>()
   private active: AbortController | null = null
   private sequence = 0
+  private backoffAttempt = 0
+  private backoffUntil = 0
 
-  constructor(private readonly transport: CrossrefTransport, private readonly cacheLimit = 32) {}
+  constructor(
+    private readonly transport: CrossrefTransport,
+    private readonly cacheLimit = 32,
+    private readonly now: () => number = Date.now,
+  ) {}
+
+  cancel() {
+    this.sequence += 1
+    this.active?.abort()
+    this.active = null
+  }
 
   async search(raw: string): Promise<CrossrefSearchResult> {
+    this.active?.abort()
+    this.active = null
+    const sequence = ++this.sequence
     const query = parseCrossrefQuery(raw)
     const request = crossrefRequest(query)
     if (!request) return { candidates: [], diagnostics: [], request: null, fromCache: false, stale: false }
     const cached = this.cache.get(query.normalized)
     if (cached) return { candidates: cached, diagnostics: [], request, fromCache: true, stale: false }
+    const backoffRemaining = this.backoffUntil - this.now()
+    if (backoffRemaining > 0) return {
+      candidates: [],
+      diagnostics: [{
+        code: 'crossref-backoff',
+        level: 'info',
+        message: `Crossref requests are paused after a provider error; retry in about ${Math.ceil(backoffRemaining / 1000)} seconds. Local and cached sources remain available.`,
+      }],
+      request,
+      fromCache: false,
+      stale: false,
+    }
 
-    this.active?.abort()
     const controller = new AbortController()
     this.active = controller
-    const sequence = ++this.sequence
     try {
       let works = await this.transport.search(request, controller.signal)
       let finalRequest = request
@@ -189,13 +272,23 @@ export class CrossrefSearchSession {
         works = await this.transport.search(finalRequest, controller.signal)
         if (sequence !== this.sequence) return { candidates: [], diagnostics: [], request: finalRequest, fromCache: false, stale: true }
       }
+      this.backoffAttempt = 0
+      this.backoffUntil = 0
       const candidates = rankCrossrefWorks(query, works)
       this.cache.set(query.normalized, candidates)
       while (this.cache.size > this.cacheLimit) this.cache.delete(this.cache.keys().next().value!)
       return { candidates, diagnostics: candidates.length ? [] : [{ code: 'crossref-empty', level: 'info', message: 'Crossref found no matching scholarly records.' }], request: finalRequest, fromCache: false, stale: false }
     } catch (error) {
       if (sequence !== this.sequence || controller.signal.aborted) return { candidates: [], diagnostics: [], request, fromCache: false, stale: true }
-      return { candidates: [], diagnostics: [failureDiagnostic(error)], request, fromCache: false, stale: false }
+      let diagnosticError = error
+      if (error instanceof CrossrefTransportError && (error.kind === 'rate-limit' || error.retryAfterMs !== undefined)) {
+        const exponentialDelay = Math.min(30_000, 1_000 * (2 ** this.backoffAttempt))
+        const delay = Math.max(exponentialDelay, error.retryAfterMs ?? 0)
+        this.backoffAttempt = Math.min(5, this.backoffAttempt + 1)
+        this.backoffUntil = this.now() + delay
+        diagnosticError = new CrossrefTransportError(error.kind, error.message, delay)
+      }
+      return { candidates: [], diagnostics: [failureDiagnostic(diagnosticError)], request, fromCache: false, stale: false }
     } finally {
       if (this.active === controller) this.active = null
     }

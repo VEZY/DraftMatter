@@ -69,10 +69,10 @@ export interface CitationRecord {
   doi?: string
   url?: string
   cslData?: Record<string, unknown>
-  source: 'bibtex' | 'csl-json' | 'ris' | 'endnote' | 'zotero' | 'sample'
+  source: 'bibtex' | 'csl-json' | 'ris' | 'endnote' | 'zotero' | 'crossref' | 'sample'
   availability?: 'live' | 'cached'
   provenance?: {
-    origin: 'project-file' | 'manual-import' | 'zotero-local' | 'sample'
+    origin: 'project-file' | 'manual-import' | 'zotero-local' | 'online-search' | 'sample'
     locator?: string
   }
   sourceIdentity?: {

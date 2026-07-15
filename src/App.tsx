@@ -23,6 +23,7 @@ import {
   type CitationStyleId,
 } from './cslRenderer'
 import { previewCitationIntake, type CitationIntakePreview } from './citationIntake'
+import { CrossrefSearchSession, crossrefCandidateToCitationRecord, crossrefDuplicateCitekeys, type CrossrefCandidate } from './crossref'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
@@ -116,6 +117,7 @@ function CitationChip({ onClick, label }: { onClick: () => void; label: string }
 function citationSourceBadge(record?: CitationRecord) {
   if (!record) return { className: '', label: 'C' }
   if (record.source === 'zotero') return { className: 'zotero', label: 'Z' }
+  if (record.source === 'crossref') return { className: 'crossref', label: 'X' }
   if (record.source === 'bibtex') return { className: 'bib', label: 'B' }
   if (record.source === 'ris') return { className: 'bib', label: 'R' }
   if (record.source === 'endnote') return { className: 'bib', label: 'E' }
@@ -203,6 +205,10 @@ function App() {
   const [citationCacheDiagnostics, setCitationCacheDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [zoteroDiagnostics, setZoteroDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [zoteroState, setZoteroState] = useState<'idle' | 'searching' | 'available' | 'unavailable' | 'desktop-only'>('idle')
+  const [crossrefDiagnostics, setCrossrefDiagnostics] = useState<DocumentDiagnostic[]>([])
+  const [crossrefState, setCrossrefState] = useState<'idle' | 'searching' | 'available' | 'unavailable' | 'desktop-only'>('idle')
+  const [crossrefCandidates, setCrossrefCandidates] = useState<CrossrefCandidate[]>([])
+  const [doiLookupState, setDoiLookupState] = useState<'idle' | 'resolving'>('idle')
   const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>(() => readRecoverySnapshots(localStorage))
   const [citations, setCitations] = useState<CitationRecord[]>(getInitialCitations)
   const [citationQuery, setCitationQuery] = useState('')
@@ -230,6 +236,12 @@ function App() {
   const citationLockSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const citationCacheRef = useRef<CitationCache>({ schemaVersion: 1, records: [] })
   const citationCacheLoadDiagnosticsRef = useRef<DocumentDiagnostic[]>([])
+  const crossrefSessionRef = useRef<CrossrefSearchSession | null>(null)
+  if (!crossrefSessionRef.current) {
+    crossrefSessionRef.current = new CrossrefSearchSession({
+      search: (request, signal) => desktopHost.searchCrossref(request, signal),
+    })
+  }
 
   const writeRecoverySnapshot = (nextDraft: DraftState, nextFilename: string, source: string, savedAt?: string) => {
     try {
@@ -249,13 +261,22 @@ function App() {
     ? 'reduced leaf area by 18%'
     : 'lowered leaf expansion during the treatment period'
   const citationResults = useMemo(() => searchCitations(citations, citationQuery).slice(0, 8), [citations, citationQuery])
+  const crossrefRecords = useMemo(() => {
+    const occupied = [...citations]
+    return crossrefCandidates.slice(0, 8).map((candidate) => {
+      const record = crossrefCandidateToCitationRecord(candidate, occupied)
+      occupied.push(record)
+      return record
+    })
+  }, [citations, crossrefCandidates])
+  const pickerResults = [...citationResults, ...crossrefRecords]
   const draftCitationItems = citationItemsForDraft(draft)
   const citationLabel = renderedCitations.introduction ?? formatCitationCluster(citations, draftCitationItems)
   const resultsCitationLabel = renderedCitations.results ?? formatCitationCluster(citations, [{ citekey: 'coutellier2022' }])
   const activeCitationItem = draftCitationItems.find((item) => item.citekey === citationEditKey) ?? draftCitationItems[0]
   const activeCitationRecord = citations.find((record) => record.citekey === activeCitationItem?.citekey)
   const activeCitationBadge = citationSourceBadge(activeCitationRecord)
-  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics]
+  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics]
 
   const replaceDesktopSession = (next: DesktopSession | null) => {
     desktopSessionRef.current = next
@@ -563,6 +584,44 @@ function App() {
     return () => {
       disposed = true
       window.clearTimeout(timeout)
+    }
+  }, [citationQuery, citationSearchOpen])
+
+  useEffect(() => {
+    const session = crossrefSessionRef.current!
+    if (!citationSearchOpen) {
+      session.cancel()
+      setCrossrefCandidates([])
+      setCrossrefState('idle')
+      return
+    }
+    if (!desktopHost.available) {
+      setCrossrefCandidates([])
+      setCrossrefState('desktop-only')
+      return
+    }
+    if (citationQuery.trim().length < 2) {
+      session.cancel()
+      setCrossrefCandidates([])
+      setCrossrefDiagnostics([])
+      setCrossrefState('idle')
+      return
+    }
+
+    let disposed = false
+    const timeout = window.setTimeout(async () => {
+      setCrossrefState('searching')
+      const result = await session.search(citationQuery)
+      if (disposed || result.stale) return
+      setCrossrefCandidates(result.candidates)
+      setCrossrefDiagnostics(result.diagnostics)
+      setCrossrefState(result.diagnostics.some((diagnostic) => diagnostic.code !== 'crossref-empty') ? 'unavailable' : 'available')
+    }, 420)
+
+    return () => {
+      disposed = true
+      window.clearTimeout(timeout)
+      session.cancel()
     }
   }, [citationQuery, citationSearchOpen])
 
@@ -997,8 +1056,51 @@ function App() {
     if (payload.trim()) showCitationIntake(payload)
   }
 
-  const toggleCitationPickerRecord = (record: CitationRecord) => {
-    setCitations((current) => mergeCitationRecords(current, [record]))
+  const resolveCitationDoi = async () => {
+    const preview = citationIntakePreview
+    if (!preview?.doi || doiLookupState === 'resolving') return
+    if (!desktopHost.available) {
+      setToast('DOI metadata lookup is available in the desktop app · the original DOI is still retained')
+      return
+    }
+    setDoiLookupState('resolving')
+    const result = await crossrefSessionRef.current!.search(preview.doi)
+    if (result.stale) {
+      setDoiLookupState('idle')
+      return
+    }
+    setCrossrefDiagnostics(result.diagnostics)
+    const candidate = result.candidates[0]
+    if (!candidate) {
+      setToast('Crossref could not resolve this DOI · the original DOI is still retained')
+      setDoiLookupState('idle')
+      return
+    }
+    const record = crossrefCandidateToCitationRecord(candidate, citations)
+    const duplicates = crossrefDuplicateCitekeys(candidate, citations)
+    const selectedByDefault = duplicates.length === 0
+    setCitationIntakePreview({
+      ...preview,
+      diagnostics: result.diagnostics,
+      records: [{
+        id: `crossref:${candidate.doi}`,
+        record,
+        duplicateCitekeys: duplicates,
+        selectedByDefault,
+        diagnostics: candidate.incompleteFields.length ? [{
+          code: `crossref-incomplete-${record.citekey}`,
+          level: 'warning',
+          message: `Crossref metadata is missing ${candidate.incompleteFields.join(', ')}.`,
+        }] : [],
+      }],
+    })
+    setCitationIntakeSelected(selectedByDefault ? [`crossref:${candidate.doi}`] : [])
+    setDoiLookupState('idle')
+    setToast('DOI metadata resolved · review it before staging')
+  }
+
+  const toggleCitationPickerRecord = (record: CitationRecord, materialize = true) => {
+    if (materialize) setCitations((current) => mergeCitationRecords(current, [record]))
     setCitationPickerItems((current) => current.some((item) => item.citekey === record.citekey)
       ? current.filter((item) => item.citekey !== record.citekey)
       : [...current, { citekey: record.citekey }])
@@ -1009,6 +1111,8 @@ function App() {
       setToast('Select at least one source for the citation')
       return
     }
+    const selectedCrossref = crossrefRecords.filter((record) => citationPickerItems.some((item) => item.citekey === record.citekey))
+    if (selectedCrossref.length) setCitations((current) => mergeCitationRecords(current, selectedCrossref))
     updateDraft(applyDraftCitationTransaction(draft, citationPickerItems))
     setCitationSearchOpen(false)
     setCitationQuery('')
@@ -1539,18 +1643,19 @@ function App() {
                   confirmCitationPicker()
                 } else if (event.key === 'ArrowDown') {
                   event.preventDefault()
-                  setCitationActiveIndex((current) => Math.min(Math.max(0, citationResults.length - 1), current + 1))
+                  setCitationActiveIndex((current) => Math.min(Math.max(0, pickerResults.length - 1), current + 1))
                 } else if (event.key === 'ArrowUp') {
                   event.preventDefault()
                   setCitationActiveIndex((current) => Math.max(0, current - 1))
-                } else if (event.key === 'Enter' && citationResults[citationActiveIndex]) {
+                } else if (event.key === 'Enter' && pickerResults[citationActiveIndex]) {
                   event.preventDefault()
-                  toggleCitationPickerRecord(citationResults[citationActiveIndex])
+                  const record = pickerResults[citationActiveIndex]
+                  toggleCitationPickerRecord(record, record.source !== 'crossref')
                 }
               }}
               placeholder="Search authors, titles, years, or DOI…"
               aria-label="Search citation sources"
-              aria-activedescendant={citationResults[citationActiveIndex] ? `citation-result-${citationResults[citationActiveIndex].citekey}` : undefined}
+              aria-activedescendant={pickerResults[citationActiveIndex] ? `citation-result-${pickerResults[citationActiveIndex].citekey}` : undefined}
             /><kbd>esc</kbd></div>
             <div className="picker-body">
               <div className="citation-intake-box">
@@ -1577,7 +1682,7 @@ function App() {
                   </div>
                   {citationIntakePreview.diagnostics.length > 0 && <div className="citation-preview-diagnostics">{citationIntakePreview.diagnostics.map((diagnostic) => <p className={diagnostic.level} key={diagnostic.code}><i />{diagnostic.message}</p>)}</div>}
                   {citationIntakePreview.doi && (
-                    <div className="citation-doi-preview"><span className="source-icon">D</span><span><strong>{citationIntakePreview.doi}</strong><small>Metadata has not been resolved; this DOI remains available to retry.</small></span><button onClick={() => setToast('DOI metadata lookup is unavailable · the original DOI is still retained')}>Retry lookup</button></div>
+                    <div className="citation-doi-preview"><span className="source-icon">D</span><span><strong>{citationIntakePreview.doi}</strong><small>{citationIntakePreview.records.length ? 'Metadata resolved through Crossref; review the record below.' : 'Metadata has not been resolved; this DOI remains available to retry.'}</small></span><button onClick={() => void resolveCitationDoi()} disabled={doiLookupState === 'resolving'}>{doiLookupState === 'resolving' ? 'Resolving…' : citationIntakePreview.records.length ? 'Resolve again' : 'Retry lookup'}</button></div>
                   )}
                   {citationIntakePreview.records.length > 0 && (
                     <>
@@ -1595,7 +1700,7 @@ function App() {
               )}
               <div className="picker-filter">
                 <span>
-                  {citationResults.length} matching source{citationResults.length === 1 ? '' : 's'}
+                  {pickerResults.length} matching source{pickerResults.length === 1 ? '' : 's'}
                   <small className={`zotero-state ${zoteroState}`}><i />{
                     zoteroState === 'searching' ? 'Searching Zotero…'
                       : zoteroState === 'available' ? 'Zotero connected'
@@ -1603,10 +1708,18 @@ function App() {
                           : zoteroState === 'desktop-only' ? 'Zotero search is available in the desktop app'
                             : 'Project and cached sources'
                   }</small>
+                  <small className={`crossref-state ${crossrefState}`}><i />{
+                    crossrefState === 'searching' ? 'Searching Crossref…'
+                      : crossrefState === 'available' ? `${crossrefRecords.length} Crossref result${crossrefRecords.length === 1 ? '' : 's'}`
+                        : crossrefState === 'unavailable' ? 'Crossref unavailable · local sources remain available'
+                          : crossrefState === 'desktop-only' ? 'Crossref search is available in the desktop app'
+                            : 'Crossref waits for a search'
+                  }</small>
                 </span>
                 <button onClick={() => bibliographyInputRef.current?.click()}>Import bibliography <Icon name="plus" size={13} /></button>
               </div>
-              {citationResults.length ? citationResults.map((record) => {
+              {citationResults.length > 0 && <div className="citation-source-group"><span>Local, project & Zotero</span><small>{citationResults.length}</small></div>}
+              {citationResults.map((record) => {
                 const isCited = citationPickerItems.some((item) => item.citekey === record.citekey)
                 const isActive = citationResults[citationActiveIndex]?.citekey === record.citekey
                 const badge = citationSourceBadge(record)
@@ -1624,7 +1737,29 @@ function App() {
                     {isCited ? <Icon name="check" /> : <Icon name="plus" />}
                   </button>
                 )
-              }) : <div className="citation-empty"><Icon name="search" size={21} /><strong>No matching sources</strong><p>Try fewer terms, open Zotero, or import a bibliography file.</p></div>}
+              })}
+              {(crossrefState === 'searching' || crossrefRecords.length > 0) && <div className="citation-source-group crossref"><span>Crossref scholarly search</span><small>{crossrefState === 'searching' ? 'Searching…' : crossrefRecords.length}</small></div>}
+              {crossrefRecords.map((record, index) => {
+                const isCited = citationPickerItems.some((item) => item.citekey === record.citekey)
+                const resultIndex = citationResults.length + index
+                const isActive = pickerResults[citationActiveIndex]?.citekey === record.citekey
+                const duplicates = crossrefDuplicateCitekeys(crossrefCandidates[index], citations)
+                return (
+                  <button
+                    id={`citation-result-${record.citekey}`}
+                    className={`source-result crossref-result ${isCited ? 'selected' : ''} ${isActive ? 'active' : ''}`}
+                    key={`${record.doi}-${record.citekey}`}
+                    onClick={() => toggleCitationPickerRecord(record, false)}
+                    onMouseEnter={() => setCitationActiveIndex(resultIndex)}
+                    aria-pressed={isCited}
+                  >
+                    <span className="source-icon crossref">X</span>
+                    <span><strong>{record.title}</strong><small>{record.authors.length ? record.authors.slice(0, 2).join(' & ') : 'Unknown creator'}{record.year ? ` · ${record.year}` : ''}{record.container ? ` · ${record.container}` : ''}</small><em>{record.doi}{duplicates.length ? ` · possible duplicate of ${duplicates.map((key) => `@${key}`).join(', ')}` : ''}</em></span>
+                    {isCited ? <Icon name="check" /> : <Icon name="plus" />}
+                  </button>
+                )
+              })}
+              {!pickerResults.length && crossrefState !== 'searching' && <div className="citation-empty"><Icon name="search" size={21} /><strong>No matching sources</strong><p>Try fewer terms, open Zotero, search Crossref, or import a bibliography file.</p></div>}
             </div>
             <div className="picker-footer">
               <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Select</span><span><kbd>⌘</kbd><kbd>↵</kbd> Confirm</span>

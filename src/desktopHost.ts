@@ -1,5 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
 import { open } from '@tauri-apps/plugin-dialog'
+import { CrossrefTransportError, type CrossrefRequest, type CrossrefWork } from './crossref'
 
 export interface ProjectConfig {
   schemaVersion: number
@@ -87,6 +88,10 @@ export interface ZoteroSearchResult {
   schemaVersion?: string
 }
 
+export interface CrossrefSearchResponse {
+  works: CrossrefWork[]
+}
+
 export type DocumentStatus =
   | { kind: 'current'; hash: string; modifiedMs: number }
   | { kind: 'modified'; hash: string; modifiedMs: number }
@@ -110,6 +115,26 @@ export function normaliseHostFailure(error: unknown): HostFailure {
     }
   }
   return { kind: 'unknown', message: error instanceof Error ? error.message : String(error) }
+}
+
+export function normaliseCrossrefFailure(error: unknown) {
+  if (error instanceof CrossrefTransportError) return error
+  if (typeof error === 'object' && error !== null && 'kind' in error && 'message' in error) {
+    const value = error as { kind: unknown; message: unknown; retryAfterMs?: unknown }
+    const kind = value.kind === 'offline' || value.kind === 'rate-limit' || value.kind === 'http' || value.kind === 'invalid-response'
+      ? value.kind
+      : 'invalid-response'
+    return new CrossrefTransportError(
+      kind,
+      typeof value.message === 'string' ? value.message : 'Crossref returned an unreadable error.',
+      typeof value.retryAfterMs === 'number' ? value.retryAfterMs : undefined,
+    )
+  }
+  return new CrossrefTransportError('offline', error instanceof Error ? error.message : String(error))
+}
+
+function abortError() {
+  return new DOMException('Crossref search was superseded.', 'AbortError')
 }
 
 export function resolveMainDocument(project: ProjectSnapshot, selectedPath?: string) {
@@ -167,6 +192,26 @@ export function createDesktopHost(
     },
     searchZotero(query: string, limit = 25) {
       return invokeBridge<ZoteroSearchResult>('zotero_search', { query, limit })
+    },
+    async searchCrossref(request: CrossrefRequest, signal?: AbortSignal) {
+      if (signal?.aborted) throw abortError()
+      const hostRequest = request.kind === 'doi'
+        ? { doi: request.doi }
+        : {
+          bibliographic: request.bibliographic,
+          author: request.author,
+          title: request.title,
+          fromPublicationDate: request.fromPublicationDate,
+          untilPublicationDate: request.untilPublicationDate,
+        }
+      try {
+        const response = await invokeBridge<CrossrefSearchResponse>('crossref_search', { request: hostRequest })
+        if (signal?.aborted) throw abortError()
+        return response.works
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') throw error
+        throw normaliseCrossrefFailure(error)
+      }
     },
   }
 }
