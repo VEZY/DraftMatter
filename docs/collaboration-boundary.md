@@ -14,6 +14,8 @@ The future synchronization transport must depend on this browser-safe surface. D
 
 `CollaborativeDocument` uses a Yjs text type for the live portable manuscript and keyed Yjs maps for anchors, authors, proposals, threads, and decisions. Anchors use encoded Yjs relative positions so they continue to resolve after concurrent text insertion. Awareness state carries collaborator identity and cursor presence separately from durable updates, so presence is neither checkpointed nor restored as manuscript data.
 
+The rendered editor binding uses `y-prosemirror` over the named `draftmatter:prosemirror` Y.XmlFragment, with collaborative undo/redo and awareness cursor plugins. Presence identity and colors are validated before entering awareness state. The binding remains inside the browser-safe package and its two-view test exercises actual ProseMirror transactions on independently offline Yjs documents before convergence.
+
 The transport seam exchanges incremental updates, state vectors, and awareness updates. It has no WebSocket or service dependency, which lets reconnect and offline convergence run in deterministic local tests before an authenticated Hocuspocus transport is attached.
 
 Review decisions are immutable revision-checked records. A decision starts from a Yjs state-vector token; a stale sequential decision is rejected before it is written. If two offline clients decide incompatibly from the same base, both records survive the merge and the derived proposal state becomes `decision-conflict`. Resolving it requires a new decision that names the exact conflicting records and is based on the merged revision. Proposal text or status is never silently chosen by last-writer-wins behavior.

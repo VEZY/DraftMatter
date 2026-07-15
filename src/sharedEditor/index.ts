@@ -34,6 +34,14 @@ export {
   CollaborationCheckpointError,
   type CollaborationCheckpoint,
 } from './collaborationCheckpoint'
+export {
+  COLLABORATIVE_PROSEMIRROR_ROOT,
+  collaborativeProseMirrorPlugins,
+  createCollaborativeProseMirrorState,
+  setCollaborativeEditorPresence,
+  type CollaborativeEditorUser,
+  type CollaborativeProseMirrorState,
+} from './prosemirrorCollaboration'
 
 export { parsePortableDocument } from '../document'
 export { materializePortableDraftSource } from '../portableDraft'
