@@ -3,6 +3,7 @@ import { Icon } from './Icon'
 import {
   HocuspocusCollaborationClient,
   type ActiveCollaborator,
+  type CollaborationCheckpoint,
   type CollaborationClientStatus,
 } from './sharedEditor'
 
@@ -12,9 +13,25 @@ export interface CollaborationDialogProps {
   onClose: () => void
   onRemoteSource: (source: string) => void
   onStatus: (status: CollaborationClientStatus) => void
+  onSessionStateChange?: (active: boolean) => void
+  onCheckpoint: (checkpoint: CollaborationCheckpoint) => Promise<void>
+  onCheckpointStateChange?: (uncheckpointed: boolean) => void
+  checkpointMode: 'working-tree' | 'download'
+  checkpointTarget: string
 }
 
-export function CollaborationDialog({ open, source, onClose, onRemoteSource, onStatus }: CollaborationDialogProps) {
+export function CollaborationDialog({
+  open,
+  source,
+  onClose,
+  onRemoteSource,
+  onStatus,
+  onSessionStateChange,
+  onCheckpoint,
+  onCheckpointStateChange,
+  checkpointMode,
+  checkpointTarget,
+}: CollaborationDialogProps) {
   const [url, setUrl] = useState('wss://')
   const [workspaceId, setWorkspaceId] = useState('')
   const [projectId, setProjectId] = useState('')
@@ -24,7 +41,15 @@ export function CollaborationDialog({ open, source, onClose, onRemoteSource, onS
   const [status, setStatus] = useState<CollaborationClientStatus>('disconnected')
   const [detail, setDetail] = useState('')
   const [collaborators, setCollaborators] = useState<ActiveCollaborator[]>([])
+  const [uncheckpointed, setUncheckpointed] = useState(false)
+  const [checkpointing, setCheckpointing] = useState(false)
   const clientRef = useRef<HocuspocusCollaborationClient | null>(null)
+  const checkpointedSourceRef = useRef(source)
+
+  const updateCheckpointState = (next: boolean) => {
+    setUncheckpointed(next)
+    onCheckpointStateChange?.(next)
+  }
 
   const updateStatus = (next: CollaborationClientStatus, message = '') => {
     setStatus(next)
@@ -33,13 +58,24 @@ export function CollaborationDialog({ open, source, onClose, onRemoteSource, onS
   }
 
   useEffect(() => {
-    clientRef.current?.publishPortableSource(source)
+    const client = clientRef.current
+    if (!client) {
+      checkpointedSourceRef.current = source
+      return
+    }
+    const canonicalSource = client.publishPortableSource(source)
+    updateCheckpointState(canonicalSource !== checkpointedSourceRef.current)
   }, [source])
 
-  useEffect(() => () => clientRef.current?.destroy(), [])
+  useEffect(() => () => {
+    clientRef.current?.destroy()
+    onSessionStateChange?.(false)
+    onCheckpointStateChange?.(false)
+  }, [])
 
   const connect = async () => {
     if (clientRef.current || status === 'connecting') return
+    onSessionStateChange?.(true)
     updateStatus('connecting')
     try {
       const client = await HocuspocusCollaborationClient.connect({
@@ -50,22 +86,47 @@ export function CollaborationDialog({ open, source, onClose, onRemoteSource, onS
         bootstrapSource: source,
         presence: { userId, name, color: '#617f73' },
         onStatus: updateStatus,
-        onPortableSource: onRemoteSource,
+        onPortableSource: (nextSource) => {
+          updateCheckpointState(nextSource !== checkpointedSourceRef.current)
+          onRemoteSource(nextSource)
+        },
         onCollaborators: setCollaborators,
       })
       clientRef.current = client
       setToken('')
       updateStatus('connected')
     } catch (error) {
+      onSessionStateChange?.(false)
       updateStatus('error', error instanceof Error ? error.message : String(error))
     }
   }
 
   const disconnect = () => {
+    if (uncheckpointed && !window.confirm('Leave this live session without checkpointing its latest changes?')) return
     clientRef.current?.destroy()
     clientRef.current = null
     setCollaborators([])
+    checkpointedSourceRef.current = source
+    onSessionStateChange?.(false)
+    updateCheckpointState(false)
     updateStatus('disconnected')
+  }
+
+  const checkpoint = async () => {
+    const client = clientRef.current
+    if (!client || checkpointing) return
+    setCheckpointing(true)
+    setDetail('')
+    try {
+      const next = client.createCheckpoint()
+      await onCheckpoint(next)
+      checkpointedSourceRef.current = next.source
+      updateCheckpointState(false)
+    } catch (error) {
+      setDetail(error instanceof Error ? error.message : String(error))
+    } finally {
+      setCheckpointing(false)
+    }
   }
 
   if (!open) return null
@@ -81,7 +142,7 @@ export function CollaborationDialog({ open, source, onClose, onRemoteSource, onS
 
         {connected ? (
           <div className="collaboration-connected">
-            <div className="collaboration-room"><span className="collaboration-live-dot" /><span><strong>{workspaceId} / {projectId}</strong><small>Encrypted live session · changes checkpoint only when the owner asks</small></span></div>
+            <div className="collaboration-room"><span className="collaboration-live-dot" /><span><strong>{workspaceId} / {projectId}</strong><small>{uncheckpointed ? 'Live changes are waiting for an owner checkpoint' : 'Live state matches the latest owner checkpoint'}</small></span></div>
             <section aria-label="People in this manuscript">
               <span className="collaboration-section-label">Here now · {collaborators.length}</span>
               <div className="collaboration-people">
@@ -91,6 +152,11 @@ export function CollaborationDialog({ open, source, onClose, onRemoteSource, onS
               </div>
             </section>
             <div className="collaboration-note"><Icon name="check" size={16} /><span>Offline edits reconnect through Yjs. Incompatible review decisions pause checkpointing until they are explicitly resolved.</span></div>
+            <div className={`collaboration-checkpoint ${uncheckpointed ? 'pending' : ''}`}>
+              <span><strong>{checkpointMode === 'working-tree' ? 'Owner-controlled working tree' : 'Portable owner copy'}</strong><small>{checkpointMode === 'working-tree' ? `Write deterministic review state to ${checkpointTarget}. Git remains a separate explicit action.` : `Download deterministic review state as ${checkpointTarget}.`}</small></span>
+              <button onClick={() => void checkpoint()} disabled={!uncheckpointed || checkpointing}>{checkpointing ? 'Checkpointing…' : uncheckpointed ? (checkpointMode === 'working-tree' ? 'Checkpoint to project' : 'Download checkpoint') : 'Checkpoint current'}</button>
+            </div>
+            {detail && <div className="collaboration-error" role="alert">{detail}</div>}
             <footer><button className="secondary" onClick={disconnect}>Leave session</button><button onClick={onClose}>Continue writing</button></footer>
           </div>
         ) : (

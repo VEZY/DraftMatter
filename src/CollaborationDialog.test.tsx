@@ -21,19 +21,39 @@ afterEach(() => vi.restoreAllMocks())
 
 describe('collaboration dialog', () => {
   it('connects without persisting its token and keeps the session alive when closed', async () => {
-    const publishPortableSource = vi.fn()
+    const publishPortableSource = vi.fn().mockReturnValue('# Draft\n\nShared revision')
     const destroy = vi.fn()
+    const createCheckpoint = vi.fn().mockReturnValue({
+      source: '# Draft\n\nShared revision',
+      bytes: new TextEncoder().encode('# Draft\n\nShared revision'),
+      contentHash: 'checkpoint-hash',
+      revision: 'checkpoint-revision',
+      recordCount: 0,
+    })
     const connect = vi.spyOn(HocuspocusCollaborationClient, 'connect').mockImplementation(async (options) => {
       options.onStatus?.('connected')
       options.onCollaborators?.([{ clientId: 7, userId: 'dm-a01', name: 'Remi Vezy', color: '#617f73' }])
-      return { publishPortableSource, destroy } as unknown as HocuspocusCollaborationClient
+      return { publishPortableSource, createCheckpoint, destroy } as unknown as HocuspocusCollaborationClient
     })
     const onClose = vi.fn()
     const onStatus = vi.fn()
+    const onSessionStateChange = vi.fn()
+    const onCheckpointStateChange = vi.fn()
+    const onCheckpoint = vi.fn().mockResolvedValue(undefined)
     const setItem = vi.spyOn(Storage.prototype, 'setItem')
     const container = document.createElement('div')
     const root = createRoot(container)
-    await act(async () => root.render(<CollaborationDialog open source="# Draft" onClose={onClose} onRemoteSource={vi.fn()} onStatus={onStatus} />))
+    const props = {
+      onClose,
+      onRemoteSource: vi.fn(),
+      onStatus,
+      onSessionStateChange,
+      onCheckpoint,
+      onCheckpointStateChange,
+      checkpointMode: 'working-tree' as const,
+      checkpointTarget: 'paper.qmd',
+    }
+    await act(async () => root.render(<CollaborationDialog open source="# Draft" {...props} />))
     change(input(container, 'Service URL'), 'wss://collab.example.org')
     change(input(container, 'Workspace ID'), 'forest')
     change(input(container, 'Project ID'), 'paper')
@@ -50,9 +70,20 @@ describe('collaboration dialog', () => {
     expect(container.textContent).toContain('Working together')
     expect(container.textContent).toContain('Remi Vezy')
     expect(setItem).not.toHaveBeenCalled()
-    await act(async () => root.render(<CollaborationDialog open={false} source="# Draft" onClose={onClose} onRemoteSource={vi.fn()} onStatus={onStatus} />))
+    expect(onSessionStateChange).toHaveBeenCalledWith(true)
+
+    await act(async () => root.render(<CollaborationDialog open source="# Draft\n\nShared revision" {...props} />))
+    expect(container.textContent).toContain('Live changes are waiting for an owner checkpoint')
+    const checkpointButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Checkpoint to project')!
+    await act(async () => checkpointButton.click())
+    expect(createCheckpoint).toHaveBeenCalledTimes(1)
+    expect(onCheckpoint).toHaveBeenCalledWith(expect.objectContaining({ contentHash: 'checkpoint-hash' }))
+    expect(container.textContent).toContain('Live state matches the latest owner checkpoint')
+
+    await act(async () => root.render(<CollaborationDialog open={false} source="# Draft\n\nShared revision" {...props} />))
     expect(destroy).not.toHaveBeenCalled()
     await act(async () => root.unmount())
     expect(destroy).toHaveBeenCalledTimes(1)
+    expect(onSessionStateChange).toHaveBeenLastCalledWith(false)
   })
 })

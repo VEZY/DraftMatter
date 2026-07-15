@@ -43,7 +43,7 @@ import { printNativeHtml, renderNativeHtmlExport } from './nativeHtmlExport'
 import { renderDocxExport } from './docxExport'
 import { ExternalExportDialog } from './ExternalExportDialog'
 import { CollaborationDialog } from './CollaborationDialog'
-import type { CollaborationClientStatus } from './sharedEditor'
+import type { CollaborationCheckpoint, CollaborationClientStatus } from './sharedEditor'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
@@ -239,6 +239,7 @@ function App() {
   const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [collaborationOpen, setCollaborationOpen] = useState(false)
   const [collaborationStatus, setCollaborationStatus] = useState<CollaborationClientStatus>('disconnected')
+  const [collaborationUncheckpointed, setCollaborationUncheckpointed] = useState(false)
   const [filename, setFilename] = useState(initialProjectMeta.filename)
   const [projectName, setProjectName] = useState(initialProjectMeta.projectName)
   const [citationStyle, setCitationStyle] = useState<CitationStyleId>(initialProjectMeta.citationStyle)
@@ -291,6 +292,7 @@ function App() {
   const draftRevisionRef = useRef(0)
   const desktopSaveBlockedRef = useRef(false)
   const desktopSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
+  const collaborationSessionActiveRef = useRef(false)
   const externalCheckRunningRef = useRef(false)
   const reopenAttemptedRef = useRef(false)
   const zoteroVersionRef = useRef<ZoteroVersionStamp>(getInitialZoteroVersion())
@@ -368,7 +370,7 @@ function App() {
   }
 
   const markDraftChanged = () => {
-    if (!desktopSaveBlockedRef.current) {
+    if (!desktopSaveBlockedRef.current && !collaborationSessionActiveRef.current) {
       setSaveState('saving')
       setSaveProblem('')
     }
@@ -416,7 +418,8 @@ function App() {
   }, [draft, desktopSession])
 
   useEffect(() => {
-    if (!desktopSession || draftRevision === 0 || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current) return
+    if (!desktopSession || draftRevision === 0 || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current
+      || collaborationSessionActiveRef.current) return
     const revision = draftRevision
     const content = reviewedProjection(draft)
     const root = desktopSession.root
@@ -425,7 +428,8 @@ function App() {
       setSaveState('saving')
       desktopSaveQueueRef.current = desktopSaveQueueRef.current.then(async () => {
         const current = desktopSessionRef.current
-        if (!current || current.root !== root || current.path !== path || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current) return
+        if (!current || current.root !== root || current.path !== path || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current
+          || collaborationSessionActiveRef.current) return
         try {
           const result = await desktopHost.saveDocument({ root, path, content, expectedHash: current.hash })
           const next = { ...current, hash: result.hash, savedRevision: revision }
@@ -854,6 +858,56 @@ function App() {
     setToast(parsed.diagnostics.some((diagnostic) => diagnostic.level === 'error')
       ? 'Live changes synchronized with diagnostics'
       : 'Live changes synchronized')
+  }
+
+  const updateCollaborationStatus = (next: CollaborationClientStatus) => {
+    setCollaborationStatus(next)
+  }
+
+  const updateCollaborationSessionState = (active: boolean) => {
+    collaborationSessionActiveRef.current = active
+  }
+
+  const checkpointCollaboration = async (checkpoint: CollaborationCheckpoint) => {
+    const parsed = parsePortableDocument(checkpoint.source, initialDraft)
+    setDiagnostics(parsed.diagnostics)
+    if (!desktopHost.available || !desktopSessionRef.current) {
+      downloadText(filename, checkpoint.source)
+      setToast(`Portable collaboration checkpoint downloaded · ${filename}`)
+      return
+    }
+    if (desktopSaveBlockedRef.current) throw new Error(saveProblem || 'Resolve the external file change before checkpointing live collaboration.')
+
+    setSaveState('saving')
+    const operation = desktopSaveQueueRef.current.then(async () => {
+      const current = desktopSessionRef.current
+      if (!current) throw new Error('The desktop project is no longer open.')
+      try {
+        const result = await desktopHost.saveDocument({
+          root: current.root,
+          path: current.path,
+          content: checkpoint.source,
+          expectedHash: current.hash,
+        })
+        replaceDesktopSession({ ...current, hash: result.hash, savedRevision: draftRevisionRef.current })
+        writeRecoverySnapshot(parsed.draft, filename, checkpoint.source)
+        setSaveProblem('')
+        setSaveState('saved')
+        setToast(`Live collaboration checkpoint written · ${current.path}`)
+      } catch (error) {
+        const failure = normaliseHostFailure(error)
+        setSaveProblem(failure.message)
+        if (failure.kind === 'conflict') {
+          desktopSaveBlockedRef.current = true
+          setSaveState('conflict')
+        } else {
+          setSaveState('error')
+        }
+        throw error
+      }
+    })
+    desktopSaveQueueRef.current = operation.catch(() => undefined)
+    await operation
   }
 
   const scrollTo = (id: string) => {
@@ -1815,8 +1869,10 @@ function App() {
         </div>
 
         <div className="document-state" aria-live="polite">
-          <span className={`save-indicator ${saveState}`} />
-          {saveState === 'saving'
+          <span className={`save-indicator ${collaborationUncheckpointed ? 'checkpoint-needed' : saveState}`} />
+          {collaborationUncheckpointed
+            ? 'Live changes · checkpoint needed'
+            : saveState === 'saving'
             ? desktopSession ? 'Saving to project…' : 'Saving locally…'
             : saveState === 'conflict'
               ? 'External change detected'
@@ -2263,7 +2319,12 @@ function App() {
         source={executionSource}
         onClose={() => setCollaborationOpen(false)}
         onRemoteSource={applyCollaborativeSource}
-        onStatus={setCollaborationStatus}
+        onStatus={updateCollaborationStatus}
+        onSessionStateChange={updateCollaborationSessionState}
+        onCheckpoint={checkpointCollaboration}
+        onCheckpointStateChange={setCollaborationUncheckpointed}
+        checkpointMode={desktopSession ? 'working-tree' : 'download'}
+        checkpointTarget={desktopSession?.path ?? filename}
       />
 
       {pendingProject && (

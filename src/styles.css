@@ -3635,6 +3635,14 @@ kbd {
 .collaboration-people small { color: var(--muted); font-size: 9px; }
 .collaboration-note { display: flex; align-items: flex-start; gap: 9px; padding: 11px 12px; border-radius: 8px; background: #f5f7f6; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .collaboration-note svg { flex: 0 0 auto; color: #527765; }
+.collaboration-checkpoint { display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 13px 14px; border: 1px solid #dde2df; border-radius: 9px; background: #fbfcfb; }
+.collaboration-checkpoint.pending { border-color: #cfdcd6; background: #f7faf8; }
+.collaboration-checkpoint > span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.collaboration-checkpoint strong { color: var(--ink); font-size: 11px; }
+.collaboration-checkpoint small { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.collaboration-checkpoint button { flex: 0 0 auto; min-height: 34px; padding: 0 12px; border: 1px solid var(--sage-dark); border-radius: 7px; background: var(--sage-dark); color: #fff; font-size: 10px; font-weight: 700; }
+.collaboration-checkpoint button:disabled { border-color: #d8ddda; background: #f0f2f1; color: #8b9691; }
+.save-indicator.checkpoint-needed { background: #b88448; box-shadow: 0 0 0 3px rgba(184, 132, 72, .12); }
 
 @media (max-width: 1120px) {
   .collaboration-toggle span { display: none; }
@@ -3648,6 +3656,8 @@ kbd {
   .collaboration-connected { padding: 20px; }
   .collaboration-fields,
   .collaboration-people { grid-template-columns: 1fr; }
+  .collaboration-checkpoint { align-items: stretch; flex-direction: column; }
+  .collaboration-checkpoint button { align-self: flex-start; }
 }
 
 @media (prefers-reduced-motion: reduce) {

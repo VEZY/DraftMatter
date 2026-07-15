@@ -4,7 +4,11 @@ import {
   type ActiveCollaborator,
   type CollaboratorPresence,
 } from './collaboration'
-import { projectCollaborationPortableSource } from './collaborationCheckpoint'
+import {
+  createCollaborationCheckpoint,
+  projectCollaborationPortableSource,
+  type CollaborationCheckpoint,
+} from './collaborationCheckpoint'
 
 export type CollaborationClientStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
 
@@ -122,9 +126,16 @@ export class HocuspocusCollaborationClient {
   }
 
   publishPortableSource(source: string) {
-    if (source === this.lastPortableSource) return
+    if (source === this.lastPortableSource) return this.lastPortableSource
     this.collaboration.reconcilePortableSource(source, LOCAL_ORIGIN)
     this.lastPortableSource = projectCollaborationPortableSource(this.collaboration)
+    return this.lastPortableSource
+  }
+
+  createCheckpoint(): CollaborationCheckpoint {
+    const checkpoint = createCollaborationCheckpoint(this.collaboration)
+    this.lastPortableSource = checkpoint.source
+    return checkpoint
   }
 
   disconnect() {
