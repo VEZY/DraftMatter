@@ -13,3 +13,17 @@ The automated DM-P6 core gate exercises one owner and one editor from invitation
 The separate loopback Hocuspocus integration test certifies the actual authenticated WebSocket reconnect path. Because it binds an ephemeral localhost port, restricted CI sandboxes must grant loopback bind permission; it performs no external network access.
 
 This gate now extends through the managed PostgreSQL/S3-compatible adapters, OIDC roles and revocation, signed billing entitlements, scheduled verified backups, restore drills, retention/deletion automation, privacy-safe metrics, and a portable service deployment. A paid or broad public launch still requires environment-specific TLS and secret management, operated identity/billing configuration, provider-level database/object backups, alert routing, privacy/data-processing review, external security review, and production load/soak testing.
+
+The product workflow now covers browser PKCE sign-in, verified author identity, authorized workspace/project discovery and creation, invitation acceptance and revocation, member/activity administration, owner-named immutable recovery, live presence, and explicit owner-controlled local checkpointing. Live shared changes do not enter the desktop working tree through autosave, and browser execution controls are disabled.
+
+## Current automated evidence
+
+Certification on 2026-07-15 from the locked checkout completed:
+
+- `npm test`: 74 files and 316 tests passed;
+- `npm run build`: collaboration service type-check/bundle and browser type-check/bundle passed;
+- `cargo test --manifest-path src-tauri/Cargo.toml --locked`: 51 host tests passed;
+- `npm run compliance:check`: 566 locked npm/Cargo components verified for `aarch64-apple-darwin`;
+- `docker compose config --quiet`: the portable local service topology validated.
+
+The CI collaboration workflow independently builds the service image on Linux. Installer signing/notarization, production OIDC/TLS configuration, external security review, and operated load/restore drills remain deployment gates rather than repository implementation gaps.

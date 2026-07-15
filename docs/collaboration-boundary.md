@@ -8,7 +8,7 @@ The shared surface supports document editing, review, portable import, and clean
 
 `browserBoundary.test.ts` walks every local import reachable from the shared entrypoint. The build fails if the graph reaches a desktop adapter or references Tauri, filesystem, child-process, network-socket, or generic host-invocation APIs.
 
-The future synchronization transport must depend on this browser-safe surface. Desktop publishing and explicit local checkpoints may call narrow host adapters outside it; receiving a collaboration session must never add a host capability to the browser package.
+The Hocuspocus synchronization client depends on this browser-safe surface. Desktop publishing and explicit local checkpoints call narrow host adapters outside it; receiving a collaboration session never adds a host capability to the browser package. Browser execution and environment controls are visibly disabled as an additional product-level guard.
 
 ## Shared state model
 
@@ -16,16 +16,18 @@ The future synchronization transport must depend on this browser-safe surface. D
 
 The rendered editor binding uses `y-prosemirror` over the named `draftmatter:prosemirror` Y.XmlFragment, with collaborative undo/redo and awareness cursor plugins. Presence identity and colors are validated before entering awareness state. The binding remains inside the browser-safe package and its two-view test exercises actual ProseMirror transactions on independently offline Yjs documents before convergence.
 
-The transport seam exchanges incremental updates, state vectors, and awareness updates. It has no WebSocket or service dependency, which lets reconnect and offline convergence run in deterministic local tests before an authenticated Hocuspocus transport is attached.
+The underlying transport seam exchanges incremental updates, state vectors, and awareness updates without a service dependency, so reconnect and offline convergence run in deterministic local tests. `HocuspocusCollaborationClient` attaches the authenticated WebSocket provider at the browser boundary and accepts a refreshable, memory-held token provider.
 
 Review decisions are immutable revision-checked records. A decision starts from a Yjs state-vector token; a stale sequential decision is rejected before it is written. If two offline clients decide incompatibly from the same base, both records survive the merge and the derived proposal state becomes `decision-conflict`. Resolving it requires a new decision that names the exact conflicting records and is based on the merged revision. Proposal text or status is never silently chosen by last-writer-wins behavior.
 
 ## Workspace authorization seam
 
-The framework-independent workspace service signs short-lived HMAC session tokens only after an upstream identity provider has verified the identity. Its policy layer supports owner, editor, commenter, and viewer roles; one-use expiring guest invitations; immediate membership revocation; per-session rate limits; and an owner-only activity audit. Invitation secrets are stored only as SHA-256 digests and are never written to the audit.
+The framework-independent policy model and managed PostgreSQL workspace service support owner, editor, commenter, and viewer roles; one-use expiring guest invitations; immediate membership revocation; durable per-session rate limits; and an owner-only activity audit. The managed service validates short-lived OIDC access tokens. Browser sign-in uses Authorization Code + S256 PKCE, strict issuer/state/redirect checks, and memory-only rotating tokens. Invitation secrets are stored only as SHA-256 digests and are never written to the audit.
 
-Every project lookup is scoped by workspace membership before the project identifier is resolved. A missing tenant membership, an unknown workspace, and an unknown project all return the same not-found response, preventing project enumeration across tenants. The future WebSocket and HTTP adapters must call `authorizeProject` for the requested capability before loading any collaboration state.
+Every project lookup is scoped by workspace membership before the project identifier is resolved. A missing tenant membership, an unknown workspace, and an unknown project all return the same not-found response, preventing project enumeration across tenants. Both the WebSocket and HTTP adapters call `authorizeProject` for the requested capability before loading collaboration state.
 
 ## Owner-controlled portable checkpoints
 
-Checkpoint creation is a pure client operation. It normalizes line endings, materializes missing Yjs-relative anchors, sorts keyed authors/proposals/threads/decisions, preserves the complete decision audit, and emits DraftMatter Review Markup without calling Git or any desktop host. An unresolved concurrent decision blocks checkpoint creation. Two converged clients produce identical UTF-8 bytes, and reopening those bytes produces the same checkpoint again. The owner may then write the returned source into the local project and invoke the existing explicit Git checkpoint flow as a separate action.
+Checkpoint serialization is a pure client operation. It normalizes line endings, materializes missing Yjs-relative anchors, sorts keyed authors/proposals/threads/decisions, preserves the complete decision audit, and emits DraftMatter Review Markup without calling Git or any desktop host. An unresolved concurrent decision blocks checkpoint creation. Two converged clients produce identical UTF-8 bytes, and reopening those bytes produces the same checkpoint again.
+
+While a live session is active, ordinary desktop autosave is suspended. The owner must press **Checkpoint to project** to write those exact bytes with the normal expected-hash conflict guard; browser owners receive an explicit portable download. Git remains a separate deliberate action. The managed service also exposes owner-named immutable recovery checkpoints with verified identity attribution, independently of the local working tree.

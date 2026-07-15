@@ -49,6 +49,7 @@ Unsigned or unnotarized desktop artifacts must be labelled development builds an
 - **History:** reports system Git availability/version, repository root, project prefix, branch/upstream/ahead/behind, staged and working changes, conflicts, and bounded source/rendered diffs.
 - **External export:** reports installed Pandoc/Quarto versions, the exact project-relative output path, overwrite conflicts, and bounded renderer failures.
 - **Citations:** reports local Zotero availability, Crossref/offline failures, citation-lock conflicts, and cached metadata state without logging manuscript content or credentials.
+- **Collaboration:** reports sign-in/discovery failures, live/reconnecting state, active presence, pending owner checkpoint state, invitation/member activity, and named recovery status. Access, refresh, and invitation tokens remain memory-only and are absent from public metrics/logs.
 
 ## Privilege and data boundaries
 

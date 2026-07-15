@@ -6,6 +6,7 @@ The server-only reference store in `services/collaboration` defines the persiste
 
 - Incremental Yjs updates are written atomically and compacted with `Y.mergeUpdates` after configurable count or byte thresholds.
 - Immutable snapshot identifiers cannot be overwritten. Creating a snapshot clears only the update tail that the caller certifies is represented by that snapshot.
+- Owner-named recovery checkpoints merge the current persisted Yjs snapshot and update tail into a new immutable snapshot, then record the verified creator and human-readable name.
 - Loads verify snapshot SHA-256 integrity before returning the latest snapshot plus ordered later updates.
 - The PostgreSQL/S3 adapter creates immutable, hash-linked backup envelopes from a complete merged Yjs state. Verification checks both the object and embedded state digest before a restore can create a new recovery snapshot in an explicitly authorized target project.
 - Project deletion removes its complete object prefix, including snapshots and backups. Workspace deletion is owner-scheduled with a one-hour to thirty-day grace period, can be cancelled before execution, disconnects live rooms, and removes database plus object state.
