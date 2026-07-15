@@ -4,7 +4,8 @@ import { CrossrefTransportError, type CrossrefRequest, type CrossrefWork } from 
 import type { JupyterKernelInventory, RuntimeExecutableProbe, RuntimeLanguage } from './runtimeDiscovery'
 import { EXECUTION_TRUST_ACKNOWLEDGEMENT, type ExecutionTrustStatus } from './executionTrust'
 import type { DirectHostExecutionRequest } from './directExecutionTransport'
-import type { RawDirectExecution } from './executionProvider'
+import type { KernelHostExecutionRequest } from './kernelExecutionTransport'
+import type { RawDirectExecution, RawKernelExecution } from './executionProvider'
 import type { ExecutionLanguage } from './executionCells'
 
 export interface ProjectConfig {
@@ -444,6 +445,11 @@ export function createDesktopHost(
         ? invokeBridge<RawDirectExecution>('execute_direct', { request })
         : executionUnavailable()
     },
+    executeKernel(request: KernelHostExecutionRequest) {
+      return available
+        ? invokeBridge<RawKernelExecution>('execute_kernel', { request })
+        : executionUnavailable()
+    },
     interruptDirect(language: ExecutionLanguage) {
       return available
         ? invokeBridge<boolean>('interrupt_direct', { language })
@@ -457,6 +463,21 @@ export function createDesktopHost(
     terminateDirect(language: ExecutionLanguage) {
       return available
         ? invokeBridge<boolean>('terminate_direct', { language })
+        : executionUnavailable()
+    },
+    interruptKernel(language: ExecutionLanguage) {
+      return available
+        ? invokeBridge<boolean>('interrupt_kernel', { language })
+        : executionUnavailable()
+    },
+    restartKernel(language: ExecutionLanguage) {
+      return available
+        ? invokeBridge<boolean>('restart_kernel', { language })
+        : executionUnavailable()
+    },
+    terminateKernel(language: ExecutionLanguage) {
+      return available
+        ? invokeBridge<boolean>('terminate_kernel', { language })
         : executionUnavailable()
     },
     readExecutionManifests(root: string) {

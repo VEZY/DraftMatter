@@ -102,7 +102,7 @@ function unavailableMessage(language: ExecutionLanguage, freshness: ExecutionFre
 export function buildExecutionAvailability(options: {
   cells: ExecutableCell[]
   states: ExecutionCellFreshness[]
-  providers: Record<ExecutionLanguage, ExecutionProviderKind>
+  providers: Record<ExecutionLanguage, ExecutionProviderKind> | ((cell: ExecutableCell) => ExecutionProviderKind)
   inventory?: RuntimeInventory
   retainedOutputs?: RetainedOutputBlock[]
   cachedResultCells?: ReadonlySet<string>
@@ -111,7 +111,7 @@ export function buildExecutionAvailability(options: {
   const retainedByCell = new Map((options.retainedOutputs ?? []).map((output) => [output.cellId, output]))
   return options.cells.map<ExecutionAvailabilityView>((cell) => {
     const state = stateByCell.get(cell.id) ?? { cellId: cell.id, language: cell.language, status: 'never-run' as const }
-    const provider = options.providers[cell.language]
+    const provider = typeof options.providers === 'function' ? options.providers(cell) : options.providers[cell.language]
     const health = runtimeHealth(options.inventory, cell.language, provider)
     const retained = retainedByCell.get(cell.id)
     const outputAvailable = state.status !== 'output-missing'

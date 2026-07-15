@@ -7,11 +7,12 @@ import {
 } from './executionFreshness'
 import {
   ExecutionLifecycle,
+  type ExecutionProviderSelector,
   type ExecutionRequestFactory,
   type ExecutionRunReport,
   type LifecycleCellState,
 } from './executionLifecycle'
-import type { ExecutionProviderKind, NormalizedExecutionResult } from './executionProvider'
+import type { NormalizedExecutionResult } from './executionProvider'
 import type { TrustedExecutionBroker } from './executionTrust'
 import { materializeExecutionOutput, type OutputPresentation } from './outputMaterializer'
 import { parseRetainedOutputs, type RetainedOutputBlock } from './retainedOutputs'
@@ -20,7 +21,7 @@ import type { DocumentDiagnostic } from './types'
 export interface CleanExecutionOptions {
   source: string
   root: string
-  providers: Record<ExecutionLanguage, ExecutionProviderKind>
+  providers: ExecutionProviderSelector
   broker: TrustedExecutionBroker
   existingManifests?: ExecutionManifest[]
   cleanRunId?: string

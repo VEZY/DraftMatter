@@ -97,7 +97,7 @@ pub struct DirectProcessRegistry {
     processes: Arc<Mutex<HashMap<RuntimeLanguage, Arc<ActiveProcess>>>>,
 }
 
-struct RunDirectory(PathBuf);
+pub(crate) struct RunDirectory(pub(crate) PathBuf);
 
 impl Drop for RunDirectory {
     fn drop(&mut self) {
@@ -105,7 +105,7 @@ impl Drop for RunDirectory {
     }
 }
 
-struct ArtifactBackup {
+pub(crate) struct ArtifactBackup {
     path: PathBuf,
     backup: Option<PathBuf>,
 }
@@ -123,7 +123,7 @@ fn process_store_error() -> HostError {
     integration("The direct-process registry is unavailable.")
 }
 
-fn valid_cell_id(value: &str) -> bool {
+pub(crate) fn valid_cell_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value.chars().all(|character| {
@@ -144,7 +144,7 @@ fn safe_cell_filename(value: &str) -> String {
         .collect()
 }
 
-fn create_run_directory(root: &Path, cell_id: &str) -> Result<RunDirectory, HostError> {
+pub(crate) fn create_run_directory(root: &Path, cell_id: &str) -> Result<RunDirectory, HostError> {
     let parent = root.join(".draftmatter/execution/tmp");
     fs::create_dir_all(&parent)?;
     for attempt in 0..100_u8 {
@@ -229,7 +229,7 @@ fn project_path(root: &Path, relative: &str, artifact: bool) -> Result<PathBuf, 
     Ok(path)
 }
 
-fn verify_inputs(root: &Path, inputs: &[DirectExecutionInput]) -> Result<(), HostError> {
+pub(crate) fn verify_inputs(root: &Path, inputs: &[DirectExecutionInput]) -> Result<(), HostError> {
     if inputs.len() > MAX_INPUTS {
         return Err(HostError::InvalidProject(format!(
             "A cell may declare at most {MAX_INPUTS} input files."
@@ -315,7 +315,7 @@ pub fn inspect_execution_artifacts_impl(
         .collect()
 }
 
-fn declared_artifacts(
+pub(crate) fn declared_artifacts(
     root: &Path,
     attributes: &HashMap<String, serde_json::Value>,
 ) -> Result<Vec<(String, PathBuf)>, HostError> {
@@ -343,7 +343,7 @@ fn declared_artifacts(
         .collect()
 }
 
-fn prepare_artifact_backups(
+pub(crate) fn prepare_artifact_backups(
     artifacts: &[(String, PathBuf)],
     run_directory: &Path,
 ) -> Result<Vec<ArtifactBackup>, HostError> {
@@ -373,7 +373,7 @@ fn prepare_artifact_backups(
     Ok(backups)
 }
 
-fn restore_artifacts(backups: &[ArtifactBackup]) -> Result<(), HostError> {
+pub(crate) fn restore_artifacts(backups: &[ArtifactBackup]) -> Result<(), HostError> {
     for backup in backups {
         if let Some(source) = &backup.backup {
             fs::copy(source, &backup.path)?;
@@ -465,7 +465,7 @@ fn media_type(path: &Path) -> Option<String> {
     }
 }
 
-fn collect_artifacts(
+pub(crate) fn collect_artifacts(
     artifacts: &[(String, PathBuf)],
 ) -> Result<Vec<DirectExecutionArtifact>, DirectExecutionError> {
     artifacts

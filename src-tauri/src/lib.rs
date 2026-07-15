@@ -14,6 +14,7 @@ mod execution_manifests;
 mod execution_trust;
 mod export_adapter;
 mod git_adapter;
+mod jupyter_execution;
 use direct_execution::{
     execute_direct_impl, fingerprint_execution_inputs_impl, inspect_execution_artifacts_impl,
     interrupt_direct_impl, restart_direct_impl, terminate_direct_impl, DirectExecutionInput,
@@ -38,6 +39,10 @@ use git_adapter::{
     git_stage_impl, git_status_impl, git_switch_branch_impl, GitBranchRequest, GitBranchStatus,
     GitCheckpointRequest, GitCommitRequest, GitCommitResult, GitDiffRequest, GitDiffResult,
     GitInitializeResult, GitRemoteRequest, GitRemoteResult, GitRepositoryStatus, GitStageRequest,
+};
+use jupyter_execution::{
+    execute_kernel_impl, interrupt_kernel_impl, restart_kernel_impl, terminate_kernel_impl,
+    KernelExecutionRequest, KernelExecutionResult, KernelProcessRegistry,
 };
 use runtime::{
     discover_jupyter_kernels_impl, probe_runtime_executable_impl, JupyterKernelInventory,
@@ -2175,6 +2180,21 @@ async fn execute_direct(
 }
 
 #[tauri::command]
+async fn execute_kernel(
+    request: KernelExecutionRequest,
+    trust: tauri::State<'_, ExecutionTrustStore>,
+    kernels: tauri::State<'_, KernelProcessRegistry>,
+) -> Result<KernelExecutionResult, HostError> {
+    let trust = trust.inner().clone();
+    let kernels = kernels.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || execute_kernel_impl(request, &trust, &kernels))
+        .await
+        .map_err(|error| {
+            HostError::Integration(format!("The Jupyter runner task failed: {error}"))
+        })?
+}
+
+#[tauri::command]
 fn interrupt_direct(
     language: RuntimeLanguage,
     processes: tauri::State<'_, DirectProcessRegistry>,
@@ -2196,6 +2216,45 @@ fn terminate_direct(
     processes: tauri::State<'_, DirectProcessRegistry>,
 ) -> Result<bool, HostError> {
     terminate_direct_impl(language, &processes)
+}
+
+#[tauri::command]
+async fn interrupt_kernel(
+    language: RuntimeLanguage,
+    kernels: tauri::State<'_, KernelProcessRegistry>,
+) -> Result<bool, HostError> {
+    let kernels = kernels.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || interrupt_kernel_impl(language, &kernels))
+        .await
+        .map_err(|error| {
+            HostError::Integration(format!("The Jupyter interrupt task failed: {error}"))
+        })?
+}
+
+#[tauri::command]
+async fn restart_kernel(
+    language: RuntimeLanguage,
+    kernels: tauri::State<'_, KernelProcessRegistry>,
+) -> Result<bool, HostError> {
+    let kernels = kernels.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || restart_kernel_impl(language, &kernels))
+        .await
+        .map_err(|error| {
+            HostError::Integration(format!("The Jupyter restart task failed: {error}"))
+        })?
+}
+
+#[tauri::command]
+async fn terminate_kernel(
+    language: RuntimeLanguage,
+    kernels: tauri::State<'_, KernelProcessRegistry>,
+) -> Result<bool, HostError> {
+    let kernels = kernels.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || terminate_kernel_impl(language, &kernels))
+        .await
+        .map_err(|error| {
+            HostError::Integration(format!("The Jupyter terminate task failed: {error}"))
+        })?
 }
 
 #[tauri::command]
@@ -2287,6 +2346,7 @@ pub fn run() {
     tauri::Builder::default()
         .manage(ExecutionTrustStore::default())
         .manage(DirectProcessRegistry::default())
+        .manage(KernelProcessRegistry::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -2315,9 +2375,13 @@ pub fn run() {
             fingerprint_execution_inputs,
             inspect_execution_artifacts,
             execute_direct,
+            execute_kernel,
             interrupt_direct,
             restart_direct,
             terminate_direct,
+            interrupt_kernel,
+            restart_kernel,
+            terminate_kernel,
             read_execution_manifests,
             save_execution_manifest,
             git_status,

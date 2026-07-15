@@ -60,9 +60,15 @@ describe('desktop host adapter', () => {
       attributes: {},
       inputs: [],
     })
+    await host.executeKernel({
+      root: '/research/canopy', cellId: 'cell-1', language: 'python', kernelName: 'python-fixture', code: 'print(1)', attributes: {}, inputs: [],
+    })
     await host.interruptDirect('python')
     await host.restartDirect('r')
     await host.terminateDirect('julia')
+    await host.interruptKernel('python')
+    await host.restartKernel('r')
+    await host.terminateKernel('julia')
     await host.readExecutionManifests('/research/canopy')
     await host.saveExecutionManifest({ root: '/research/canopy', cellId: 'cell-1', content: '{"schemaVersion":1}', expectedHash: null })
     await host.gitStatus('/research/canopy')
@@ -107,9 +113,13 @@ describe('desktop host adapter', () => {
       ['fingerprint_execution_inputs', { root: '/research/canopy', paths: ['data/input.csv'] }],
       ['inspect_execution_artifacts', { root: '/research/canopy', paths: ['figures/result.svg'] }],
       ['execute_direct', { request: { root: '/research/canopy', cellId: 'cell-1', language: 'python', code: 'print(1)', attributes: {}, inputs: [] } }],
+      ['execute_kernel', { request: { root: '/research/canopy', cellId: 'cell-1', language: 'python', kernelName: 'python-fixture', code: 'print(1)', attributes: {}, inputs: [] } }],
       ['interrupt_direct', { language: 'python' }],
       ['restart_direct', { language: 'r' }],
       ['terminate_direct', { language: 'julia' }],
+      ['interrupt_kernel', { language: 'python' }],
+      ['restart_kernel', { language: 'r' }],
+      ['terminate_kernel', { language: 'julia' }],
       ['read_execution_manifests', { root: '/research/canopy' }],
       ['save_execution_manifest', { request: { root: '/research/canopy', cellId: 'cell-1', content: '{"schemaVersion":1}', expectedHash: null } }],
       ['git_status', { root: '/research/canopy' }],

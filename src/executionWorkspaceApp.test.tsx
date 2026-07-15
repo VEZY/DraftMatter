@@ -60,7 +60,18 @@ describe('document execution workspace', () => {
       executable: `/usr/bin/${language}`,
       version: `${language} test runtime`,
     }))
-    vi.spyOn(desktopHost, 'discoverJupyterKernels').mockResolvedValue({ health: 'missing', kernels: [], searchedLocations: [] })
+    vi.spyOn(desktopHost, 'discoverJupyterKernels').mockResolvedValue({
+      health: 'available',
+      kernels: [{
+        name: 'python-fixture',
+        displayName: 'Python fixture kernel',
+        language: 'python',
+        health: 'available',
+        resourceDir: '/kernels/python-fixture',
+        executable: '/usr/bin/python',
+      }],
+      searchedLocations: ['/kernels'],
+    })
     vi.spyOn(desktopHost, 'executionTrustStatus').mockResolvedValue({ trusted: true, scope: 'session', warning: 'trusted' })
     vi.spyOn(desktopHost, 'fingerprintExecutionInputs').mockResolvedValue([{ path: 'data/observations.csv', hash: `sha256:${'9'.repeat(64)}` }])
     vi.spyOn(desktopHost, 'executeDirect').mockImplementation(async (request) => ({
@@ -76,6 +87,20 @@ describe('document execution workspace', () => {
     vi.spyOn(desktopHost, 'interruptDirect').mockResolvedValue(true)
     vi.spyOn(desktopHost, 'restartDirect').mockResolvedValue(true)
     vi.spyOn(desktopHost, 'terminateDirect').mockResolvedValue(true)
+    vi.spyOn(desktopHost, 'executeKernel').mockImplementation(async (request) => ({
+      status: 'ok',
+      messages: [
+        { kind: 'stream', sequence: 0, name: 'stdout', text: `kernel:${request.cellId}\n` },
+        { kind: 'display', sequence: 1, data: { 'text/plain': `kernel-output:${request.cellId}` }, metadata: {} },
+      ],
+      artifacts: [],
+      environment: { identity: request.kernelName, version: 'Python 3.13', details: { mode: 'interactive-kernel' } },
+      providerRunId: `kernel-${request.cellId}`,
+      executionCount: 2,
+    }))
+    vi.spyOn(desktopHost, 'interruptKernel').mockResolvedValue(true)
+    vi.spyOn(desktopHost, 'restartKernel').mockResolvedValue(true)
+    vi.spyOn(desktopHost, 'terminateKernel').mockResolvedValue(true)
     vi.spyOn(desktopHost, 'saveExecutionManifest').mockImplementation(async (request) => ({
       path: `.draftmatter/execution/${request.cellId}.json`, content: request.content, hash: `manifest-${request.cellId}`, modifiedMs: 2,
     }))
@@ -185,6 +210,46 @@ describe('document execution workspace', () => {
     expect(container.textContent).toContain('output:py-prepare')
     expect(container.textContent).toContain('output:r-model')
     expect(container.textContent).toContain('output:jl-report')
+  })
+
+  it('selects a healthy Jupyter kernel and routes execution through the typed kernel command', async () => {
+    const environments = [...container.querySelectorAll<HTMLButtonElement>('.structured-execution-bar button')]
+      .find((button) => button.textContent?.includes('Environments'))!
+    await act(async () => {
+      environments.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 20))
+    })
+
+    const dialog = container.querySelector<HTMLElement>('[aria-labelledby="execution-environment-title"]')!
+    const provider = dialog.querySelector<HTMLSelectElement>('[aria-label="Execution provider"]')!
+    const kernel = dialog.querySelector<HTMLSelectElement>('[aria-label="Jupyter kernel"]')!
+    expect(kernel.value).toBe('python-fixture')
+    expect(kernel.textContent).toContain('Python fixture kernel')
+
+    await act(async () => {
+      provider.value = 'kernel'
+      provider.dispatchEvent(new Event('change', { bubbles: true }))
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    expect(provider.value).toBe('kernel')
+    vi.mocked(desktopHost.executeDirect).mockClear()
+    vi.mocked(desktopHost.executeKernel).mockClear()
+
+    const runPython = [...container.querySelectorAll<HTMLButtonElement>('.structured-execution-bar button')]
+      .find((button) => button.textContent?.includes('Run Python'))!
+    await act(async () => {
+      runPython.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 100))
+    })
+
+    expect(desktopHost.executeDirect).not.toHaveBeenCalled()
+    expect(desktopHost.executeKernel).toHaveBeenCalledWith(expect.objectContaining({
+      root: rootPath,
+      cellId: 'py-prepare',
+      language: 'python',
+      kernelName: 'python-fixture',
+    }))
+    expect(container.textContent).toContain('kernel:py-prepare')
   })
 
   it('marks the affected language stale when a declared input changes on disk', async () => {

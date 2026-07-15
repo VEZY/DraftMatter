@@ -155,4 +155,29 @@ describe('execution lifecycle', () => {
     expect(execution.restart).toHaveBeenCalledWith('/project', 'direct', 'r')
     expect(execution.terminate).toHaveBeenCalledWith('kernel', 'julia')
   })
+
+  it('supports explicit per-cell providers and restarts every provider used by a language', async () => {
+    const mixedCells = [
+      { ...cell('py-kernel', 'python'), source: 'value = 1', attributes: { provider: 'kernel' } },
+      { ...cell('py-direct', 'python'), source: 'print(value)', attributes: { provider: 'direct' } },
+    ]
+    const execution = broker()
+    const lifecycle = new ExecutionLifecycle(
+      '/project',
+      mixedCells,
+      (cell) => cell.attributes.provider as 'kernel' | 'direct',
+      execution,
+    )
+
+    await lifecycle.cleanRunAll()
+
+    expect(vi.mocked(execution.restart).mock.calls.map((call) => [call[1], call[2]])).toEqual([
+      ['kernel', 'python'],
+      ['direct', 'python'],
+    ])
+    expect(vi.mocked(execution.run).mock.calls.map((call) => [call[1], call[2].cellId])).toEqual([
+      ['kernel', 'py-kernel'],
+      ['direct', 'py-direct'],
+    ])
+  })
 })

@@ -24,6 +24,7 @@ export interface ExecutionRunReport {
 
 export type ExecutionRequestFactory = (cell: ExecutableCell, root: string) => Promise<ExecutionRequest> | ExecutionRequest
 export type LifecycleListener = (states: LifecycleCellState[]) => void
+export type ExecutionProviderSelector = Record<ExecutionLanguage, ExecutionProviderKind> | ((cell: ExecutableCell) => ExecutionProviderKind)
 
 const languages: ExecutionLanguage[] = ['python', 'r', 'julia']
 
@@ -55,7 +56,7 @@ export class ExecutionLifecycle {
   constructor(
     private readonly root: string,
     cells: ExecutableCell[],
-    private readonly providers: Record<ExecutionLanguage, ExecutionProviderKind>,
+    private readonly providers: ExecutionProviderSelector,
     private readonly broker: TrustedExecutionBroker,
     private readonly requestFactory: ExecutionRequestFactory = defaultRequest,
   ) {
@@ -63,6 +64,14 @@ export class ExecutionLifecycle {
     for (const cell of this.cells) {
       this.states.set(cell.id, { cellId: cell.id, language: cell.language, status: 'never-run' })
     }
+  }
+
+  private provider(cell: ExecutableCell) {
+    return typeof this.providers === 'function' ? this.providers(cell) : this.providers[cell.language]
+  }
+
+  private languageProviders(language: ExecutionLanguage) {
+    return [...new Set(this.cells.filter((cell) => cell.language === language).map((cell) => this.provider(cell)))]
   }
 
   snapshot() {
@@ -104,7 +113,7 @@ export class ExecutionLifecycle {
       this.update(cell, { status: 'running', result: undefined, message: undefined })
       try {
         const request = await this.requestFactory(cell, this.root)
-        const result = await this.broker.run(this.root, this.providers[language], request, controller.signal)
+        const result = await this.broker.run(this.root, this.provider(cell), request, controller.signal)
         this.update(cell, { status: resultStatus(result), result })
         if (result.status === 'failed') throw new Error(`Execution failed in ${cell.id}.`)
       } catch (error) {
@@ -168,21 +177,23 @@ export class ExecutionLifecycle {
         this.update(cell, { status: 'interrupted', message: 'Interrupted by the author.' })
       }
     }
-    await this.broker.interrupt(this.providers[language], language)
+    for (const provider of this.languageProviders(language)) await this.broker.interrupt(provider, language)
   }
 
   async restart(language: ExecutionLanguage) {
     this.generations[language] += 1
     this.controllers.get(language)?.abort()
-    if (this.controllers.has(language)) await this.broker.interrupt(this.providers[language], language)
+    if (this.controllers.has(language)) {
+      for (const provider of this.languageProviders(language)) await this.broker.interrupt(provider, language)
+    }
     await this.lanes.get(language)
-    await this.broker.restart(this.root, this.providers[language], language)
+    for (const provider of this.languageProviders(language)) await this.broker.restart(this.root, provider, language)
   }
 
   async terminate(language: ExecutionLanguage) {
     this.generations[language] += 1
     this.controllers.get(language)?.abort()
-    await this.broker.terminate(this.providers[language], language)
+    for (const provider of this.languageProviders(language)) await this.broker.terminate(provider, language)
     await this.lanes.get(language)
   }
 }
