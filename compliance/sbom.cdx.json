@@ -20,7 +20,7 @@
       },
       {
         "name": "draftmatter:dependency-fingerprint",
-        "value": "sha256:af628410468dda9b3d9d7b45fb111a49f1db1de711b94b6b4427bc232327ea6c"
+        "value": "sha256:679b581896b962710d6e316aa748198553ca1c7d4bbd7b9b5b18ccfc1b5398e6"
       }
     ]
   },
@@ -7752,6 +7752,35 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:npm/%40types%2Fnode@26.1.1",
+      "name": "@types/node",
+      "version": "26.1.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40types%2Fnode@26.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@types/node/-/node-26.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:npm/%40types%2Freact@19.2.17",
       "name": "@types/react",
       "version": "19.2.17",
@@ -11855,6 +11884,35 @@
         {
           "type": "distribution",
           "url": "https://registry.npmjs.org/undici/-/undici-7.28.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/undici-types@8.3.0",
+      "name": "undici-types",
+      "version": "8.3.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/undici-types@8.3.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/undici-types/-/undici-types-8.3.0.tgz"
         }
       ],
       "properties": [

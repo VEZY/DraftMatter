@@ -327,6 +327,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | @types/estree | 1.0.9 | MIT | development |
 | npm | @types/mdast | 4.0.4 | MIT | required |
 | npm | @types/ms | 2.1.0 | MIT | required |
+| npm | @types/node | 26.1.1 | MIT | required |
 | npm | @types/react | 19.2.17 | MIT | development |
 | npm | @types/react-dom | 19.2.3 | MIT | development |
 | npm | @types/unist | 3.0.3 | MIT | required |
@@ -469,6 +470,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | tslib | 2.8.1 | 0BSD | required |
 | npm | typescript | 7.0.2 | Apache-2.0 | required |
 | npm | undici | 7.28.0 | MIT | development |
+| npm | undici-types | 8.3.0 | MIT | required |
 | npm | unified | 11.0.5 | MIT | required |
 | npm | unist-util-stringify-position | 4.0.0 | MIT | required |
 | npm | vfile | 6.0.3 | MIT | required |
