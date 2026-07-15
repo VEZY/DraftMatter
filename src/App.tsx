@@ -10,7 +10,7 @@ import { downloadText, projectCleanSource, reviewedProjection } from './projecti
 import { sampleCitations } from './sampleCitations'
 import { initialDraft } from './sampleDraft'
 import { readRecoverySnapshots, saveRecoverySnapshot, type RecoverySnapshot } from './storage'
-import type { CitationRecord, DocumentDiagnostic, DraftState, MarkupView, SuggestionStatus } from './types'
+import type { CitationItem, CitationRecord, DocumentDiagnostic, DraftState, MarkupView, SuggestionStatus } from './types'
 import { queryZoteroLibrary, type ZoteroVersionStamp } from './zotero'
 import { citationItemsForDraft, normalizeCitationItems } from './citation'
 
@@ -100,6 +100,9 @@ function App() {
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
   const [citationOpen, setCitationOpen] = useState(false)
   const [citationSearchOpen, setCitationSearchOpen] = useState(false)
+  const [citationPickerItems, setCitationPickerItems] = useState<CitationItem[]>([])
+  const [citationActiveIndex, setCitationActiveIndex] = useState(0)
+  const [citationEditKey, setCitationEditKey] = useState('')
   const [exportOpen, setExportOpen] = useState(false)
   const [sourceOpen, setSourceOpen] = useState(false)
   const [sourceTab, setSourceTab] = useState<'reviewed' | 'final' | 'original'>('reviewed')
@@ -156,8 +159,10 @@ function App() {
     ? 'reduced leaf area by 18%'
     : 'lowered leaf expansion during the treatment period'
   const citationResults = useMemo(() => searchCitations(citations, citationQuery).slice(0, 8), [citations, citationQuery])
-  const citationLabel = useMemo(() => formatCitationCluster(citations, citationItemsForDraft(draft)), [citations, draft])
-  const primaryCitation = citations.find((record) => record.citekey === draft.citationKeys[0]) ?? citations[0]
+  const draftCitationItems = citationItemsForDraft(draft)
+  const citationLabel = formatCitationCluster(citations, draftCitationItems)
+  const activeCitationItem = draftCitationItems.find((item) => item.citekey === citationEditKey) ?? draftCitationItems[0]
+  const activeCitationRecord = citations.find((record) => record.citekey === activeCitationItem?.citekey)
   const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...zoteroDiagnostics]
 
   const replaceDesktopSession = (next: DesktopSession | null) => {
@@ -400,6 +405,15 @@ function App() {
         event.preventDefault()
         setCommandOpen((open) => !open)
       }
+      if (modifier && event.shiftKey && event.key.toLowerCase() === 'c') {
+        event.preventDefault()
+        setCitationPickerItems(citationItemsForDraft(draft))
+        setCitationActiveIndex(0)
+        setCitationQuery('')
+        setCitationOpen(false)
+        setCommandOpen(false)
+        setCitationSearchOpen(true)
+      }
       if (event.key === 'Escape') {
         setCommandOpen(false)
         setCitationOpen(false)
@@ -414,7 +428,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [canRedo, canUndo])
+  }, [canRedo, canUndo, draft])
 
   useEffect(() => {
     if (!toast) return
@@ -709,18 +723,51 @@ function App() {
     setToast('Recovered local manuscript version')
   }
 
-  const addCitation = (record: CitationRecord) => {
+  const openCitationPicker = () => {
+    setCitationPickerItems(citationItemsForDraft(draft))
+    setCitationActiveIndex(0)
+    setCitationQuery('')
+    setCitationOpen(false)
+    setCitationSearchOpen(true)
+  }
+
+  const toggleCitationPickerRecord = (record: CitationRecord) => {
     setCitations((current) => mergeCitationRecords(current, [record]))
-    if (draft.citationKeys.includes(record.citekey)) {
-      setToast(`${record.citekey} is already cited here`)
-      setCitationSearchOpen(false)
+    setCitationPickerItems((current) => current.some((item) => item.citekey === record.citekey)
+      ? current.filter((item) => item.citekey !== record.citekey)
+      : [...current, { citekey: record.citekey }])
+  }
+
+  const confirmCitationPicker = () => {
+    if (!citationPickerItems.length) {
+      setToast('Select at least one source for the citation')
       return
     }
-    const citationItems = [...citationItemsForDraft(draft), { citekey: record.citekey }]
-    updateDraft(applyDraftCitationTransaction(draft, citationItems))
+    updateDraft(applyDraftCitationTransaction(draft, citationPickerItems))
     setCitationSearchOpen(false)
     setCitationQuery('')
-    setToast(`Citation inserted · @${record.citekey}`)
+    setCitationEditKey(citationPickerItems[0].citekey)
+    setToast(`${citationPickerItems.length} source${citationPickerItems.length === 1 ? '' : 's'} in citation`)
+  }
+
+  const openCitationDetails = () => {
+    setCitationEditKey(draftCitationItems[0]?.citekey ?? '')
+    setCitationOpen(true)
+  }
+
+  const updateCitationItem = (citekey: string, patch: Partial<CitationItem>) => {
+    const items = citationItemsForDraft(draft).map((item) => item.citekey === citekey ? { ...item, ...patch } : item)
+    updateDraft(applyDraftCitationTransaction(draft, items))
+  }
+
+  const removeCitationItem = (citekey: string) => {
+    const items = citationItemsForDraft(draft).filter((item) => item.citekey !== citekey)
+    if (!items.length) {
+      setToast('A citation cluster needs at least one source')
+      return
+    }
+    updateDraft(applyDraftCitationTransaction(draft, items))
+    setCitationEditKey(items[0].citekey)
   }
 
   const onBibliographySelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -741,7 +788,7 @@ function App() {
     setCitations(next)
     setBibliographyDiagnostics(parsed.diagnostics)
     setProjectMenuOpen(false)
-    setCitationSearchOpen(true)
+    if (!citationSearchOpen) openCitationPicker()
     setToast(`Indexed ${added} new source${added === 1 ? '' : 's'} from ${file.name}`)
   }
 
@@ -866,7 +913,7 @@ function App() {
           <div className="rail-items">
             <button className={activeNav === 'manuscript' ? 'active' : ''} onClick={() => setActiveNav('manuscript')} data-label="Manuscript" aria-label="Manuscript" aria-current={activeNav === 'manuscript' ? 'page' : undefined}><Icon name="document" /></button>
             <button className={activeNav === 'review' ? 'active' : ''} onClick={showReviewPanel} data-label="Review" aria-label="Review, 3 open items" aria-current={activeNav === 'review' ? 'page' : undefined}><Icon name="message" /><span className="rail-notice">3</span></button>
-            <button className={activeNav === 'sources' ? 'active' : ''} onClick={() => { setActiveNav('sources'); setCitationSearchOpen(true) }} data-label="Sources" aria-label="Sources" aria-current={activeNav === 'sources' ? 'page' : undefined}><Icon name="book" /></button>
+            <button className={activeNav === 'sources' ? 'active' : ''} onClick={() => { setActiveNav('sources'); openCitationPicker() }} data-label="Sources" aria-label="Sources" aria-current={activeNav === 'sources' ? 'page' : undefined}><Icon name="book" /></button>
             <button className={activeNav === 'history' ? 'active' : ''} onClick={() => setActiveNav('history')} data-label="History" aria-label="History" aria-current={activeNav === 'history' ? 'page' : undefined}><Icon name="history" /></button>
           </div>
           <button data-label="Settings" aria-label="Settings"><Icon name="settings" /></button>
@@ -946,17 +993,35 @@ function App() {
               <h2><span>1</span> Introduction</h2>
               <p className="editable" contentEditable suppressContentEditableWarning spellCheck onBlur={(event) => updateManuscriptText('introduction', event.currentTarget.innerText.replace(/\s*\(Vezy.*$/, '').trim())}>
                 {draft.introduction}{' '}
-                <CitationChip onClick={() => setCitationOpen((open) => !open)} label={citationLabel} />
+                <CitationChip onClick={openCitationDetails} label={citationLabel} />
               </p>
               {citationOpen && (
                 <div className="citation-detail popover">
                   <div className="citation-detail-top">
-                    <span className="source-icon">Z</span>
-                    <div><strong>{primaryCitation ? `${primaryCitation.authors[0] ?? primaryCitation.citekey}${primaryCitation.authors.length > 1 ? ' et al.' : ''}${primaryCitation.year ? ` (${primaryCitation.year})` : ''}` : 'Missing citation'}</strong><p>{primaryCitation?.title ?? draft.citationKeys[0]}</p></div>
+                    <span className={`source-icon ${activeCitationRecord?.source === 'zotero' ? 'zotero' : activeCitationRecord?.source === 'bibtex' ? 'bib' : ''}`}>{activeCitationRecord?.source === 'zotero' ? 'Z' : activeCitationRecord?.source === 'bibtex' ? 'B' : 'C'}</span>
+                    <div><strong>Citation cluster · {draftCitationItems.length} source{draftCitationItems.length === 1 ? '' : 's'}</strong><p>{citationLabel}</p></div>
                     <button className="icon-button subtle" onClick={() => setCitationOpen(false)} aria-label="Close citation details"><Icon name="close" size={15} /></button>
                   </div>
-                  <dl><div><dt>Source</dt><dd>{primaryCitation?.container ?? primaryCitation?.source ?? 'Not available'}</dd></div><div><dt>DOI</dt><dd>{primaryCitation?.doi ?? 'Not available'}</dd></div></dl>
-                  <div className="citation-actions"><button>Edit citation</button><button onClick={() => { setCitationSearchOpen(true); setCitationOpen(false) }}>Add another source</button></div>
+                  <div className="citation-cluster-list" aria-label="Works in citation">
+                    {draftCitationItems.map((item) => {
+                      const record = citations.find((candidate) => candidate.citekey === item.citekey)
+                      return (
+                        <div className={item.citekey === activeCitationItem?.citekey ? 'active' : ''} key={item.citekey}>
+                          <button onClick={() => setCitationEditKey(item.citekey)}><strong>{record?.title ?? item.citekey}</strong><small>@{item.citekey}</small></button>
+                          <button onClick={() => removeCitationItem(item.citekey)} aria-label={`Remove ${item.citekey} from citation`}><Icon name="close" size={13} /></button>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {activeCitationItem && (
+                    <div className="citation-modifiers">
+                      <label><span>Prefix</span><input value={activeCitationItem.prefix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { prefix: event.target.value })} placeholder="e.g. see" /></label>
+                      <label><span>Locator</span><input value={activeCitationItem.locator ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { locator: event.target.value })} placeholder="e.g. p. 18" /></label>
+                      <label className="citation-suffix"><span>Suffix</span><input value={activeCitationItem.suffix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { suffix: event.target.value })} placeholder="e.g. emphasis added" /></label>
+                      <label className="citation-suppress"><input type="checkbox" checked={activeCitationItem.suppressAuthor ?? false} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { suppressAuthor: event.target.checked })} /><span>Suppress author</span></label>
+                    </div>
+                  )}
+                  <div className="citation-actions"><button onClick={() => setCitationOpen(false)}>Done</button><button onClick={openCitationPicker}>Add or remove sources</button></div>
                 </div>
               )}
               <p>
@@ -1155,7 +1220,29 @@ function App() {
       {citationSearchOpen && (
         <div className="modal-backdrop" onMouseDown={() => setCitationSearchOpen(false)}>
           <div className="citation-picker" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Insert citation">
-            <div className="picker-search"><Icon name="search" /><input autoFocus value={citationQuery} onChange={(event) => setCitationQuery(event.target.value)} placeholder="Search authors, titles, years, or DOI…" /><kbd>esc</kbd></div>
+            <div className="picker-search"><Icon name="search" /><input
+              autoFocus
+              value={citationQuery}
+              onChange={(event) => { setCitationQuery(event.target.value); setCitationActiveIndex(0) }}
+              onKeyDown={(event) => {
+                if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
+                  event.preventDefault()
+                  confirmCitationPicker()
+                } else if (event.key === 'ArrowDown') {
+                  event.preventDefault()
+                  setCitationActiveIndex((current) => Math.min(Math.max(0, citationResults.length - 1), current + 1))
+                } else if (event.key === 'ArrowUp') {
+                  event.preventDefault()
+                  setCitationActiveIndex((current) => Math.max(0, current - 1))
+                } else if (event.key === 'Enter' && citationResults[citationActiveIndex]) {
+                  event.preventDefault()
+                  toggleCitationPickerRecord(citationResults[citationActiveIndex])
+                }
+              }}
+              placeholder="Search authors, titles, years, or DOI…"
+              aria-label="Search citation sources"
+              aria-activedescendant={citationResults[citationActiveIndex] ? `citation-result-${citationResults[citationActiveIndex].citekey}` : undefined}
+            /><kbd>esc</kbd></div>
             <div className="picker-body">
               <div className="picker-filter">
                 <span>
@@ -1171,9 +1258,17 @@ function App() {
                 <button onClick={() => bibliographyInputRef.current?.click()}>Import bibliography <Icon name="plus" size={13} /></button>
               </div>
               {citationResults.length ? citationResults.map((record) => {
-                const isCited = draft.citationKeys.includes(record.citekey)
+                const isCited = citationPickerItems.some((item) => item.citekey === record.citekey)
+                const isActive = citationResults[citationActiveIndex]?.citekey === record.citekey
                 return (
-                  <button className={`source-result ${isCited ? 'selected' : ''}`} key={record.citekey} onClick={() => addCitation(record)}>
+                  <button
+                    id={`citation-result-${record.citekey}`}
+                    className={`source-result ${isCited ? 'selected' : ''} ${isActive ? 'active' : ''}`}
+                    key={record.citekey}
+                    onClick={() => toggleCitationPickerRecord(record)}
+                    onMouseEnter={() => setCitationActiveIndex(citationResults.indexOf(record))}
+                    aria-pressed={isCited}
+                  >
                     <span className={`source-icon ${record.source === 'bibtex' ? 'bib' : record.source === 'zotero' ? 'zotero' : ''}`}>{record.source === 'bibtex' ? 'B' : record.source === 'csl-json' ? 'C' : record.source === 'zotero' ? 'Z' : 'L'}</span>
                     <span><strong>{record.title}</strong><small>{record.authors.length ? record.authors.slice(0, 2).join(' & ') : record.citekey}{record.year ? ` · ${record.year}` : ''}{record.container ? ` · ${record.container}` : ''}</small><em>{record.doi ?? `@${record.citekey}`}</em></span>
                     {isCited ? <Icon name="check" /> : <Icon name="plus" />}
@@ -1181,7 +1276,11 @@ function App() {
                 )
               }) : <div className="citation-empty"><Icon name="search" size={21} /><strong>No matching sources</strong><p>Try fewer terms, open Zotero, or import a BibTeX/CSL JSON file.</p></div>}
             </div>
-            <div className="picker-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Add citation</span><button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={12} /> Import .bib / CSL JSON</button></div>
+            <div className="picker-footer">
+              <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Select</span><span><kbd>⌘</kbd><kbd>↵</kbd> Confirm</span>
+              <button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={12} /> Import</button>
+              <button className="confirm-citation" onClick={confirmCitationPicker} disabled={!citationPickerItems.length}>Insert selected · {citationPickerItems.length}</button>
+            </div>
           </div>
         </div>
       )}
@@ -1242,7 +1341,7 @@ function App() {
           <div className="command-menu" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Command menu">
             <div className="picker-search"><Icon name="search" /><input autoFocus placeholder="Search commands…" /><kbd>esc</kbd></div>
             <span className="command-group-title">Suggested</span>
-            <button onClick={() => { setCommandOpen(false); setCitationSearchOpen(true) }}><span className="command-icon">@</span><span><strong>Insert citation</strong><small>Search Zotero and project bibliography</small></span><kbd>⌘ ⇧ C</kbd></button>
+            <button onClick={() => { setCommandOpen(false); openCitationPicker() }}><span className="command-icon">@</span><span><strong>Insert citation</strong><small>Search Zotero and project bibliography</small></span><kbd>⌘ ⇧ C</kbd></button>
             <button onClick={() => { setCommandOpen(false); showReviewPanel() }}><span className="command-icon"><Icon name="message" size={17} /></span><span><strong>Add comment</strong><small>Attach a note to selected text</small></span></button>
             <button onClick={() => { setCommandOpen(false); runCell() }}><span className="command-icon"><Icon name="play" size={17} /></span><span><strong>Run code cell</strong><small>Execute the current cell explicitly</small></span><kbd>⌘ ↵</kbd></button>
             <button onClick={() => { setCommandOpen(false); openSourceInspector() }}><span className="command-icon"><Icon name="code" size={17} /></span><span><strong>Inspect portable source</strong><small>Compare reviewed and clean projections</small></span></button>
@@ -1253,7 +1352,7 @@ function App() {
       {toast && <div className="toast" role="status"><Icon name="check" size={16} /> {toast}</div>}
 
       {!citationSearchOpen && !commandOpen && (
-        <button className="quick-cite" onClick={() => setCitationSearchOpen(true)} aria-label="Insert citation"><span>@</span> Cite</button>
+        <button className="quick-cite" onClick={openCitationPicker} aria-label="Insert citation"><span>@</span> Cite</button>
       )}
     </div>
   )

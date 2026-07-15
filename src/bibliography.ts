@@ -302,7 +302,8 @@ export function formatCitationCluster(records: CitationRecord[], citationItems: 
           : record.citekey
     const year = record.year ?? (item.suppressAuthor ? record.citekey : '')
     const core = item.suppressAuthor ? year : `${author}${year ? `, ${year}` : ''}`
-    return [[item.prefix, core, item.locator, item.suffix].filter(Boolean).join(', ')]
+    const prefixed = item.prefix ? `${item.prefix} ${core}` : core
+    return [[prefixed, item.locator, item.suffix].filter(Boolean).join(', ')]
   })
   return `(${labels.join('; ')})`
 }
