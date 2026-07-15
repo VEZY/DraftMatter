@@ -37,6 +37,7 @@ describe('rendered Crossref citation search', () => {
     desktopHost.available = true
     vi.spyOn(desktopHost, 'zoteroStatus').mockResolvedValue({ available: false, message: 'closed' })
     vi.spyOn(desktopHost, 'searchCrossref').mockResolvedValue([dynacof])
+    vi.spyOn(desktopHost, 'openScholarSearch').mockResolvedValue()
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
@@ -87,5 +88,30 @@ describe('rendered Crossref citation search', () => {
     expect(container.querySelector('.citation-doi-preview')?.textContent).toContain('Metadata resolved through Crossref')
     expect(container.querySelector('.citation-preview-records')?.textContent).toContain('DynACof')
     expect((container.querySelector('.citation-intake-box textarea') as HTMLTextAreaElement).value).toBe(dynacof.doi)
+  })
+
+  it('hands only the explicit query to Scholar and explains the export return path', async () => {
+    await act(async () => root.render(<App />))
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, shiftKey: true, bubbles: true })))
+    const search = container.querySelector<HTMLInputElement>('input[aria-label="Search citation sources"]')!
+    await enter(search, 'vezy et al. 2020 DynACof')
+    const handoff = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Search Google Scholar'))!
+    await act(async () => {
+      handoff.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+
+    expect(desktopHost.openScholarSearch).toHaveBeenCalledWith('vezy et al. 2020 DynACof')
+    const guidance = container.querySelector('[role="status"]')!
+    expect(guidance.textContent).toContain('Cite')
+    expect(guidance.textContent).toContain('BibTeX')
+    expect(guidance.textContent).toContain('EndNote')
+
+    const refresh = [...guidance.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Refresh Zotero'))!
+    await act(async () => {
+      refresh.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 320))
+    })
+    expect(desktopHost.zoteroStatus).toHaveBeenCalled()
   })
 })

@@ -29,6 +29,7 @@ describe('desktop host adapter', () => {
     await host.zoteroStatus()
     await host.searchZotero('canopy water', 12)
     await host.searchCrossref({ kind: 'doi', doi: '10.1016/j.envsoft.2019.104609' })
+    await host.openScholarSearch('vezy et al. 2020 DynACof')
 
     expect(calls).toEqual([
       ['open_project', { root: '/research/canopy' }],
@@ -43,6 +44,7 @@ describe('desktop host adapter', () => {
       ['zotero_status', undefined],
       ['zotero_search', { query: 'canopy water', limit: 12 }],
       ['crossref_search', { request: { doi: '10.1016/j.envsoft.2019.104609' } }],
+      ['open_scholar_search', { query: 'vezy et al. 2020 DynACof' }],
     ])
   })
 

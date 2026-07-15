@@ -205,10 +205,12 @@ function App() {
   const [citationCacheDiagnostics, setCitationCacheDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [zoteroDiagnostics, setZoteroDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [zoteroState, setZoteroState] = useState<'idle' | 'searching' | 'available' | 'unavailable' | 'desktop-only'>('idle')
+  const [zoteroRefreshRevision, setZoteroRefreshRevision] = useState(0)
   const [crossrefDiagnostics, setCrossrefDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [crossrefState, setCrossrefState] = useState<'idle' | 'searching' | 'available' | 'unavailable' | 'desktop-only'>('idle')
   const [crossrefCandidates, setCrossrefCandidates] = useState<CrossrefCandidate[]>([])
   const [doiLookupState, setDoiLookupState] = useState<'idle' | 'resolving'>('idle')
+  const [scholarHelpOpen, setScholarHelpOpen] = useState(false)
   const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>(() => readRecoverySnapshots(localStorage))
   const [citations, setCitations] = useState<CitationRecord[]>(getInitialCitations)
   const [citationQuery, setCitationQuery] = useState('')
@@ -585,7 +587,7 @@ function App() {
       disposed = true
       window.clearTimeout(timeout)
     }
-  }, [citationQuery, citationSearchOpen])
+  }, [citationQuery, citationSearchOpen, zoteroRefreshRevision])
 
   useEffect(() => {
     const session = crossrefSessionRef.current!
@@ -1054,6 +1056,34 @@ function App() {
     }
     const payload = event.dataTransfer.getData('text/plain')
     if (payload.trim()) showCitationIntake(payload)
+  }
+
+  const openScholarHandoff = async () => {
+    const query = citationQuery.trim()
+    if (!query) {
+      setToast('Enter an author, title, year, or DOI before opening Google Scholar')
+      return
+    }
+    if (!desktopHost.available) {
+      setToast('Google Scholar handoff is available in the desktop app')
+      return
+    }
+    try {
+      await desktopHost.openScholarSearch(query)
+      setScholarHelpOpen(true)
+      setToast('Google Scholar opened in your default browser')
+    } catch (error) {
+      setToast(normaliseHostFailure(error).message)
+    }
+  }
+
+  const refreshZoteroResults = () => {
+    if (!desktopHost.available) {
+      setToast('Zotero refresh is available in the desktop app')
+      return
+    }
+    setZoteroRefreshRevision((current) => current + 1)
+    setToast('Refreshing Zotero results…')
   }
 
   const resolveCitationDoi = async () => {
@@ -1696,6 +1726,17 @@ function App() {
                       <div className="citation-preview-footer"><details><summary>Original payload</summary><pre>{citationIntakePreview.originalPayload.slice(0, 10000)}{citationIntakePreview.originalPayload.length > 10000 ? '\n…preview truncated; full payload retained in memory' : ''}</pre></details><button onClick={acceptCitationIntake} disabled={!citationIntakeSelected.length}>Stage selected · {citationIntakeSelected.length}</button></div>
                     </>
                   )}
+                </div>
+              )}
+              <div className="scholar-handoff">
+                <span><Icon name="link" size={14} /><span><strong>Still looking?</strong><small>Open the current query in Google Scholar. DraftMatter never reads or scrapes Scholar pages.</small></span></span>
+                <button onClick={() => void openScholarHandoff()} disabled={!citationQuery.trim()}>Search Google Scholar <Icon name="arrowRight" size={12} /></button>
+              </div>
+              {scholarHelpOpen && (
+                <div className="scholar-return" role="status">
+                  <span><strong>Bring the record back</strong><small>In Scholar choose <b>Cite</b> → <b>BibTeX</b> or <b>EndNote</b>, then paste or drop the export above. If you saved it with Zotero Connector, refresh the local results.</small></span>
+                  <button onClick={refreshZoteroResults}>Refresh Zotero results</button>
+                  <button className="icon-button" onClick={() => setScholarHelpOpen(false)} aria-label="Dismiss Google Scholar return instructions"><Icon name="close" size={12} /></button>
                 </div>
               )}
               <div className="picker-filter">

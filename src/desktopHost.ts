@@ -213,6 +213,9 @@ export function createDesktopHost(
         throw normaliseCrossrefFailure(error)
       }
     },
+    openScholarSearch(query: string) {
+      return invokeBridge<void>('open_scholar_search', { query })
+    },
   }
 }
 

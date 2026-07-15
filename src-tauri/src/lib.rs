@@ -7,6 +7,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tauri_plugin_opener::OpenerExt;
 
 const PROJECT_SCHEMA: u32 = 1;
 const MAX_RECOVERY_FILES: usize = 8;
@@ -1015,6 +1016,19 @@ fn percent_encode_query(value: &str) -> String {
         .collect()
 }
 
+fn scholar_search_url(query: &str) -> Result<String, HostError> {
+    let query = query.trim();
+    if query.is_empty() || query.len() > 512 {
+        return Err(HostError::Integration(
+            "Google Scholar search needs an explicit query of at most 512 bytes.".to_string(),
+        ));
+    }
+    Ok(format!(
+        "https://scholar.google.com/scholar?q={}",
+        percent_encode_query(query)
+    ))
+}
+
 fn zotero_status_impl() -> ZoteroStatus {
     zotero_status_at(zotero_address())
 }
@@ -1500,10 +1514,19 @@ fn crossref_search(
     crossref_search_impl(request)
 }
 
+#[tauri::command]
+fn open_scholar_search(app: tauri::AppHandle, query: String) -> Result<(), HostError> {
+    let url = scholar_search_url(&query)?;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|error| HostError::Integration(format!("Could not open Google Scholar: {error}")))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             open_project,
             create_project,
@@ -1517,7 +1540,8 @@ pub fn run() {
             set_citation_preferences,
             zotero_status,
             zotero_search,
-            crossref_search
+            crossref_search,
+            open_scholar_search
         ])
         .run(tauri::generate_context!())
         .expect("error while running DraftMatter");
@@ -1609,6 +1633,16 @@ mod tests {
             ..CrossrefSearchRequest::default()
         })
         .is_err());
+    }
+
+    #[test]
+    fn builds_only_an_explicit_google_scholar_search_url() {
+        assert_eq!(
+            scholar_search_url("vezy et al. 2020 DynACof").unwrap(),
+            "https://scholar.google.com/scholar?q=vezy%20et%20al.%202020%20DynACof"
+        );
+        assert!(scholar_search_url("   ").is_err());
+        assert!(scholar_search_url(&"x".repeat(513)).is_err());
     }
 
     #[test]
