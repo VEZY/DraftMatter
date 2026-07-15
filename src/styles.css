@@ -4044,6 +4044,13 @@ img.ProseMirror-separator { border: 0 !important; display: inline !important; he
 .structured-footnote-preview { font-size: .9rem; line-height: 1.55; margin: 0 !important; }
 .structured-footnote-editor { display: grid; gap: 7px; }
 .structured-footnote-editor[hidden] { display: none; }
+.structured-footnote-label-field { display: grid; gap: 4px; }
+.structured-footnote-label-field > span { color: #53625b; font-family: Inter, ui-sans-serif, sans-serif; font-size: 9px; font-weight: 700; }
+.structured-footnote-label-field > small { color: #87928c; font-family: Inter, ui-sans-serif, sans-serif; font-size: 8px; }
+.structured-footnote-label-input { background: #fff; border: 1px solid #d8dfdb; border-radius: 5px; color: #3f4b45; font: 10px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 7px 8px; }
+.structured-footnote-label-input:focus { border-color: #89a294; outline: 2px solid rgba(63, 104, 89, .14); }
+.structured-footnote-validation { color: #9a5e4a; font-family: Inter, ui-sans-serif, sans-serif; font-size: 8px; line-height: 1.45; margin: 0 !important; }
+.structured-footnote-validation[hidden] { display: none; }
 .structured-footnote-textarea { background: #fff; border: 1px solid #d8dfdb; border-radius: 5px; color: #3f4b45; font-family: Georgia, serif; font-size: 12px; line-height: 1.5; min-height: 74px; padding: 8px 9px; resize: vertical; width: 100%; }
 .structured-footnote-textarea:focus { border-color: #89a294; outline: 2px solid rgba(63, 104, 89, .14); }
 .structured-footnote-editor > div { display: flex; gap: 6px; justify-content: flex-end; }

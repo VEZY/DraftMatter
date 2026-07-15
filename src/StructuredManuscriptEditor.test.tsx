@@ -291,11 +291,27 @@ describe('full structured manuscript editor', () => {
 
     const beta = definitions[1]
     await act(async () => beta.querySelector<HTMLButtonElement>('.structured-footnote-edit')?.click())
+    const label = beta.querySelector<HTMLInputElement>('.structured-footnote-label-input')!
     const textarea = beta.querySelector<HTMLTextAreaElement>('.structured-footnote-textarea')!
-    textarea.value = 'Revised **beta** details.'
-    await act(async () => beta.querySelector<HTMLButtonElement>('.structured-footnote-editor .primary-button')?.click())
+    const save = beta.querySelector<HTMLButtonElement>('.structured-footnote-editor .primary-button')!
 
-    expect(changed.at(-1)).toContain('[^beta]: Revised **beta** details.')
+    label.value = 'alpha'
+    label.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(beta.querySelector('.structured-footnote-validation')?.textContent).toContain('already belongs')
+    expect(save.disabled).toBe(true)
+
+    label.value = 'fieldwork'
+    label.dispatchEvent(new Event('input', { bubbles: true }))
+    textarea.value = 'Revised **beta** details.'
+    textarea.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(save.disabled).toBe(false)
+    await act(async () => save.click())
+
+    expect(changed.at(-1)).toContain('Beta first[^fieldwork], alpha next[^alpha], and beta again[^fieldwork].')
+    expect(changed.at(-1)).toContain('[^fieldwork]: Revised **beta** details.')
+    expect(changed.at(-1)).not.toContain('[^beta]')
+    expect([...container.querySelectorAll<HTMLElement>('.structured-footnote-reference')].map((reference) => reference.dataset.footnoteLabel)).toEqual(['fieldwork', 'alpha', 'fieldwork'])
+    expect(beta.dataset.footnoteLabel).toBe('fieldwork')
     expect(beta.querySelector('.structured-footnote-preview')?.textContent).toBe('Revised beta details.')
     expect(beta.querySelector<HTMLElement>('.structured-footnote-editor')?.hidden).toBe(true)
   })
@@ -488,6 +504,7 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector<HTMLTextAreaElement>('.structured-code-editor')?.readOnly).toBe(true)
     expect(container.querySelector<HTMLButtonElement>('.structured-code-toggle')?.disabled).toBe(false)
     expect(container.querySelector<HTMLButtonElement>('.structured-footnote-edit')?.disabled).toBe(true)
+    expect([...container.querySelectorAll<HTMLInputElement>('.structured-footnote-label-input')].every((input) => input.readOnly)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-equation-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLInputElement>('.structured-equation-label-input')].every((input) => input.readOnly)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-figure-edit')].every((button) => button.disabled)).toBe(true)

@@ -554,6 +554,31 @@ function footnoteNumbers(document: ProseMirrorNode) {
   return numbers
 }
 
+function footnoteDefinitionLabelUsedByAnotherNode(document: ProseMirrorNode, label: string, currentNodeId?: string) {
+  let found = false
+  document.descendants((candidate) => {
+    if (
+      candidate.type === manuscriptSchema.nodes.footnote_definition
+      && String(candidate.attrs.id ?? '') !== currentNodeId
+      && candidate.attrs.label === label
+    ) found = true
+    return !found
+  })
+  return found
+}
+
+function retargetFootnoteReferences(transaction: Transaction, previousLabel: string, nextLabel: string) {
+  if (!previousLabel || !nextLabel || previousLabel === nextLabel) return transaction
+  let updated = transaction
+  transaction.doc.descendants((candidate, position) => {
+    if (candidate.type === manuscriptSchema.nodes.footnote_reference && candidate.attrs.label === previousLabel) {
+      updated = updated.setNodeMarkup(position, undefined, { ...candidate.attrs, label: nextLabel })
+    }
+    return true
+  })
+  return updated
+}
+
 function inlineMarkdownPreviewText(value: string) {
   return value
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
@@ -655,8 +680,24 @@ function footnoteDefinitionNodeView(initialNode: ProseMirrorNode, view: EditorVi
   const editor = document.createElement('div')
   editor.className = 'structured-footnote-editor'
   editor.hidden = true
+  const labelField = document.createElement('label')
+  labelField.className = 'structured-footnote-label-field'
+  const labelText = document.createElement('span')
+  labelText.textContent = 'Portable label'
+  const labelInput = document.createElement('input')
+  labelInput.type = 'text'
+  labelInput.className = 'structured-footnote-label-input'
+  labelInput.setAttribute('aria-label', 'Footnote label')
+  labelInput.placeholder = 'methods'
+  labelInput.spellcheck = false
+  const labelHint = document.createElement('small')
+  labelHint.textContent = 'Changing this updates every matching reference.'
+  labelField.append(labelText, labelInput, labelHint)
   const textarea = document.createElement('textarea')
   textarea.className = 'structured-footnote-textarea'
+  const validation = document.createElement('p')
+  validation.className = 'structured-footnote-validation'
+  validation.hidden = true
   const actions = document.createElement('div')
   const cancel = document.createElement('button')
   cancel.type = 'button'
@@ -666,10 +707,22 @@ function footnoteDefinitionNodeView(initialNode: ProseMirrorNode, view: EditorVi
   save.className = 'primary-button'
   save.textContent = 'Save note'
   actions.append(cancel, save)
-  editor.append(textarea, actions)
+  editor.append(labelField, textarea, validation, actions)
 
   const descriptor = () => footnoteNumbers(view.state.doc).get(String(node.attrs.label))
-  const updateSave = () => { save.disabled = !isEditable() || !textarea.value.trim() }
+  const normalizedLabel = () => labelInput.value.trim().replace(/^\[\^|\]$/g, '')
+  const updateSave = () => {
+    const nextLabel = normalizedLabel()
+    const validLabel = /^[a-zA-Z0-9_.:-]+$/.test(nextLabel)
+    const unique = validLabel && !footnoteDefinitionLabelUsedByAnotherNode(view.state.doc, nextLabel, String(node.attrs.id))
+    validation.textContent = !validLabel
+      ? 'Use a portable label containing letters, numbers, dots, colons, underscores, or hyphens.'
+      : !unique
+        ? 'That label already belongs to another footnote.'
+        : ''
+    validation.hidden = validLabel && unique
+    save.disabled = !isEditable() || !textarea.value.trim() || !validLabel || !unique
+  }
   const updateDom = () => {
     const number = descriptor()
     dom.dataset.dmId = String(node.attrs.id)
@@ -682,7 +735,11 @@ function footnoteDefinitionNodeView(initialNode: ProseMirrorNode, view: EditorVi
     edit.setAttribute('aria-label', number ? `Edit footnote ${number}` : `Edit unreferenced footnote ${String(node.attrs.label)}`)
     textarea.setAttribute('aria-label', number ? `Footnote ${number} content` : `Footnote ${String(node.attrs.label)} content`)
     textarea.readOnly = !isEditable()
-    if (!editing) textarea.value = String(node.attrs.contentMarkdown)
+    labelInput.readOnly = !isEditable()
+    if (!editing) {
+      labelInput.value = String(node.attrs.label)
+      textarea.value = String(node.attrs.contentMarkdown)
+    }
     updateSave()
   }
   const closeEditor = () => {
@@ -690,15 +747,26 @@ function footnoteDefinitionNodeView(initialNode: ProseMirrorNode, view: EditorVi
     editor.hidden = true
     preview.hidden = false
     edit.hidden = false
+    labelInput.value = String(node.attrs.label)
     textarea.value = String(node.attrs.contentMarkdown)
     updateSave()
     edit.focus()
   }
   const saveEditor = () => {
     const content = textarea.value.trim()
+    const nextLabel = normalizedLabel()
+    const previousLabel = String(node.attrs.label)
     const position = getPos()
-    if (!content || typeof position !== 'number' || !isEditable()) return
-    view.dispatch(view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, contentMarkdown: content }))
+    if (
+      !content
+      || typeof position !== 'number'
+      || !isEditable()
+      || !/^[a-zA-Z0-9_.:-]+$/.test(nextLabel)
+      || footnoteDefinitionLabelUsedByAnotherNode(view.state.doc, nextLabel, String(node.attrs.id))
+    ) return
+    let transaction = view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, label: nextLabel, contentMarkdown: content })
+    transaction = retargetFootnoteReferences(transaction, previousLabel, nextLabel)
+    view.dispatch(transaction)
     closeEditor()
   }
   edit.addEventListener('click', () => {
@@ -707,6 +775,7 @@ function footnoteDefinitionNodeView(initialNode: ProseMirrorNode, view: EditorVi
     preview.hidden = true
     edit.hidden = true
     editor.hidden = false
+    labelInput.value = String(node.attrs.label)
     textarea.value = String(node.attrs.contentMarkdown)
     updateSave()
     textarea.focus()
@@ -714,16 +783,20 @@ function footnoteDefinitionNodeView(initialNode: ProseMirrorNode, view: EditorVi
   })
   cancel.addEventListener('click', closeEditor)
   save.addEventListener('click', saveEditor)
+  labelInput.addEventListener('input', updateSave)
   textarea.addEventListener('input', updateSave)
-  textarea.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      event.preventDefault()
+  const handleEditorKeydown = (event: Event) => {
+    const keyboard = event as KeyboardEvent
+    if (keyboard.key === 'Escape') {
+      keyboard.preventDefault()
       closeEditor()
-    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
-      event.preventDefault()
+    } else if (keyboard.key === 'Enter' && (keyboard.metaKey || keyboard.ctrlKey)) {
+      keyboard.preventDefault()
       saveEditor()
     }
-  })
+  }
+  labelInput.addEventListener('keydown', handleEditorKeydown)
+  textarea.addEventListener('keydown', handleEditorKeydown)
   dom.append(header, preview, editor)
   updateDom()
   return {
@@ -1627,6 +1700,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       const view = viewRef.current
       const normalized = label.trim().replace(/^\[\^|\]$/g, '')
       if (!view || readOnlyRef.current || !/^[a-zA-Z0-9_.:-]+$/.test(normalized) || !content.trim()) return false
+      if (footnoteDefinitionLabelUsedByAnotherNode(view.state.doc, normalized)) return false
       let transaction = view.state.tr.replaceSelectionWith(manuscriptSchema.nodes.footnote_reference.createChecked({
         id: randomId('footnote-reference'),
         label: normalized,
@@ -1900,7 +1974,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   useEffect(() => {
     viewRef.current?.setProps({ editable: () => !readOnly })
     hostRef.current?.querySelectorAll<HTMLTextAreaElement>('.structured-code-editor').forEach((editor) => { editor.readOnly = readOnly })
-    hostRef.current?.querySelectorAll<HTMLTextAreaElement>('.structured-footnote-textarea').forEach((editor) => { editor.readOnly = readOnly })
+    hostRef.current?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('.structured-footnote-label-input, .structured-footnote-textarea').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-footnote-edit').forEach((button) => { button.disabled = readOnly })
     hostRef.current?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('.structured-equation-input, .structured-equation-label-input').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-equation-edit').forEach((button) => { button.disabled = readOnly })
