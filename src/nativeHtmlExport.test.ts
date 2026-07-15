@@ -8,6 +8,8 @@ author:
   - Alice Martin
 ---
 
+# Quiet canopy study
+
 ## Results {#results}
 
 Leaf area declined by **18%** [@vezy2020]. See @fig-response and the model $y = ax + b$.
@@ -35,6 +37,9 @@ describe('native HTML export', () => {
     })
 
     expect(html).toContain('<title>Quiet canopy study</title>')
+    expect(html).toContain('<p class="authors">Remi Vezy · Alice Martin</p>')
+    expect(html.match(/<h1>/g)).toHaveLength(1)
+    expect(html).not.toContain('<main><h1')
     expect(html).toContain('<h2 id="results">Results</h2>')
     expect(html).toContain('data-citekeys="vezy2020"')
     expect(html).toContain('href="#fig-response"')

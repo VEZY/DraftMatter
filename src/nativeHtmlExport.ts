@@ -37,15 +37,26 @@ function parseFrontmatter(source: string): { body: string; frontmatter: Frontmat
   const match = source.match(/^---(?:\r\n|\n|\r)([\s\S]*?)(?:\r\n|\n|\r)---(?:\r\n|\n|\r|$)/)
   if (!match) return { body: source, frontmatter: { authors: [] } }
   const yaml = match[1]
-  const title = yaml.match(/^title\s*:\s*(.+)$/m)?.[1]?.trim().replace(/^(["'])(.*)\1$/, '$2')
+  const title = yaml.match(/^title[ \t]*:[ \t]*(.+)$/m)?.[1]?.trim().replace(/^(["'])(.*)\1$/, '$2')
   const authors: string[] = []
-  const inlineAuthor = yaml.match(/^author\s*:\s*(?!$)(.+)$/m)?.[1]?.trim()
+  const inlineAuthor = yaml.match(/^author[ \t]*:[ \t]*(?![ \t]*$)(.+)$/m)?.[1]?.trim()
   if (inlineAuthor) authors.push(inlineAuthor.replace(/^(["'])(.*)\1$/, '$2'))
-  const authorBlock = yaml.match(/^author\s*:\s*$([\s\S]*?)(?=^[a-zA-Z][\w-]*\s*:|\s*$)/m)?.[1]
+  const authorBlock = yaml.match(/^author[ \t]*:[ \t]*$(?:\r?\n|\r)?([\s\S]*?)(?=^[a-zA-Z][\w-]*[ \t]*:|(?![\s\S]))/m)?.[1]
   if (authorBlock) {
     for (const author of authorBlock.matchAll(/^\s*-\s*(.+)$/gm)) authors.push(author[1].trim().replace(/^(["'])(.*)\1$/, '$2'))
   }
   return { body: source.slice(match[0].length), frontmatter: { title, authors } }
+}
+
+function removeDuplicateLeadingTitle(body: string, title: string) {
+  const normalizedTitle = title.trim().replaceAll(/[`*_]/g, '').replaceAll(/\s+/g, ' ').toLocaleLowerCase()
+  return body.replace(
+    /^(\s*)#\s+(.+?)(?:\s+\{#[a-zA-Z][\w.:-]*[^}]*\})?\s*(\r?\n|$)/,
+    (match, leading: string, heading: string, newline: string) => {
+      const normalizedHeading = heading.trim().replaceAll(/[`*_]/g, '').replaceAll(/\s+/g, ' ').toLocaleLowerCase()
+      return normalizedHeading === normalizedTitle ? `${leading}${newline}` : match
+    },
+  )
 }
 
 function renderInline(value: string, options: NativeHtmlExportOptions) {
@@ -226,7 +237,7 @@ export function renderNativeHtmlExport(source: string, options: NativeHtmlExport
 </head>
 <body>
 <header><h1>${escapeHtml(title)}</h1>${authors}</header>
-<main>${renderBody(body, options)}</main>
+<main>${renderBody(removeDuplicateLeadingTitle(body, title), options)}</main>
 ${bibliography}
 </body>
 </html>

@@ -9,7 +9,7 @@ import { ManuscriptTextEditor } from './ManuscriptTextEditor'
 import { StructuredManuscriptEditor, type StructuredManuscriptEditorHandle, type StructuredOutlineItem, type StructuredReviewSelection } from './StructuredManuscriptEditor'
 import { structuredCitationClusters } from './structuredManuscript'
 import { applyDraftCitationTransaction, applyDraftCodeTransaction, applyDraftTextTransaction, type ManuscriptTextField } from './manuscriptModel'
-import { downloadBlob, downloadText, projectCleanSource, reviewedProjection } from './projections'
+import { downloadBlob, downloadText, projectCurrentManuscriptSource, reviewedProjection } from './projections'
 import { sampleCitations } from './sampleCitations'
 import { initialDraft } from './sampleDraft'
 import { readRecoverySnapshots, saveRecoverySnapshot, type RecoverySnapshot } from './storage'
@@ -924,7 +924,7 @@ function App() {
     return text.trim().split(/\s+/).length
   }, [draft, manuscriptSource, structuredMode])
 
-  const cleanSourceResult = sourceTab === 'reviewed' ? null : projectCleanSource(draft, sourceTab)
+  const cleanSourceResult = sourceTab === 'reviewed' ? null : projectCurrentManuscriptSource(manuscriptSource, draft, structuredMode, sourceTab)
   const sourceDiagnostics = cleanSourceResult && !cleanSourceResult.ok ? cleanSourceResult.diagnostics : []
   const sourceBlocked = sourceDiagnostics.length > 0
   const source = sourceTab === 'reviewed'
@@ -1832,7 +1832,7 @@ function App() {
     if (kind === 'reviewed') {
       content = manuscriptSource
     } else {
-      const projection = projectCleanSource(draft, kind)
+      const projection = projectCurrentManuscriptSource(manuscriptSource, draft, structuredMode, kind)
       if (!projection.ok) {
         setDiagnostics((current) => [
           ...current.filter((diagnostic) => !diagnostic.code.startsWith('final-projection-')),
@@ -1851,7 +1851,7 @@ function App() {
   }
 
   const exportPublication = (kind: 'html' | 'pdf') => {
-    const projection = projectCleanSource(draft, 'final')
+    const projection = projectCurrentManuscriptSource(manuscriptSource, draft, structuredMode, 'final')
     if (!projection.ok) {
       setDiagnostics((current) => [
         ...current.filter((diagnostic) => !diagnostic.code.startsWith('final-projection-')),
@@ -1882,7 +1882,7 @@ function App() {
   }
 
   const exportDocx = () => {
-    const projection = projectCleanSource(draft, 'final')
+    const projection = projectCurrentManuscriptSource(manuscriptSource, draft, structuredMode, 'final')
     if (!projection.ok) {
       setExportOpen(false)
       setToast('DOCX export blocked · resolve the overlapping alternatives')
@@ -1908,7 +1908,7 @@ function App() {
       setToast('Pandoc and Quarto exports are available for desktop project folders')
       return
     }
-    const projection = projectCleanSource(draft, 'final')
+    const projection = projectCurrentManuscriptSource(manuscriptSource, draft, structuredMode, 'final')
     if (!projection.ok) {
       setExportOpen(false)
       setToast('External export blocked · resolve the overlapping alternatives')

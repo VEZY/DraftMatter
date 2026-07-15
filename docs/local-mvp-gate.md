@@ -17,6 +17,8 @@ The rendered DM-P4-02 browser path switches a generic portable manuscript from E
 
 The rendered DM-P4-04 rebase path accepts one of two identical alternatives, opens the preserved `Needs rebase` proposal, and anchors revised wording to the accepted manuscript. The transaction materializes accepted decisions into the portable base once, marks old records `applied`/`rebased` for audit, preserves independent review anchors, appends a `rebased` decision, and leaves exactly one new open proposal linked by `data-rebased-from`.
 
+The rendered DM-P5-01/02 publication path opens an arbitrary structured manuscript and routes those authoritative bytes through clean Markdown, native HTML/PDF, DOCX, and optional external export preparation. Its browser test downloads HTML and DOCX, rejects demo-source substitution and review leakage, verifies multi-author metadata, math, citations, cross-references, figures, tables, and inert executable cells, then renders the HTML in Chromium against the committed `native-html-publication.png` visual baseline.
+
 Run the full local gate with:
 
 ```sh

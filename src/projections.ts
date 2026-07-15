@@ -90,6 +90,19 @@ export function projectCleanSource(state: DraftState, view: 'original' | 'final'
     : { ok: false, source: null, diagnostics: projected.diagnostics }
 }
 
+export function projectCurrentManuscriptSource(
+  source: string,
+  state: DraftState,
+  structuredMode: boolean,
+  view: 'original' | 'final',
+): CleanProjectionResult {
+  if (!structuredMode) return projectCleanSource(state, view)
+  const projected = projectPortableReviewSource(source, { view })
+  return projected.ok
+    ? { ok: true, source: projected.source, diagnostics: projected.diagnostics }
+    : { ok: false, source: null, diagnostics: projected.diagnostics }
+}
+
 export function reviewedProjection(state: DraftState) {
   const materialized = materializePortableDraftSource(state)
   if (materialized !== null) return materialized

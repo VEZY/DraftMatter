@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parsePortableDocument, sourceHash, validateCleanProjection } from './document'
-import { cleanProjection, projectCleanSource, reviewedProjection } from './projections'
+import { cleanProjection, projectCleanSource, projectCurrentManuscriptSource, reviewedProjection } from './projections'
 import { initialDraft } from './sampleDraft'
 import adversarialCells from './fixtures/execution/adversarial-cells.qmd?raw'
 
@@ -84,6 +84,28 @@ describe('portable document core', () => {
     })
     expect(projectCleanSource({ ...initialDraft, aliceStatus: 'accepted', marcusStatus: 'needs-rebase' }, 'final')).toMatchObject({ ok: true })
     expect(projectCleanSource(initialDraft, 'original')).toMatchObject({ ok: true })
+  })
+
+  it('projects an opened structured manuscript from its authoritative bytes instead of the sample draft', () => {
+    const generic = `---
+title: "Independent field article"
+---
+
+## A custom section
+
+These exact article bytes belong to the opened project.
+
+::: {.future-extension data-owner="field-team"}
+Preserve this extension.
+:::
+`
+    const projected = projectCurrentManuscriptSource(generic, initialDraft, true, 'final')
+
+    expect(projected).toEqual({ ok: true, source: generic, diagnostics: [] })
+    expect(projected.source).toContain('Independent field article')
+    expect(projected.source).toContain('future-extension')
+    expect(projected.source).not.toContain(initialDraft.title)
+    expect(projectCurrentManuscriptSource(generic, initialDraft, false, 'original').source).toContain(initialDraft.title)
   })
 
   it('creates stable source fingerprints', () => {
