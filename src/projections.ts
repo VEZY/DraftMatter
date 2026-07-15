@@ -64,7 +64,7 @@ ${state.introduction}${citation}${preservedAfter(state, 'introduction')}
 
 ${state.methods}
 
-\`\`\`python {#fig-canopy .execute output="figure"}
+\`\`\`python {#fig-canopy .execute output="figure" produces="figures/generated/fig-canopy.svg"}
 ${state.code}
 \`\`\`
 
@@ -112,7 +112,7 @@ ${state.introduction}${citation}${preservedAfter(state, 'introduction')}
 
 ${state.methods}
 
-\`\`\`python {#fig-canopy .execute output="figure"}
+\`\`\`python {#fig-canopy .execute output="figure" produces="figures/generated/fig-canopy.svg"}
 ${state.code}
 \`\`\`
 

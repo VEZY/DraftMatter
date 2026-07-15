@@ -1,0 +1,123 @@
+// @vitest-environment jsdom
+
+import { act } from 'react'
+import { createRoot } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import App from './App'
+import { desktopHost, type ProjectSnapshot } from './desktopHost'
+import { reviewedProjection } from './projections'
+import { initialDraft } from './sampleDraft'
+
+const rootPath = '/research/canopy-execution'
+const source = reviewedProjection(initialDraft)
+const project: ProjectSnapshot = {
+  root: rootPath,
+  config: { schemaVersion: 1, name: 'Canopy execution', mainDocument: 'paper.qmd', citationStyle: 'draftmatter-author-date', citationLocale: 'en-US' },
+  documents: [{ path: 'paper.qmd', kind: 'manuscript', bytes: source.length, modifiedMs: 1, hash: 'document-old' }],
+  bibliographies: [],
+}
+
+describe('rendered local execution workflow', () => {
+  let container: HTMLDivElement
+  let appRoot: ReturnType<typeof createRoot>
+  let previousAvailability: boolean
+
+  beforeEach(async () => {
+    ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    localStorage.clear()
+    localStorage.setItem('draftmatter.last-project-root.v1', rootPath)
+    previousAvailability = desktopHost.available
+    desktopHost.available = true
+    vi.spyOn(desktopHost, 'openProject').mockResolvedValue(project)
+    vi.spyOn(desktopHost, 'readDocument').mockResolvedValue({ path: 'paper.qmd', content: source, hash: 'document-old', modifiedMs: 1 })
+    vi.spyOn(desktopHost, 'readCitationLock').mockResolvedValue({ path: '.draftmatter/citations.lock.json', content: '{"schemaVersion":1,"entries":[]}\n', hash: 'lock-old', modifiedMs: 1 })
+    vi.spyOn(desktopHost, 'readCitationCache').mockResolvedValue(null)
+    vi.spyOn(desktopHost, 'readExecutionManifests').mockResolvedValue([])
+    vi.spyOn(desktopHost, 'saveCitationLock').mockResolvedValue({ path: '.draftmatter/citations.lock.json', content: '{"schemaVersion":1,"entries":[]}\n', hash: 'lock-old', modifiedMs: 1 })
+    vi.spyOn(desktopHost, 'setCitationPreferences').mockResolvedValue(project)
+    vi.spyOn(desktopHost, 'documentStatus').mockResolvedValue({ kind: 'current', hash: 'document-old', modifiedMs: 1 })
+    vi.spyOn(desktopHost, 'probeRuntime').mockImplementation(async (language) => language === 'python'
+      ? { language, health: 'available', executable: '/usr/bin/python3', version: 'Python 3.12.4' }
+      : { language, health: 'missing', message: `${language} is not installed.` })
+    vi.spyOn(desktopHost, 'discoverJupyterKernels').mockResolvedValue({ health: 'missing', kernels: [], searchedLocations: [] })
+    vi.spyOn(desktopHost, 'executionTrustStatus')
+      .mockResolvedValueOnce({ trusted: false, scope: 'session', warning: 'Project code has the user permissions. Local execution is not a sandbox.' })
+      .mockResolvedValue({ trusted: true, scope: 'session', warning: 'Project code has the user permissions. Local execution is not a sandbox.' })
+    vi.spyOn(desktopHost, 'trustProjectForSession').mockResolvedValue({ trusted: true, scope: 'session', warning: 'trusted' })
+    vi.spyOn(desktopHost, 'executeDirect').mockResolvedValue({
+      exitCode: 0,
+      interrupted: false,
+      stdout: 'Wrote figures/generated/fig-canopy.svg\n',
+      stderr: '',
+      artifacts: [{ path: 'figures/generated/fig-canopy.svg', bytes: 620, hash: `sha256:${'a'.repeat(64)}`, mediaType: 'image/svg+xml' }],
+      environment: { identity: '/usr/bin/python3', version: 'Python 3.12.4' },
+      providerRunId: 'direct-rendered-1',
+    })
+    vi.spyOn(desktopHost, 'saveExecutionManifest').mockImplementation(async (request) => ({
+      path: `.draftmatter/execution/${request.cellId}.json`, content: request.content, hash: 'manifest-new', modifiedMs: 2,
+    }))
+    vi.spyOn(desktopHost, 'saveDocument').mockImplementation(async (request) => ({
+      path: request.path, hash: 'document-new', bytes: request.content.length, recoveryPath: null,
+    }))
+
+    container = document.createElement('div')
+    document.body.append(container)
+    appRoot = createRoot(container)
+    await act(async () => {
+      appRoot.render(<App />)
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+  })
+
+  afterEach(async () => {
+    await act(async () => appRoot.unmount())
+    desktopHost.available = previousAvailability
+    vi.restoreAllMocks()
+    container.remove()
+  })
+
+  it('discovers explicitly, requires session trust, executes, and materializes the successful result', async () => {
+    const run = container.querySelector<HTMLButtonElement>('.run-button')!
+    await act(async () => {
+      run.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+
+    expect(desktopHost.probeRuntime).toHaveBeenCalledTimes(3)
+    expect(desktopHost.executeDirect).not.toHaveBeenCalled()
+    const trustDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="execution-trust-title"]')!
+    expect(trustDialog.textContent).toContain('Local execution is not a sandbox')
+
+    await act(async () => {
+      [...trustDialog.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Trust for this session'))!.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 40))
+    })
+
+    expect(desktopHost.trustProjectForSession).toHaveBeenCalledWith(rootPath, 'run-project-code-with-user-permissions')
+    expect(desktopHost.executeDirect).toHaveBeenCalledWith(expect.objectContaining({
+      root: rootPath,
+      cellId: 'fig-canopy',
+      language: 'python',
+      attributes: expect.objectContaining({ produces: 'figures/generated/fig-canopy.svg' }),
+      inputs: [],
+    }))
+    expect(desktopHost.saveExecutionManifest).toHaveBeenCalledWith(expect.objectContaining({
+      root: rootPath,
+      cellId: 'fig-canopy',
+      content: expect.stringContaining('direct-rendered-1'),
+      expectedHash: null,
+    }))
+    expect(container.querySelector('.cell-status')?.textContent).toBe('Current')
+    expect(container.textContent).toContain('Wrote figures/generated/fig-canopy.svg')
+
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 950))
+    })
+    expect(desktopHost.saveDocument).toHaveBeenCalledWith(expect.objectContaining({
+      root: rootPath,
+      path: 'paper.qmd',
+      content: expect.stringMatching(/dm-output:start cell="fig-canopy" run="sha256:[a-f0-9]{64}"/),
+      expectedHash: 'document-old',
+    }))
+  })
+})

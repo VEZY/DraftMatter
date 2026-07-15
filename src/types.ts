@@ -46,7 +46,7 @@ export interface DraftState {
   marcusStatus: SuggestionStatus
   commentResolved: boolean
   commentReplies: string[]
-  cellStatus: 'current' | 'stale' | 'running'
+  cellStatus: 'current' | 'stale' | 'running' | 'failed' | 'interrupted' | 'environment-changed' | 'output-missing'
   lastSavedAt: string
   frontmatterSource?: string
   preservedSections?: PreservedSection[]

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { convertFileSrc, isTauri } from '@tauri-apps/api/core'
 import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, searchCitations } from './bibliography'
 import { desktopHost, normaliseHostFailure, resolveMainDocument, type ProjectSnapshot } from './desktopHost'
 import { parsePortableDocument } from './document'
@@ -25,12 +26,49 @@ import {
 import { previewCitationIntake, type CitationIntakePreview } from './citationIntake'
 import { CrossrefSearchSession, crossrefCandidateToCitationRecord, crossrefDuplicateCitekeys, type CrossrefCandidate } from './crossref'
 import { DEFAULT_ACQUISITION_BIBLIOGRAPHY, canonicalizeAcquisitionRecord, citationRecordToAcquisitionCsl, ensureBibliographyReference, persistedAcquisitionRecord } from './citationAcquisition'
+import { createDesktopDirectExecutionTransport } from './directExecutionTransport'
+import { extractExecutableCells } from './executionCells'
+import { executionManifestFromResult, parseExecutionManifest, serializeExecutionManifest, type ExecutionManifest } from './executionFreshness'
+import { createDirectExecutionProvider, sha256, type NormalizedExecutionResult } from './executionProvider'
+import { EXECUTION_TRUST_ACKNOWLEDGEMENT, createTrustedExecutionBroker } from './executionTrust'
+import { ExecutionOutputView } from './ExecutionOutputView'
+import { materializeExecutionOutput } from './outputMaterializer'
+import { buildExecutionAvailability, parseRetainedOutputs } from './retainedOutputs'
+import { RuntimeProvenance } from './RuntimeProvenance'
+import { discoverRuntimeInventory, type RuntimeInventory, type RuntimeLanguage } from './runtimeDiscovery'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
 const CITATIONS_KEY = 'draftmatter.citations.v1'
 const LAST_PROJECT_ROOT_KEY = 'draftmatter.last-project-root.v1'
 const ZOTERO_VERSION_KEY = 'draftmatter.zotero-version.v1'
+const PRIMARY_EXECUTION_CELL = 'fig-canopy'
+const LEGACY_SAMPLE_CODE = 'weeks = [0, 2, 4, 6, 8, 10, 12]\ncontrol = [0, 8, 21, 39, 58, 76, 91]\ndrought = [0, 7, 19, 33, 47, 60, 72]\nplot_response(weeks, control, drought)'
+
+const directExecutionProvider = createDirectExecutionProvider(createDesktopDirectExecutionTransport(desktopHost))
+const executionBroker = createTrustedExecutionBroker(desktopHost, { direct: directExecutionProvider })
+
+function cellStatusLabel(status: DraftState['cellStatus']) {
+  if (status === 'environment-changed') return 'Environment changed'
+  if (status === 'output-missing') return 'Output missing'
+  return status[0].toUpperCase() + status.slice(1)
+}
+
+function projectArtifactPath(root: string, relative: string) {
+  const separator = root.includes('\\') && !root.includes('/') ? '\\' : '/'
+  const base = root.replace(/[\\/]+$/, '')
+  const child = relative.replace(/^[\\/]+/, '').replaceAll(/[\\/]/g, separator)
+  return `${base}${separator}${child}`
+}
+
+function projectArtifactUrl(root: string, relative: string) {
+  const absolute = projectArtifactPath(root, relative)
+  return isTauri() ? convertFileSrc(absolute) : relative
+}
+
+function runtimeName(language: RuntimeLanguage) {
+  return language === 'r' ? 'R' : language[0].toUpperCase() + language.slice(1)
+}
 
 interface DesktopSession {
   root: string
@@ -76,6 +114,7 @@ function getInitialDraft(): DraftState {
     const saved = localStorage.getItem(STORAGE_KEY)
     if (!saved) return initialDraft
     const parsed = JSON.parse(saved)
+    if (parsed.code === LEGACY_SAMPLE_CODE) parsed.code = initialDraft.code
     const merged = { ...initialDraft, ...parsed }
     return { ...merged, citationItems: normalizeCitationItems(parsed.citationItems, merged.citationKeys) }
   } catch {
@@ -225,6 +264,16 @@ function App() {
   const [newProjectRoot, setNewProjectRoot] = useState('')
   const [newProjectName, setNewProjectName] = useState('')
   const [pendingProject, setPendingProject] = useState<{ project: ProjectSnapshot; announce: boolean } | null>(null)
+  const [runtimeInventory, setRuntimeInventory] = useState<RuntimeInventory>()
+  const [runtimeDiscoveryState, setRuntimeDiscoveryState] = useState<'idle' | 'discovering' | 'ready'>('idle')
+  const [environmentOpen, setEnvironmentOpen] = useState(false)
+  const [executionResult, setExecutionResult] = useState<NormalizedExecutionResult>()
+  const [executionManifest, setExecutionManifest] = useState<ExecutionManifest>()
+  const [executionDiagnostics, setExecutionDiagnostics] = useState<DocumentDiagnostic[]>([])
+  const [executionProblem, setExecutionProblem] = useState('')
+  const [executionTrustOpen, setExecutionTrustOpen] = useState(false)
+  const [executionTrustWarning, setExecutionTrustWarning] = useState('')
+  const [executionTrustBusy, setExecutionTrustBusy] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bibliographyInputRef = useRef<HTMLInputElement>(null)
   const desktopSessionRef = useRef<DesktopSession | null>(null)
@@ -245,6 +294,8 @@ function App() {
   const citationCacheLoadDiagnosticsRef = useRef<DocumentDiagnostic[]>([])
   const citationBibliographyRef = useRef<{ path: string; hash: string | null }>({ path: DEFAULT_ACQUISITION_BIBLIOGRAPHY, hash: null })
   const citationAcquisitionRunningRef = useRef(false)
+  const executionManifestHashRef = useRef<string | null>(null)
+  const executionAbortRef = useRef<AbortController | null>(null)
   const crossrefSessionRef = useRef<CrossrefSearchSession | null>(null)
   if (!crossrefSessionRef.current) {
     crossrefSessionRef.current = new CrossrefSearchSession({
@@ -293,7 +344,7 @@ function App() {
   const activeCitationItem = draftCitationItems.find((item) => item.citekey === citationEditKey) ?? draftCitationItems[0]
   const activeCitationRecord = citations.find((record) => record.citekey === activeCitationItem?.citekey)
   const activeCitationBadge = citationSourceBadge(activeCitationRecord)
-  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics]
+  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics, ...executionDiagnostics]
 
   const replaceDesktopSession = (next: DesktopSession | null) => {
     desktopSessionRef.current = next
@@ -684,13 +735,15 @@ function App() {
         setProjectMenuOpen(false)
         setCreateProjectOpen(false)
         setPendingProject(null)
+        setEnvironmentOpen(false)
+        if (!executionTrustBusy) setExecutionTrustOpen(false)
         setSourceOpen(false)
         setSourceEditing(false)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [canRedo, canUndo, draft])
+  }, [canRedo, canUndo, draft, executionTrustBusy])
 
   useEffect(() => {
     if (!toast) return
@@ -712,6 +765,34 @@ function App() {
       ? cleanSourceResult.source
       : `Final projection unavailable.\n\n${sourceDiagnostics.map((diagnostic) => `- ${diagnostic.message}`).join('\n')}`
   const displayedSource = sourceEditing ? sourceBuffer : source
+  const executionSource = reviewedProjection(draft)
+  const executableCells = extractExecutableCells(executionSource).cells
+  const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL)
+  const retainedOutputs = parseRetainedOutputs(executionSource).outputs
+  const latestAttemptManifest = executionResult
+    ? executionManifest?.resultHash === executionResult.hashes.result
+      ? executionManifest
+      : executionManifestFromResult(executionResult, (executionManifest?.sequence ?? -1) + 1)
+    : executionManifest
+  const lastSuccessfulManifest = executionResult?.status === 'succeeded'
+    ? latestAttemptManifest
+    : executionManifest?.status === 'succeeded' ? executionManifest : undefined
+  const executionView = primaryCell ? buildExecutionAvailability({
+    cells: [primaryCell],
+    states: [{
+      cellId: primaryCell.id,
+      language: primaryCell.language,
+      status: draft.cellStatus,
+      ...(latestAttemptManifest ? { lastAttempt: latestAttemptManifest } : {}),
+      ...(lastSuccessfulManifest ? { lastSuccessful: lastSuccessfulManifest } : {}),
+    }],
+    providers: { python: 'direct', r: 'direct', julia: 'direct' },
+    inventory: runtimeInventory,
+    retainedOutputs,
+    cachedResultCells: executionResult ? new Set([executionResult.cellId]) : undefined,
+  })[0] : undefined
+  const pythonRuntimeUnavailable = runtimeInventory?.executables.python.health !== undefined
+    && runtimeInventory.executables.python.health !== 'available'
 
   const openSourceInspector = () => {
     setSourceTab('reviewed')
@@ -751,12 +832,207 @@ function App() {
     document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
   }
 
-  const runCell = () => {
-    updateDraft({ cellStatus: 'running' })
-    window.setTimeout(() => {
-      updateDraft({ cellStatus: 'current' })
-      setToast('Figure regenerated · run 6f42f1a')
-    }, 1100)
+  const discoverExecutionEnvironments = async (showDialog = false) => {
+    if (showDialog) setEnvironmentOpen(true)
+    if (!desktopHost.available || !desktopSessionRef.current) {
+      setToast('Local environments are available after opening a desktop project')
+      return undefined
+    }
+    setRuntimeDiscoveryState('discovering')
+    setExecutionProblem('')
+    try {
+      const inventory = await discoverRuntimeInventory(desktopHost)
+      if (desktopSessionRef.current) {
+        setRuntimeInventory(inventory)
+        setRuntimeDiscoveryState('ready')
+      }
+      return inventory
+    } catch (error) {
+      const message = normaliseHostFailure(error).message
+      setRuntimeDiscoveryState('idle')
+      setExecutionProblem(message)
+      setToast(message)
+      return undefined
+    }
+  }
+
+  const persistExecutionManifest = async (root: string, result: NormalizedExecutionResult) => {
+    const manifest = executionManifestFromResult(result, (executionManifest?.sequence ?? -1) + 1)
+    setExecutionManifest(manifest)
+    try {
+      const saved = await desktopHost.saveExecutionManifest({
+        root,
+        cellId: result.cellId,
+        content: serializeExecutionManifest(manifest),
+        expectedHash: executionManifestHashRef.current,
+      })
+      if (desktopSessionRef.current?.root === root) executionManifestHashRef.current = saved.hash
+      setExecutionDiagnostics((current) => current.filter((diagnostic) => diagnostic.code !== 'execution-manifest-save'))
+    } catch (error) {
+      const message = normaliseHostFailure(error).message
+      setExecutionDiagnostics((current) => [
+        ...current.filter((diagnostic) => diagnostic.code !== 'execution-manifest-save'),
+        { code: 'execution-manifest-save', level: 'warning', message: `The generated output is available, but its run manifest could not be saved. ${message}` },
+      ])
+    }
+  }
+
+  const executeTrustedCell = async () => {
+    const session = desktopSessionRef.current
+    const currentSource = reviewedProjection(draft)
+    const cell = extractExecutableCells(currentSource).cells.find((candidate) => candidate.id === PRIMARY_EXECUTION_CELL)
+    if (!session || !cell) {
+      setExecutionProblem('No explicit Python executable cell is available in this project source.')
+      setToast('No explicit Python executable cell is available')
+      return
+    }
+
+    const controller = new AbortController()
+    executionAbortRef.current = controller
+    updateDraftHistory({ cellStatus: 'running' })
+    setExecutionProblem('')
+    setExecutionDiagnostics((current) => current.filter((diagnostic) => !diagnostic.code.startsWith('execution-run-')))
+    try {
+      const result = await executionBroker.run(session.root, 'direct', {
+        cellId: cell.id,
+        language: cell.language,
+        code: cell.source,
+        workingDirectory: session.root,
+        attributes: cell.attributes,
+        inputs: [],
+      }, controller.signal)
+      if (desktopSessionRef.current?.root !== session.root) return
+      setExecutionResult(result)
+
+      if (result.status === 'succeeded') {
+        const materialized = materializeExecutionOutput({
+          source: currentSource,
+          cellId: cell.id,
+          result,
+          presentation: {
+            label: 'fig-canopy-result',
+            alt: 'Canopy response over twelve weeks',
+            caption: 'Normalized canopy area across twelve weeks.',
+          },
+        })
+        if (materialized.ok) {
+          const parsed = parsePortableDocument(materialized.source, draft)
+          const nextDraft = { ...parsed.draft, cellStatus: 'current' as const }
+          markDraftChanged()
+          commitDraftHistory(nextDraft)
+          setDiagnostics(parsed.diagnostics)
+          writeRecoverySnapshot(nextDraft, filename, materialized.source)
+        } else {
+          updateDraftHistory({ cellStatus: 'current' })
+          setExecutionDiagnostics((current) => [
+            ...current,
+            ...materialized.diagnostics.map((diagnostic) => ({ ...diagnostic, code: `execution-run-${diagnostic.code}` })),
+          ])
+          setExecutionProblem(materialized.diagnostics[0]?.message ?? 'The live result could not be materialized into portable source.')
+        }
+        await persistExecutionManifest(session.root, result)
+        setToast(`Figure regenerated · run ${result.hashes.result.slice(7, 15)}`)
+      } else {
+        updateDraftHistory({ cellStatus: result.status })
+        const detail = result.errors[0]?.message
+          ?? result.streams.find((stream) => stream.name === 'stderr')?.text.trim()
+          ?? `The ${cell.language} process ${result.status}.`
+        setExecutionProblem(detail)
+        setToast(result.status === 'interrupted' ? 'Execution interrupted · retained output preserved' : 'Execution failed · retained output preserved')
+      }
+    } catch (error) {
+      if (desktopSessionRef.current?.root !== session.root) return
+      const interrupted = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
+      const message = interrupted ? 'The run was interrupted.' : normaliseHostFailure(error).message
+      updateDraftHistory({ cellStatus: interrupted ? 'interrupted' : 'failed' })
+      setExecutionProblem(message)
+      setToast(interrupted ? 'Execution interrupted · retained output preserved' : 'Execution failed · retained output preserved')
+    } finally {
+      if (executionAbortRef.current === controller) executionAbortRef.current = null
+    }
+  }
+
+  const runCell = async () => {
+    setCommandOpen(false)
+    const session = desktopSessionRef.current
+    if (!desktopHost.available || !session) {
+      setToast('Code execution is available only in an opened desktop project')
+      return
+    }
+    const inventory = runtimeInventory ?? await discoverExecutionEnvironments()
+    if (!inventory) return
+    const runtime = inventory.executables.python
+    if (runtime.health !== 'available') {
+      setEnvironmentOpen(true)
+      setExecutionProblem(runtime.message ?? 'No healthy Python executable was found. Select or install Python, then refresh environments.')
+      return
+    }
+    try {
+      const trust = await desktopHost.executionTrustStatus(session.root)
+      if (!trust.trusted) {
+        setExecutionTrustWarning(trust.warning)
+        setExecutionTrustOpen(true)
+        return
+      }
+      await executeTrustedCell()
+    } catch (error) {
+      const message = normaliseHostFailure(error).message
+      setExecutionProblem(message)
+      setToast(message)
+    }
+  }
+
+  const confirmExecutionTrust = async () => {
+    const session = desktopSessionRef.current
+    if (!session || executionTrustBusy) return
+    setExecutionTrustBusy(true)
+    try {
+      const trust = await desktopHost.trustProjectForSession(session.root, EXECUTION_TRUST_ACKNOWLEDGEMENT)
+      if (!trust.trusted) throw new Error('The project was not trusted for execution.')
+      setExecutionTrustOpen(false)
+      await executeTrustedCell()
+    } catch (error) {
+      const message = normaliseHostFailure(error).message
+      setExecutionProblem(message)
+      setToast(message)
+    } finally {
+      setExecutionTrustBusy(false)
+    }
+  }
+
+  const interruptExecution = async () => {
+    executionAbortRef.current?.abort()
+    try {
+      await executionBroker.interrupt('direct', primaryCell?.language ?? 'python')
+    } catch (error) {
+      setToast(normaliseHostFailure(error).message)
+    }
+  }
+
+  const restartExecution = async () => {
+    const session = desktopSessionRef.current
+    if (!session) return
+    try {
+      const trust = await desktopHost.executionTrustStatus(session.root)
+      if (!trust.trusted) {
+        setToast('Run a cell and trust this project before restarting its execution environment')
+        return
+      }
+      await executionBroker.restart(session.root, 'direct', primaryCell?.language ?? 'python')
+      setToast('Direct execution environment restarted')
+    } catch (error) {
+      setToast(normaliseHostFailure(error).message)
+    }
+  }
+
+  const terminateExecution = async () => {
+    try {
+      await executionBroker.terminate('direct', primaryCell?.language ?? 'python')
+      updateDraftHistory({ cellStatus: draft.cellStatus === 'running' ? 'interrupted' : draft.cellStatus })
+      setToast('Direct execution process terminated')
+    } catch (error) {
+      setToast(normaliseHostFailure(error).message)
+    }
   }
 
   const acceptProposal = () => {
@@ -823,6 +1099,17 @@ function App() {
     const nextName = file.name.replace(/\.(qmd|md)$/i, '')
     const cacheResult = readCitationCache(localStorage, `browser:${file.name}`)
     replaceDesktopSession(null)
+    executionAbortRef.current?.abort()
+    executionAbortRef.current = null
+    executionManifestHashRef.current = null
+    setExecutionManifest(undefined)
+    setExecutionResult(undefined)
+    setExecutionDiagnostics([])
+    setExecutionProblem('')
+    setRuntimeInventory(undefined)
+    setRuntimeDiscoveryState('idle')
+    setEnvironmentOpen(false)
+    setExecutionTrustOpen(false)
     citationLockRef.current = buildCitationLock([])
     citationLockHashRef.current = null
     citationLockSavedContentRef.current = null
@@ -860,7 +1147,7 @@ function App() {
       throw new Error('This folder does not contain a Markdown or Quarto manuscript.')
     }
 
-    const [document, projectBibliography, lockSnapshot, cacheSnapshot] = await Promise.all([
+    const [document, projectBibliography, lockSnapshot, cacheSnapshot, manifestSnapshots] = await Promise.all([
       desktopHost.readDocument(project.root, mainPath),
       loadProjectBibliographies(
         project.bibliographies.map((entry) => entry.path),
@@ -868,9 +1155,28 @@ function App() {
       ),
       desktopHost.readCitationLock(project.root),
       desktopHost.readCitationCache(project.root),
+      desktopHost.readExecutionManifests(project.root).catch(() => []),
     ])
     if (mainPath !== project.config.mainDocument) await desktopHost.setMainDocument(project.root, mainPath)
     const parsed = parsePortableDocument(document.content, initialDraft)
+    const manifestResults = manifestSnapshots.map((snapshot) => ({ snapshot, ...parseExecutionManifest(snapshot.content) }))
+    const manifestDiagnostics: DocumentDiagnostic[] = manifestResults.flatMap(({ snapshot, error }) => error ? [{
+      code: `execution-manifest-${snapshot.path}`,
+      level: 'warning' as const,
+      message: `${snapshot.path} was ignored: ${error}`,
+    }] : [])
+    const primaryManifestResult = manifestResults.find((result) => result.manifest?.cellId === PRIMARY_EXECUTION_CELL)
+    const primaryManifest = primaryManifestResult?.manifest
+    const primaryCell = parsed.executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL)
+    const matchingManifest = primaryManifest && primaryCell && primaryManifest.codeHash === await sha256(primaryCell.source)
+      ? primaryManifest
+      : undefined
+    const openedDraft: DraftState = {
+      ...parsed.draft,
+      cellStatus: matchingManifest
+        ? matchingManifest.status === 'succeeded' ? 'current' : matchingManifest.status === 'interrupted' ? 'interrupted' : 'failed'
+        : 'stale',
+    }
     const cacheResult = cacheSnapshot
       ? parseCitationCache(cacheSnapshot.content)
       : readCitationCache(localStorage, project.root)
@@ -883,6 +1189,17 @@ function App() {
     const displayName = mainPath.split('/').at(-1) ?? mainPath
     desktopSaveBlockedRef.current = false
     setSaveProblem('')
+    executionAbortRef.current?.abort()
+    executionAbortRef.current = null
+    executionManifestHashRef.current = primaryManifestResult?.snapshot.hash ?? null
+    setExecutionManifest(primaryManifest)
+    setExecutionResult(undefined)
+    setExecutionDiagnostics(manifestDiagnostics)
+    setExecutionProblem('')
+    setRuntimeInventory(undefined)
+    setRuntimeDiscoveryState('idle')
+    setEnvironmentOpen(false)
+    setExecutionTrustOpen(false)
     resetDraftRevision()
     citationLockRef.current = projectLock
     citationLockHashRef.current = lockSnapshot?.hash ?? null
@@ -898,7 +1215,7 @@ function App() {
       hash: project.bibliographies.find((entry) => entry.path === acquisitionPath)?.hash ?? null,
     }
     replaceDesktopSession({ root: project.root, path: mainPath, hash: document.hash, savedRevision: 0 })
-    resetDraftHistory(parsed.draft)
+    resetDraftHistory(openedDraft)
     setFilename(displayName)
     setProjectName(project.config.name)
     setCitationStyle(project.config.citationStyle)
@@ -909,7 +1226,7 @@ function App() {
     setBibliographyDiagnostics(projectBibliography.diagnostics)
     setCitationLockDiagnostics([
       ...lockResult.diagnostics,
-      ...diagnoseCitationLock(projectCitations, parsed.draft.citationKeys, projectLock),
+      ...diagnoseCitationLock(projectCitations, openedDraft.citationKeys, projectLock),
     ])
     setCitationLockHostDiagnostics([])
     setCitationCacheDiagnostics(cacheResult.diagnostics)
@@ -917,7 +1234,7 @@ function App() {
     setPendingProject(null)
     setSaveState('saved')
     localStorage.setItem(LAST_PROJECT_ROOT_KEY, project.root)
-    writeRecoverySnapshot(parsed.draft, displayName, document.content)
+    writeRecoverySnapshot(openedDraft, displayName, document.content)
     if (announce) {
       const sourceCount = projectBibliography.records.length
       setToast(`Opened ${project.config.name} · ${mainPath}${sourceCount ? ` · ${sourceCount} project source${sourceCount === 1 ? '' : 's'}` : ''}`)
@@ -1491,7 +1808,7 @@ function App() {
             <div className="project-health">
               <div className="project-health-title"><Icon name="spark" size={16} /> Project health</div>
               <div><span><i className={`health-dot ${cslState === 'error' ? 'warning' : 'okay'}`} /> Citations</span><small>{draft.citationKeys.length} cited · {citations.length} indexed{cslState === 'loading' ? ' · formatting' : ''}{citations.some((record) => record.availability === 'cached') ? ' · offline cache active' : ''}</small></div>
-              <div><span><i className={`health-dot ${draft.cellStatus === 'current' ? 'okay' : 'warning'}`} /> Figures</span><small>{draft.cellStatus === 'current' ? 'Up to date' : draft.cellStatus}</small></div>
+              <div><span><i className={`health-dot ${draft.cellStatus === 'current' ? 'okay' : 'warning'}`} /> Figures</span><small>{draft.cellStatus === 'current' ? 'Up to date' : cellStatusLabel(draft.cellStatus)}</small></div>
               <div><span><i className={`health-dot ${allDiagnostics.some((item) => item.level === 'error') ? 'warning' : 'okay'}`} /> Source</span><small>{allDiagnostics.length ? `${allDiagnostics.length} check${allDiagnostics.length === 1 ? '' : 's'}` : 'Portable'}</small></div>
             </div>
 
@@ -1582,14 +1899,16 @@ function App() {
 
               <div className={`code-cell ${draft.cellStatus}`} id="code-cell">
                 <div className="code-cell-header">
-                  <div className="code-cell-label"><span className="python-mark">Py</span><strong>Canopy response over time</strong><span className={`cell-status ${draft.cellStatus}`}><i />{draft.cellStatus === 'running' ? 'Running' : draft.cellStatus === 'stale' ? 'Stale' : 'Current'}</span></div>
+                  <div className="code-cell-label"><span className="python-mark">Py</span><strong>Canopy response over time</strong><span className={`cell-status ${draft.cellStatus}`}><i />{cellStatusLabel(draft.cellStatus)}</span></div>
                   <div className="code-cell-actions">
-                    <button className="run-button" onClick={runCell} disabled={draft.cellStatus === 'running'}><Icon name="play" size={14} /> {draft.cellStatus === 'running' ? 'Running…' : 'Run'}</button>
-                    <button className="icon-button subtle" aria-label="Code cell options"><Icon name="more" /></button>
+                    {draft.cellStatus === 'running'
+                      ? <button className="run-button interrupt" onClick={() => void interruptExecution()}><Icon name="close" size={13} /> Interrupt</button>
+                      : <button className="run-button" onClick={() => void runCell()} disabled={runtimeDiscoveryState === 'discovering' || pythonRuntimeUnavailable}><Icon name="play" size={14} /> {runtimeDiscoveryState === 'discovering' ? 'Checking…' : 'Run'}</button>}
+                    <button className="icon-button subtle" onClick={() => void discoverExecutionEnvironments(true)} aria-label="Execution environments and options"><Icon name="more" /></button>
                   </div>
                 </div>
                 <div className="code-editor-wrap">
-                  <div className="line-numbers">1<br />2<br />3<br />4</div>
+                  <div className="line-numbers">{draft.code.split('\n').map((_, index) => <span key={index}>{index + 1}<br /></span>)}</div>
                   <textarea
                     aria-label="Python code"
                     value={draft.code}
@@ -1598,7 +1917,13 @@ function App() {
                   />
                 </div>
                 <figure className="cell-output">
-                  <div className={`chart-wrap ${draft.cellStatus === 'running' ? 'loading' : ''}`}>
+                  {executionResult && <ExecutionOutputView
+                    result={executionResult}
+                    artifactUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) : path}
+                  />}
+                  {(!executionResult || executionResult.status !== 'succeeded') && (desktopSession && executionView?.retained?.artifactPaths[0]
+                    ? <div className={`chart-wrap retained-artifact ${draft.cellStatus === 'running' ? 'loading' : ''}`}><img src={projectArtifactUrl(desktopSession.root, executionView.retained.artifactPaths[0])} alt="Retained canopy response output" /></div>
+                    : <div className={`chart-wrap ${draft.cellStatus === 'running' ? 'loading' : ''}`}>
                     <svg viewBox="0 0 620 250" role="img" aria-label="Line chart comparing control and drought canopy response over twelve weeks">
                       <g className="grid-lines">
                         <path d="M50 30H590M50 80H590M50 130H590M50 180H590M50 230H590" />
@@ -1614,10 +1939,13 @@ function App() {
                       <g className="chart-points drought-points"><circle cx="50" cy="230" r="3"/><circle cx="140" cy="216" r="3"/><circle cx="230" cy="192" r="3"/><circle cx="320" cy="164" r="3"/><circle cx="410" cy="136" r="3"/><circle cx="500" cy="110" r="3"/><circle cx="590" cy="86" r="3"/></g>
                     </svg>
                     <div className="chart-legend"><span><i className="legend-control" /> Well-watered</span><span><i className="legend-drought" /> Drought</span></div>
-                  </div>
+                  </div>)}
+                  {executionProblem && <div className="execution-inline-problem" role="alert">{executionProblem}</div>}
                   <figcaption><strong>Figure 1.</strong> Normalized canopy area across twelve weeks. Shaded uncertainty omitted in this prototype. <button><Icon name="link" size={13} /> fig-canopy-result</button></figcaption>
                 </figure>
-                <div className="provenance-bar"><span><Icon name="check" size={14} /> Run 6f42f1a · Python 3.12</span><span>1.2 s · figures/generated/fig-canopy.svg</span></div>
+                {executionView
+                  ? <RuntimeProvenance view={executionView} />
+                  : <div className="runtime-provenance warning">No explicit executable cell is present in the portable source.</div>}
               </div>
             </section>
 
@@ -1742,6 +2070,62 @@ function App() {
           </aside>
         )}
       </div>
+
+      {executionTrustOpen && (
+        <div className="modal-backdrop execution-dialog-backdrop" onMouseDown={() => { if (!executionTrustBusy) setExecutionTrustOpen(false) }}>
+          <div className="execution-trust-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="execution-trust-title">
+            <div className="execution-dialog-head">
+              <span className="execution-shield"><Icon name="code" size={19} /></span>
+              <div><span className="eyebrow">Local project trust</span><h2 id="execution-trust-title">Run this project’s code?</h2></div>
+              <button className="icon-button" onClick={() => setExecutionTrustOpen(false)} disabled={executionTrustBusy} aria-label="Close execution trust dialog"><Icon name="close" /></button>
+            </div>
+            <div className="execution-trust-body">
+              <p>{executionTrustWarning || 'Project code can read and change files and use the network with your user permissions. Local execution is not a sandbox.'}</p>
+              <div className="execution-project-root"><Icon name="folder" size={15} /><span>{desktopSession?.root}</span></div>
+              <p className="execution-trust-note">Trust lasts only for this DraftMatter session. Opening a project never runs its code.</p>
+            </div>
+            <div className="execution-dialog-actions">
+              <button onClick={() => setExecutionTrustOpen(false)} disabled={executionTrustBusy}>Cancel</button>
+              <button className="primary-button" onClick={() => void confirmExecutionTrust()} disabled={executionTrustBusy}>{executionTrustBusy ? 'Trusting…' : 'Trust for this session and run'}</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {environmentOpen && (
+        <div className="modal-backdrop execution-dialog-backdrop" onMouseDown={() => setEnvironmentOpen(false)}>
+          <div className="execution-environment-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="execution-environment-title">
+            <div className="execution-dialog-head">
+              <span className="execution-shield"><Icon name="code" size={19} /></span>
+              <div><span className="eyebrow">Execution environments</span><h2 id="execution-environment-title">Local runtimes</h2><p>DraftMatter discovers installed tools only when you ask. It never installs packages automatically.</p></div>
+              <button className="icon-button" onClick={() => setEnvironmentOpen(false)} aria-label="Close execution environments"><Icon name="close" /></button>
+            </div>
+            <div className="execution-environment-list">
+              {(['python', 'r', 'julia'] as const).map((language) => {
+                const runtime = runtimeInventory?.executables[language]
+                const selected = language === 'python'
+                return <div className={selected ? 'selected' : ''} key={language}>
+                  <span className={`runtime-language runtime-${language}`}>{language === 'python' ? 'Py' : language === 'julia' ? 'Jl' : 'R'}</span>
+                  <span><strong>{runtimeName(language)}</strong><small>{runtimeDiscoveryState === 'discovering' ? 'Checking…' : runtime?.health === 'available' ? `${runtime.version ?? 'Version available'} · ${runtime.executable}` : runtime?.message ?? 'Not checked'}</small></span>
+                  <span className={`runtime-health ${runtime?.health ?? 'not-checked'}`}>{runtime?.health === 'available' ? 'Available' : runtime?.health === 'unhealthy' ? 'Needs attention' : runtime?.health === 'missing' ? 'Missing' : 'Not checked'}</span>
+                </div>
+              })}
+            </div>
+            <div className="execution-provider-summary">
+              <div><strong>Selected provider</strong><span>Direct process · Python</span></div>
+              <div><strong>Jupyter kernels</strong><span>{runtimeInventory ? `${runtimeInventory.jupyter.kernels.filter((kernel) => kernel.health === 'available').length} available` : 'Not checked'}</span></div>
+            </div>
+            {executionProblem && <div className="execution-environment-help" role="alert">{executionProblem}</div>}
+            <div className="execution-dialog-actions environment-actions">
+              <button onClick={() => void restartExecution()} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}>Restart</button>
+              <button onClick={() => void terminateExecution()} disabled={!desktopSession}>Terminate</button>
+              <span />
+              <button onClick={() => void discoverExecutionEnvironments()} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}>{runtimeDiscoveryState === 'discovering' ? 'Checking…' : 'Refresh'}</button>
+              <button className="primary-button" onClick={() => setEnvironmentOpen(false)}>Done</button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {pendingProject && (
         <div className="modal-backdrop manuscript-picker-backdrop" onMouseDown={() => setPendingProject(null)}>

@@ -50,7 +50,7 @@ export interface CleanRunCertification {
   environmentFingerprints: Partial<Record<ExecutionLanguage, string>>
 }
 
-function manifestFromResult(result: NormalizedExecutionResult, sequence: number, cleanRunId?: string): ExecutionManifest {
+export function executionManifestFromResult(result: NormalizedExecutionResult, sequence: number, cleanRunId?: string): ExecutionManifest {
   return {
     schemaVersion: 1,
     cellId: result.cellId,
@@ -212,7 +212,7 @@ export class ExecutionFreshnessTracker {
   recordResult(result: NormalizedExecutionResult, sequence: number, cleanRunId?: string) {
     const state = this.states.get(result.cellId)
     if (!state || state.language !== result.language) throw new Error(`Execution result does not match cell ${result.cellId}.`)
-    const manifest = manifestFromResult(result, sequence, cleanRunId)
+    const manifest = executionManifestFromResult(result, sequence, cleanRunId)
     this.certification = undefined
     state.lastAttempt = manifest
     state.reason = undefined
