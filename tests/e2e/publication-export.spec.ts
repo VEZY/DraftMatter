@@ -41,7 +41,7 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     await page.goto('/')
   })
 
-  test('downloads and renders the opened manuscript rather than the demo article', async ({ page, context }) => {
+  test('downloads and renders the opened manuscript rather than the demo article', async ({ page, context }, testInfo) => {
     await page.getByRole('button', { name: 'Export' }).click()
     const htmlDownloadEvent = page.waitForEvent('download')
     await page.getByRole('button', { name: /Native HTML/ }).click()
@@ -66,7 +66,28 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     const rendered = await context.newPage()
     await rendered.setContent(html, { waitUntil: 'load' })
     await expect(rendered).toHaveScreenshot('native-html-publication.png', { fullPage: true })
+    await rendered.emulateMedia({ media: 'print' })
+    await expect(rendered).toHaveScreenshot('native-print-publication.png', { fullPage: true })
+    const pdfPath = testInfo.outputPath('native-publication.pdf')
+    const pdf = await rendered.pdf({
+      path: pdfPath,
+      format: 'A4',
+      printBackground: true,
+      tagged: true,
+      outline: true,
+    })
+    expect(pdf.subarray(0, 5).toString('ascii')).toBe('%PDF-')
+    expect(pdf.byteLength).toBeGreaterThan(20_000)
+    await testInfo.attach('native-publication.pdf', { path: pdfPath, contentType: 'application/pdf' })
     await rendered.close()
+
+    await page.getByRole('button', { name: 'Export' }).click()
+    await page.getByRole('button', { name: /Print \/ PDF/ }).click()
+    const printFrame = page.locator('iframe[title="DraftMatter print preview"]')
+    await expect(printFrame).toHaveCount(1)
+    await expect(page.getByText('Clean print view opened · choose Save as PDF')).toBeVisible()
+    expect(await printFrame.getAttribute('srcdoc')).toContain('<title>Independent canopy synthesis</title>')
+    expect(await printFrame.getAttribute('srcdoc')).not.toMatch(/\.dm-anchor|\.draftmatter-reviews/)
 
     await page.getByRole('button', { name: 'Export' }).click()
     const docxDownloadEvent = page.waitForEvent('download')
