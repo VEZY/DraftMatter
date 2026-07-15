@@ -65,10 +65,11 @@ describe('full structured manuscript editor', () => {
 
   it('renders semantic content while hiding Markdown, review storage, and unsupported raw payloads', async () => {
     const inspect = vi.fn()
+    const selectReview = vi.fn()
     const asset = vi.fn((path: string) => `asset://${path}`)
 
     await act(async () => root.render(
-      <StructuredManuscriptEditor source={source} onChange={vi.fn()} onInspectRaw={inspect} resolveAssetUrl={asset} />,
+      <StructuredManuscriptEditor source={source} onChange={vi.fn()} onInspectRaw={inspect} onReviewAnchorSelect={selectReview} resolveAssetUrl={asset} />,
     ))
 
     const editor = container.querySelector('[role="textbox"][aria-label="Rendered manuscript editor"]')
@@ -85,9 +86,12 @@ describe('full structured manuscript editor', () => {
     expect(container.textContent).not.toContain('Opaque raw payload')
     expect(container.textContent).not.toContain('.dm-anchor')
     expect(container.textContent).not.toContain('.draftmatter-reviews')
+    expect(container.querySelector('.dm-review-point')?.getAttribute('aria-label')).toBe('Open point comment')
 
     await act(async () => (container.querySelector('.structured-raw-node button') as HTMLButtonElement).click())
+    await act(async () => (container.querySelector('.dm-review-point') as HTMLButtonElement).click())
     expect(inspect).toHaveBeenCalledOnce()
+    expect(selectReview).toHaveBeenCalledWith('dm-comment')
     expect(asset).toHaveBeenCalledWith('figures/growth.svg')
   })
 
@@ -113,6 +117,19 @@ describe('full structured manuscript editor', () => {
     await act(async () => { expect(editorRef.current?.setHeading(2)).toBe(true) })
     expect(changed.at(-1)).toContain('## Generic manuscript')
     expect(editorRef.current?.source()).toBe(changed.at(-1))
+
+    const editedSource = changed.at(-1)!
+    await act(async () => root.render(
+      <StructuredManuscriptEditor ref={editorRef} source={editedSource} onChange={(next) => changed.push(next)} />,
+    ))
+    await act(async () => root.render(
+      <StructuredManuscriptEditor ref={editorRef} source={source} onChange={(next) => changed.push(next)} />,
+    ))
+    expect(container.querySelector('h1')?.textContent).toBe('Generic manuscript')
+    await act(async () => root.render(
+      <StructuredManuscriptEditor ref={editorRef} source={editedSource} onChange={(next) => changed.push(next)} />,
+    ))
+    expect(container.querySelector('h2')?.textContent).toBe('Generic manuscript')
   })
 
   it('previews and inserts a multi-source citation at the retained editor selection', async () => {

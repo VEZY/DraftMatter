@@ -3740,6 +3740,20 @@ kbd {
 .structured-editor-content figcaption { color: var(--muted); font-family: Inter, ui-sans-serif, sans-serif; font-size: 12px; line-height: 1.55; margin-top: 9px; }
 .structured-citation { background: #e7eef2; border: 0; border-radius: 4px; color: #365a6f; cursor: pointer; display: inline; font-family: Inter, ui-sans-serif, sans-serif; font-size: .86em; line-height: inherit; margin: 0; padding: 2px 5px; }
 .structured-citation:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.dm-review-thread { background: rgba(230, 194, 83, .18); border-bottom: 1px solid rgba(178, 139, 34, .55); }
+.dm-review-change { background: rgba(91, 145, 112, .14); border-bottom: 1px solid rgba(69, 119, 88, .58); }
+.dm-review-needs-rebase { background: rgba(202, 143, 73, .16); border-bottom-color: rgba(168, 105, 42, .62); }
+.dm-review-resolved, .dm-review-accepted, .dm-review-rejected { opacity: .72; }
+.dm-review-simple { background: transparent; border-bottom-style: dotted; }
+.dm-review-point { align-items: center; background: #f8efd4; border: 1px solid #dec985; border-radius: 50%; color: #78622e; cursor: pointer; display: inline-flex; font: 700 9px/1 Inter, ui-sans-serif, sans-serif; height: 15px; justify-content: center; margin: 0 2px; padding: 0; vertical-align: text-top; width: 15px; }
+.dm-review-point.dm-review-change { background: #e5f0e8; border-color: #9ab5a3; color: #456c53; }
+.dm-review-point:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+
+.structured-review-preview { align-items: center; background: #f2f6f3; border: 1px solid #d8e2dc; border-radius: 7px; color: #5d7569; display: flex; font-family: Inter, ui-sans-serif, sans-serif; gap: 8px; margin: 0 0 18px; padding: 9px 11px; }
+.structured-review-preview span { display: flex; flex-direction: column; gap: 2px; }
+.structured-review-preview strong { color: #43564d; font-size: 10px; }
+.structured-review-preview small { color: #7d8b84; font-size: 8px; }
+.structured-review-preview.blocked { background: #fff8ef; border-color: #ead7ba; color: #966e3e; }
 .outline-empty { color: var(--muted); font-size: 11px; line-height: 1.5; margin: 8px 10px 14px; }
 .structured-execution-bar { align-items: center; background: #f6f8f7; border: 1px solid #e0e5e2; border-radius: 8px; display: flex; font-family: Inter, ui-sans-serif, sans-serif; gap: 8px; margin: 0 0 24px; padding: 9px 10px; }
 .structured-execution-bar > span { align-items: center; color: #557065; display: flex; flex: 1; gap: 7px; min-width: 0; }

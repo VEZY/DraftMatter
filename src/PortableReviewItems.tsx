@@ -36,10 +36,12 @@ function uniqueQuote(source: string, quote: string) {
 export function PortableReviewItems({
   source,
   excludeIds = [],
+  selectedTarget,
   onApply,
 }: {
   source: string
   excludeIds?: string[]
+  selectedTarget?: { quote: string; occurrence: number } | null
   onApply: (source: string, message: string) => void
 }) {
   const document = useMemo(() => parseReviewMarkup(source), [source])
@@ -52,6 +54,7 @@ export function PortableReviewItems({
   const [problem, setProblem] = useState('')
   const [compose, setCompose] = useState<'comment' | 'suggestion' | null>(null)
   const [quote, setQuote] = useState('')
+  const [selectedOccurrence, setSelectedOccurrence] = useState<number>()
   const [body, setBody] = useState('')
   const composerRef = useRef<HTMLDivElement>(null)
 
@@ -110,14 +113,16 @@ export function PortableReviewItems({
       return
     }
     const matches = uniqueQuote(source, selected)
-    if (matches.length !== 1) {
+    const selectedMatch = selectedTarget?.quote === selected && selectedOccurrence !== undefined ? matches[selectedOccurrence] : undefined
+    if (selectedMatch === undefined && matches.length !== 1) {
       setProblem(matches.length === 0 ? 'That quote was not found in the manuscript.' : 'That quote occurs more than once; use a longer selection.')
       return
     }
+    const start = selectedMatch ?? matches[0]
     try {
       const result = compose === 'comment'
-        ? createReviewThread(source, { start: matches[0], end: matches[0] + selected.length, author: localAuthor, message: body.trim() })
-        : createReviewChange(source, { start: matches[0], end: matches[0] + selected.length, author: localAuthor, kind: 'replace', proposal: body })
+        ? createReviewThread(source, { start, end: start + selected.length, author: localAuthor, message: body.trim() })
+        : createReviewChange(source, { start, end: start + selected.length, author: localAuthor, kind: 'replace', proposal: body })
       setCompose(null)
       setQuote('')
       setBody('')
@@ -177,15 +182,15 @@ export function PortableReviewItems({
       {compose && (
         <div className="portable-review-composer" ref={composerRef} role="group" aria-label={compose === 'comment' ? 'New comment' : 'New suggestion'}>
           <strong>{compose === 'comment' ? 'New comment' : 'Suggest replacement'}</strong>
-          <label><span>Exact manuscript text</span><input value={quote} onChange={(event) => setQuote(event.target.value)} placeholder="Paste the selected text" /></label>
+          <label><span>Exact manuscript text</span><input value={quote} onChange={(event) => { setQuote(event.target.value); setSelectedOccurrence(undefined) }} placeholder="Paste the selected text" /></label>
           <label><span>{compose === 'comment' ? 'Comment' : 'Replacement'}</span><textarea value={body} onChange={(event) => setBody(event.target.value)} rows={3} /></label>
           <div><button onClick={() => setCompose(null)}>Cancel</button><button className="primary-button" onClick={create}>Add</button></div>
         </div>
       )}
 
       <div className="review-panel-footer portable-review-footer">
-        <button onClick={() => { setCompose('comment'); setProblem('') }}><Icon name="message" size={15} /> New comment</button>
-        <button onClick={() => { setCompose('suggestion'); setProblem('') }}><Icon name="spark" size={15} /> Suggest edit</button>
+        <button onClick={() => { setCompose('comment'); setProblem(''); setQuote(selectedTarget?.quote ?? ''); setSelectedOccurrence(selectedTarget?.occurrence) }}><Icon name="message" size={15} /> New comment</button>
+        <button onClick={() => { setCompose('suggestion'); setProblem(''); setQuote(selectedTarget?.quote ?? ''); setSelectedOccurrence(selectedTarget?.occurrence) }}><Icon name="spark" size={15} /> Suggest edit</button>
         <span>{queue.length ? `${Math.max(1, queue.findIndex((item) => item.id === activeId) + 1)} of ${queue.length}` : 'No additional items'}</span>
         <button onClick={() => navigate('previous')} disabled={!queue.length} aria-label="Previous review item">↑</button>
         <button onClick={() => navigate('next')} disabled={!queue.length} aria-label="Next review item">↓</button>

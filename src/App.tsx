@@ -6,7 +6,7 @@ import { parsePortableDocument, parseReviewMarkup } from './sharedEditor'
 import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
 import { ManuscriptTextEditor } from './ManuscriptTextEditor'
-import { StructuredManuscriptEditor, type StructuredManuscriptEditorHandle, type StructuredOutlineItem } from './StructuredManuscriptEditor'
+import { StructuredManuscriptEditor, type StructuredManuscriptEditorHandle, type StructuredOutlineItem, type StructuredReviewSelection } from './StructuredManuscriptEditor'
 import { structuredCitationClusters } from './structuredManuscript'
 import { applyDraftCitationTransaction, applyDraftCodeTransaction, applyDraftTextTransaction, type ManuscriptTextField } from './manuscriptModel'
 import { downloadBlob, downloadText, projectCleanSource, reviewedProjection } from './projections'
@@ -41,6 +41,7 @@ import { discoverRuntimeInventory, type RuntimeInventory, type RuntimeLanguage }
 import { PortableReviewItems } from './PortableReviewItems'
 import { GitHistoryPanel } from './GitHistoryPanel'
 import { buildReviewQueue } from './reviewQueue'
+import { projectPortableReviewSource } from './reviewProjector'
 import { printNativeHtml, renderNativeHtmlExport } from './nativeHtmlExport'
 import { renderDocxExport } from './docxExport'
 import { ExternalExportDialog } from './ExternalExportDialog'
@@ -294,6 +295,7 @@ function App() {
   const [manuscriptSource, setManuscriptSource] = useState(() => localStorage.getItem(STRUCTURED_SOURCE_KEY) ?? reviewedProjection(initialDraftState))
   const [structuredMode, setStructuredMode] = useState(() => localStorage.getItem(STRUCTURED_MODE_KEY) === 'true')
   const [structuredOutline, setStructuredOutline] = useState<StructuredOutlineItem[]>([])
+  const [structuredReviewSelection, setStructuredReviewSelection] = useState<StructuredReviewSelection | null>(null)
   const [externalExportSource, setExternalExportSource] = useState<string>()
   const [executionResult, setExecutionResult] = useState<NormalizedExecutionResult>()
   const [executionManifest, setExecutionManifest] = useState<ExecutionManifest>()
@@ -842,6 +844,11 @@ function App() {
   const executionSource = manuscriptSource
   const reviewDocument = parseReviewMarkup(executionSource)
   const reviewQueue = buildReviewQueue(reviewDocument)
+  const structuredReviewProjection = useMemo(() => {
+    if (!structuredMode || (markupView !== 'original' && markupView !== 'final')) return null
+    return projectPortableReviewSource(manuscriptSource, { view: markupView })
+  }, [manuscriptSource, markupView, structuredMode])
+  const structuredEditorSource = structuredReviewProjection?.ok ? structuredReviewProjection.source : manuscriptSource
   const demoReviewAvailable = reviewDocument.changes.some((change) => change.id === 'dm-c01')
     && reviewDocument.changes.some((change) => change.id === 'dm-c02')
     && reviewDocument.threads.some((thread) => thread.id === 'dm-comment-01')
@@ -2185,15 +2192,25 @@ function App() {
                 <ExecutionOutputView result={executionResult} artifactUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) : path} />
               </div>
             )}
+            {structuredReviewProjection && (
+              <div className={`structured-review-preview ${structuredReviewProjection.ok ? '' : 'blocked'}`} role={structuredReviewProjection.ok ? 'status' : 'alert'}>
+                <Icon name={structuredReviewProjection.ok ? 'eye' : 'branch'} size={15} />
+                <span><strong>{markupView === 'original' ? 'Original preview' : structuredReviewProjection.ok ? 'Final preview' : 'Final preview needs a decision'}</strong><small>{structuredReviewProjection.ok ? 'Read-only clean projection; return to a markup view to keep editing.' : `${structuredReviewProjection.conflicts.length} overlapping review conflict${structuredReviewProjection.conflicts.length === 1 ? '' : 's'} must be resolved or selected first.`}</small></span>
+              </div>
+            )}
             <StructuredManuscriptEditor
               ref={structuredEditorRef}
-              source={manuscriptSource}
+              source={structuredEditorSource}
               onChange={updateStructuredManuscript}
               onDiagnostics={setDiagnostics}
               onOutlineChange={setStructuredOutline}
               onInspectRaw={openSourceInspector}
               onCitationSelect={openStructuredCitationDetails}
+              onReviewSelectionChange={setStructuredReviewSelection}
+              onReviewAnchorSelect={() => showReviewPanel()}
               citationLabels={structuredCitationLabels}
+              markupView={markupView}
+              readOnly={Boolean(structuredReviewProjection)}
               resolveAssetUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) : path}
             />
             {citationOpen && structuredCitationSelection && (
@@ -2473,6 +2490,7 @@ function App() {
               <PortableReviewItems
                 source={executionSource}
                 excludeIds={demoReviewAvailable ? ['dm-c01', 'dm-c02', 'dm-comment-01'] : []}
+                selectedTarget={structuredMode ? structuredReviewSelection : null}
                 onApply={applyPortableReviewSource}
               />
             </div>

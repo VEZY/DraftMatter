@@ -6,18 +6,24 @@ import { wrapInList } from 'prosemirror-schema-list'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
 import { EditorState, NodeSelection, type Command } from 'prosemirror-state'
 import { tableEditing } from 'prosemirror-tables'
-import { EditorView, type NodeView } from 'prosemirror-view'
+import { Decoration, DecorationSet, EditorView, type NodeView } from 'prosemirror-view'
 import { baseKeymap } from 'prosemirror-commands'
 import { serializeCitationCluster } from './citation'
 import { manuscriptSchema } from './manuscriptSchema'
+import { parseReviewMarkup } from './reviewMarkup'
 import { parseStructuredManuscript, serializeStructuredManuscript, type StructuredManuscriptMetadata } from './structuredManuscript'
-import type { CitationItem, DocumentDiagnostic } from './types'
+import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
 
 export interface StructuredOutlineItem {
   id: string
   level: number
   title: string
   position: number
+}
+
+export interface StructuredReviewSelection {
+  quote: string
+  occurrence: number
 }
 
 export interface StructuredManuscriptEditorHandle {
@@ -51,8 +57,11 @@ export interface StructuredManuscriptEditorProps {
   onOutlineChange?: (outline: StructuredOutlineItem[]) => void
   onInspectRaw?: (nodeId: string) => void
   onCitationSelect?: (id: string, items: CitationItem[]) => void
+  onReviewSelectionChange?: (selection: StructuredReviewSelection | null) => void
+  onReviewAnchorSelect?: (anchorId: string) => void
   resolveAssetUrl?: (path: string) => string
   citationLabels?: Record<string, string>
+  markupView?: MarkupView
   readOnly?: boolean
   ariaLabel?: string
   className?: string
@@ -89,6 +98,68 @@ function citationNode(items: CitationItem[], rendered?: string) {
     suppressAuthor: false,
     rendered: rendered || `(${keys.join('; ')})`,
   })
+}
+
+function selectedReviewText(view: EditorView): StructuredReviewSelection | null {
+  const { from, to, empty } = view.state.selection
+  if (empty) return null
+  const quote = view.state.doc.textBetween(from, to, ' ', ' ').trim()
+  if (!quote) return null
+  const prefix = view.state.doc.textBetween(0, from, ' ', ' ')
+  let occurrence = 0
+  let offset = prefix.indexOf(quote)
+  while (offset >= 0) {
+    occurrence += 1
+    offset = prefix.indexOf(quote, offset + Math.max(1, quote.length))
+  }
+  return { quote, occurrence }
+}
+
+interface ReviewDecorationRecord {
+  kind: 'change' | 'thread'
+  status: string
+}
+
+function reviewDecorationIndex(source: string) {
+  const parsed = parseReviewMarkup(source)
+  return new Map<string, ReviewDecorationRecord>([
+    ...parsed.changes.map((change) => [change.anchorId, { kind: 'change' as const, status: change.status }] as const),
+    ...parsed.threads.map((thread) => [thread.anchorId, { kind: 'thread' as const, status: thread.status }] as const),
+  ])
+}
+
+function reviewDecorations(document: ProseMirrorNode, records: Map<string, ReviewDecorationRecord>, markupView: MarkupView) {
+  if (markupView === 'original' || markupView === 'final') return DecorationSet.empty
+  const anchors = new Map<string, { start?: number; end?: number; points: number[] }>()
+  document.descendants((node, position) => {
+    if (node.type !== manuscriptSchema.nodes.review_anchor) return true
+    const id = String(node.attrs.anchorId)
+    const anchor = anchors.get(id) ?? { points: [] }
+    if (node.attrs.edge === 'start') anchor.start = position + node.nodeSize
+    else if (node.attrs.edge === 'end') anchor.end = position
+    else anchor.points.push(position + node.nodeSize)
+    anchors.set(id, anchor)
+    return true
+  })
+  const decorations: Decoration[] = []
+  for (const [anchorId, anchor] of anchors) {
+    const record = records.get(anchorId)
+    if (!record || record.status === 'deleted') continue
+    const classes = [`dm-review-${record.kind}`, `dm-review-${record.status}`, markupView === 'simple' ? 'dm-review-simple' : 'dm-review-all'].join(' ')
+    if (anchor.start !== undefined && anchor.end !== undefined && anchor.start < anchor.end) {
+      decorations.push(Decoration.inline(anchor.start, anchor.end, { class: classes, 'data-review-anchor': anchorId }))
+    }
+    for (const position of anchor.points) decorations.push(Decoration.widget(position, () => {
+      const marker = globalThis.document.createElement('button')
+      marker.type = 'button'
+      marker.className = `dm-review-point ${classes}`
+      marker.dataset.reviewAnchor = anchorId
+      marker.setAttribute('aria-label', record.kind === 'thread' ? 'Open point comment' : 'Open point suggestion')
+      marker.textContent = record.kind === 'thread' ? '•' : '±'
+      return marker
+    }, { key: `dm-review-point-${anchorId}-${position}`, side: 1 }))
+  }
+  return DecorationSet.create(document, decorations)
 }
 
 function codeCellNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () => number | undefined, isEditable: () => boolean): NodeView {
@@ -248,8 +319,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   onOutlineChange,
   onInspectRaw,
   onCitationSelect,
+  onReviewSelectionChange,
+  onReviewAnchorSelect,
   resolveAssetUrl,
   citationLabels,
+  markupView = 'all',
   readOnly = false,
   ariaLabel = 'Rendered manuscript editor',
   className = '',
@@ -258,21 +332,37 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const viewRef = useRef<EditorView | null>(null)
   const metadataRef = useRef<StructuredManuscriptMetadata | undefined>(undefined)
   const sourceRef = useRef(source)
-  const lastEmittedRef = useRef<string | undefined>(undefined)
+  const loadedSourceRef = useRef(source)
   const onChangeRef = useRef(onChange)
   const onDiagnosticsRef = useRef(onDiagnostics)
   const onOutlineRef = useRef(onOutlineChange)
   const onInspectRawRef = useRef(onInspectRaw)
   const onCitationSelectRef = useRef(onCitationSelect)
+  const onReviewSelectionRef = useRef(onReviewSelectionChange)
+  const onReviewAnchorSelectRef = useRef(onReviewAnchorSelect)
+  const reviewSelectionSignatureRef = useRef('')
   const resolveAssetUrlRef = useRef(resolveAssetUrl)
   const readOnlyRef = useRef(readOnly)
+  const markupViewRef = useRef(markupView)
+  const reviewDecorationRef = useRef(reviewDecorationIndex(source))
   onChangeRef.current = onChange
   onDiagnosticsRef.current = onDiagnostics
   onOutlineRef.current = onOutlineChange
   onInspectRawRef.current = onInspectRaw
   onCitationSelectRef.current = onCitationSelect
+  onReviewSelectionRef.current = onReviewSelectionChange
+  onReviewAnchorSelectRef.current = onReviewAnchorSelect
   resolveAssetUrlRef.current = resolveAssetUrl
   readOnlyRef.current = readOnly
+  markupViewRef.current = markupView
+
+  const emitReviewSelection = (view: EditorView) => {
+    const selection = selectedReviewText(view)
+    const signature = selection ? `${selection.occurrence}:${selection.quote}` : ''
+    if (signature === reviewSelectionSignatureRef.current) return
+    reviewSelectionSignatureRef.current = signature
+    onReviewSelectionRef.current?.(selection)
+  }
 
   const run = (command: Command) => {
     const view = viewRef.current
@@ -432,6 +522,14 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         spellcheck: 'true',
         class: 'structured-editor-content',
       },
+      decorations: (state) => reviewDecorations(state.doc, reviewDecorationRef.current, markupViewRef.current),
+      handleDOMEvents: {
+        click: (_editorView, event) => {
+          const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-review-anchor]') : null
+          if (target?.dataset.reviewAnchor) onReviewAnchorSelectRef.current?.(target.dataset.reviewAnchor)
+          return false
+        },
+      },
       nodeViews: {
         code_cell: (node, editorView, getPos) => codeCellNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         raw_block: (node) => rawNodeView(node, (nodeId) => onInspectRawRef.current?.(nodeId)),
@@ -442,16 +540,18 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       dispatchTransaction(transaction) {
         const next = view.state.apply(transaction)
         view.updateState(next)
+        emitReviewSelection(view)
         onOutlineRef.current?.(outlineFor(next.doc))
         if (transaction.docChanged && !transaction.getMeta('dm-presentation-only') && metadataRef.current) {
           const serialized = serializeStructuredManuscript(next.doc, metadataRef.current)
-          lastEmittedRef.current = serialized
+          loadedSourceRef.current = serialized
           sourceRef.current = serialized
           onChangeRef.current(serialized)
         }
       },
     })
     viewRef.current = view
+    emitReviewSelection(view)
     return () => {
       viewRef.current = null
       view.destroy()
@@ -460,15 +560,28 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
 
   useEffect(() => {
     sourceRef.current = source
-    if (source === lastEmittedRef.current) return
+    if (source === loadedSourceRef.current) return
     const view = viewRef.current
     if (!view) return
     const parsed = parseStructuredManuscript(source)
+    loadedSourceRef.current = source
+    reviewDecorationRef.current = reviewDecorationIndex(source)
     metadataRef.current = parsed.metadata
     onDiagnosticsRef.current?.(parsed.diagnostics)
     onOutlineRef.current?.(outlineFor(parsed.document))
-    if (!view.state.doc.eq(parsed.document)) view.updateState(editorState(parsed.document))
+    if (!view.state.doc.eq(parsed.document)) {
+      view.updateState(editorState(parsed.document))
+      emitReviewSelection(view)
+    } else {
+      view.dispatch(view.state.tr.setMeta('dm-decoration-refresh', true))
+    }
   }, [source])
+
+  useEffect(() => {
+    markupViewRef.current = markupView
+    const view = viewRef.current
+    if (view) view.dispatch(view.state.tr.setMeta('dm-decoration-refresh', true))
+  }, [markupView])
 
   useEffect(() => {
     const view = viewRef.current

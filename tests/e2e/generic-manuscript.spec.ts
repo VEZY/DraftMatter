@@ -10,6 +10,10 @@ title: "Portable field notes"
 
 This is an arbitrary manuscript with a citation [@vezy2024] and **editable prose**.
 
+A uniquely selected review sentence.
+
+A uniquely selected suggestion sentence.
+
 ~~~julia {#cell-growth .execute output="table"}
 println("before")
 ~~~
@@ -65,6 +69,41 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await citationDetails.getByLabel('Locator').fill('p. 18')
     await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('[@martin2023, p. 18]')
     await citationDetails.getByRole('button', { name: 'Done' }).click()
+
+    await manuscript.getByText('A uniquely selected review sentence.', { exact: true }).selectText()
+    const reviewPanel = page.getByRole('complementary', { name: 'Review feedback' })
+    await reviewPanel.getByRole('button', { name: 'New comment' }).click()
+    const commentComposer = reviewPanel.getByRole('group', { name: 'New comment' })
+    await expect(commentComposer.getByLabel('Exact manuscript text')).toHaveValue('A uniquely selected review sentence.')
+    await commentComposer.getByLabel('Comment').fill('Clarify how this sentence supports the result.')
+    await commentComposer.getByRole('button', { name: 'Add' }).click()
+    await expect(reviewPanel.getByText('Clarify how this sentence supports the result.')).toBeVisible()
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('.draftmatter-reviews')
+    await expect(manuscript.locator('.dm-review-thread')).toContainText('A uniquely selected review sentence.')
+
+    await reviewPanel.getByLabel('Markup view').selectOption('original')
+    await expect(manuscript.getByText('Original preview')).toBeVisible()
+    await expect(page.getByRole('textbox', { name: 'Rendered manuscript editor' })).toHaveAttribute('contenteditable', 'false')
+    await expect(manuscript.locator('.dm-review-thread')).toHaveCount(0)
+    await reviewPanel.getByLabel('Markup view').selectOption('all')
+    await expect(page.getByRole('textbox', { name: 'Rendered manuscript editor' })).toHaveAttribute('contenteditable', 'true')
+    await expect(manuscript.locator('.dm-review-thread')).toContainText('A uniquely selected review sentence.')
+
+    await manuscript.getByText('A uniquely selected suggestion sentence.', { exact: true }).selectText()
+    await reviewPanel.getByRole('button', { name: 'Suggest edit' }).click()
+    const suggestionComposer = reviewPanel.getByRole('group', { name: 'New suggestion' })
+    await expect(suggestionComposer.getByLabel('Exact manuscript text')).toHaveValue('A uniquely selected suggestion sentence.')
+    await suggestionComposer.getByLabel('Replacement').fill('A carefully revised suggestion sentence.')
+    await suggestionComposer.getByRole('button', { name: 'Add' }).click()
+    await reviewPanel.getByRole('button', { name: /A carefully revised suggestion sentence/ }).click()
+    await reviewPanel.getByRole('button', { name: 'Accept' }).click()
+    await expect(reviewPanel.getByText('Accepted')).toBeVisible()
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('A carefully revised suggestion sentence.')
+
+    await reviewPanel.getByLabel('Markup view').selectOption('final')
+    await expect(manuscript.getByText('Final preview')).toBeVisible()
+    await expect(manuscript.getByText('A carefully revised suggestion sentence.', { exact: true })).toBeVisible()
+    await reviewPanel.getByLabel('Markup view').selectOption('all')
 
     await expect(page).toHaveScreenshot('generic-manuscript-editor.png')
   })

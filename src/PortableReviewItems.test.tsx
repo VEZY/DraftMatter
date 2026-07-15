@@ -93,4 +93,25 @@ describe('portable review panel items', () => {
     expect(parsed.ranges.find((range) => range.anchorId === parsed.threads[0].anchorId)?.complete).toBe(true)
     expect(notices.at(-1)).toBe('Portable comment created')
   })
+
+  it('creates a comment on the selected occurrence when the same quote appears twice', async () => {
+    const duplicateSource = '# Duplicate\n\nrepeat first, repeat second.\n'
+    await act(async () => root.render(
+      <PortableReviewItems
+        source={duplicateSource}
+        selectedTarget={{ quote: 'repeat', occurrence: 1 }}
+        onApply={(next, message) => { latestSource = next; notices.push(message) }}
+      />,
+    ))
+
+    await click(button(container, 'New comment'))
+    const composer = container.querySelector('.portable-review-composer')!
+    const fields = composer.querySelectorAll('input, textarea')
+    expect((fields[0] as HTMLInputElement).value).toBe('repeat')
+    await input(fields[1] as HTMLTextAreaElement, 'This comment belongs to the second occurrence.')
+    await click(button(composer, 'Add'))
+
+    expect(latestSource).toMatch(/repeat first, \[\]\{#dm-[^}]+data-edge="start"[^}]*\}repeat\[\]\{#dm-[^}]+data-edge="end"[^}]*\} second\./)
+    expect(notices.at(-1)).toBe('Portable comment created')
+  })
 })
