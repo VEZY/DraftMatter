@@ -1,5 +1,6 @@
 import type { DocumentDiagnostic, DraftState, SectionKey } from './types'
 import { projectPortableReviewSource } from './reviewProjector'
+import { materializePortableDraftSource } from './portableDraft'
 
 const REVIEW_START = '::::: {.draftmatter-reviews .hidden data-schema="1"}'
 const REVIEW_END = ':::::'
@@ -90,6 +91,8 @@ export function projectCleanSource(state: DraftState, view: 'original' | 'final'
 }
 
 export function reviewedProjection(state: DraftState) {
+  const materialized = materializePortableDraftSource(state)
+  if (materialized !== null) return materialized
   const citationKeys = state.citationKeys?.length ? state.citationKeys : state.citationInserted ? ['vezy2024', 'martin2023'] : ['vezy2024']
   const citation = ` [${citationKeys.map((key) => `@${key}`).join('; ')}]`
   const replyBlocks = state.commentReplies

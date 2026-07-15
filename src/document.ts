@@ -131,6 +131,7 @@ function sectionContent(sections: SourceSection[], key: Exclude<SectionKey, 'fro
 }
 
 export function parsePortableDocument(sourceInput: string, fallback: DraftState): ParsedPortableDocument {
+  const originalSource = sourceInput
   const source = sourceInput.replaceAll('\r\n', '\n')
   const diagnostics: DocumentDiagnostic[] = []
   const reviewIndex = source.indexOf(REVIEW_MARKER)
@@ -166,10 +167,28 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
     preservedSections: collectPreservedSections(sections),
   }
 
+  draft.portableEnvelope = {
+    source: originalSource,
+    baseline: {
+      title: draft.title,
+      abstract: draft.abstract,
+      introduction: draft.introduction,
+      methods: draft.methods,
+      resultsLead: draft.resultsLead,
+      code: draft.code,
+      conclusion: draft.conclusion,
+      citationKeys: [...draft.citationKeys],
+      aliceStatus: draft.aliceStatus,
+      marcusStatus: draft.marcusStatus,
+      commentResolved: draft.commentResolved,
+      commentReplies: [...draft.commentReplies],
+    },
+  }
+
   const preservedCount = draft.preservedSections?.length ?? 0
   if (preservedCount) diagnostics.push({ code: 'sections-preserved', level: 'info', message: `${preservedCount} unsupported section${preservedCount === 1 ? '' : 's'} will be preserved in portable exports.` })
 
-  return { draft, diagnostics, sourceHash: sourceHash(source) }
+  return { draft, diagnostics, sourceHash: sourceHash(originalSource) }
 }
 
 export function validateCleanProjection(source: string): DocumentDiagnostic[] {

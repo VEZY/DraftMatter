@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import identicalSource from './fixtures/portable/25-review-identical.qmd?raw'
 import nestedSource from './fixtures/portable/26-review-nested.qmd?raw'
 import crossingSource from './fixtures/portable/27-review-crossing.qmd?raw'
-import { parseReviewMarkup, serializeReviewMarkup, updateReviewRecordStatus } from './reviewMarkup'
+import { parseReviewMarkup, serializeReviewMarkup, updateReviewRecordStatus, updateReviewThreadMessages } from './reviewMarkup'
 
 const completeReviewSource = `---
 title: "Review records"
@@ -118,6 +118,17 @@ describe('DraftMatter Review Markup', () => {
     expect(source).toBe(completeReviewSource.replace('data-status="open" data-created=', 'data-status="accepted" data-created='))
     expect(updated.changes[0].status).toBe('accepted')
     expect(updated.unknownRecords[0].raw).toBe(parsed.unknownRecords[0].raw)
+  })
+
+  it('updates thread messages without reformatting other review records', () => {
+    const parsed = parseReviewMarkup(completeReviewSource)
+    const messages = ['Can we quantify this?', 'Updated reply with a literal fence:\n~~~\nstill inside.', 'A second reply.']
+    const updated = updateReviewThreadMessages(parsed, 'dm-thread', messages)
+    const reopened = parseReviewMarkup(serializeReviewMarkup(updated))
+
+    expect(reopened.threads[0].messages).toEqual(messages)
+    expect(reopened.changes[0].raw).toBe(parsed.changes[0].raw)
+    expect(reopened.unknownRecords[0].raw).toBe(parsed.unknownRecords[0].raw)
   })
 
   it('reports dangling open changes and incomplete anchors', () => {

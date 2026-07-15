@@ -7,6 +7,26 @@ export interface PreservedSection {
   markdown: string
 }
 
+export interface PortableDraftBaseline {
+  title: string
+  abstract: string
+  introduction: string
+  methods: string
+  resultsLead: string
+  code: string
+  conclusion: string
+  citationKeys: string[]
+  aliceStatus: SuggestionStatus
+  marcusStatus: SuggestionStatus
+  commentResolved: boolean
+  commentReplies: string[]
+}
+
+export interface PortableDraftEnvelope {
+  source: string
+  baseline: PortableDraftBaseline
+}
+
 export interface DraftState {
   title: string
   abstract: string
@@ -26,6 +46,7 @@ export interface DraftState {
   lastSavedAt: string
   frontmatterSource?: string
   preservedSections?: PreservedSection[]
+  portableEnvelope?: PortableDraftEnvelope
 }
 
 export interface CitationRecord {

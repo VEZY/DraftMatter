@@ -111,7 +111,7 @@ function parseAttributes(source: string) {
 
 function literalBlocks(body: string) {
   const lines = indexedLines(body)
-  const blocks: { className: string; content: string }[] = []
+  const blocks: { className: string; content: string; start: number; end: number; contentStart: number; contentEnd: number }[] = []
   let index = 0
   while (index < lines.length) {
     const opening = lines[index].content.match(/^[ \t]*(`{3,}|~{3,})\{\.([a-zA-Z][\w-]*)[^}]*\}[ \t]*$/)
@@ -128,6 +128,10 @@ function literalBlocks(body: string) {
     blocks.push({
       className: opening[2],
       content: body.slice(contentStart, contentEnd).replace(/(?:\r\n|\n|\r)$/, ''),
+      start: lines[index].start,
+      end: end < lines.length ? lines[end].end : body.length,
+      contentStart,
+      contentEnd,
     })
     index = end + 1
   }
@@ -312,5 +316,58 @@ export function updateReviewRecordStatus(document: ReviewMarkupDocument, recordI
     ? header.replace(/\bdata-status="[^"]*"/, `data-status="${status}"`)
     : header.replace(/\}[ \t]*$/, ` data-status="${status}"}`)
   const updatedRaw = `${updatedHeader}${headerEnd < 0 ? '' : record.raw.slice(headerEnd)}`
+  return parseReviewMarkup(`${document.source.slice(0, record.start)}${updatedRaw}${document.source.slice(record.end)}`)
+}
+
+function messageFence(message: string) {
+  const longest = Math.max(0, ...[...message.matchAll(/^~+/gm)].map((match) => match[0].length))
+  return '~'.repeat(Math.max(3, longest + 1))
+}
+
+function rewrittenMessageBlock(raw: string, block: ReturnType<typeof literalBlocks>[number], message: string) {
+  const opening = raw.slice(block.start, block.contentStart)
+  const ending = opening.match(/(?:\r\n|\n|\r)$/)?.[0] ?? '\n'
+  const header = opening.slice(0, -ending.length)
+  const marker = header.match(/^(`{3,}|~{3,})/)?.[1] ?? '~~~'
+  const longest = Math.max(0, ...[...message.matchAll(new RegExp(`^\\${marker[0]}+`, 'gm'))].map((match) => match[0].length))
+  if (longest < marker.length) return null
+  const fence = marker[0].repeat(longest + 1)
+  return `${fence}${header.slice(marker.length)}${ending}${message}${ending}${fence}${ending}`
+}
+
+export function updateReviewThreadMessages(document: ReviewMarkupDocument, recordId: string, messages: string[], authorId = 'dm-a01') {
+  const record = document.threads.find((candidate) => candidate.id === recordId)
+  if (!record) throw new Error(`Review thread ${recordId} was not found.`)
+  if (messages.length === 0) throw new Error(`Review thread ${recordId} must retain its opening message.`)
+
+  const blocks = literalBlocks(record.raw).filter((block) => block.className === 'dm-message')
+  if (blocks.length === 0) throw new Error(`Review thread ${recordId} has no message payload.`)
+  const patches: { start: number; end: number; replacement: string }[] = []
+  const retained = Math.min(blocks.length, messages.length)
+  for (let index = 0; index < retained; index += 1) {
+    const rewritten = rewrittenMessageBlock(record.raw, blocks[index], messages[index])
+    if (rewritten !== null) {
+      patches.push({ start: blocks[index].start, end: blocks[index].end, replacement: rewritten })
+    } else {
+      const ending = record.raw.slice(blocks[index].contentStart, blocks[index].contentEnd).match(/(?:\r\n|\n|\r)$/)?.[0] ?? '\n'
+      patches.push({ start: blocks[index].contentStart, end: blocks[index].contentEnd, replacement: `${messages[index]}${ending}` })
+    }
+  }
+  for (let index = messages.length; index < blocks.length; index += 1) {
+    patches.push({ start: blocks[index].start, end: blocks[index].end, replacement: '' })
+  }
+  if (messages.length > blocks.length) {
+    const lineEnding = document.source.includes('\r\n') ? '\r\n' : document.source.includes('\r') ? '\r' : '\n'
+    const added = messages.slice(blocks.length).map((message, offset) => {
+      const fence = messageFence(message)
+      return `${fence}{.dm-message data-author="${authorId}" data-index="${blocks.length + offset}"}${lineEnding}${message}${lineEnding}${fence}${lineEnding}`
+    }).join('')
+    patches.push({ start: blocks.at(-1)!.end, end: blocks.at(-1)!.end, replacement: added })
+  }
+
+  let updatedRaw = record.raw
+  for (const patch of patches.sort((left, right) => right.start - left.start || right.end - left.end)) {
+    updatedRaw = `${updatedRaw.slice(0, patch.start)}${patch.replacement}${updatedRaw.slice(patch.end)}`
+  }
   return parseReviewMarkup(`${document.source.slice(0, record.start)}${updatedRaw}${document.source.slice(record.end)}`)
 }
