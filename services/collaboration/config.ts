@@ -13,6 +13,7 @@ export interface CollaborationServiceConfig {
   }
   oidc: {
     issuer: string
+    clientId: string
     audience: string | string[]
     jwksUri: string
     allowInsecureHttp: boolean
@@ -95,6 +96,7 @@ export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = 
   const jwksUri = httpsUrl(required(environment, 'DM_OIDC_JWKS_URI'), 'DM_OIDC_JWKS_URI', allowInsecureOidc)
   const audiences = required(environment, 'DM_OIDC_AUDIENCE').split(',').map((value) => value.trim()).filter(Boolean)
   if (!audiences.length) throw new CollaborationConfigError('DM_OIDC_AUDIENCE must contain at least one audience.')
+  const clientId = environment.DM_OIDC_CLIENT_ID?.trim() || audiences[0]
   const allowedOrigins = (environment.DM_ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean).map((value) => httpsUrl(value, 'DM_ALLOWED_ORIGINS'))
   if (mode === 'production' && !allowedOrigins.length) throw new CollaborationConfigError('DM_ALLOWED_ORIGINS is required in production.')
 
@@ -127,7 +129,7 @@ export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = 
         ...(accessKeyId && secretAccessKey ? { credentials: { accessKeyId, secretAccessKey } } : {}),
       },
     },
-    oidc: { issuer, audience: audiences.length === 1 ? audiences[0] : audiences, jwksUri, allowInsecureHttp: allowInsecureOidc },
+    oidc: { issuer, clientId, audience: audiences.length === 1 ? audiences[0] : audiences, jwksUri, allowInsecureHttp: allowInsecureOidc },
     webhookSecret: secret(required(environment, 'DM_WEBHOOK_SECRET')),
     allowedOrigins,
     maxPayloadBytes: integer(environment, 'DM_MAX_PAYLOAD_BYTES', 1024 * 1024, 16 * 1024, 16 * 1024 * 1024),

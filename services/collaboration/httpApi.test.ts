@@ -52,6 +52,7 @@ function fixture() {
     dashboard,
     connections: () => 3,
     allowedOrigins: ['https://app.example.test'],
+    publicConfig: { oidcIssuer: 'https://identity.example.test', oidcClientId: 'draftmatter-browser' },
     maxBodyBytes: 1024,
     backups,
   })
@@ -77,6 +78,13 @@ describe('collaboration HTTP API', () => {
     expect(metricBody).toContain('draftmatter_collaboration_update_bytes_total 42')
     expect(metricBody).not.toContain('private-tenant')
     expect(metricBody).not.toContain('private-project')
+  })
+
+  it('publishes only the browser-safe identity configuration without authentication', async () => {
+    const { api } = fixture()
+    const response = await api(request('/config', { headers: { origin: 'https://app.example.test' } }))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-browser' } })
   })
 
   it('routes bearer-authenticated workspace operations and returns strict CORS headers', async () => {

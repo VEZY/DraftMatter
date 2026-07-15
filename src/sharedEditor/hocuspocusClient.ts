@@ -16,7 +16,7 @@ export interface CollaborationClientOptions {
   url: string
   workspaceId: string
   projectId: string
-  token: string
+  token: string | (() => string | Promise<string>)
   bootstrapSource: string
   presence: CollaboratorPresence
   timeoutMs?: number
@@ -76,7 +76,7 @@ export class HocuspocusCollaborationClient {
   static async connect(options: CollaborationClientOptions) {
     const url = validateCollaborationServiceUrl(options.url)
     const name = documentName(options.workspaceId, options.projectId)
-    if (!options.token.trim() || options.token.length > 16_384) throw new Error('A valid short-lived collaboration token is required.')
+    if (typeof options.token === 'string' && (!options.token.trim() || options.token.length > 16_384)) throw new Error('A valid short-lived collaboration token is required.')
     const collaboration = new CollaborativeDocument()
     collaboration.setLocalPresence(options.presence)
     options.onStatus?.('connecting')

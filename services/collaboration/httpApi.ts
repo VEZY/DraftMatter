@@ -22,6 +22,7 @@ export interface CollaborationHttpApiOptions {
   dashboard: CollaborationOperationsDashboard
   connections: () => number
   allowedOrigins: string[]
+  publicConfig: { oidcIssuer: string; oidcClientId: string }
   maxBodyBytes?: number
   maintenanceMetrics?: () => MaintenanceMetrics
   backups?: Pick<PostgresCollaborationStore, 'createBackup' | 'listBackups' | 'verifyBackup' | 'restoreBackup'>
@@ -170,6 +171,9 @@ export function createCollaborationHttpApi(options: CollaborationHttpApiOptions)
       }
       const url = new URL(request.url)
       if (request.method === 'GET' && url.pathname === '/health/live') return json(200, { status: 'live' }, headers)
+      if (request.method === 'GET' && url.pathname === '/config') return json(200, {
+        oidc: { issuer: options.publicConfig.oidcIssuer, clientId: options.publicConfig.oidcClientId },
+      }, headers)
       if (request.method === 'GET' && url.pathname === '/health/ready') {
         await options.readiness()
         return json(200, { status: 'ready' }, headers)

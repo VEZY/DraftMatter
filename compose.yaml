@@ -66,7 +66,8 @@ services:
       DM_OIDC_ISSUER: http://localhost:8080/realms/draftmatter
       DM_OIDC_JWKS_URI: http://keycloak:8080/realms/draftmatter/protocol/openid-connect/certs
       DM_OIDC_AUDIENCE: draftmatter-local
-      DM_ALLOWED_ORIGINS: http://localhost:5173
+      DM_OIDC_CLIENT_ID: draftmatter-local
+      DM_ALLOWED_ORIGINS: http://127.0.0.1:4173,http://localhost:4173
       DM_WEBHOOK_SECRET: ${WEBHOOK_SECRET:-change-this-webhook-secret-with-at-least-32-bytes}
     depends_on:
       postgres:

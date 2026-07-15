@@ -2321,10 +2321,12 @@ function App() {
         onRemoteSource={applyCollaborativeSource}
         onStatus={updateCollaborationStatus}
         onSessionStateChange={updateCollaborationSessionState}
+        onRequestOpen={() => setCollaborationOpen(true)}
         onCheckpoint={checkpointCollaboration}
         onCheckpointStateChange={setCollaborationUncheckpointed}
         checkpointMode={desktopSession ? 'working-tree' : 'download'}
         checkpointTarget={desktopSession?.path ?? filename}
+        canUseBrowserSignIn={!desktopHost.available}
       />
 
       {pendingProject && (

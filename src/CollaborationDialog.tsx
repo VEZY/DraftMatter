@@ -3,8 +3,10 @@ import { CollaborationAccessPanel } from './CollaborationAccessPanel'
 import {
   CollaborationServiceClient,
   normalizeCollaborationServiceUrl,
+  type CollaborationAccessToken,
   type WorkspaceSummary,
 } from './collaboration/serviceClient'
+import { completeOidcAuthorization, hasOidcCallback, prepareOidcAuthorization } from './collaboration/oidcBrowser'
 import type { CollaborationSessionProfile, WorkspaceProject } from './collaboration/workspaceService'
 import { Icon } from './Icon'
 import {
@@ -25,6 +27,9 @@ export interface CollaborationDialogProps {
   onCheckpointStateChange?: (uncheckpointed: boolean) => void
   checkpointMode: 'working-tree' | 'download'
   checkpointTarget: string
+  canUseBrowserSignIn?: boolean
+  onRequestOpen?: () => void
+  navigateToIdentity?: (url: string) => void
 }
 
 function portableId(value: string, fallback: string) {
@@ -43,6 +48,9 @@ export function CollaborationDialog({
   onCheckpointStateChange,
   checkpointMode,
   checkpointTarget,
+  canUseBrowserSignIn = true,
+  onRequestOpen,
+  navigateToIdentity,
 }: CollaborationDialogProps) {
   const [url, setUrl] = useState('https://')
   const [workspaceId, setWorkspaceId] = useState('')
@@ -67,7 +75,8 @@ export function CollaborationDialog({
   const [newProjectId, setNewProjectId] = useState(() => portableId(checkpointTarget.replace(/\.(qmd|md)$/i, ''), 'manuscript'))
   const [invitationToken, setInvitationToken] = useState('')
   const clientRef = useRef<HocuspocusCollaborationClient | null>(null)
-  const accessTokenRef = useRef('')
+  const accessTokenRef = useRef<CollaborationAccessToken | null>(null)
+  const oidcCallbackStartedRef = useRef(false)
   const checkpointedSourceRef = useRef(source)
 
   const updateCheckpointState = (next: boolean) => {
@@ -79,6 +88,23 @@ export function CollaborationDialog({
     setStatus(next)
     setDetail(message)
     onStatus(next)
+  }
+
+  const hydrateServiceClient = async (client: CollaborationServiceClient, preferredWorkspaceId = workspaceId) => {
+    const [nextProfile, available] = await Promise.all([client.getSession(), client.listWorkspaces()])
+    setServiceClient(client)
+    setProfile(nextProfile)
+    setUserId(nextProfile.userId)
+    if (nextProfile.displayName) setName(nextProfile.displayName)
+    setWorkspaces(available)
+    const nextWorkspaceId = available.some((workspace) => workspace.id === preferredWorkspaceId) ? preferredWorkspaceId : available[0]?.id ?? ''
+    setWorkspaceId(nextWorkspaceId)
+    if (nextWorkspaceId) await loadProjects(client, nextWorkspaceId)
+    else {
+      setProjects([])
+      setProjectId('')
+    }
+    setServiceState('ready')
   }
 
   const loadProjects = async (client: CollaborationServiceClient, nextWorkspaceId: string, preferredProjectId = projectId) => {
@@ -93,23 +119,23 @@ export function CollaborationDialog({
     setServiceState('loading')
     setDetail('')
     try {
-      const client = new CollaborationServiceClient(url, accessTokenRef.current)
-      const [nextProfile, available] = await Promise.all([client.getSession(), client.listWorkspaces()])
-      setServiceClient(client)
-      setProfile(nextProfile)
-      setUserId(nextProfile.userId)
-      if (nextProfile.displayName) setName(nextProfile.displayName)
-      setWorkspaces(available)
-      const nextWorkspaceId = available.some((workspace) => workspace.id === workspaceId) ? workspaceId : available[0]?.id ?? ''
-      setWorkspaceId(nextWorkspaceId)
-      if (nextWorkspaceId) await loadProjects(client, nextWorkspaceId)
-      else {
-        setProjects([])
-        setProjectId('')
-      }
-      setServiceState('ready')
+      const client = new CollaborationServiceClient(url, accessTokenRef.current ?? '')
+      await hydrateServiceClient(client)
     } catch (error) {
       setServiceClient(null)
+      setServiceState('idle')
+      setDetail(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const signIn = async () => {
+    if (!canUseBrowserSignIn || serviceState === 'loading') return
+    setServiceState('loading')
+    setDetail('')
+    try {
+      const request = await prepareOidcAuthorization(url, window.location.href, sessionStorage)
+      ;(navigateToIdentity ?? ((nextUrl: string) => window.location.assign(nextUrl)))(request.authorizationUrl)
+    } catch (error) {
       setServiceState('idle')
       setDetail(error instanceof Error ? error.message : String(error))
     }
@@ -193,12 +219,33 @@ export function CollaborationDialog({
     onCheckpointStateChange?.(false)
   }, [])
 
+  useEffect(() => {
+    if (!hasOidcCallback(window.location.href) || oidcCallbackStartedRef.current) return
+    oidcCallbackStartedRef.current = true
+    onRequestOpen?.()
+    setServiceState('loading')
+    setDetail('Completing secure sign-in…')
+    void completeOidcAuthorization(window.location.href, sessionStorage).then(async (result) => {
+      if (!result) return
+      window.history.replaceState({}, '', result.cleanUrl)
+      setUrl(result.serviceUrl)
+      setToken('')
+      accessTokenRef.current = result.token
+      setDetail('')
+      await hydrateServiceClient(new CollaborationServiceClient(result.serviceUrl, result.token), '')
+    }).catch((error) => {
+      setServiceState('idle')
+      setDetail(error instanceof Error ? error.message : String(error))
+    })
+  }, [])
+
   const connect = async () => {
     if (clientRef.current || status === 'connecting') return
     onSessionStateChange?.(true)
     updateStatus('connecting')
     try {
       const accessToken = accessTokenRef.current
+      if (!accessToken) throw new Error('A short-lived collaboration token is required.')
       const urls = serviceClient?.urls ?? normalizeCollaborationServiceUrl(url)
       const client = await HocuspocusCollaborationClient.connect({
         url: urls.websocketUrl,
@@ -286,10 +333,11 @@ export function CollaborationDialog({
           </div>
         ) : (
           <form onSubmit={(event) => { event.preventDefault(); void connect() }}>
-            <div className="collaboration-service-fields"><label><span>Service URL</span><input value={url} onChange={(event) => { setUrl(event.target.value); setServiceClient(null); setServiceState('idle') }} placeholder="https://collab.example.org" inputMode="url" autoCapitalize="none" spellCheck={false} required disabled={serviceState === 'ready'} /><small>Remote services require encrypted HTTPS/WSS transport.</small></label><label><span>Short-lived access token</span><input type="password" value={token} onChange={(event) => { setToken(event.target.value); accessTokenRef.current = event.target.value; setServiceClient(null); setServiceState('idle') }} autoComplete="one-time-code" required disabled={serviceState === 'ready'} /><small>Held in memory only and cleared from this form after connection.</small></label><button type="button" className="collaboration-discover" onClick={() => void discoverWorkspaces()} disabled={!token || serviceState === 'loading'}>{serviceState === 'loading' ? 'Checking account…' : serviceState === 'ready' ? 'Account ready' : 'Find my workspaces'}</button></div>
+            <div className="collaboration-service-fields"><label><span>Service URL</span><input value={url} onChange={(event) => { setUrl(event.target.value); setServiceClient(null); setServiceState('idle') }} placeholder="https://collab.example.org" inputMode="url" autoCapitalize="none" spellCheck={false} required disabled={serviceState === 'ready'} /><small>Remote services require encrypted HTTPS/WSS transport.</small></label><label><span>Short-lived access token</span><input type="password" value={token} onChange={(event) => { setToken(event.target.value); accessTokenRef.current = event.target.value; setServiceClient(null); setServiceState('idle') }} autoComplete="one-time-code" required={false} disabled={serviceState === 'ready'} /><small>Advanced fallback · held in memory and cleared from this form after connection.</small></label><button type="button" className="collaboration-discover" onClick={() => void discoverWorkspaces()} disabled={!token || serviceState === 'loading'}>{serviceState === 'loading' ? 'Checking account…' : serviceState === 'ready' ? 'Account ready' : 'Use access token'}</button></div>
+            {canUseBrowserSignIn && !serviceClient && <div className="collaboration-oidc"><span><Icon name="users" size={16} /><span><strong>Workspace account</strong><small>Authorization Code + PKCE · no password is shared with DraftMatter</small></span></span><button type="button" onClick={() => void signIn()} disabled={serviceState === 'loading' || url === 'https://' || url === 'wss://'}>{serviceState === 'loading' ? 'Opening sign-in…' : 'Sign in securely'}</button></div>}
 
             {serviceClient ? <div className="collaboration-workspace-browser">
-              <div className="collaboration-account"><Icon name="check" size={15} /><span><strong>{profile?.displayName ?? profile?.email ?? profile?.userId ?? 'Authenticated account'}</strong><small>{workspaces.length ? `${workspaces.length} accessible workspace${workspaces.length === 1 ? '' : 's'}` : 'No workspace yet · create one below'}</small></span><button type="button" onClick={() => { setServiceClient(null); setServiceState('idle'); setProfile(null); setWorkspaces([]); setProjects([]); setToken(''); accessTokenRef.current = '' }}>Change</button></div>
+              <div className="collaboration-account"><Icon name="check" size={15} /><span><strong>{profile?.displayName ?? profile?.email ?? profile?.userId ?? 'Authenticated account'}</strong><small>{workspaces.length ? `${workspaces.length} accessible workspace${workspaces.length === 1 ? '' : 's'}` : 'No workspace yet · create one below'}</small></span><button type="button" onClick={() => { setServiceClient(null); setServiceState('idle'); setProfile(null); setWorkspaces([]); setProjects([]); setToken(''); accessTokenRef.current = null }}>Change</button></div>
               {workspaces.length > 0 && <div className="collaboration-fields"><label><span>Workspace</span><select value={workspaceId} onChange={(event) => void chooseWorkspace(event.target.value)} required>{workspaces.map((workspace) => <option value={workspace.id} key={workspace.id}>{workspace.name} · {workspace.role}</option>)}</select></label><label><span>Project</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} required>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select><small>{projects.length ? 'Joining synchronizes this portable manuscript.' : 'Create a project to publish this manuscript.'}</small></label></div>}
               <div className="collaboration-browser-actions"><button type="button" onClick={() => setCreateMode(createMode === 'workspace' ? null : 'workspace')}><Icon name="plus" size={13} />Workspace</button><button type="button" onClick={() => setCreateMode(createMode === 'project' ? null : 'project')} disabled={!workspaceId}><Icon name="plus" size={13} />Project</button></div>
               {createMode === 'workspace' && <div className="collaboration-create-row"><label><span>Workspace name</span><input value={newWorkspaceName} onChange={(event) => { setNewWorkspaceName(event.target.value); setNewWorkspaceId(portableId(event.target.value, 'workspace')) }} placeholder="Forest systems lab" /></label><label><span>Portable ID</span><input value={newWorkspaceId} onChange={(event) => setNewWorkspaceId(event.target.value)} autoCapitalize="none" spellCheck={false} /></label><button type="button" onClick={() => void createWorkspace()} disabled={!newWorkspaceName.trim()}>Create</button></div>}

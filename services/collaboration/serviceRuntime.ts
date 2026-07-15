@@ -50,6 +50,7 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
     dashboard: persistence.dashboard,
     connections: () => server?.hocuspocus.getConnectionsCount() ?? 0,
     allowedOrigins: config.allowedOrigins,
+    publicConfig: { oidcIssuer: config.oidc.issuer, oidcClientId: config.oidc.clientId },
     maintenanceMetrics: () => maintenance.snapshot(),
     backups: persistence,
   })

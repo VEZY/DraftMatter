@@ -13,6 +13,7 @@ function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
     DM_OIDC_ISSUER: 'https://identity.example.test',
     DM_OIDC_JWKS_URI: 'https://identity.example.test/.well-known/jwks.json',
     DM_OIDC_AUDIENCE: 'draftmatter-collaboration',
+    DM_OIDC_CLIENT_ID: 'draftmatter-browser',
     DM_WEBHOOK_SECRET: 'a-32-byte-minimum-webhook-secret-value',
     ...overrides,
   }
@@ -25,10 +26,14 @@ describe('collaboration service configuration', () => {
       port: 4123,
       database: { ssl: false, application_name: 'draftmatter-collaboration' },
       objectStorage: { bucket: 'draftmatter', client: { endpoint: 'http://minio:9000', forcePathStyle: true } },
-      oidc: { issuer: 'https://identity.example.test', audience: 'draftmatter-collaboration' },
+      oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-browser', audience: 'draftmatter-collaboration' },
       allowedOrigins: ['https://app.example.test'],
     })
     expect(config.webhookSecret.byteLength).toBeGreaterThanOrEqual(32)
+  })
+
+  it('defaults the public client ID to the first accepted audience', () => {
+    expect(loadCollaborationServiceConfig(environment({ DM_OIDC_CLIENT_ID: '' })).oidc.clientId).toBe('draftmatter-collaboration')
   })
 
   it('fails closed for missing secrets, insecure remote identity, and empty production origins', () => {

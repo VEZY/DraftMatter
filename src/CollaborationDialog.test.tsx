@@ -20,6 +20,7 @@ function change(field: HTMLInputElement, value: string) {
 afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
+  sessionStorage.clear()
 })
 
 describe('collaboration dialog', () => {
@@ -119,7 +120,7 @@ describe('collaboration dialog', () => {
     change(input(container, 'Service URL'), 'https://collab.example.org')
     change(input(container, 'Short-lived access token'), 'identity-token')
     await act(async () => {
-      [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Find my workspaces')!.click()
+      [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Use access token')!.click()
       await new Promise((resolve) => window.setTimeout(resolve, 0))
     })
 
@@ -138,6 +139,43 @@ describe('collaboration dialog', () => {
       presence: expect.objectContaining({ userId: 'account-42', name: 'Dr Researcher' }),
     }))
     expect(container.textContent).toContain('Workspace access & recovery')
+    await act(async () => root.unmount())
+  })
+
+  it('starts browser account sign-in with S256 PKCE and no password handoff', async () => {
+    const request = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-browser' } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        issuer: 'https://identity.example.test',
+        authorization_endpoint: 'https://identity.example.test/authorize',
+        token_endpoint: 'https://identity.example.test/token',
+        code_challenge_methods_supported: ['S256'],
+      }), { status: 200 }))
+    vi.stubGlobal('fetch', request)
+    const navigateToIdentity = vi.fn()
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<CollaborationDialog
+      open
+      source="# Draft"
+      onClose={vi.fn()}
+      onRemoteSource={vi.fn()}
+      onStatus={vi.fn()}
+      onCheckpoint={vi.fn().mockResolvedValue(undefined)}
+      checkpointMode="download"
+      checkpointTarget="paper.qmd"
+      navigateToIdentity={navigateToIdentity}
+    />))
+    change(input(container, 'Service URL'), 'https://collab.example.org')
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Sign in securely')!.click())
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 40)) })
+
+    expect(navigateToIdentity).toHaveBeenCalledTimes(1)
+    const authorization = new URL(navigateToIdentity.mock.calls[0][0])
+    expect(authorization.origin + authorization.pathname).toBe('https://identity.example.test/authorize')
+    expect(authorization.searchParams.get('code_challenge_method')).toBe('S256')
+    expect(sessionStorage.length).toBe(1)
+    expect([...Array(sessionStorage.length)].map((_, index) => sessionStorage.getItem(sessionStorage.key(index)!)).join('')).not.toContain('access_token')
     await act(async () => root.unmount())
   })
 })

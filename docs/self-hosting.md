@@ -14,9 +14,9 @@ The checked-in Compose stack is a development and evaluation environment. It use
    ```
 
 3. Check `http://localhost:1234/health/ready`. Keycloak is available only on loopback at `http://localhost:8080`.
-4. Run the web client with `npm run dev`. Its collaboration workspace uses `ws://localhost:1234`, the `draftmatter` Keycloak realm, and the `draftmatter-local` client.
+4. Run the web client with `npm run dev`, open `http://127.0.0.1:4173`, enter `http://localhost:1234` as the collaboration service, and choose **Sign in securely**. The browser uses Authorization Code + S256 PKCE with the `draftmatter` Keycloak realm and the public `draftmatter-local` client; neither the password nor a client secret is sent to DraftMatter.
 
-The imported realm contains `alice` / `alice-local-only` and `bob` / `bob-local-only` solely for local evaluation. A direct-grant access token can be requested from:
+The imported realm contains `alice` / `alice-local-only` and `bob` / `bob-local-only` solely for local evaluation. The password grant remains enabled only as an advanced test fallback. A short-lived access token can be requested from:
 
 ```text
 POST http://localhost:8080/realms/draftmatter/protocol/openid-connect/token
@@ -25,7 +25,7 @@ Content-Type: application/x-www-form-urlencoded
 client_id=draftmatter-local&grant_type=password&username=alice&password=alice-local-only
 ```
 
-Paste the returned `access_token` into the collaboration connection panel. Never expose this development realm or its fixture credentials to a network.
+Paste the returned `access_token` into the collaboration connection panel’s advanced fallback field. Never expose this development realm or its fixture credentials to a network.
 
 Stop containers without deleting data using `docker compose down`. Add `--volumes` only when you explicitly want to erase both PostgreSQL and object-storage state.
 
@@ -35,11 +35,12 @@ The container starts only after database migrations, a PostgreSQL query, and an 
 
 - `/health/live` for process liveness;
 - `/health/ready` for dependency readiness;
+- `/config` for the browser-safe OIDC issuer and public client ID only;
 - `/metrics` for aggregate Prometheus counters without workspace, project, user, token, or manuscript labels;
 - `/api/...` for bearer-authenticated workspace administration and signed entitlement updates;
 - the Hocuspocus WebSocket protocol on the same port.
 
-Use an HTTPS reverse proxy or load balancer with WebSocket support. In production, `DM_OIDC_ISSUER`, `DM_OIDC_JWKS_URI`, and every allowed browser origin must use HTTPS; insecure internal JWKS URLs are accepted only when `NODE_ENV` is not `production`. Keep PostgreSQL and object storage on private networks, use verified database TLS, use encrypted object storage, and inject credentials through a secrets manager rather than an environment file checked into an image.
+Use an HTTPS reverse proxy or load balancer with WebSocket support. In production, `DM_OIDC_ISSUER`, `DM_OIDC_JWKS_URI`, and every allowed browser origin must use HTTPS; insecure internal JWKS URLs are accepted only when `NODE_ENV` is not `production`. Register each hosted browser origin as an exact redirect URI and web origin at the identity provider, configure `DM_OIDC_CLIENT_ID` as a public PKCE client without a secret, and keep access/rotating refresh tokens short-lived. DraftMatter holds those tokens in memory only. Keep PostgreSQL and object storage on private networks, use verified database TLS, use encrypted object storage, and inject credentials through a secrets manager rather than an environment file checked into an image.
 
 Required variables and safe development defaults are documented in `.env.example` and validated in `services/collaboration/config.ts`. Important production choices are:
 

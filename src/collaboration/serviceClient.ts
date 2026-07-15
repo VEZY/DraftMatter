@@ -49,6 +49,8 @@ export class CollaborationServiceError extends Error {
   }
 }
 
+export type CollaborationAccessToken = string | (() => string | Promise<string>)
+
 function isLoopback(hostname: string) {
   return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]'
 }
@@ -82,14 +84,20 @@ function encoded(value: string) {
 export class CollaborationServiceClient {
   readonly urls: CollaborationServiceUrls
 
-  constructor(serviceUrl: string, private readonly accessToken: string, private readonly request: typeof fetch = fetch) {
+  constructor(serviceUrl: string, private readonly accessToken: CollaborationAccessToken, private readonly request: typeof fetch = fetch) {
     this.urls = normalizeCollaborationServiceUrl(serviceUrl)
-    if (!accessToken.trim() || accessToken.length > 16_384) throw new Error('A valid short-lived access token is required.')
+    if (typeof accessToken === 'string' && (!accessToken.trim() || accessToken.length > 16_384)) throw new Error('A valid short-lived access token is required.')
+  }
+
+  private async token() {
+    const token = typeof this.accessToken === 'function' ? await this.accessToken() : this.accessToken
+    if (!token.trim() || token.length > 16_384) throw new Error('The short-lived collaboration token is unavailable or expired.')
+    return token
   }
 
   private async call<T>(path: string, init: RequestInit = {}): Promise<T> {
     const headers = new Headers(init.headers)
-    headers.set('authorization', `Bearer ${this.accessToken}`)
+    headers.set('authorization', `Bearer ${await this.token()}`)
     if (init.body !== undefined) headers.set('content-type', 'application/json')
     const response = await this.request(`${this.urls.apiUrl}${path}`, { ...init, headers })
     if (!response.ok) {

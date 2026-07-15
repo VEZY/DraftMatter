@@ -3622,6 +3622,13 @@ kbd {
 .collaboration-service-fields { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 12px; }
 .collaboration-discover { height: 38px; padding: 0 13px; border: 1px solid #ccd5d1; border-radius: 7px; background: #f8faf9; color: var(--sage-dark); font-size: 10px; font-weight: 750; white-space: nowrap; }
 .collaboration-discover:disabled { color: #89938f; }
+.collaboration-oidc { display: flex; align-items: center; gap: 16px; padding: 12px 13px; border: 1px solid #d9e2de; border-radius: 9px; background: linear-gradient(145deg, #f8fbf9, #f3f7f5); }
+.collaboration-oidc > span { display: flex; min-width: 0; flex: 1; align-items: center; gap: 9px; color: #527565; }
+.collaboration-oidc > span > span { display: flex; flex-direction: column; gap: 2px; }
+.collaboration-oidc strong { color: var(--ink); font-size: 11px; }
+.collaboration-oidc small { color: var(--muted); font-size: 9px; }
+.collaboration-oidc button { min-height: 34px; padding: 0 13px; border: 1px solid var(--sage-dark); border-radius: 7px; background: var(--sage-dark); color: #fff; font-size: 10px; font-weight: 750; }
+.collaboration-oidc button:disabled { opacity: .55; }
 .collaboration-workspace-browser { display: flex; flex-direction: column; gap: 13px; padding: 14px; border: 1px solid #dde4e1; border-radius: 10px; background: #fafcfb; }
 .collaboration-account { display: flex; align-items: center; gap: 9px; padding-bottom: 11px; border-bottom: 1px solid #e5e9e7; color: #557467; }
 .collaboration-account > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
@@ -3718,6 +3725,8 @@ kbd {
   .collaboration-people { grid-template-columns: 1fr; }
   .collaboration-service-fields { align-items: stretch; }
   .collaboration-discover { justify-self: start; }
+  .collaboration-oidc { align-items: stretch; flex-direction: column; }
+  .collaboration-oidc button { align-self: flex-start; }
   .collaboration-checkpoint { align-items: stretch; flex-direction: column; }
   .collaboration-checkpoint button { align-self: flex-start; }
 }
