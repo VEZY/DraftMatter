@@ -43,6 +43,42 @@ export interface SaveDocumentResult {
   recoveryPath: string | null
 }
 
+export interface ZoteroStatus {
+  available: boolean
+  zoteroVersion?: string
+  apiVersion?: string
+  schemaVersion?: string
+  message?: string
+}
+
+export interface ZoteroCreator {
+  creatorType: string
+  firstName?: string
+  lastName?: string
+  name?: string
+}
+
+export interface ZoteroItem {
+  itemKey: string
+  version: number
+  itemType: string
+  title: string
+  creators: ZoteroCreator[]
+  date?: string
+  publicationTitle?: string
+  doi?: string
+  url?: string
+  extra?: string
+  citationKey?: string
+}
+
+export interface ZoteroSearchResult {
+  items: ZoteroItem[]
+  libraryVersion?: string
+  apiVersion?: string
+  schemaVersion?: string
+}
+
 export type DocumentStatus =
   | { kind: 'current'; hash: string; modifiedMs: number }
   | { kind: 'modified'; hash: string; modifiedMs: number }
@@ -50,7 +86,7 @@ export type DocumentStatus =
   | { kind: 'deleted' }
 
 export interface HostFailure {
-  kind: 'invalidPath' | 'notFound' | 'unsupportedFile' | 'conflict' | 'io' | 'invalidProject' | 'unknown'
+  kind: 'invalidPath' | 'notFound' | 'unsupportedFile' | 'conflict' | 'io' | 'invalidProject' | 'integration' | 'unknown'
   message: string
 }
 
@@ -108,6 +144,12 @@ export function createDesktopHost(
     },
     setMainDocument(root: string, path: string) {
       return invokeBridge<ProjectSnapshot>('set_main_document', { root, path })
+    },
+    zoteroStatus() {
+      return invokeBridge<ZoteroStatus>('zotero_status')
+    },
+    searchZotero(query: string, limit = 25) {
+      return invokeBridge<ZoteroSearchResult>('zotero_search', { query, limit })
     },
   }
 }

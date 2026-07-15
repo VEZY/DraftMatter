@@ -1034,6 +1034,11 @@ button:disabled {
   background: #5d7d6f;
 }
 
+.source-icon.zotero {
+  background: #f6eceb;
+  color: #8b4945;
+}
+
 .citation-detail-top > div {
   flex: 1;
 }
@@ -1974,6 +1979,38 @@ kbd {
   gap: 4px;
   letter-spacing: 0;
   text-transform: none;
+}
+
+.picker-filter > span {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.zotero-state {
+  align-items: center;
+  color: #7c8781;
+  display: flex;
+  font-size: 8px;
+  font-weight: 500;
+  gap: 5px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.zotero-state i {
+  background: #b5bdb8;
+  border-radius: 50%;
+  height: 5px;
+  width: 5px;
+}
+
+.zotero-state.available i {
+  background: var(--sage);
+}
+
+.zotero-state.unavailable i {
+  background: #b98a80;
 }
 
 .source-result {

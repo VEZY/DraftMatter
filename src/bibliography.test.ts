@@ -33,6 +33,28 @@ describe('local bibliography', () => {
     expect(mergeCitationRecords(sampleCitations, [sampleCitations[0], duplicate])).toHaveLength(sampleCitations.length)
   })
 
+  it('refreshes newer Zotero metadata by item identity without changing its cached citekey', () => {
+    const cached = {
+      ...sampleCitations[0],
+      citekey: 'stable-key',
+      title: 'Earlier metadata',
+      source: 'zotero' as const,
+      sourceIdentity: { provider: 'zotero' as const, itemKey: 'PXW99EKT', itemVersion: 12, libraryVersion: '90' },
+    }
+    const refreshed = {
+      ...cached,
+      citekey: 'changed-in-better-bibtex',
+      title: 'Refreshed metadata',
+      sourceIdentity: { ...cached.sourceIdentity, itemVersion: 13, libraryVersion: '91' },
+    }
+
+    expect(mergeCitationRecords([cached], [refreshed])).toEqual([{
+      ...refreshed,
+      citekey: 'stable-key',
+    }])
+    expect(mergeCitationRecords([refreshed], [cached])).toEqual([refreshed])
+  })
+
   it('searches title, author, year, and identifiers', () => {
     expect(searchCitations(sampleCitations, 'Coutellier drought').map((record) => record.citekey)).toEqual(['coutellier2022'])
     expect(searchCitations(sampleCitations, '19208')[0].citekey).toBe('martin2023')

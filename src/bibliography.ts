@@ -245,16 +245,38 @@ export async function loadProjectBibliographies(
 }
 
 export function mergeCitationRecords(existing: CitationRecord[], incoming: CitationRecord[]) {
-  const byKey = new Map(existing.map((record) => [record.citekey.toLowerCase(), record]))
-  const dois = new Set(existing.map((record) => record.doi?.toLowerCase()).filter(Boolean))
+  const records = [...existing]
+  const byKey = new Map(records.map((record, index) => [record.citekey.toLowerCase(), index]))
+  const byDoi = new Map(records.flatMap((record, index) => record.doi ? [[record.doi.toLowerCase(), index] as const] : []))
+  const bySourceIdentity = new Map<string, number>(records.flatMap((record, index) => record.sourceIdentity
+    ? [[`${record.sourceIdentity.provider}:${record.sourceIdentity.itemKey}`, index] as const]
+    : []))
   for (const record of incoming) {
     const key = record.citekey.toLowerCase()
     const doi = record.doi?.toLowerCase()
-    if (byKey.has(key) || (doi && dois.has(doi))) continue
-    byKey.set(key, record)
-    if (doi) dois.add(doi)
+    const sourceIdentity = record.sourceIdentity
+      ? `${record.sourceIdentity.provider}:${record.sourceIdentity.itemKey}`
+      : undefined
+    const identityIndex = sourceIdentity ? bySourceIdentity.get(sourceIdentity) : undefined
+    if (identityIndex !== undefined) {
+      const current = records[identityIndex]
+      if (
+        current.sourceIdentity
+        && record.sourceIdentity
+        && record.sourceIdentity.itemVersion > current.sourceIdentity.itemVersion
+      ) {
+        records[identityIndex] = { ...record, citekey: current.citekey }
+      }
+      continue
+    }
+    if (byKey.has(key) || (doi && byDoi.has(doi))) continue
+    const index = records.length
+    records.push(record)
+    byKey.set(key, index)
+    if (doi) byDoi.set(doi, index)
+    if (sourceIdentity) bySourceIdentity.set(sourceIdentity, index)
   }
-  return [...byKey.values()]
+  return records
 }
 
 function familyName(author: string) {

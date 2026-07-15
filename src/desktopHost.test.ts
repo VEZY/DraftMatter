@@ -23,6 +23,8 @@ describe('desktop host adapter', () => {
     await host.saveDocument({ root: '/research/canopy', path: 'paper.qmd', content: '# Paper', expectedHash: 'old' })
     await host.documentStatus('/research/canopy', 'paper.qmd', 'next')
     await host.setMainDocument('/research/canopy', 'renamed.qmd')
+    await host.zoteroStatus()
+    await host.searchZotero('canopy water', 12)
 
     expect(calls).toEqual([
       ['open_project', { root: '/research/canopy' }],
@@ -31,6 +33,8 @@ describe('desktop host adapter', () => {
       ['save_document', { request: { root: '/research/canopy', path: 'paper.qmd', content: '# Paper', expectedHash: 'old' } }],
       ['document_status', { root: '/research/canopy', path: 'paper.qmd', expectedHash: 'next' }],
       ['set_main_document', { root: '/research/canopy', path: 'renamed.qmd' }],
+      ['zotero_status', undefined],
+      ['zotero_search', { query: 'canopy water', limit: 12 }],
     ])
   })
 

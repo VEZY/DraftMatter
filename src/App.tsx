@@ -11,11 +11,13 @@ import { sampleCitations } from './sampleCitations'
 import { initialDraft } from './sampleDraft'
 import { readRecoverySnapshots, saveRecoverySnapshot, type RecoverySnapshot } from './storage'
 import type { CitationRecord, DocumentDiagnostic, DraftState, MarkupView, SuggestionStatus } from './types'
+import { queryZoteroLibrary, type ZoteroVersionStamp } from './zotero'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
 const CITATIONS_KEY = 'draftmatter.citations.v1'
 const LAST_PROJECT_ROOT_KEY = 'draftmatter.last-project-root.v1'
+const ZOTERO_VERSION_KEY = 'draftmatter.zotero-version.v1'
 
 interface DesktopSession {
   root: string
@@ -47,6 +49,14 @@ function getInitialDraft(): DraftState {
     return saved ? { ...initialDraft, ...JSON.parse(saved) } : initialDraft
   } catch {
     return initialDraft
+  }
+}
+
+function getInitialZoteroVersion(): ZoteroVersionStamp {
+  try {
+    return JSON.parse(localStorage.getItem(ZOTERO_VERSION_KEY) ?? '{}')
+  } catch {
+    return {}
   }
 }
 
@@ -102,6 +112,8 @@ function App() {
   const [projectName, setProjectName] = useState(initialProjectMeta.projectName)
   const [diagnostics, setDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [bibliographyDiagnostics, setBibliographyDiagnostics] = useState<DocumentDiagnostic[]>([])
+  const [zoteroDiagnostics, setZoteroDiagnostics] = useState<DocumentDiagnostic[]>([])
+  const [zoteroState, setZoteroState] = useState<'idle' | 'searching' | 'available' | 'unavailable' | 'desktop-only'>('idle')
   const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>(() => readRecoverySnapshots(localStorage))
   const [citations, setCitations] = useState<CitationRecord[]>(getInitialCitations)
   const [citationQuery, setCitationQuery] = useState('')
@@ -120,6 +132,7 @@ function App() {
   const desktopSaveQueueRef = useRef<Promise<void>>(Promise.resolve())
   const externalCheckRunningRef = useRef(false)
   const reopenAttemptedRef = useRef(false)
+  const zoteroVersionRef = useRef<ZoteroVersionStamp>(getInitialZoteroVersion())
 
   const writeRecoverySnapshot = (nextDraft: DraftState, nextFilename: string, source: string, savedAt?: string) => {
     try {
@@ -141,7 +154,7 @@ function App() {
   const citationResults = useMemo(() => searchCitations(citations, citationQuery).slice(0, 8), [citations, citationQuery])
   const citationLabel = useMemo(() => formatCitationCluster(citations, draft.citationKeys), [citations, draft.citationKeys])
   const primaryCitation = citations.find((record) => record.citekey === draft.citationKeys[0]) ?? citations[0]
-  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics]
+  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...zoteroDiagnostics]
 
   const replaceDesktopSession = (next: DesktopSession | null) => {
     desktopSessionRef.current = next
@@ -316,8 +329,55 @@ function App() {
   }, [filename, projectName])
 
   useEffect(() => {
-    localStorage.setItem(CITATIONS_KEY, JSON.stringify(citations))
+    try {
+      localStorage.setItem(CITATIONS_KEY, JSON.stringify(citations))
+    } catch {
+      setBibliographyDiagnostics((current) => [...current.filter((diagnostic) => diagnostic.code !== 'citation-cache-unavailable'), {
+        code: 'citation-cache-unavailable',
+        level: 'warning',
+        message: 'Citation changes remain available for this session, but the local citation cache could not be stored.',
+      }])
+    }
   }, [citations])
+
+  useEffect(() => {
+    if (!citationSearchOpen) return
+    if (!desktopHost.available) {
+      setZoteroState('desktop-only')
+      return
+    }
+
+    let disposed = false
+    const timeout = window.setTimeout(async () => {
+      setZoteroState('searching')
+      const result = await queryZoteroLibrary({
+        status: () => desktopHost.zoteroStatus(),
+        search: (query, limit) => desktopHost.searchZotero(query, limit),
+      }, citationQuery, zoteroVersionRef.current)
+      if (disposed) return
+
+      setZoteroState(result.available ? 'available' : 'unavailable')
+      setZoteroDiagnostics(result.diagnostics)
+      if (!result.available) return
+
+      setCitations((current) => mergeCitationRecords(current, result.records))
+      zoteroVersionRef.current = result.version
+      try {
+        localStorage.setItem(ZOTERO_VERSION_KEY, JSON.stringify(result.version))
+      } catch {
+        setZoteroDiagnostics((current) => [...current, {
+          code: 'zotero-version-cache-unavailable',
+          level: 'warning',
+          message: 'Zotero results remain available for this session, but the local version stamp could not be stored.',
+        }])
+      }
+    }, 280)
+
+    return () => {
+      disposed = true
+      window.clearTimeout(timeout)
+    }
+  }, [citationQuery, citationSearchOpen])
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
@@ -646,6 +706,7 @@ function App() {
   }
 
   const addCitation = (record: CitationRecord) => {
+    setCitations((current) => mergeCitationRecords(current, [record]))
     if (draft.citationKeys.includes(record.citekey)) {
       setToast(`${record.citekey} is already cited here`)
       setCitationSearchOpen(false)
@@ -1092,17 +1153,29 @@ function App() {
           <div className="citation-picker" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Insert citation">
             <div className="picker-search"><Icon name="search" /><input autoFocus value={citationQuery} onChange={(event) => setCitationQuery(event.target.value)} placeholder="Search authors, titles, years, or DOI…" /><kbd>esc</kbd></div>
             <div className="picker-body">
-              <div className="picker-filter"><span>{citationResults.length} matching source{citationResults.length === 1 ? '' : 's'}</span><button onClick={() => bibliographyInputRef.current?.click()}>Import bibliography <Icon name="plus" size={13} /></button></div>
+              <div className="picker-filter">
+                <span>
+                  {citationResults.length} matching source{citationResults.length === 1 ? '' : 's'}
+                  <small className={`zotero-state ${zoteroState}`}><i />{
+                    zoteroState === 'searching' ? 'Searching Zotero…'
+                      : zoteroState === 'available' ? 'Zotero connected'
+                        : zoteroState === 'unavailable' ? 'Zotero unavailable · cached sources shown'
+                          : zoteroState === 'desktop-only' ? 'Zotero search is available in the desktop app'
+                            : 'Project and cached sources'
+                  }</small>
+                </span>
+                <button onClick={() => bibliographyInputRef.current?.click()}>Import bibliography <Icon name="plus" size={13} /></button>
+              </div>
               {citationResults.length ? citationResults.map((record) => {
                 const isCited = draft.citationKeys.includes(record.citekey)
                 return (
                   <button className={`source-result ${isCited ? 'selected' : ''}`} key={record.citekey} onClick={() => addCitation(record)}>
-                    <span className={`source-icon ${record.source === 'bibtex' ? 'bib' : ''}`}>{record.source === 'bibtex' ? 'B' : record.source === 'csl-json' ? 'C' : 'L'}</span>
+                    <span className={`source-icon ${record.source === 'bibtex' ? 'bib' : record.source === 'zotero' ? 'zotero' : ''}`}>{record.source === 'bibtex' ? 'B' : record.source === 'csl-json' ? 'C' : record.source === 'zotero' ? 'Z' : 'L'}</span>
                     <span><strong>{record.title}</strong><small>{record.authors.length ? record.authors.slice(0, 2).join(' & ') : record.citekey}{record.year ? ` · ${record.year}` : ''}{record.container ? ` · ${record.container}` : ''}</small><em>{record.doi ?? `@${record.citekey}`}</em></span>
                     {isCited ? <Icon name="check" /> : <Icon name="plus" />}
                   </button>
                 )
-              }) : <div className="citation-empty"><Icon name="search" size={21} /><strong>No matching sources</strong><p>Try fewer terms or import a BibTeX/CSL JSON file.</p></div>}
+              }) : <div className="citation-empty"><Icon name="search" size={21} /><strong>No matching sources</strong><p>Try fewer terms, open Zotero, or import a BibTeX/CSL JSON file.</p></div>}
             </div>
             <div className="picker-footer"><span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Add citation</span><button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={12} /> Import .bib / CSL JSON</button></div>
           </div>

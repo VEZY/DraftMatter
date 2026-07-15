@@ -58,10 +58,16 @@ export interface CitationRecord {
   container?: string
   doi?: string
   url?: string
-  source: 'bibtex' | 'csl-json' | 'sample'
+  source: 'bibtex' | 'csl-json' | 'zotero' | 'sample'
   provenance?: {
-    origin: 'project-file' | 'manual-import' | 'sample'
+    origin: 'project-file' | 'manual-import' | 'zotero-local' | 'sample'
     locator?: string
+  }
+  sourceIdentity?: {
+    provider: 'zotero'
+    itemKey: string
+    itemVersion: number
+    libraryVersion?: string
   }
 }
 
