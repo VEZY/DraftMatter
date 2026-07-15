@@ -42,6 +42,7 @@ import { parseReviewMarkup } from './reviewMarkup'
 import { buildReviewQueue } from './reviewQueue'
 import { printNativeHtml, renderNativeHtmlExport } from './nativeHtmlExport'
 import { renderDocxExport } from './docxExport'
+import { ExternalExportDialog } from './ExternalExportDialog'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
@@ -273,6 +274,7 @@ function App() {
   const [runtimeInventory, setRuntimeInventory] = useState<RuntimeInventory>()
   const [runtimeDiscoveryState, setRuntimeDiscoveryState] = useState<'idle' | 'discovering' | 'ready'>('idle')
   const [environmentOpen, setEnvironmentOpen] = useState(false)
+  const [externalExportSource, setExternalExportSource] = useState<string>()
   const [executionResult, setExecutionResult] = useState<NormalizedExecutionResult>()
   const [executionManifest, setExecutionManifest] = useState<ExecutionManifest>()
   const [executionDiagnostics, setExecutionDiagnostics] = useState<DocumentDiagnostic[]>([])
@@ -1152,6 +1154,22 @@ function App() {
     }
   }
 
+  const openExternalExport = () => {
+    if (!desktopSession) {
+      setExportOpen(false)
+      setToast('Pandoc and Quarto exports are available for desktop project folders')
+      return
+    }
+    const projection = projectCleanSource(draft, 'final')
+    if (!projection.ok) {
+      setExportOpen(false)
+      setToast('External export blocked · resolve the overlapping alternatives')
+      return
+    }
+    setExternalExportSource(projection.source)
+    setExportOpen(false)
+  }
+
   const showReviewPanel = () => {
     setActiveNav('review')
     setRightPanelOpen(true)
@@ -1815,6 +1833,7 @@ function App() {
                 <button onClick={() => exportPublication('html')}><span><strong>Native HTML</strong><small>Semantic, styled, and script-free</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => exportPublication('pdf')}><span><strong>Print / PDF</strong><small>Browser print with clean page styling</small></span><Icon name="arrowRight" /></button>
                 <button onClick={exportDocx}><span><strong>Clean DOCX</strong><small>Native Word document, no tracked-change claim</small></span><Icon name="arrowRight" /></button>
+                <button onClick={openExternalExport}><span><strong>Pandoc / Quarto…</strong><small>Optional separately installed renderer</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => download('final')}><span><strong>Clean final</strong><small>Resolved manuscript, no review data</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => download('original')}><span><strong>Clean original</strong><small>Accepted base before open suggestions</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => download('reviewed')}><span><strong>Portable source</strong><small>QMD with anchors and review records</small></span><Icon name="arrowRight" /></button>
@@ -2208,6 +2227,16 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {externalExportSource && desktopSession && (
+        <ExternalExportDialog
+          root={desktopSession.root}
+          source={externalExportSource}
+          baseName={filename.replace(/\.(qmd|md)$/i, '')}
+          onClose={() => setExternalExportSource(undefined)}
+          onNotice={setToast}
+        />
       )}
 
       {pendingProject && (
