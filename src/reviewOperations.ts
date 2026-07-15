@@ -2,6 +2,7 @@ import {
   parseReviewMarkup,
   updateReviewRecordStatus,
   type ReviewAuthor,
+  type ReviewAnchorContext,
   type ReviewChange,
   type ReviewDecision,
   type ReviewMarkupDocument,
@@ -223,8 +224,23 @@ function literalBlock(className: string, content: string, ending: string) {
   return `${fence}{.${className}}${ending}${content}${ending}${fence}${ending}`
 }
 
-function threadRecord(threadId: string, anchorId: string, authorId: string, message: string, timestamp: string, ending: string) {
-  return `:::: {#${threadId} .dm-thread data-anchor="${anchorId}" data-author="${authorId}" data-status="open" data-created="${timestamp}"}${ending}${messageBlock(message, authorId, timestamp, 0, ending)}::::${ending}`
+function stripAnchorMarkup(value: string) {
+  return value.replace(/\[\]\{[^}\r\n]*\.dm-anchor\b[^}\r\n]*\}/g, '')
+}
+
+function anchorContext(source: string, start: number, end: number): ReviewAnchorContext {
+  const prefix = stripAnchorMarkup(source.slice(Math.max(0, start - 256), start)).slice(-64)
+  const quote = stripAnchorMarkup(source.slice(start, end))
+  const suffix = stripAnchorMarkup(source.slice(end, Math.min(source.length, end + 256))).slice(0, 64)
+  return { quote, prefix, suffix }
+}
+
+function anchorContextBlocks(context: ReviewAnchorContext, ending: string) {
+  return `${literalBlock('dm-anchor-quote', context.quote, ending)}${literalBlock('dm-anchor-prefix', context.prefix, ending)}${literalBlock('dm-anchor-suffix', context.suffix, ending)}`
+}
+
+function threadRecord(threadId: string, anchorId: string, authorId: string, message: string, context: ReviewAnchorContext, timestamp: string, ending: string) {
+  return `:::: {#${threadId} .dm-thread data-anchor="${anchorId}" data-author="${authorId}" data-status="open" data-created="${timestamp}"}${ending}${anchorContextBlocks(context, ending)}${messageBlock(message, authorId, timestamp, 0, ending)}::::${ending}`
 }
 
 function changeRecord(
@@ -234,12 +250,13 @@ function changeRecord(
   kind: ReviewChangeKind,
   proposal: string | undefined,
   rationale: string | undefined,
+  context: ReviewAnchorContext,
   timestamp: string,
   ending: string,
 ) {
   const proposalBlock = proposal === undefined ? '' : literalBlock('dm-proposal', proposal, ending)
   const rationaleBlock = rationale?.trim() ? literalBlock('dm-rationale', rationale, ending) : ''
-  return `:::: {#${changeId} .dm-change data-anchor="${anchorId}" data-kind="${kind}" data-author="${authorId}" data-status="open" data-created="${timestamp}"}${ending}${proposalBlock}${rationaleBlock}::::${ending}`
+  return `:::: {#${changeId} .dm-change data-anchor="${anchorId}" data-kind="${kind}" data-author="${authorId}" data-status="open" data-created="${timestamp}"}${ending}${anchorContextBlocks(context, ending)}${proposalBlock}${rationaleBlock}::::${ending}`
 }
 
 function decisionRecord(decisionId: string, changeId: string, authorId: string, action: 'accepted' | 'rejected', timestamp: string, ending: string) {
@@ -301,7 +318,8 @@ export function createReviewThread(source: string, request: CreateReviewThreadRe
     : `${source.slice(0, request.start)}${startMarker}${source.slice(request.start, request.end)}${marker(endMarkerId!, anchorId, 'end')}${source.slice(request.end)}`
   const anchoredDocument = parseReviewMarkup(anchored)
   const ending = lineEnding(anchored)
-  const additions = `${existingAuthor ? '' : authorRecord(request.author, timestamp, ending)}${threadRecord(threadId, anchorId, request.author.id, request.message, timestamp, ending)}`
+  const context = anchorContext(source, request.start, request.end)
+  const additions = `${existingAuthor ? '' : authorRecord(request.author, timestamp, ending)}${threadRecord(threadId, anchorId, request.author.id, request.message, context, timestamp, ending)}`
   const updated = parseReviewMarkup(appendSectionRecords(anchoredDocument, additions))
   assertWritable(updated)
   return threadResult(updated, threadId)
@@ -398,6 +416,7 @@ export function createReviewChange(source: string, request: CreateReviewChangeRe
     request.kind,
     request.kind === 'delete' ? undefined : request.proposal,
     request.rationale,
+    anchorContext(source, request.start, request.end),
     timestamp,
     ending,
   )}`

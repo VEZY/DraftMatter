@@ -34,6 +34,13 @@ export interface ReviewChange extends ReviewRecordBase {
   status: string
   proposal?: string
   rationale?: string
+  anchorContext?: ReviewAnchorContext
+}
+
+export interface ReviewAnchorContext {
+  quote: string
+  prefix: string
+  suffix: string
 }
 
 export interface ReviewThreadMessage {
@@ -50,6 +57,7 @@ export interface ReviewThread extends ReviewRecordBase {
   status: string
   messages: string[]
   messageRecords: ReviewThreadMessage[]
+  anchorContext?: ReviewAnchorContext
 }
 
 export interface ReviewDecision extends ReviewRecordBase {
@@ -199,7 +207,7 @@ function deriveRanges(anchors: ReviewAnchor[], diagnostics: DocumentDiagnostic[]
     return {
       anchorId,
       start: point?.start ?? start?.end ?? markers[0].start,
-      end: point?.end ?? end?.start ?? markers.at(-1)?.end ?? markers[0].end,
+      end: point?.start ?? end?.start ?? markers.at(-1)?.end ?? markers[0].end,
       markerIds: markers.map((marker) => marker.markerId),
       complete,
     }
@@ -273,6 +281,9 @@ export function parseReviewMarkup(source: string): ReviewMarkupDocument {
       if (parsedAttributes.classes.includes('dm-author')) {
         authors.push({ ...base, kind: 'author', name: parsedAttributes.attributes['data-name'] ?? id })
       } else if (parsedAttributes.classes.includes('dm-change')) {
+        const quote = literals.find((block) => block.className === 'dm-anchor-quote')
+        const prefix = literals.find((block) => block.className === 'dm-anchor-prefix')
+        const suffix = literals.find((block) => block.className === 'dm-anchor-suffix')
         changes.push({
           ...base,
           kind: 'change',
@@ -282,8 +293,12 @@ export function parseReviewMarkup(source: string): ReviewMarkupDocument {
           status: parsedAttributes.attributes['data-status'] ?? 'open',
           proposal: literals.find((block) => block.className === 'dm-proposal')?.content,
           rationale: literals.find((block) => block.className === 'dm-rationale')?.content,
+          ...(quote && prefix && suffix ? { anchorContext: { quote: quote.content, prefix: prefix.content, suffix: suffix.content } } : {}),
         })
       } else if (parsedAttributes.classes.includes('dm-thread')) {
+        const quote = literals.find((block) => block.className === 'dm-anchor-quote')
+        const prefix = literals.find((block) => block.className === 'dm-anchor-prefix')
+        const suffix = literals.find((block) => block.className === 'dm-anchor-suffix')
         const messageRecords = literals.filter((block) => block.className === 'dm-message').map<ReviewThreadMessage>((block) => ({
           content: block.content,
           ...(block.attributes['data-author'] ? { authorId: block.attributes['data-author'] } : {}),
@@ -298,6 +313,7 @@ export function parseReviewMarkup(source: string): ReviewMarkupDocument {
           status: parsedAttributes.attributes['data-status'] ?? 'open',
           messages: messageRecords.map((message) => message.content),
           messageRecords,
+          ...(quote && prefix && suffix ? { anchorContext: { quote: quote.content, prefix: prefix.content, suffix: suffix.content } } : {}),
         })
       } else if (parsedAttributes.classes.includes('dm-decision')) {
         decisions.push({
