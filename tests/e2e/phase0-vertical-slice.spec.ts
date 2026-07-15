@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises'
 import { expect, test } from '@playwright/test'
 
 test.describe('DM-P0-06 rendered vertical slice', () => {
@@ -22,6 +23,18 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
     await expect(page.locator('body')).not.toContainText('.draftmatter-reviews')
 
     await expect(page).toHaveScreenshot('rendered-vertical-slice.png')
+
+    await page.getByRole('button', { name: 'Export' }).click()
+    const reviewDownloadPromise = page.waitForEvent('download')
+    await page.getByRole('button', { name: /Review report/ }).click()
+    const reviewDownload = await reviewDownloadPromise
+    expect(reviewDownload.suggestedFilename()).toBe('canopy-drought.review.md')
+    const reviewDownloadPath = await reviewDownload.path()
+    expect(reviewDownloadPath).not.toBeNull()
+    const reviewReport = await readFile(reviewDownloadPath!, 'utf8')
+    expect(reviewReport).toContain('# DraftMatter review report')
+    expect(reviewReport).toContain('Can we quantify this increase in the main text?')
+    expect(reviewReport).not.toMatch(/\.draftmatter-reviews|\.dm-(?:anchor|change|thread|decision)|data-anchor=/)
 
     await nextReview.click()
     await expect(reviewPosition).toHaveText('2 of 3')

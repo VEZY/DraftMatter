@@ -17,6 +17,7 @@ describe('clean review exports', () => {
     expect(bundle.report).toContain('dm-i01, dm-i02 — identical')
     expect(bundle.report).toContain('leaf area declined by 18%')
     expect(bundle.original).not.toMatch(/\.draftmatter-reviews|\.dm-anchor|data-anchor=/)
+    expect(bundle.report).not.toMatch(/\.draftmatter-reviews|\.dm-(?:anchor|change|thread|decision)|data-anchor=/)
   })
 
   it('exports deterministic clean Final after an explicit decision and logs that decision separately', () => {
@@ -36,6 +37,7 @@ describe('clean review exports', () => {
     expect(first.report).toContain('dm-i01: accepted by Alice Martin at 2026-07-15T16:00:00.000Z')
     expect(first.report).toContain('dm-i02 — Marcus Chen')
     expect(first.report).toContain('Status: needs-rebase')
+    expect(first.report).not.toMatch(/\.draftmatter-reviews|\.dm-(?:anchor|change|thread|decision)|data-anchor=/)
   })
 
   it('escapes raw HTML carried by review messages in the report', () => {

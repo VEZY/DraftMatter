@@ -43,6 +43,7 @@ import { PortableReviewItems } from './PortableReviewItems'
 import { GitHistoryPanel } from './GitHistoryPanel'
 import { buildReviewQueue } from './reviewQueue'
 import { projectPortableReviewSource } from './reviewProjector'
+import { renderReviewReport } from './reviewExport'
 import { printNativeHtml, renderNativeHtmlExport } from './nativeHtmlExport'
 import { renderDocxExport } from './docxExport'
 import { ExternalExportDialog } from './ExternalExportDialog'
@@ -1629,7 +1630,14 @@ function App() {
     setToast(message)
   }
 
-  const download = (kind: 'reviewed' | 'final' | 'original') => {
+  const download = (kind: 'reviewed' | 'final' | 'original' | 'report') => {
+    const base = filename.replace(/\.(qmd|md)$/i, '')
+    if (kind === 'report') {
+      downloadText(`${base}.review.md`, renderReviewReport(manuscriptSource))
+      setExportOpen(false)
+      setToast('Separate review report exported')
+      return
+    }
     let content: string
     if (kind === 'reviewed') {
       content = manuscriptSource
@@ -1647,7 +1655,6 @@ function App() {
       content = projection.source
       setDiagnostics((current) => current.filter((diagnostic) => !diagnostic.code.startsWith('final-projection-')))
     }
-    const base = filename.replace(/\.(qmd|md)$/i, '')
     downloadText(kind === 'reviewed' ? filename : `${base}.${kind}.qmd`, content)
     setExportOpen(false)
     setToast(kind === 'reviewed' ? 'Portable project source exported' : `Clean ${kind} projection exported`)
@@ -2485,6 +2492,7 @@ function App() {
                 <button onClick={openExternalExport}><span><strong>Pandoc / Quarto…</strong><small>Optional separately installed renderer</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => download('final')}><span><strong>Clean final</strong><small>Resolved manuscript, no review data</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => download('original')}><span><strong>Clean original</strong><small>Accepted base before open suggestions</small></span><Icon name="arrowRight" /></button>
+                <button onClick={() => download('report')}><span><strong>Review report</strong><small>Separate Markdown summary, comments, and decisions</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => download('reviewed')}><span><strong>Portable source</strong><small>QMD with anchors and review records</small></span><Icon name="arrowRight" /></button>
               </div>
             )}
