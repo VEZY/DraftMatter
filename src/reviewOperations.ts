@@ -2,10 +2,13 @@ import {
   parseReviewMarkup,
   updateReviewRecordStatus,
   type ReviewAuthor,
+  type ReviewChange,
+  type ReviewDecision,
   type ReviewMarkupDocument,
   type ReviewThread,
 } from './reviewMarkup'
 import { parseLosslessPortableSource } from './portableSource'
+import { conflictingChangeIds } from './reviewConflicts'
 
 export interface ReviewAuthorIdentity {
   id: string
@@ -35,6 +38,40 @@ export interface ReviewOperationResult {
   thread: ReviewThread
 }
 
+export type ReviewChangeKind = 'insert' | 'delete' | 'replace' | 'format' | 'structural'
+
+export interface CreateReviewChangeRequest {
+  start: number
+  end: number
+  author: ReviewAuthorIdentity
+  kind: ReviewChangeKind
+  proposal?: string
+  rationale?: string
+  timestamp?: string
+  changeId?: string
+  anchorId?: string
+  startMarkerId?: string
+  endMarkerId?: string
+}
+
+export interface ReviewChangeOperationResult {
+  document: ReviewMarkupDocument
+  change: ReviewChange
+}
+
+export interface DecideReviewChangeRequest {
+  changeId: string
+  action: 'accepted' | 'rejected'
+  authorId: string
+  timestamp?: string
+  decisionId?: string
+}
+
+export interface ReviewDecisionOperationResult extends ReviewChangeOperationResult {
+  decision: ReviewDecision
+  rebasedChangeIds: string[]
+}
+
 export class ReviewOperationError extends Error {
   constructor(readonly code: string, message: string) {
     super(message)
@@ -57,6 +94,12 @@ function generatedId(prefix: string) {
 
 function lineEnding(source: string) {
   return source.includes('\r\n') ? '\r\n' : source.includes('\r') ? '\r' : '\n'
+}
+
+function reviewTimestamp(value?: string) {
+  const date = value === undefined ? new Date() : new Date(value)
+  if (Number.isNaN(date.getTime())) throw new ReviewOperationError('review-timestamp-invalid', 'Review timestamps must be valid dates.')
+  return date.toISOString()
 }
 
 function escapedAttribute(value: string) {
@@ -86,6 +129,12 @@ function validateMessage(message: string) {
   if (!message.trim()) throw new ReviewOperationError('review-message-empty', 'A review message cannot be empty.')
   if (new TextEncoder().encode(message).byteLength > 256 * 1024) {
     throw new ReviewOperationError('review-message-too-large', 'A review message cannot exceed 256 KB.')
+  }
+}
+
+function validatePayload(value: string, label: string) {
+  if (new TextEncoder().encode(value).byteLength > 1024 * 1024) {
+    throw new ReviewOperationError('review-payload-too-large', `${label} cannot exceed 1 MB.`)
   }
 }
 
@@ -169,8 +218,32 @@ function messageBlock(message: string, authorId: string, timestamp: string, inde
   return `${fence}{.dm-message data-author="${authorId}" data-at="${timestamp}" data-index="${index}"}${ending}${message}${ending}${fence}${ending}`
 }
 
+function literalBlock(className: string, content: string, ending: string) {
+  const fence = messageFence(content)
+  return `${fence}{.${className}}${ending}${content}${ending}${fence}${ending}`
+}
+
 function threadRecord(threadId: string, anchorId: string, authorId: string, message: string, timestamp: string, ending: string) {
   return `:::: {#${threadId} .dm-thread data-anchor="${anchorId}" data-author="${authorId}" data-status="open" data-created="${timestamp}"}${ending}${messageBlock(message, authorId, timestamp, 0, ending)}::::${ending}`
+}
+
+function changeRecord(
+  changeId: string,
+  anchorId: string,
+  authorId: string,
+  kind: ReviewChangeKind,
+  proposal: string | undefined,
+  rationale: string | undefined,
+  timestamp: string,
+  ending: string,
+) {
+  const proposalBlock = proposal === undefined ? '' : literalBlock('dm-proposal', proposal, ending)
+  const rationaleBlock = rationale?.trim() ? literalBlock('dm-rationale', rationale, ending) : ''
+  return `:::: {#${changeId} .dm-change data-anchor="${anchorId}" data-kind="${kind}" data-author="${authorId}" data-status="open" data-created="${timestamp}"}${ending}${proposalBlock}${rationaleBlock}::::${ending}`
+}
+
+function decisionRecord(decisionId: string, changeId: string, authorId: string, action: 'accepted' | 'rejected', timestamp: string, ending: string) {
+  return `:::: {#${decisionId} .dm-decision data-change="${changeId}" data-author="${authorId}" data-action="${action}" data-at="${timestamp}"}${ending}::::${ending}`
 }
 
 function marker(markerId: string, anchorId: string, edge: 'start' | 'end' | 'point') {
@@ -192,6 +265,12 @@ function threadResult(document: ReviewMarkupDocument, threadId: string): ReviewO
   return { document, thread }
 }
 
+function changeResult(document: ReviewMarkupDocument, changeId: string): ReviewChangeOperationResult {
+  const change = document.changes.find((candidate) => candidate.id === changeId)
+  if (!change) throw new ReviewOperationError('review-change-missing', `Review change ${changeId} was not created.`)
+  return { document, change }
+}
+
 export function createReviewThread(source: string, request: CreateReviewThreadRequest): ReviewOperationResult {
   validateMessage(request.message)
   if (!validBoundary(source, request.start) || !validBoundary(source, request.end) || request.start > request.end) {
@@ -204,7 +283,7 @@ export function createReviewThread(source: string, request: CreateReviewThreadRe
     throw new ReviewOperationError('review-range-reserved', 'Comments cannot be anchored inside the portable review data section.')
   }
 
-  const timestamp = request.timestamp ?? new Date().toISOString()
+  const timestamp = reviewTimestamp(request.timestamp)
   const threadId = safeId(request.threadId ?? generatedId('dm-thread'), 'Thread ID')
   const anchorId = safeId(request.anchorId ?? generatedId('dm-anchor'), 'Anchor ID')
   const startMarkerId = safeId(request.startMarkerId ?? generatedId('dm-marker'), 'Marker ID')
@@ -247,7 +326,7 @@ export function appendReviewThreadMessage(
   if (!document.authors.some((author) => author.id === request.authorId)) {
     throw new ReviewOperationError('review-author-missing', `Review author ${request.authorId} was not found.`)
   }
-  const timestamp = request.timestamp ?? new Date().toISOString()
+  const timestamp = reviewTimestamp(request.timestamp)
   const ending = lineEnding(document.source)
   const nextIndex = Math.max(-1, ...thread.messageRecords.map((message, index) => message.index ?? index)) + 1
   const insertion = recordClosingStart(thread)
@@ -270,4 +349,115 @@ export function setReviewThreadStatus(
 
 export function deleteReviewThread(document: ReviewMarkupDocument, threadId: string) {
   return setReviewThreadStatus(document, threadId, 'deleted')
+}
+
+export function createReviewChange(source: string, request: CreateReviewChangeRequest): ReviewChangeOperationResult {
+  if (!validBoundary(source, request.start) || !validBoundary(source, request.end) || request.start > request.end) {
+    throw new ReviewOperationError('review-range-invalid', 'The suggestion range is outside the portable source or splits a character.')
+  }
+  assertCommentableRange(source, request.start, request.end)
+  if (request.kind === 'insert' && request.start !== request.end) {
+    throw new ReviewOperationError('review-change-range-invalid', 'Insertions require a point selection.')
+  }
+  if (request.kind !== 'insert' && request.start === request.end) {
+    throw new ReviewOperationError('review-change-range-invalid', `${request.kind} suggestions require a non-empty range.`)
+  }
+  if (request.kind !== 'delete' && request.proposal === undefined) {
+    throw new ReviewOperationError('review-proposal-missing', `${request.kind} suggestions require replacement content.`)
+  }
+  if (request.proposal !== undefined) validatePayload(request.proposal, 'A suggestion')
+  if (request.rationale !== undefined) validatePayload(request.rationale, 'A rationale')
+
+  const original = parseReviewMarkup(source)
+  assertWritable(original)
+  if (original.sectionStart !== undefined && request.end > original.sectionStart) {
+    throw new ReviewOperationError('review-range-reserved', 'Suggestions cannot be anchored inside the portable review data section.')
+  }
+  const timestamp = reviewTimestamp(request.timestamp)
+  const changeId = safeId(request.changeId ?? generatedId('dm-change'), 'Change ID')
+  const anchorId = safeId(request.anchorId ?? generatedId('dm-anchor'), 'Anchor ID')
+  const startMarkerId = safeId(request.startMarkerId ?? generatedId('dm-marker'), 'Marker ID')
+  const endMarkerId = request.start === request.end
+    ? undefined
+    : safeId(request.endMarkerId ?? generatedId('dm-marker'), 'Marker ID')
+  safeId(request.author.id, 'Author ID')
+  if (!request.author.name.trim()) throw new ReviewOperationError('review-author-name-empty', 'An author name is required.')
+  const existingAuthor = authorFor(original, request.author)
+  requireUniqueIds(original, [changeId, anchorId, startMarkerId, ...(endMarkerId ? [endMarkerId] : []), ...(existingAuthor ? [] : [request.author.id])])
+
+  const startMarker = marker(startMarkerId, anchorId, request.start === request.end ? 'point' : 'start')
+  const anchored = request.start === request.end
+    ? `${source.slice(0, request.start)}${startMarker}${source.slice(request.start)}`
+    : `${source.slice(0, request.start)}${startMarker}${source.slice(request.start, request.end)}${marker(endMarkerId!, anchorId, 'end')}${source.slice(request.end)}`
+  const anchoredDocument = parseReviewMarkup(anchored)
+  const ending = lineEnding(anchored)
+  const additions = `${existingAuthor ? '' : authorRecord(request.author, timestamp, ending)}${changeRecord(
+    changeId,
+    anchorId,
+    request.author.id,
+    request.kind,
+    request.kind === 'delete' ? undefined : request.proposal,
+    request.rationale,
+    timestamp,
+    ending,
+  )}`
+  const updated = parseReviewMarkup(appendSectionRecords(anchoredDocument, additions))
+  assertWritable(updated)
+  return changeResult(updated, changeId)
+}
+
+export function decideReviewChange(
+  document: ReviewMarkupDocument,
+  request: DecideReviewChangeRequest,
+): ReviewDecisionOperationResult {
+  assertWritable(document)
+  const change = document.changes.find((candidate) => candidate.id === request.changeId)
+  if (!change) throw new ReviewOperationError('review-change-missing', `Review change ${request.changeId} was not found.`)
+  safeId(request.authorId, 'Author ID')
+  if (!document.authors.some((author) => author.id === request.authorId)) {
+    throw new ReviewOperationError('review-author-missing', `Review author ${request.authorId} was not found.`)
+  }
+  const previous = document.decisions.find((decision) => decision.changeId === request.changeId)
+  if (previous) {
+    if (previous.action !== request.action) {
+      throw new ReviewOperationError('review-decision-conflict', `Review change ${request.changeId} already has a ${previous.action} decision.`)
+    }
+    return { document, change, decision: previous, rebasedChangeIds: [] }
+  }
+  if (change.status === 'rejected' || change.status === 'accepted') {
+    const expected = request.action === 'accepted' ? 'accepted' : 'rejected'
+    if (change.status !== expected) throw new ReviewOperationError('review-decision-conflict', `Review change ${request.changeId} is already ${change.status}.`)
+  } else if (change.status !== 'open' && !(change.status === 'needs-rebase' && request.action === 'rejected')) {
+    throw new ReviewOperationError('review-change-not-decidable', `Review change ${request.changeId} cannot be ${request.action} while it is ${change.status}.`)
+  }
+
+  const conflicting = conflictingChangeIds(document, request.changeId)
+  if (request.action === 'accepted') {
+    const acceptedConflict = document.changes.find((candidate) => conflicting.includes(candidate.id) && candidate.status === 'accepted')
+    if (acceptedConflict) throw new ReviewOperationError('review-decision-conflict', `Conflicting change ${acceptedConflict.id} is already accepted.`)
+  }
+
+  let updated = document
+  const targetStatus = request.action === 'accepted' ? 'accepted' : 'rejected'
+  if (change.status !== targetStatus) updated = updateReviewRecordStatus(updated, request.changeId, targetStatus)
+  const rebasedChangeIds: string[] = []
+  if (request.action === 'accepted') {
+    for (const conflictId of conflicting) {
+      const candidate = updated.changes.find((item) => item.id === conflictId)
+      if (candidate?.status !== 'open') continue
+      updated = updateReviewRecordStatus(updated, conflictId, 'needs-rebase')
+      rebasedChangeIds.push(conflictId)
+    }
+  }
+
+  const decisionId = safeId(request.decisionId ?? generatedId('dm-decision'), 'Decision ID')
+  requireUniqueIds(updated, [decisionId])
+  const timestamp = reviewTimestamp(request.timestamp)
+  const ending = lineEnding(updated.source)
+  updated = parseReviewMarkup(appendSectionRecords(updated, decisionRecord(decisionId, request.changeId, request.authorId, request.action, timestamp, ending)))
+  assertWritable(updated)
+  const decided = changeResult(updated, request.changeId)
+  const decision = updated.decisions.find((candidate) => candidate.id === decisionId)
+  if (!decision) throw new ReviewOperationError('review-decision-missing', `Review decision ${decisionId} was not created.`)
+  return { ...decided, decision, rebasedChangeIds }
 }

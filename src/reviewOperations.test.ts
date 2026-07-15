@@ -1,8 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import { parseReviewMarkup } from './reviewMarkup'
+import identicalSource from './fixtures/portable/25-review-identical.qmd?raw'
+import aliceFinalGolden from './fixtures/golden/review-identical.alice-final.md?raw'
+import { projectPortableReviewSource } from './reviewProjector'
 import {
   appendReviewThreadMessage,
+  createReviewChange,
   createReviewThread,
+  decideReviewChange,
   deleteReviewThread,
   ReviewOperationError,
   setReviewThreadStatus,
@@ -154,5 +159,129 @@ describe('portable review thread operations', () => {
       author: { ...author, name: 'Different Person' },
       message: 'Conflicting identity',
     })).toThrowError(expect.objectContaining({ code: 'review-author-conflict' }))
+  })
+})
+
+describe('portable suggestion operations', () => {
+  it('captures attributed replacement and insertion proposals without changing base prose', () => {
+    const selected = 'increased modestly'
+    const start = source.indexOf(selected)
+    const replacement = createReviewChange(source, {
+      start,
+      end: start + selected.length,
+      author,
+      kind: 'replace',
+      proposal: 'increased by 18%\n:::::\n~~~~',
+      rationale: 'State the measured response directly.',
+      timestamp: '2026-07-15T14:00:00.000Z',
+      changeId: 'dm-change-effect',
+      anchorId: 'dm-anchor-effect',
+      startMarkerId: 'dm-marker-effect-start',
+      endMarkerId: 'dm-marker-effect-end',
+    })
+
+    expect(replacement.document.source).toContain('increased modestly')
+    expect(replacement.change).toMatchObject({
+      id: 'dm-change-effect',
+      changeKind: 'replace',
+      status: 'open',
+      proposal: 'increased by 18%\n:::::\n~~~~',
+      rationale: 'State the measured response directly.',
+    })
+    expect(replacement.document.diagnostics.filter((diagnostic) => diagnostic.level === 'error')).toEqual([])
+
+    const insertionPoint = replacement.document.source.indexOf(' during recovery')
+    const insertion = createReviewChange(replacement.document.source, {
+      start: insertionPoint,
+      end: insertionPoint,
+      author,
+      kind: 'insert',
+      proposal: ' (95% CI 12–24%)',
+      timestamp: '2026-07-15T14:01:00.000Z',
+      changeId: 'dm-change-interval',
+      anchorId: 'dm-anchor-interval',
+      startMarkerId: 'dm-marker-interval',
+    })
+    expect(insertion.change).toMatchObject({ changeKind: 'insert', proposal: ' (95% CI 12–24%)' })
+    expect(insertion.document.authors).toHaveLength(1)
+  })
+
+  it('accepts one alternative exactly once and marks conflicting siblings needs-rebase', () => {
+    const document = parseReviewMarkup(identicalSource)
+    const accepted = decideReviewChange(document, {
+      changeId: 'dm-i01',
+      action: 'accepted',
+      authorId: 'dm-a01',
+      timestamp: '2026-07-15T14:10:00.000Z',
+      decisionId: 'dm-decision-i01',
+    })
+
+    expect(accepted.change.status).toBe('accepted')
+    expect(accepted.rebasedChangeIds).toEqual(['dm-i02'])
+    expect(accepted.document.changes.map((change) => [change.id, change.status])).toEqual([
+      ['dm-i01', 'accepted'],
+      ['dm-i02', 'needs-rebase'],
+    ])
+    expect(accepted.decision).toMatchObject({
+      id: 'dm-decision-i01',
+      changeId: 'dm-i01',
+      authorId: 'dm-a01',
+      action: 'accepted',
+      timestamp: '2026-07-15T14:10:00.000Z',
+    })
+    const final = projectPortableReviewSource(accepted.document.source, { view: 'final' })
+    expect(final).toMatchObject({ ok: true, source: aliceFinalGolden, appliedChangeIds: ['dm-i01'] })
+
+    const repeated = decideReviewChange(accepted.document, {
+      changeId: 'dm-i01',
+      action: 'accepted',
+      authorId: 'dm-a01',
+      decisionId: 'unused-repeated-id',
+    })
+    expect(repeated.document.source).toBe(accepted.document.source)
+    expect(repeated.decision.id).toBe('dm-decision-i01')
+    expect(() => decideReviewChange(accepted.document, {
+      changeId: 'dm-i01',
+      action: 'rejected',
+      authorId: 'dm-a01',
+    })).toThrowError(expect.objectContaining({ code: 'review-decision-conflict' }))
+  })
+
+  it('rejects an open or needs-rebase proposal without changing its alternatives', () => {
+    const accepted = decideReviewChange(parseReviewMarkup(identicalSource), {
+      changeId: 'dm-i01',
+      action: 'accepted',
+      authorId: 'dm-a01',
+      decisionId: 'dm-decision-first',
+    })
+    const rejected = decideReviewChange(accepted.document, {
+      changeId: 'dm-i02',
+      action: 'rejected',
+      authorId: 'dm-a02',
+      timestamp: '2026-07-15T14:20:00.000Z',
+      decisionId: 'dm-decision-second',
+    })
+
+    expect(rejected.change.status).toBe('rejected')
+    expect(rejected.rebasedChangeIds).toEqual([])
+    expect(rejected.document.changes.find((change) => change.id === 'dm-i01')?.status).toBe('accepted')
+    expect(rejected.document.decisions).toHaveLength(2)
+  })
+
+  it('validates change geometry and proposal requirements before touching source', () => {
+    const point = source.indexOf('Leaf area')
+    expect(() => createReviewChange(source, {
+      start: point,
+      end: point + 4,
+      author,
+      kind: 'insert',
+      proposal: 'New',
+    })).toThrowError(expect.objectContaining({ code: 'review-change-range-invalid' }))
+    expect(() => createReviewChange(source, {
+      start: point,
+      end: point + 4,
+      author,
+      kind: 'replace',
+    })).toThrowError(expect.objectContaining({ code: 'review-proposal-missing' }))
   })
 })

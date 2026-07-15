@@ -1,4 +1,5 @@
-import { parseReviewMarkup, type ReviewAnchorRange, type ReviewChange } from './reviewMarkup'
+import { parseReviewMarkup, type ReviewChange } from './reviewMarkup'
+import { buildReviewConflictGraph } from './reviewConflicts'
 import type { DocumentDiagnostic } from './types'
 
 export interface ReviewProjectionConflictCandidate {
@@ -39,43 +40,6 @@ interface Patch {
   start: number
   end: number
   replacement: string
-}
-
-function intervalsConflict(left: ReviewAnchorRange, right: ReviewAnchorRange) {
-  if (left.anchorId === right.anchorId) return true
-  if (left.start === left.end) return right.start <= left.start && left.start <= right.end
-  if (right.start === right.end) return left.start <= right.start && right.start <= left.end
-  return left.start < right.end && right.start < left.end
-}
-
-function conflictComponents(changes: ReviewChange[], rangeByAnchor: Map<string, ReviewAnchorRange>) {
-  const remaining = new Set(changes.map((change) => change.id))
-  const byId = new Map(changes.map((change) => [change.id, change]))
-  const components: ReviewChange[][] = []
-
-  while (remaining.size > 0) {
-    const firstId = remaining.values().next().value as string
-    remaining.delete(firstId)
-    const component: ReviewChange[] = []
-    const queue = [byId.get(firstId)!]
-    while (queue.length > 0) {
-      const change = queue.shift()!
-      component.push(change)
-      const range = rangeByAnchor.get(change.anchorId)
-      if (!range) continue
-      for (const candidateId of [...remaining]) {
-        const candidate = byId.get(candidateId)!
-        const candidateRange = rangeByAnchor.get(candidate.anchorId)
-        if (candidateRange && intervalsConflict(range, candidateRange)) {
-          remaining.delete(candidateId)
-          queue.push(candidate)
-        }
-      }
-    }
-    components.push(component.sort((left, right) => left.start - right.start || left.id.localeCompare(right.id)))
-  }
-
-  return components
 }
 
 function conflictRecord(component: ReviewChange[], authorNames: Map<string, string>): ReviewProjectionConflict {
@@ -143,13 +107,15 @@ export function projectPortableReviewSource(source: string, options: ReviewProje
   const errors = baseDiagnostics.filter((diagnostic) => diagnostic.level === 'error')
   if (errors.length > 0) return { ok: false, source: null, diagnostics: baseDiagnostics, appliedChangeIds: [], conflicts: [] }
 
-  const rangeByAnchor = new Map(review.ranges.filter((range) => range.complete).map((range) => [range.anchorId, range]))
   const markersByAnchor = new Map<string, typeof review.anchors>()
   for (const anchor of review.anchors) markersByAnchor.set(anchor.anchorId, [...(markersByAnchor.get(anchor.anchorId) ?? []), anchor])
   const authorNames = new Map(review.authors.map((author) => [author.id, author.name]))
   const selected = new Set(options.selectedChangeIds ?? [])
   const candidates = review.changes.filter((change) => change.status !== 'rejected')
-  const components = conflictComponents(candidates, rangeByAnchor)
+  const candidateById = new Map(candidates.map((change) => [change.id, change]))
+  const components = buildReviewConflictGraph(review).components.map((component) =>
+    component.changeIds.flatMap((id) => candidateById.get(id) ?? []),
+  )
   const chosen: ReviewChange[] = []
   const conflicts: ReviewProjectionConflict[] = []
 
