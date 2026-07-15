@@ -17,7 +17,10 @@ function change(field: HTMLInputElement, value: string) {
   field.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  vi.unstubAllGlobals()
+})
 
 describe('collaboration dialog', () => {
   it('connects without persisting its token and keeps the session alive when closed', async () => {
@@ -85,5 +88,56 @@ describe('collaboration dialog', () => {
     await act(async () => root.unmount())
     expect(destroy).toHaveBeenCalledTimes(1)
     expect(onSessionStateChange).toHaveBeenLastCalledWith(false)
+  })
+
+  it('discovers the authenticated identity and permitted projects before joining', async () => {
+    const request = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ userId: 'account-42', displayName: 'Dr Researcher' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ workspaces: [{ id: 'forest', name: 'Forest Lab', role: 'owner', createdAt: '2026-07-15T00:00:00.000Z' }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ projects: [{ id: 'paper', workspaceId: 'forest', name: 'Canopy paper', createdAt: '2026-07-15T00:00:00.000Z' }] }), { status: 200 }))
+    vi.stubGlobal('fetch', request)
+    const connect = vi.spyOn(HocuspocusCollaborationClient, 'connect').mockImplementation(async (options) => {
+      options.onStatus?.('connected')
+      return {
+        publishPortableSource: vi.fn(() => '# Draft'),
+        createCheckpoint: vi.fn(),
+        destroy: vi.fn(),
+      } as unknown as HocuspocusCollaborationClient
+    })
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<CollaborationDialog
+      open
+      source="# Draft"
+      onClose={vi.fn()}
+      onRemoteSource={vi.fn()}
+      onStatus={vi.fn()}
+      onCheckpoint={vi.fn().mockResolvedValue(undefined)}
+      checkpointMode="working-tree"
+      checkpointTarget="paper.qmd"
+    />))
+    change(input(container, 'Service URL'), 'https://collab.example.org')
+    change(input(container, 'Short-lived access token'), 'identity-token')
+    await act(async () => {
+      [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Find my workspaces')!.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+
+    expect(container.textContent).toContain('Dr Researcher')
+    expect(container.textContent).toContain('Forest Lab · owner')
+    expect(container.textContent).toContain('Canopy paper')
+    expect(input(container, 'Author ID').value).toBe('account-42')
+    expect(input(container, 'Author ID').readOnly).toBe(true)
+
+    await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    expect(connect).toHaveBeenCalledWith(expect.objectContaining({
+      url: 'wss://collab.example.org',
+      workspaceId: 'forest',
+      projectId: 'paper',
+      token: 'identity-token',
+      presence: expect.objectContaining({ userId: 'account-42', name: 'Dr Researcher' }),
+    }))
+    expect(container.textContent).toContain('Workspace access & recovery')
+    await act(async () => root.unmount())
   })
 })

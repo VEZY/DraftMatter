@@ -13,6 +13,12 @@ export interface VerifiedCollaborationIdentity extends CollaborationIdentity {
   displayName?: string
 }
 
+export interface CollaborationSessionProfile {
+  userId: string
+  displayName?: string
+  email?: string
+}
+
 export interface CollaborationIdentityVerifier {
   verify(token: string): Promise<VerifiedCollaborationIdentity>
 }

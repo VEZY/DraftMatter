@@ -4,6 +4,7 @@ import {
   WorkspaceAccessError,
   roleAllows,
   type CollaborationIdentityVerifier,
+  type CollaborationSessionProfile,
   type CreatedInvitation,
   type ProjectAuthorizationService,
   type ProjectCapability,
@@ -179,6 +180,15 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
     await this.upsertIdentity(identity)
     await this.consumeRateLimit(identity, category)
     return identity
+  }
+
+  async getCurrentIdentity(token: string): Promise<CollaborationSessionProfile> {
+    const identity = await this.authenticate(token, 'read')
+    return {
+      userId: identity.userId,
+      ...(identity.displayName ? { displayName: identity.displayName } : {}),
+      ...(identity.email ? { email: identity.email } : {}),
+    }
   }
 
   private async requireWorkspaceAccess(database: Pick<PoolClient, 'query'> | Database, workspaceId: string, userId: string, capability: ProjectCapability) {

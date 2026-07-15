@@ -3604,7 +3604,7 @@ kbd {
 @keyframes collaboration-pulse { 50% { opacity: .38; } }
 
 .collaboration-backdrop { z-index: 110; }
-.collaboration-dialog { width: min(590px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; border: 1px solid #d9dedb; border-radius: 14px; background: #fff; box-shadow: 0 24px 70px rgba(31, 43, 38, .15); }
+.collaboration-dialog { width: min(720px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; border: 1px solid #d9dedb; border-radius: 14px; background: #fff; box-shadow: 0 24px 70px rgba(31, 43, 38, .15); }
 .collaboration-head { display: flex; justify-content: space-between; gap: 24px; padding: 27px 28px 23px; border-bottom: 1px solid #e7eae8; background: linear-gradient(145deg, #fbfdfc, #f5f8f6); }
 .collaboration-head h2 { margin: 4px 0 8px; color: var(--ink); font-family: Georgia, "Times New Roman", serif; font-size: 25px; font-weight: 540; }
 .collaboration-head p { max-width: 470px; margin: 0; color: var(--muted); font-size: 12px; line-height: 1.55; }
@@ -3613,9 +3613,30 @@ kbd {
 .collaboration-connected { display: flex; flex-direction: column; gap: 18px; padding: 24px 28px 26px; }
 .collaboration-dialog label { display: flex; flex-direction: column; gap: 7px; color: var(--ink); font-size: 11px; font-weight: 700; letter-spacing: .02em; }
 .collaboration-dialog label small { color: var(--muted); font-size: 10px; font-weight: 450; letter-spacing: 0; }
-.collaboration-dialog input { height: 38px; padding: 0 11px; border: 1px solid #d8ddda; border-radius: 7px; outline: none; background: #fcfdfc; color: var(--ink); font-family: inherit; font-size: 12px; }
-.collaboration-dialog input:focus { border-color: #829d91; box-shadow: 0 0 0 3px rgba(97, 127, 115, .12); background: #fff; }
+.collaboration-dialog input,
+.collaboration-dialog select { height: 38px; padding: 0 11px; border: 1px solid #d8ddda; border-radius: 7px; outline: none; background: #fcfdfc; color: var(--ink); font-family: inherit; font-size: 12px; }
+.collaboration-dialog input:focus,
+.collaboration-dialog select:focus { border-color: #829d91; box-shadow: 0 0 0 3px rgba(97, 127, 115, .12); background: #fff; }
+.collaboration-dialog input:disabled { color: #6f7a75; background: #f3f5f4; }
 .collaboration-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.collaboration-service-fields { display: grid; grid-template-columns: 1fr 1fr auto; align-items: end; gap: 12px; }
+.collaboration-discover { height: 38px; padding: 0 13px; border: 1px solid #ccd5d1; border-radius: 7px; background: #f8faf9; color: var(--sage-dark); font-size: 10px; font-weight: 750; white-space: nowrap; }
+.collaboration-discover:disabled { color: #89938f; }
+.collaboration-workspace-browser { display: flex; flex-direction: column; gap: 13px; padding: 14px; border: 1px solid #dde4e1; border-radius: 10px; background: #fafcfb; }
+.collaboration-account { display: flex; align-items: center; gap: 9px; padding-bottom: 11px; border-bottom: 1px solid #e5e9e7; color: #557467; }
+.collaboration-account > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.collaboration-account strong { color: var(--ink); font-size: 11px; }
+.collaboration-account small { color: var(--muted); font-size: 9px; }
+.collaboration-account button,
+.collaboration-browser-actions button,
+.collaboration-accept button { min-height: 30px; padding: 0 10px; border: 1px solid #d5dcD9; border-radius: 6px; background: #fff; color: var(--ink); font-size: 9px; font-weight: 700; }
+.collaboration-browser-actions { display: flex; gap: 7px; }
+.collaboration-browser-actions button { display: flex; align-items: center; gap: 5px; }
+.collaboration-create-row { display: grid; grid-template-columns: 1fr .8fr auto; align-items: end; gap: 10px; padding: 12px; border-radius: 8px; background: #f2f6f4; }
+.collaboration-create-row button { height: 38px; padding: 0 13px; border: 1px solid var(--sage-dark); border-radius: 7px; background: var(--sage-dark); color: #fff; font-size: 10px; font-weight: 700; }
+.collaboration-accept { display: flex; gap: 8px; }
+.collaboration-accept input { flex: 1; height: 32px; font-size: 10px; }
+.collaboration-accept button { min-width: 64px; }
 .collaboration-dialog footer { display: flex; justify-content: flex-end; gap: 9px; padding-top: 4px; }
 .collaboration-dialog footer button { min-height: 36px; padding: 0 15px; border: 1px solid var(--sage-dark); border-radius: 7px; background: var(--sage-dark); color: #fff; font-size: 11px; font-weight: 700; }
 .collaboration-dialog footer button.secondary { border-color: #d6dcda; background: #fff; color: var(--ink); }
@@ -3642,6 +3663,40 @@ kbd {
 .collaboration-checkpoint small { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .collaboration-checkpoint button { flex: 0 0 auto; min-height: 34px; padding: 0 12px; border: 1px solid var(--sage-dark); border-radius: 7px; background: var(--sage-dark); color: #fff; font-size: 10px; font-weight: 700; }
 .collaboration-checkpoint button:disabled { border-color: #d8ddda; background: #f0f2f1; color: #8b9691; }
+.collaboration-access { overflow: hidden; border: 1px solid #dce2df; border-radius: 9px; background: #fff; }
+.collaboration-access-toggle { display: flex; width: 100%; align-items: center; gap: 10px; padding: 12px 13px; border: 0; background: #fafbfa; color: #587367; text-align: left; }
+.collaboration-access-toggle > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.collaboration-access-toggle strong { color: var(--ink); font-size: 10px; }
+.collaboration-access-toggle small { color: var(--muted); font-size: 9px; }
+.collaboration-access-toggle[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
+.collaboration-access-body { display: flex; flex-direction: column; gap: 13px; padding: 14px; border-top: 1px solid #e5e9e7; }
+.collaboration-invite-row { display: grid; grid-template-columns: 1fr 120px auto; align-items: end; gap: 9px; }
+.collaboration-invite-row label > span small { color: var(--muted); font-size: 9px; font-weight: 450; }
+.collaboration-invite-row button,
+.collaboration-invite-token button,
+.collaboration-admin-item button,
+.collaboration-recovery-row button,
+.collaboration-refresh { min-height: 34px; padding: 0 11px; border: 1px solid #d3dad7; border-radius: 6px; background: #fff; color: var(--ink); font-size: 9px; font-weight: 700; }
+.collaboration-invite-token { display: grid; grid-template-columns: 1fr minmax(150px, .9fr) auto; align-items: center; gap: 9px; padding: 10px; border-radius: 7px; background: #f4f8f6; }
+.collaboration-invite-token > span { display: flex; flex-direction: column; gap: 2px; }
+.collaboration-invite-token strong { color: var(--ink); font-size: 10px; }
+.collaboration-invite-token small { color: var(--muted); font-size: 8px; }
+.collaboration-invite-token input { height: 32px; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 9px; }
+.collaboration-admin-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.collaboration-admin-grid > section { display: flex; flex-direction: column; gap: 6px; }
+.collaboration-admin-item { display: flex; min-height: 37px; align-items: center; gap: 8px; padding: 7px 8px; border: 1px solid #e6e9e7; border-radius: 7px; }
+.collaboration-admin-item > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.collaboration-admin-item strong { overflow: hidden; color: var(--ink); font-size: 9px; text-overflow: ellipsis; }
+.collaboration-admin-item small { color: var(--muted); font-size: 8px; text-transform: capitalize; }
+.collaboration-admin-item button { min-height: 26px; padding: 0 7px; }
+.collaboration-recovery-row { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 7px; background: #f6f8f7; }
+.collaboration-recovery-row > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
+.collaboration-recovery-row strong { color: var(--ink); font-size: 10px; }
+.collaboration-recovery-row small { color: var(--muted); font-size: 8px; }
+.collaboration-activity { display: flex; flex-direction: column; gap: 5px; }
+.collaboration-activity > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 2px; border-bottom: 1px solid #eceeed; color: var(--ink); font-size: 9px; text-transform: capitalize; }
+.collaboration-activity small { color: var(--muted); font-size: 8px; text-transform: none; }
+.collaboration-refresh { align-self: flex-start; }
 .save-indicator.checkpoint-needed { background: #b88448; box-shadow: 0 0 0 3px rgba(184, 132, 72, .12); }
 
 @media (max-width: 1120px) {
@@ -3654,8 +3709,15 @@ kbd {
   .collaboration-head { padding: 22px 20px 19px; }
   .collaboration-dialog form,
   .collaboration-connected { padding: 20px; }
+  .collaboration-service-fields,
   .collaboration-fields,
+  .collaboration-create-row,
+  .collaboration-invite-row,
+  .collaboration-invite-token,
+  .collaboration-admin-grid,
   .collaboration-people { grid-template-columns: 1fr; }
+  .collaboration-service-fields { align-items: stretch; }
+  .collaboration-discover { justify-self: start; }
   .collaboration-checkpoint { align-items: stretch; flex-direction: column; }
   .collaboration-checkpoint button { align-self: flex-start; }
 }

@@ -5,6 +5,7 @@ import { CollaborationOperationsDashboard } from './operations'
 
 function fixture() {
   const workspaces = {
+    getCurrentIdentity: vi.fn(async () => ({ userId: 'owner', displayName: 'Owner Researcher', email: 'owner@example.test' })),
     createWorkspace: vi.fn(async (_token: string, request: { id: string; name: string }) => ({ ...request, createdAt: '2026-07-15T00:00:00.000Z' })),
     listWorkspaces: vi.fn(async () => [{ id: 'forest', name: 'Forest study', createdAt: '2026-07-15T00:00:00.000Z', role: 'owner' as const }]),
     createProject: vi.fn(async (_token: string, workspaceId: string, request: { id: string; name: string }) => ({ ...request, workspaceId, createdAt: '2026-07-15T00:00:00.000Z' })),
@@ -96,6 +97,14 @@ describe('collaboration HTTP API', () => {
     const blocked = await api(request('/api/workspaces', { headers: { authorization: 'Bearer oidc-token', origin: 'https://evil.example.test' } }))
     expect(blocked.status).toBe(403)
     expect(blocked.headers.get('access-control-allow-origin')).toBeNull()
+  })
+
+  it('returns the authenticated collaboration identity without exposing token claims', async () => {
+    const { api, workspaces } = fixture()
+    const response = await api(request('/api/session', { headers: { authorization: 'Bearer oidc-token' } }))
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ userId: 'owner', displayName: 'Owner Researcher', email: 'owner@example.test' })
+    expect(workspaces.getCurrentIdentity).toHaveBeenCalledWith('oidc-token')
   })
 
   it('passes the exact signed webhook bytes and maps authentication/rate errors safely', async () => {

@@ -8,7 +8,7 @@ import type { PostgresCollaborationStore } from './postgresStore'
 import { WorkspaceAccessError } from '../../src/collaboration/workspaceService'
 
 type WorkspaceApi = Pick<PostgresWorkspaceService,
-  'createWorkspace' | 'listWorkspaces' | 'createProject' | 'getProject' | 'listProjects'
+  'getCurrentIdentity' | 'createWorkspace' | 'listWorkspaces' | 'createProject' | 'getProject' | 'listProjects'
   | 'createInvitation' | 'acceptInvitation' | 'revokeInvitation' | 'revokeMember'
   | 'listMembers' | 'listInvitations' | 'listAuditEvents'>
   & Pick<PostgresWorkspaceService, 'scheduleWorkspaceDeletion' | 'getWorkspaceDeletion' | 'cancelWorkspaceDeletion'>
@@ -188,6 +188,10 @@ export function createCollaborationHttpApi(options: CollaborationHttpApiOptions)
       const parts = pathParts(url.pathname)
       if (parts[0] !== 'api') throw new CollaborationHttpError(404, 'not-found', 'The requested service endpoint was not found.')
       const token = bearer(request)
+
+      if (request.method === 'GET' && parts.length === 2 && parts[1] === 'session') {
+        return json(200, await options.workspaces.getCurrentIdentity(token), headers)
+      }
 
       if (request.method === 'GET' && parts.length === 2 && parts[1] === 'workspaces') {
         return json(200, { workspaces: await options.workspaces.listWorkspaces(token) }, headers)

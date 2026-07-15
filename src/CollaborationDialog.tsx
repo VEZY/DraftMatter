@@ -1,4 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
+import { CollaborationAccessPanel } from './CollaborationAccessPanel'
+import {
+  CollaborationServiceClient,
+  normalizeCollaborationServiceUrl,
+  type WorkspaceSummary,
+} from './collaboration/serviceClient'
+import type { CollaborationSessionProfile, WorkspaceProject } from './collaboration/workspaceService'
 import { Icon } from './Icon'
 import {
   HocuspocusCollaborationClient,
@@ -20,6 +27,11 @@ export interface CollaborationDialogProps {
   checkpointTarget: string
 }
 
+function portableId(value: string, fallback: string) {
+  const normalized = value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9_.:-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80)
+  return /^[a-z]/.test(normalized) ? normalized : fallback
+}
+
 export function CollaborationDialog({
   open,
   source,
@@ -32,7 +44,7 @@ export function CollaborationDialog({
   checkpointMode,
   checkpointTarget,
 }: CollaborationDialogProps) {
-  const [url, setUrl] = useState('wss://')
+  const [url, setUrl] = useState('https://')
   const [workspaceId, setWorkspaceId] = useState('')
   const [projectId, setProjectId] = useState('')
   const [token, setToken] = useState('')
@@ -43,7 +55,19 @@ export function CollaborationDialog({
   const [collaborators, setCollaborators] = useState<ActiveCollaborator[]>([])
   const [uncheckpointed, setUncheckpointed] = useState(false)
   const [checkpointing, setCheckpointing] = useState(false)
+  const [serviceClient, setServiceClient] = useState<CollaborationServiceClient | null>(null)
+  const [serviceState, setServiceState] = useState<'idle' | 'loading' | 'ready'>('idle')
+  const [profile, setProfile] = useState<CollaborationSessionProfile | null>(null)
+  const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([])
+  const [projects, setProjects] = useState<WorkspaceProject[]>([])
+  const [createMode, setCreateMode] = useState<'workspace' | 'project' | null>(null)
+  const [newWorkspaceName, setNewWorkspaceName] = useState('')
+  const [newWorkspaceId, setNewWorkspaceId] = useState('')
+  const [newProjectName, setNewProjectName] = useState(checkpointTarget.replace(/\.(qmd|md)$/i, ''))
+  const [newProjectId, setNewProjectId] = useState(() => portableId(checkpointTarget.replace(/\.(qmd|md)$/i, ''), 'manuscript'))
+  const [invitationToken, setInvitationToken] = useState('')
   const clientRef = useRef<HocuspocusCollaborationClient | null>(null)
+  const accessTokenRef = useRef('')
   const checkpointedSourceRef = useRef(source)
 
   const updateCheckpointState = (next: boolean) => {
@@ -55,6 +79,102 @@ export function CollaborationDialog({
     setStatus(next)
     setDetail(message)
     onStatus(next)
+  }
+
+  const loadProjects = async (client: CollaborationServiceClient, nextWorkspaceId: string, preferredProjectId = projectId) => {
+    const available = await client.listProjects(nextWorkspaceId)
+    setProjects(available)
+    setProjectId(available.some((project) => project.id === preferredProjectId) ? preferredProjectId : available[0]?.id ?? '')
+    return available
+  }
+
+  const discoverWorkspaces = async () => {
+    if (serviceState === 'loading') return
+    setServiceState('loading')
+    setDetail('')
+    try {
+      const client = new CollaborationServiceClient(url, accessTokenRef.current)
+      const [nextProfile, available] = await Promise.all([client.getSession(), client.listWorkspaces()])
+      setServiceClient(client)
+      setProfile(nextProfile)
+      setUserId(nextProfile.userId)
+      if (nextProfile.displayName) setName(nextProfile.displayName)
+      setWorkspaces(available)
+      const nextWorkspaceId = available.some((workspace) => workspace.id === workspaceId) ? workspaceId : available[0]?.id ?? ''
+      setWorkspaceId(nextWorkspaceId)
+      if (nextWorkspaceId) await loadProjects(client, nextWorkspaceId)
+      else {
+        setProjects([])
+        setProjectId('')
+      }
+      setServiceState('ready')
+    } catch (error) {
+      setServiceClient(null)
+      setServiceState('idle')
+      setDetail(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const chooseWorkspace = async (nextWorkspaceId: string) => {
+    if (!serviceClient) return
+    setWorkspaceId(nextWorkspaceId)
+    setProjectId('')
+    setDetail('')
+    try {
+      await loadProjects(serviceClient, nextWorkspaceId, '')
+    } catch (error) {
+      setProjects([])
+      setDetail(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const createWorkspace = async () => {
+    if (!serviceClient) return
+    setDetail('')
+    try {
+      const created = await serviceClient.createWorkspace({
+        id: newWorkspaceId || portableId(newWorkspaceName, 'workspace'),
+        name: newWorkspaceName,
+      })
+      setWorkspaces((current) => [...current, created])
+      setWorkspaceId(created.id)
+      setProjects([])
+      setProjectId('')
+      setCreateMode('project')
+    } catch (error) {
+      setDetail(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const createProject = async () => {
+    if (!serviceClient || !workspaceId) return
+    setDetail('')
+    try {
+      const created = await serviceClient.createProject(workspaceId, {
+        id: newProjectId || portableId(newProjectName, 'manuscript'),
+        name: newProjectName,
+      })
+      setProjects((current) => [...current, created])
+      setProjectId(created.id)
+      setCreateMode(null)
+    } catch (error) {
+      setDetail(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const acceptInvitation = async () => {
+    if (!serviceClient || !invitationToken.trim()) return
+    setDetail('')
+    try {
+      const membership = await serviceClient.acceptInvitation(invitationToken.trim())
+      setInvitationToken('')
+      const available = await serviceClient.listWorkspaces()
+      setWorkspaces(available)
+      setWorkspaceId(membership.workspaceId)
+      await loadProjects(serviceClient, membership.workspaceId, '')
+    } catch (error) {
+      setDetail(error instanceof Error ? error.message : String(error))
+    }
   }
 
   useEffect(() => {
@@ -78,11 +198,13 @@ export function CollaborationDialog({
     onSessionStateChange?.(true)
     updateStatus('connecting')
     try {
+      const accessToken = accessTokenRef.current
+      const urls = serviceClient?.urls ?? normalizeCollaborationServiceUrl(url)
       const client = await HocuspocusCollaborationClient.connect({
-        url,
+        url: urls.websocketUrl,
         workspaceId,
         projectId,
-        token,
+        token: accessToken,
         bootstrapSource: source,
         presence: { userId, name, color: '#617f73' },
         onStatus: updateStatus,
@@ -93,6 +215,7 @@ export function CollaborationDialog({
         onCollaborators: setCollaborators,
       })
       clientRef.current = client
+      if (!serviceClient) setServiceClient(new CollaborationServiceClient(url, accessToken))
       setToken('')
       updateStatus('connected')
     } catch (error) {
@@ -131,6 +254,7 @@ export function CollaborationDialog({
 
   if (!open) return null
   const connected = status === 'connected' && Boolean(clientRef.current)
+  const activeWorkspace = workspaces.find((workspace) => workspace.id === workspaceId)
 
   return (
     <div className="modal-backdrop collaboration-backdrop" onMouseDown={onClose}>
@@ -152,6 +276,7 @@ export function CollaborationDialog({
               </div>
             </section>
             <div className="collaboration-note"><Icon name="check" size={16} /><span>Offline edits reconnect through Yjs. Incompatible review decisions pause checkpointing until they are explicitly resolved.</span></div>
+            {serviceClient && activeWorkspace?.role === 'owner' && profile && <CollaborationAccessPanel client={serviceClient} workspace={activeWorkspace} projectId={projectId} currentUserId={profile.userId} />}
             <div className={`collaboration-checkpoint ${uncheckpointed ? 'pending' : ''}`}>
               <span><strong>{checkpointMode === 'working-tree' ? 'Owner-controlled working tree' : 'Portable owner copy'}</strong><small>{checkpointMode === 'working-tree' ? `Write deterministic review state to ${checkpointTarget}. Git remains a separate explicit action.` : `Download deterministic review state as ${checkpointTarget}.`}</small></span>
               <button onClick={() => void checkpoint()} disabled={!uncheckpointed || checkpointing}>{checkpointing ? 'Checkpointing…' : uncheckpointed ? (checkpointMode === 'working-tree' ? 'Checkpoint to project' : 'Download checkpoint') : 'Checkpoint current'}</button>
@@ -161,12 +286,20 @@ export function CollaborationDialog({
           </div>
         ) : (
           <form onSubmit={(event) => { event.preventDefault(); void connect() }}>
-            <label><span>Service URL</span><input value={url} onChange={(event) => setUrl(event.target.value)} placeholder="wss://collab.example.org" inputMode="url" autoCapitalize="none" spellCheck={false} required /><small>Remote services require encrypted wss:// transport.</small></label>
-            <div className="collaboration-fields"><label><span>Workspace ID</span><input value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} placeholder="forest-lab" autoCapitalize="none" spellCheck={false} required /></label><label><span>Project ID</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="canopy-paper" autoCapitalize="none" spellCheck={false} required /></label></div>
-            <div className="collaboration-fields"><label><span>Your name</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label><label><span>Author ID</span><input value={userId} onChange={(event) => setUserId(event.target.value)} autoCapitalize="none" spellCheck={false} required /></label></div>
-            <label><span>Short-lived access token</span><input type="password" value={token} onChange={(event) => setToken(event.target.value)} autoComplete="one-time-code" required /><small>The token stays in memory and is cleared from this form after connection.</small></label>
+            <div className="collaboration-service-fields"><label><span>Service URL</span><input value={url} onChange={(event) => { setUrl(event.target.value); setServiceClient(null); setServiceState('idle') }} placeholder="https://collab.example.org" inputMode="url" autoCapitalize="none" spellCheck={false} required disabled={serviceState === 'ready'} /><small>Remote services require encrypted HTTPS/WSS transport.</small></label><label><span>Short-lived access token</span><input type="password" value={token} onChange={(event) => { setToken(event.target.value); accessTokenRef.current = event.target.value; setServiceClient(null); setServiceState('idle') }} autoComplete="one-time-code" required disabled={serviceState === 'ready'} /><small>Held in memory only and cleared from this form after connection.</small></label><button type="button" className="collaboration-discover" onClick={() => void discoverWorkspaces()} disabled={!token || serviceState === 'loading'}>{serviceState === 'loading' ? 'Checking account…' : serviceState === 'ready' ? 'Account ready' : 'Find my workspaces'}</button></div>
+
+            {serviceClient ? <div className="collaboration-workspace-browser">
+              <div className="collaboration-account"><Icon name="check" size={15} /><span><strong>{profile?.displayName ?? profile?.email ?? profile?.userId ?? 'Authenticated account'}</strong><small>{workspaces.length ? `${workspaces.length} accessible workspace${workspaces.length === 1 ? '' : 's'}` : 'No workspace yet · create one below'}</small></span><button type="button" onClick={() => { setServiceClient(null); setServiceState('idle'); setProfile(null); setWorkspaces([]); setProjects([]); setToken(''); accessTokenRef.current = '' }}>Change</button></div>
+              {workspaces.length > 0 && <div className="collaboration-fields"><label><span>Workspace</span><select value={workspaceId} onChange={(event) => void chooseWorkspace(event.target.value)} required>{workspaces.map((workspace) => <option value={workspace.id} key={workspace.id}>{workspace.name} · {workspace.role}</option>)}</select></label><label><span>Project</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} required>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select><small>{projects.length ? 'Joining synchronizes this portable manuscript.' : 'Create a project to publish this manuscript.'}</small></label></div>}
+              <div className="collaboration-browser-actions"><button type="button" onClick={() => setCreateMode(createMode === 'workspace' ? null : 'workspace')}><Icon name="plus" size={13} />Workspace</button><button type="button" onClick={() => setCreateMode(createMode === 'project' ? null : 'project')} disabled={!workspaceId}><Icon name="plus" size={13} />Project</button></div>
+              {createMode === 'workspace' && <div className="collaboration-create-row"><label><span>Workspace name</span><input value={newWorkspaceName} onChange={(event) => { setNewWorkspaceName(event.target.value); setNewWorkspaceId(portableId(event.target.value, 'workspace')) }} placeholder="Forest systems lab" /></label><label><span>Portable ID</span><input value={newWorkspaceId} onChange={(event) => setNewWorkspaceId(event.target.value)} autoCapitalize="none" spellCheck={false} /></label><button type="button" onClick={() => void createWorkspace()} disabled={!newWorkspaceName.trim()}>Create</button></div>}
+              {createMode === 'project' && <div className="collaboration-create-row"><label><span>Project name</span><input value={newProjectName} onChange={(event) => { setNewProjectName(event.target.value); setNewProjectId(portableId(event.target.value, 'manuscript')) }} /></label><label><span>Portable ID</span><input value={newProjectId} onChange={(event) => setNewProjectId(event.target.value)} autoCapitalize="none" spellCheck={false} /></label><button type="button" onClick={() => void createProject()} disabled={!newProjectName.trim() || !workspaceId}>Create</button></div>}
+              <div className="collaboration-accept"><input value={invitationToken} onChange={(event) => setInvitationToken(event.target.value)} placeholder="Have an invitation token?" aria-label="Invitation token" /><button type="button" onClick={() => void acceptInvitation()} disabled={!invitationToken.trim()}>Accept</button></div>
+            </div> : <div className="collaboration-fields"><label><span>Workspace ID</span><input value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)} placeholder="forest-lab" autoCapitalize="none" spellCheck={false} required /></label><label><span>Project ID</span><input value={projectId} onChange={(event) => setProjectId(event.target.value)} placeholder="canopy-paper" autoCapitalize="none" spellCheck={false} required /></label></div>}
+
+            <div className="collaboration-fields"><label><span>Your name</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label><label><span>Author ID</span><input value={userId} onChange={(event) => setUserId(event.target.value)} autoCapitalize="none" spellCheck={false} required readOnly={Boolean(profile)} /><small>{profile ? 'Bound to the authenticated account.' : 'Used for portable review attribution.'}</small></label></div>
             {detail && <div className="collaboration-error" role="alert">{detail}</div>}
-            <footer><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="submit" disabled={status === 'connecting'}>{status === 'connecting' ? 'Connecting…' : 'Join workspace'}</button></footer>
+            <footer><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="submit" disabled={status === 'connecting' || !workspaceId || !projectId || (!token && !serviceClient)}>{status === 'connecting' ? 'Connecting…' : projects.length === 0 && serviceClient ? 'Create a project first' : 'Join workspace'}</button></footer>
           </form>
         )}
       </div>

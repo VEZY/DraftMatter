@@ -1,5 +1,6 @@
 import type {
   CreatedInvitation,
+  CollaborationSessionProfile,
   WorkspaceAuditEvent,
   WorkspaceInvitation,
   WorkspaceMembership,
@@ -107,6 +108,10 @@ export class CollaborationServiceClient {
     }
     if (response.status === 204) return undefined as T
     return response.json() as Promise<T>
+  }
+
+  getSession() {
+    return this.call<CollaborationSessionProfile>('/api/session')
   }
 
   async listWorkspaces() {
