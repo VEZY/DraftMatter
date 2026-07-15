@@ -58,6 +58,7 @@ export interface CollaborativeDecision {
   action: string
   timestamp?: string
   baseRevision?: string
+  resolves?: string[]
 }
 
 export interface CollaboratorPresence {
@@ -252,6 +253,10 @@ export class CollaborativeDocument {
 
   stateVector() {
     return Y.encodeStateVector(this.doc)
+  }
+
+  revisionToken() {
+    return bytesToHex(this.stateVector())
   }
 
   encodeUpdate(remoteStateVector?: Uint8Array) {

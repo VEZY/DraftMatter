@@ -15,6 +15,20 @@ export {
   type CollaborativeThread,
   type CollaboratorPresence,
 } from './collaboration'
+export {
+  beginReviewDecision,
+  commitReviewDecision,
+  proposalDecisionState,
+  resolveReviewDecisionConflict,
+  reviewDecisionConflicts,
+  TransactionalReviewError,
+  type CommitReviewDecisionRequest,
+  type ProposalDecisionState,
+  type ResolveReviewDecisionConflictRequest,
+  type ReviewDecisionConflict,
+  type ReviewDecisionTransaction,
+  type TransactionalReviewAction,
+} from './reviewDecisions'
 
 export { parsePortableDocument } from '../document'
 export { materializePortableDraftSource } from '../portableDraft'
