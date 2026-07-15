@@ -18,6 +18,7 @@ The browser implementation runs on macOS, Windows, and Linux and needs no backen
 ```sh
 npm run check
 npm test
+npm run test:e2e
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
 npm run compliance:check

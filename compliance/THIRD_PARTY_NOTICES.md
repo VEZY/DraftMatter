@@ -311,6 +311,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | @lifeomic/attempt | 3.1.0 | MIT | required |
 | npm | @napi-rs/wasm-runtime | 1.1.6 | MIT | required |
 | npm | @oxc-project/types | 0.139.0 | MIT | required |
+| npm | @playwright/test | 1.61.1 | Apache-2.0 | development |
 | npm | @rolldown/binding-android-arm64 | 1.1.5 | MIT | required |
 | npm | @rolldown/binding-darwin-arm64 | 1.1.5 | MIT | required |
 | npm | @rolldown/binding-darwin-x64 | 1.1.5 | MIT | required |
@@ -423,6 +424,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | expect-type | 1.4.0 | Apache-2.0 | development |
 | npm | extend | 3.0.2 | MIT | required |
 | npm | fdir | 6.5.0 | MIT | required |
+| npm | fsevents | 2.3.2 | MIT | development |
 | npm | fsevents | 2.3.3 | MIT | required |
 | npm | function-bind | 1.1.2 | MIT | development |
 | npm | functional-red-black-tree | 1.0.1 | MIT | development |
@@ -507,6 +509,8 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | pgsql-ast-parser | 12.0.2 | MIT | development |
 | npm | picocolors | 1.1.1 | ISC | required |
 | npm | picomatch | 4.0.5 | MIT | required |
+| npm | playwright | 1.61.1 | Apache-2.0 | development |
+| npm | playwright-core | 1.61.1 | Apache-2.0 | development |
 | npm | postcss | 8.5.19 | MIT | required |
 | npm | postgres-array | 2.0.0 | MIT | required |
 | npm | postgres-bytea | 1.0.1 | MIT | required |

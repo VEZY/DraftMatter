@@ -13,7 +13,10 @@
     "check:service": "tsc -p services/collaboration/tsconfig.json --noEmit",
     "compliance:generate": "node scripts/generate-compliance.mjs",
     "compliance:check": "node scripts/generate-compliance.mjs --verify",
-    "test": "vitest run",
+    "test": "vitest run src services",
+    "test:e2e": "playwright test",
+    "test:e2e:update": "playwright test --update-snapshots",
+    "test:release": "npm run check && npm test && npm run test:e2e && npm run build && npm run compliance:check",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build"
@@ -48,6 +51,7 @@
     "yjs": "13.6.31"
   },
   "devDependencies": {
+    "@playwright/test": "^1.61.1",
     "@tauri-apps/cli": "^2.11.4",
     "@types/node": "26.1.1",
     "@types/pg": "8.20.0",

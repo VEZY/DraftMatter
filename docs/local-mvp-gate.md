@@ -18,6 +18,7 @@ Run the full local gate with:
 ```sh
 npm run check
 npm test
+npm run test:e2e
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 npm run compliance:check

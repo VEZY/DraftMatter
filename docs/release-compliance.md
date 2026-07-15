@@ -19,6 +19,7 @@ Run from a clean checkout:
 npm ci
 npm run check
 npm test
+npm run test:e2e
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 npm run compliance:check
@@ -26,6 +27,8 @@ npm run compliance:generate
 ```
 
 `compliance:check` resolves the locked npm and target-filtered Cargo graphs and rejects every SPDX token outside `compliance/license-allowlist.json`. `compliance:generate` emits target-specific third-party notices and a CycloneDX 1.5 SBOM. The portability workflow attaches both files beside each platform build.
+
+`test:e2e` starts the browser-safe application on loopback, exercises the rendered manuscript/review workflow in pinned Chromium, checks keyboard access, and compares the result with the committed visual baseline. The dedicated browser workflow installs the Playwright-pinned browser before running this gate.
 
 The allowlist is an engineering gate, not legal advice. Adding an identifier requires an explicit reviewed change. Package-specific notice and attribution files must be retained when their licence requires it.
 
