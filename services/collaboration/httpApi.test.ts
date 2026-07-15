@@ -35,6 +35,8 @@ function fixture() {
     listBackups: vi.fn(async () => []),
     verifyBackup: vi.fn(async () => ({ id: 'backup-01', createdAt: '2026-07-15T00:00:00.000Z', bytes: 42, sha256: 'a'.repeat(64), stateSha256: 'b'.repeat(64), verifiedAt: '2026-07-15T00:00:00.000Z' })),
     restoreBackup: vi.fn(async () => ({ id: 'restore-backup-01', createdAt: '2026-07-15T00:00:00.000Z', bytes: 42, sha256: 'a'.repeat(64) })),
+    createRecoveryCheckpoint: vi.fn(async (_scope, request: { name: string; createdBy: string }) => ({ id: 'recovery-01', snapshotId: 'snapshot-01', ...request, createdAt: '2026-07-15T00:00:00.000Z' })),
+    listRecoveryCheckpoints: vi.fn(async () => []),
   }
   const api = createCollaborationHttpApi({
     workspaces,
@@ -160,6 +162,21 @@ describe('collaboration HTTP API', () => {
       { workspaceId: 'forest', projectId: 'paper' },
       'backup-01',
       { workspaceId: 'forest', projectId: 'restore-drill' },
+    )
+  })
+
+  it('creates named immutable recovery history with verified owner attribution', async () => {
+    const { api, workspaces, backups } = fixture()
+    const response = await api(request('/api/workspaces/forest/projects/paper/recoveries', {
+      method: 'POST',
+      headers: { authorization: 'Bearer oidc-token', 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'Before reviewer revisions', createdBy: 'spoofed-user' }),
+    }))
+    expect(response.status).toBe(201)
+    expect(workspaces.authorizeProject).toHaveBeenCalledWith('oidc-token', 'forest', 'paper', 'checkpoint')
+    expect(backups.createRecoveryCheckpoint).toHaveBeenCalledWith(
+      { workspaceId: 'forest', projectId: 'paper' },
+      { name: 'Before reviewer revisions', createdBy: 'owner' },
     )
   })
 

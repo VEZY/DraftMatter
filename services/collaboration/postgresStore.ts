@@ -318,6 +318,21 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
     return { id, snapshotId, name, createdBy: request.createdBy, createdAt: at }
   }
 
+  async createRecoveryCheckpoint(scope: CollaborationProjectScope, request: { name: string; createdBy: string }) {
+    const loaded = await this.load(scope)
+    const updates = [...(loaded.snapshot ? [loaded.snapshot] : []), ...loaded.updates]
+    let state: Uint8Array
+    if (updates.length) state = Y.mergeUpdates(updates)
+    else {
+      const empty = new Y.Doc()
+      state = Y.encodeStateAsUpdate(empty)
+      empty.destroy()
+    }
+    const snapshotId = safeId(`recovery-state-${this.idFactory()}`, 'Recovery snapshot ID')
+    await this.createSnapshot(scope, snapshotId, state)
+    return this.createNamedRecoveryCheckpoint(scope, snapshotId, request)
+  }
+
   async listRecoveryCheckpoints(scope: CollaborationProjectScope) {
     const result = await this.pool.query<{ id: string; snapshot_id: string; name: string; created_by: string; created_at: Date | string }>(
       `SELECT id, snapshot_id, name, created_by, created_at FROM draftmatter_recovery_checkpoints

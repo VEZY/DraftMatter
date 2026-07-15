@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { WorkspaceAuditEvent, WorkspaceInvitation, WorkspaceMembership, WorkspaceRole } from './collaboration/workspaceService'
-import { CollaborationServiceClient, type CollaborationBackup, type WorkspaceSummary } from './collaboration/serviceClient'
+import { CollaborationServiceClient, type CollaborationRecoveryCheckpoint, type WorkspaceSummary } from './collaboration/serviceClient'
 import { Icon } from './Icon'
 
 export interface CollaborationAccessPanelProps {
@@ -21,7 +21,8 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
   const [members, setMembers] = useState<WorkspaceMembership[]>([])
   const [invitations, setInvitations] = useState<WorkspaceInvitation[]>([])
   const [events, setEvents] = useState<WorkspaceAuditEvent[]>([])
-  const [backups, setBackups] = useState<CollaborationBackup[]>([])
+  const [recoveries, setRecoveries] = useState<CollaborationRecoveryCheckpoint[]>([])
+  const [recoveryName, setRecoveryName] = useState('')
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Exclude<WorkspaceRole, 'owner'>>('editor')
   const [createdToken, setCreatedToken] = useState('')
@@ -30,16 +31,16 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
     setBusy('refresh')
     setProblem('')
     try {
-      const [nextMembers, nextInvitations, nextEvents, nextBackups] = await Promise.all([
+      const [nextMembers, nextInvitations, nextEvents, nextRecoveries] = await Promise.all([
         client.listMembers(workspace.id),
         client.listInvitations(workspace.id),
         client.listAuditEvents(workspace.id),
-        projectId ? client.listBackups(workspace.id, projectId) : Promise.resolve([]),
+        projectId ? client.listRecoveryCheckpoints(workspace.id, projectId) : Promise.resolve([]),
       ])
       setMembers(nextMembers)
       setInvitations(nextInvitations)
       setEvents(nextEvents)
-      setBackups(nextBackups)
+      setRecoveries(nextRecoveries)
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error))
     } finally {
@@ -100,8 +101,9 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
     setBusy('backup')
     setProblem('')
     try {
-      const backup = await client.createBackup(workspace.id, projectId)
-      setBackups((current) => [...current, backup])
+      const recovery = await client.createRecoveryCheckpoint(workspace.id, projectId, recoveryName.trim())
+      setRecoveries((current) => [recovery, ...current.filter((item) => item.id !== recovery.id)])
+      setRecoveryName('')
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error))
     } finally {
@@ -126,7 +128,7 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
             <section><span className="collaboration-section-label">Open invitations · {invitations.filter((item) => !item.revokedAt && !item.acceptedAt).length}</span>{invitations.filter((item) => !item.revokedAt && !item.acceptedAt).map((invitation) => <div className="collaboration-admin-item" key={invitation.id}><span><strong>{invitation.email ?? 'Share link'}</strong><small>{invitation.role} · expires {new Date(invitation.expiresAt).toLocaleDateString()}</small></span><button onClick={() => void revokeInvitation(invitation.id)} disabled={Boolean(busy)}>Revoke</button></div>)}</section>
           </div>
 
-          <div className="collaboration-recovery-row"><span><strong>Cloud recovery points · {backups.length}</strong><small>Encrypted immutable project snapshots are independent of the local working tree.</small></span><button onClick={() => void createRecovery()} disabled={Boolean(busy) || !projectId}>{busy === 'backup' ? 'Saving…' : 'Create recovery point'}</button></div>
+          <div className="collaboration-recovery-row"><span><strong>Named cloud recovery · {recoveries.length}</strong><small>{recoveries[0] ? `${recoveries[0].name} · ${new Date(recoveries[0].createdAt).toLocaleString()}` : 'Encrypted immutable history, independent of the local working tree.'}</small></span><input value={recoveryName} onChange={(event) => setRecoveryName(event.target.value)} placeholder="Before reviewer revisions" aria-label="Recovery checkpoint name" /><button onClick={() => void createRecovery()} disabled={Boolean(busy) || !projectId || !recoveryName.trim()}>{busy === 'backup' ? 'Saving…' : 'Save named point'}</button></div>
           <section className="collaboration-activity"><span className="collaboration-section-label">Recent activity</span>{events.slice(-6).reverse().map((event) => <div key={event.id}><span>{eventLabel(event)}</span><small>{event.targetId ?? event.actorId} · {new Date(event.at).toLocaleString()}</small></div>)}</section>
           {problem && <div className="collaboration-error" role="alert">{problem}</div>}
           <button className="collaboration-refresh" onClick={() => void refresh()} disabled={Boolean(busy)}>{busy === 'refresh' ? 'Refreshing…' : 'Refresh workspace details'}</button>

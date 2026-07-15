@@ -25,7 +25,9 @@ export interface CollaborationHttpApiOptions {
   publicConfig: { oidcIssuer: string; oidcClientId: string }
   maxBodyBytes?: number
   maintenanceMetrics?: () => MaintenanceMetrics
-  backups?: Pick<PostgresCollaborationStore, 'createBackup' | 'listBackups' | 'verifyBackup' | 'restoreBackup'>
+  backups?: Pick<PostgresCollaborationStore,
+    'createBackup' | 'listBackups' | 'verifyBackup' | 'restoreBackup'
+    | 'createRecoveryCheckpoint' | 'listRecoveryCheckpoints'>
 }
 
 function safeHeaders(requestId: string, origin?: string) {
@@ -225,6 +227,16 @@ export function createCollaborationHttpApi(options: CollaborationHttpApiOptions)
         if (request.method === 'GET' && parts.length === 4) return json(200, { projects: await options.workspaces.listProjects(token, workspaceId) }, headers)
         if (request.method === 'POST' && parts.length === 4) return json(201, await options.workspaces.createProject(token, workspaceId, await body(request, maximum)), headers)
         if (request.method === 'GET' && parts.length === 5) return json(200, await options.workspaces.getProject(token, workspaceId, parts[4]), headers)
+        if (parts.length === 6 && parts[5] === 'recoveries' && options.backups) {
+          const projectId = parts[4]
+          const authorization = await options.workspaces.authorizeProject(token, workspaceId, projectId, 'checkpoint')
+          const scope = { workspaceId, projectId }
+          if (request.method === 'GET') return json(200, { recoveries: await options.backups.listRecoveryCheckpoints(scope) }, headers)
+          if (request.method === 'POST') {
+            const recovery = await body<{ name?: string }>(request, maximum)
+            return json(201, await options.backups.createRecoveryCheckpoint(scope, { name: recovery.name ?? '', createdBy: authorization.userId }), headers)
+          }
+        }
         if (parts.length >= 6 && parts[5] === 'backups' && options.backups) {
           const projectId = parts[4]
           const scope = { workspaceId, projectId }

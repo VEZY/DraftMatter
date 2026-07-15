@@ -37,6 +37,14 @@ export interface CollaborationBackup {
   objectKey: string
 }
 
+export interface CollaborationRecoveryCheckpoint {
+  id: string
+  snapshotId: string
+  name: string
+  createdBy: string
+  createdAt: string
+}
+
 export class CollaborationServiceError extends Error {
   constructor(
     readonly code: string,
@@ -169,6 +177,14 @@ export class CollaborationServiceClient {
 
   async listBackups(workspaceId: string, projectId: string) {
     return (await this.call<{ backups: CollaborationBackup[] }>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/backups`)).backups
+  }
+
+  async listRecoveryCheckpoints(workspaceId: string, projectId: string) {
+    return (await this.call<{ recoveries: CollaborationRecoveryCheckpoint[] }>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/recoveries`)).recoveries
+  }
+
+  createRecoveryCheckpoint(workspaceId: string, projectId: string, name: string) {
+    return this.call<CollaborationRecoveryCheckpoint>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/recoveries`, { method: 'POST', body: JSON.stringify({ name }) })
   }
 
   createBackup(workspaceId: string, projectId: string) {

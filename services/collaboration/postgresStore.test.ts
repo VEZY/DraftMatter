@@ -95,7 +95,9 @@ describe('managed PostgreSQL and object-storage persistence', () => {
     expect(snapshot.sha256).toMatch(/^[a-f0-9]{64}$/)
     await expect(persistence.createSnapshot(scope, 'checkpoint-01', Y.encodeStateAsUpdate(fixture.document))).rejects.toMatchObject({ code: 'already-exists' })
     const recovery = await persistence.createNamedRecoveryCheckpoint(scope, 'checkpoint-01', { name: 'Before reviewer revisions', createdBy: 'owner' })
-    expect(await persistence.listRecoveryCheckpoints(scope)).toEqual([recovery])
+    const liveRecovery = await persistence.createRecoveryCheckpoint(scope, { name: 'Ready for coauthor review', createdBy: 'owner' })
+    expect(liveRecovery).toMatchObject({ name: 'Ready for coauthor review', createdBy: 'owner', snapshotId: 'recovery-state-fixed-2' })
+    expect(await persistence.listRecoveryCheckpoints(scope)).toEqual([liveRecovery, recovery])
 
     const loaded = await persistence.load(scope)
     expect(loaded.updates).toEqual([])
@@ -103,7 +105,10 @@ describe('managed PostgreSQL and object-storage persistence', () => {
     Y.applyUpdate(reopened, loaded.snapshot!)
     expect(reopened.getText('draftmatter:document').toString()).toBe('Canopy response under drought')
     const keys = await objects.list('draftmatter/workspaces/forest/projects/paper/')
-    expect(keys).toEqual(['draftmatter/workspaces/forest/projects/paper/snapshots/checkpoint-01.bin'])
+    expect(keys).toEqual([
+      'draftmatter/workspaces/forest/projects/paper/snapshots/checkpoint-01.bin',
+      'draftmatter/workspaces/forest/projects/paper/snapshots/recovery-state-fixed-2.bin',
+    ])
     fixture.document.destroy()
     reopened.destroy()
     await pool.end()

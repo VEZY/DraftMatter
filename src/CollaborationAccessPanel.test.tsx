@@ -14,11 +14,12 @@ describe('collaboration workspace administration', () => {
       listMembers: vi.fn().mockResolvedValue([{ workspaceId: 'forest', userId: 'owner-1', role: 'owner', joinedAt: '2026-07-15T00:00:00.000Z' }]),
       listInvitations: vi.fn().mockResolvedValue([]),
       listAuditEvents: vi.fn().mockResolvedValue([{ id: 'audit-1', workspaceId: 'forest', actorId: 'owner-1', action: 'project.created', targetId: 'paper', at: '2026-07-15T00:00:00.000Z' }]),
-      listBackups: vi.fn().mockResolvedValue([{ id: 'backup-1', workspaceId: 'forest', projectId: 'paper', createdAt: '2026-07-15T00:00:00.000Z', bytes: 42, sha256: 'a'.repeat(64), objectKey: 'private' }]),
+      listRecoveryCheckpoints: vi.fn().mockResolvedValue([{ id: 'recovery-1', snapshotId: 'snapshot-1', name: 'Initial review', createdBy: 'owner-1', createdAt: '2026-07-15T00:00:00.000Z' }]),
       createInvitation: vi.fn().mockResolvedValue({
         invitation: { id: 'invite-1', workspaceId: 'forest', role: 'commenter', createdAt: '2026-07-15T00:00:00.000Z', expiresAt: '2026-07-22T00:00:00.000Z', createdBy: 'owner-1' },
         token: 'one-time-invitation-token',
       }),
+      createRecoveryCheckpoint: vi.fn().mockResolvedValue({ id: 'recovery-2', snapshotId: 'snapshot-2', name: 'Before reviewer revisions', createdBy: 'owner-1', createdAt: '2026-07-15T01:00:00.000Z' }),
     } as unknown as CollaborationServiceClient
     const container = document.createElement('div')
     const root = createRoot(container)
@@ -34,8 +35,8 @@ describe('collaboration workspace administration', () => {
       await new Promise((resolve) => window.setTimeout(resolve, 0))
     })
     expect(client.listMembers).toHaveBeenCalledWith('forest')
-    expect(client.listBackups).toHaveBeenCalledWith('forest', 'paper')
-    expect(container.textContent).toContain('Cloud recovery points · 1')
+    expect(client.listRecoveryCheckpoints).toHaveBeenCalledWith('forest', 'paper')
+    expect(container.textContent).toContain('Named cloud recovery · 1')
     expect(container.textContent).toContain('project created')
 
     const role = container.querySelector<HTMLSelectElement>('.collaboration-invite-row select')!
@@ -49,6 +50,19 @@ describe('collaboration workspace administration', () => {
     })
     expect(client.createInvitation).toHaveBeenCalledWith('forest', { role: 'commenter', expiresInMs: 7 * 24 * 60 * 60_000 })
     expect(container.querySelector<HTMLInputElement>('[aria-label="Invitation token"]')?.value).toBe('one-time-invitation-token')
+
+    const recoveryName = container.querySelector<HTMLInputElement>('[aria-label="Recovery checkpoint name"]')!
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+      setter.call(recoveryName, 'Before reviewer revisions')
+      recoveryName.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => {
+      [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Save named point')!.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    expect(client.createRecoveryCheckpoint).toHaveBeenCalledWith('forest', 'paper', 'Before reviewer revisions')
+    expect(container.textContent).toContain('Before reviewer revisions')
     await act(async () => root.unmount())
   })
 })

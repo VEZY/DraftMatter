@@ -3700,6 +3700,7 @@ kbd {
 .collaboration-recovery-row > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
 .collaboration-recovery-row strong { color: var(--ink); font-size: 10px; }
 .collaboration-recovery-row small { color: var(--muted); font-size: 8px; }
+.collaboration-recovery-row input { width: 180px; height: 34px; font-size: 9px; }
 .collaboration-activity { display: flex; flex-direction: column; gap: 5px; }
 .collaboration-activity > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 2px; border-bottom: 1px solid #eceeed; color: var(--ink); font-size: 9px; text-transform: capitalize; }
 .collaboration-activity small { color: var(--muted); font-size: 8px; text-transform: none; }
@@ -3729,6 +3730,9 @@ kbd {
   .collaboration-oidc button { align-self: flex-start; }
   .collaboration-checkpoint { align-items: stretch; flex-direction: column; }
   .collaboration-checkpoint button { align-self: flex-start; }
+  .collaboration-recovery-row { align-items: stretch; flex-direction: column; }
+  .collaboration-recovery-row input { width: 100%; }
+  .collaboration-recovery-row button { align-self: flex-start; }
 }
 
 @media (prefers-reduced-motion: reduce) {
