@@ -75,6 +75,19 @@ describe('rendered Phase 0 vertical slice', () => {
     expect(container.textContent).not.toContain('.draftmatter-reviews')
     expect(container.textContent).not.toContain(':::::')
 
+    const reviewFooter = container.querySelector('.portable-review-footer')!
+    const nextReview = container.querySelector<HTMLButtonElement>('[aria-label="Next review item"]')!
+    expect(normalizedText(reviewFooter.querySelector('span'))).toBe('1 of 3')
+    expect(container.querySelector('#review-item-dm-c01')?.classList.contains('selected')).toBe(true)
+    await click(nextReview)
+    expect(normalizedText(reviewFooter.querySelector('span'))).toBe('2 of 3')
+    expect(container.querySelector('#review-item-dm-c02')?.classList.contains('selected')).toBe(true)
+    await click(nextReview)
+    expect(normalizedText(reviewFooter.querySelector('span'))).toBe('3 of 3')
+    expect(container.querySelector('#review-item-dm-comment-01')?.classList.contains('active')).toBe(true)
+    await click(nextReview)
+    expect(normalizedText(reviewFooter.querySelector('span'))).toBe('1 of 3')
+
     const authorFilter = container.querySelector<HTMLSelectElement>('[aria-label="Review author"]')!
     await select(authorFilter, 'dm-a01')
     expect([...container.querySelectorAll('.proposal-option')].map((option) => normalizedText(option))).toEqual([
@@ -82,6 +95,8 @@ describe('rendered Phase 0 vertical slice', () => {
     ])
     expect(container.querySelector('.comment-card')).toBeNull()
     expect(normalizedText(container.querySelector('.review-panel-header h2'))).toContain('1')
+    expect(normalizedText(reviewFooter.querySelector('span'))).toBe('1 of 1')
+    expect(nextReview.disabled).toBe(true)
     await select(authorFilter, 'all')
 
     await click(buttonWithText(container, 'View source'))

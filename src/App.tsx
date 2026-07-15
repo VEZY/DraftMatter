@@ -271,6 +271,7 @@ function App() {
   } = useDraftHistory(initialDraftState)
   const [markupView, setMarkupView] = useState<MarkupView>('all')
   const [reviewAuthorFilter, setReviewAuthorFilter] = useState('all')
+  const [activeReviewId, setActiveReviewId] = useState<string>()
   const [activeNav, setActiveNav] = useState<'manuscript' | 'review' | 'sources' | 'history'>('manuscript')
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
@@ -901,7 +902,10 @@ function App() {
   const executionProjection = useMemo(() => cleanExecutionProjection(manuscriptSource), [manuscriptSource])
   const executionSource = executionProjection.ok ? executionProjection.source : manuscriptSource
   const reviewDocument = useMemo(() => parseReviewMarkup(manuscriptSource), [manuscriptSource])
-  const reviewQueue = buildReviewQueue(reviewDocument, reviewAuthorFilter === 'all' ? {} : { authorIds: [reviewAuthorFilter] })
+  const reviewQueue = useMemo(
+    () => buildReviewQueue(reviewDocument, reviewAuthorFilter === 'all' ? {} : { authorIds: [reviewAuthorFilter] }),
+    [reviewAuthorFilter, reviewDocument],
+  )
   const structuredReviewProjection = useMemo(() => {
     if (!structuredMode || (markupView !== 'original' && markupView !== 'final')) return null
     return projectPortableReviewSource(manuscriptSource, { view: markupView })
@@ -911,7 +915,11 @@ function App() {
     && reviewDocument.changes.some((change) => change.id === 'dm-c02')
     && reviewDocument.threads.some((thread) => thread.id === 'dm-comment-01')
   const openReviewCount = reviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
-  const reviewProposal = reviewAuthorFilter === 'dm-a01' ? 'alice' : reviewAuthorFilter === 'dm-a02' ? 'marcus' : draft.activeProposal
+  const reviewProposal = reviewAuthorFilter === 'dm-a01' || activeReviewId === 'dm-c01'
+    ? 'alice'
+    : reviewAuthorFilter === 'dm-a02' || activeReviewId === 'dm-c02'
+      ? 'marcus'
+      : draft.activeProposal
   const reviewProposalStatus = reviewProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
   const executableCells = extractExecutableCells(executionSource).cells
   const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL) ?? executableCells[0]
@@ -2903,7 +2911,7 @@ function App() {
                 <div className="conflict-heading"><Icon name="branch" size={16} /><span>{reviewAuthorFilter === 'all' ? '2 overlapping alternatives' : 'Filtered alternative'}</span><small>{reviewAuthorFilter === 'all' ? 'Compare one at a time' : 'Author filter active'}</small></div>
 
                 {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a01') &&
-                <button className={`proposal-option ${reviewProposal === 'alice' ? 'selected' : ''}`} onClick={() => updateDraft({ activeProposal: 'alice' })}>
+                <button id="review-item-dm-c01" className={`proposal-option ${reviewProposal === 'alice' && activeReviewId !== 'dm-comment-01' ? 'selected' : ''}`} onClick={() => { setActiveReviewId('dm-c01'); updateDraft({ activeProposal: 'alice' }) }}>
                   <Avatar initials="AM" tone="blue" small />
                   <span className="proposal-author"><strong>Alice Martin</strong><small>12 minutes ago</small></span>
                   <StatusPill status={draft.aliceStatus} />
@@ -2911,7 +2919,7 @@ function App() {
                 </button>}
 
                 {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
-                <button className={`proposal-option ${reviewProposal === 'marcus' ? 'selected' : ''}`} onClick={() => updateDraft({ activeProposal: 'marcus' })}>
+                <button id="review-item-dm-c02" className={`proposal-option ${reviewProposal === 'marcus' && activeReviewId !== 'dm-comment-01' ? 'selected' : ''}`} onClick={() => { setActiveReviewId('dm-c02'); updateDraft({ activeProposal: 'marcus' }) }}>
                   <Avatar initials="MC" tone="clay" small />
                   <span className="proposal-author"><strong>Marcus Chen</strong><small>8 minutes ago</small></span>
                   <StatusPill status={draft.marcusStatus} />
@@ -2930,7 +2938,7 @@ function App() {
               </div>
 
               {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
-              <div className={`comment-card ${draft.commentResolved ? 'resolved' : ''}`}>
+              <div id="review-item-dm-comment-01" className={`comment-card ${activeReviewId === 'dm-comment-01' ? 'active' : ''} ${draft.commentResolved ? 'resolved' : ''}`} onClick={() => setActiveReviewId('dm-comment-01')}>
                 <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small>5 minutes ago</small></span><button className="icon-button subtle" aria-label="Comment options"><Icon name="more" /></button></div>
                 <div className="comment-quote">“increased modestly”</div>
                 <p>Can we quantify this increase in the main text? The estimate is already in the supplement.</p>
@@ -2946,6 +2954,9 @@ function App() {
                 source={manuscriptSource}
                 excludeIds={demoReviewAvailable ? ['dm-c01', 'dm-c02', 'dm-comment-01'] : []}
                 authorId={reviewAuthorFilter === 'all' ? undefined : reviewAuthorFilter}
+                activeId={activeReviewId}
+                navigationItems={reviewQueue}
+                onActiveIdChange={setActiveReviewId}
                 selectedTarget={structuredMode ? structuredReviewSelection : null}
                 onApply={applyPortableReviewSource}
               />

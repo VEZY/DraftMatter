@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import { parseReviewMarkup } from './reviewMarkup'
 import {
@@ -9,7 +9,7 @@ import {
   ensureReviewAuthor,
   setReviewThreadStatus,
 } from './reviewOperations'
-import { buildReviewQueue, navigateReviewQueue } from './reviewQueue'
+import { buildReviewQueue, navigateReviewQueue, type ReviewQueueItem } from './reviewQueue'
 
 const localAuthor = { id: 'dm-local-author', name: 'Remi Vezy' }
 
@@ -37,12 +37,18 @@ export function PortableReviewItems({
   source,
   excludeIds = [],
   authorId,
+  activeId: controlledActiveId,
+  navigationItems,
+  onActiveIdChange,
   selectedTarget,
   onApply,
 }: {
   source: string
   excludeIds?: string[]
   authorId?: string
+  activeId?: string
+  navigationItems?: ReviewQueueItem[]
+  onActiveIdChange?: (id: string | undefined) => void
   selectedTarget?: { quote: string; occurrence: number } | null
   onApply: (source: string, message: string) => void
 }) {
@@ -51,7 +57,13 @@ export function PortableReviewItems({
     const excluded = new Set(excludeIds)
     return buildReviewQueue(document, authorId ? { authorIds: [authorId] } : {}).filter((item) => !excluded.has(item.id))
   }, [authorId, document, excludeIds])
-  const [activeId, setActiveId] = useState<string>()
+  const [internalActiveId, setInternalActiveId] = useState<string>()
+  const activeId = onActiveIdChange ? controlledActiveId : internalActiveId
+  const setActiveId = useCallback((id: string | undefined) => {
+    if (onActiveIdChange) onActiveIdChange(id)
+    else setInternalActiveId(id)
+  }, [onActiveIdChange])
+  const navigableQueue = navigationItems ?? queue
   const [reply, setReply] = useState('')
   const [problem, setProblem] = useState('')
   const [compose, setCompose] = useState<'comment' | 'suggestion' | null>(null)
@@ -61,8 +73,8 @@ export function PortableReviewItems({
   const composerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (!queue.some((item) => item.id === activeId)) setActiveId(queue[0]?.id)
-  }, [activeId, queue])
+    if (!navigableQueue.some((item) => item.id === activeId)) setActiveId(navigableQueue[0]?.id)
+  }, [activeId, navigableQueue, setActiveId])
 
   useEffect(() => {
     if (compose && typeof composerRef.current?.scrollIntoView === 'function') composerRef.current.scrollIntoView({ block: 'nearest' })
@@ -135,10 +147,13 @@ export function PortableReviewItems({
   }
 
   const navigate = (direction: 'next' | 'previous') => {
-    const next = navigateReviewQueue(queue, activeId, direction)
+    const next = navigateReviewQueue(navigableQueue, activeId, direction)
     setActiveId(next?.id)
-    if (next) globalThis.document.getElementById(`review-item-${next.id}`)?.scrollIntoView({ block: 'nearest' })
+    const target = next ? globalThis.document.getElementById(`review-item-${next.id}`) : null
+    if (typeof target?.scrollIntoView === 'function') target.scrollIntoView({ block: 'nearest' })
   }
+
+  const activePosition = navigableQueue.findIndex((item) => item.id === activeId)
 
   return (
     <>
@@ -193,9 +208,9 @@ export function PortableReviewItems({
       <div className="review-panel-footer portable-review-footer">
         <button onClick={() => { setCompose('comment'); setProblem(''); setQuote(selectedTarget?.quote ?? ''); setSelectedOccurrence(selectedTarget?.occurrence) }}><Icon name="message" size={15} /> New comment</button>
         <button onClick={() => { setCompose('suggestion'); setProblem(''); setQuote(selectedTarget?.quote ?? ''); setSelectedOccurrence(selectedTarget?.occurrence) }}><Icon name="spark" size={15} /> Suggest edit</button>
-        <span>{queue.length ? `${Math.max(1, queue.findIndex((item) => item.id === activeId) + 1)} of ${queue.length}` : 'No additional items'}</span>
-        <button onClick={() => navigate('previous')} disabled={!queue.length} aria-label="Previous review item">↑</button>
-        <button onClick={() => navigate('next')} disabled={!queue.length} aria-label="Next review item">↓</button>
+        <span>{navigableQueue.length ? `${Math.max(1, activePosition + 1)} of ${navigableQueue.length}` : 'No review items'}</span>
+        <button onClick={() => navigate('previous')} disabled={navigableQueue.length < 2} aria-label="Previous review item">↑</button>
+        <button onClick={() => navigate('next')} disabled={navigableQueue.length < 2} aria-label="Next review item">↓</button>
       </div>
     </>
   )

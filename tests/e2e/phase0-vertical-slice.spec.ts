@@ -14,10 +14,23 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
     await expect(page.getByRole('img', { name: /Line chart comparing control and drought/ })).toBeVisible()
     await expect(reviewPanel.getByText('2 overlapping alternatives')).toBeVisible()
     await expect(reviewPanel.getByText(/Can we quantify this increase/)).toBeVisible()
+    const reviewPosition = reviewPanel.locator('.portable-review-footer span')
+    const nextReview = reviewPanel.getByRole('button', { name: 'Next review item' })
+    const previousReview = reviewPanel.getByRole('button', { name: 'Previous review item' })
+    await expect(reviewPosition).toHaveText('1 of 3')
     await expect(page.locator('body')).not.toContainText('.dm-anchor')
     await expect(page.locator('body')).not.toContainText('.draftmatter-reviews')
 
     await expect(page).toHaveScreenshot('rendered-vertical-slice.png')
+
+    await nextReview.click()
+    await expect(reviewPosition).toHaveText('2 of 3')
+    await expect(reviewPanel.locator('#review-item-dm-c02')).toHaveClass(/selected/)
+    await nextReview.click()
+    await expect(reviewPosition).toHaveText('3 of 3')
+    await expect(reviewPanel.locator('#review-item-dm-comment-01')).toHaveClass(/active/)
+    await previousReview.click()
+    await expect(reviewPosition).toHaveText('2 of 3')
 
     await page.getByRole('button', { name: /View source/ }).click()
     const sourceInspector = page.getByRole('dialog', { name: 'Portable source inspector' })
@@ -26,10 +39,10 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
     await expect(sourceInspector.getByRole('button', { name: 'Resolve review first' })).toBeDisabled()
 
     await page.getByRole('button', { name: 'Close source inspector' }).click()
-    await reviewPanel.locator('.proposal-option').nth(1).click()
+    await reviewPanel.locator('#review-item-dm-c02').click()
     await reviewPanel.getByRole('button', { name: 'Accept' }).click()
-    await expect(reviewPanel.locator('.proposal-option').nth(1)).toContainText('Accepted')
-    await expect(reviewPanel.locator('.proposal-option').first()).toContainText('Needs rebase')
+    await expect(reviewPanel.locator('#review-item-dm-c02')).toContainText('Accepted')
+    await expect(reviewPanel.locator('#review-item-dm-c01')).toContainText('Needs rebase')
 
     await page.getByRole('button', { name: /View source/ }).click()
     await sourceInspector.getByRole('tab', { name: 'Clean final' }).click()
