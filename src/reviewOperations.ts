@@ -60,6 +60,15 @@ export interface CreateReviewChangeRequest {
   endMarkerId?: string
 }
 
+export interface CreateReviewAlternativeRequest {
+  changeId: string
+  author: ReviewAuthorIdentity
+  proposal: string
+  rationale?: string
+  timestamp?: string
+  alternativeId?: string
+}
+
 export interface ReviewChangeOperationResult {
   document: ReviewMarkupDocument
   change: ReviewChange
@@ -448,6 +457,48 @@ export function createReviewChange(source: string, request: CreateReviewChangeRe
   const updated = parseReviewMarkup(appendSectionRecords(anchoredDocument, additions))
   assertWritable(updated)
   return changeResult(updated, changeId)
+}
+
+export function createReviewAlternative(
+  document: ReviewMarkupDocument,
+  request: CreateReviewAlternativeRequest,
+): ReviewChangeOperationResult {
+  assertWritable(document)
+  const original = document.changes.find((change) => change.id === request.changeId)
+  if (!original) throw new ReviewOperationError('review-change-missing', `Review change ${request.changeId} was not found.`)
+  if (original.status !== 'open') throw new ReviewOperationError('review-change-not-open', `Alternatives can be added only while ${request.changeId} is open.`)
+  const supportedKinds: ReviewChangeKind[] = ['insert', 'delete', 'replace', 'format', 'structural']
+  if (!supportedKinds.includes(original.changeKind as ReviewChangeKind)) {
+    throw new ReviewOperationError('review-change-kind-unsupported', `Review change ${request.changeId} uses unsupported kind ${original.changeKind}.`)
+  }
+  validatePayload(request.proposal, 'A suggestion')
+  if (request.rationale !== undefined) validatePayload(request.rationale, 'A rationale')
+  safeId(request.author.id, 'Author ID')
+  if (!request.author.name.trim()) throw new ReviewOperationError('review-author-name-empty', 'An author name is required.')
+  const timestamp = reviewTimestamp(request.timestamp)
+  const alternativeId = safeId(request.alternativeId ?? generatedId('dm-change'), 'Change ID')
+  const existingAuthor = authorFor(document, request.author)
+  requireUniqueIds(document, [alternativeId, ...(existingAuthor ? [] : [request.author.id])])
+  const range = document.ranges.find((candidate) => candidate.anchorId === original.anchorId && candidate.complete)
+  const context = original.anchorContext ?? (range
+    ? anchorContext(document.source, range.start, range.end)
+    : undefined)
+  if (!context) throw new ReviewOperationError('review-anchor-context-missing', `Review change ${request.changeId} has no reusable anchor context.`)
+  const ending = lineEnding(document.source)
+  const additions = `${existingAuthor ? '' : authorRecord(request.author, timestamp, ending)}${changeRecord(
+    alternativeId,
+    original.anchorId,
+    request.author.id,
+    original.changeKind as ReviewChangeKind,
+    request.proposal,
+    request.rationale,
+    context,
+    timestamp,
+    ending,
+  )}`
+  const updated = parseReviewMarkup(appendSectionRecords(document, additions))
+  assertWritable(updated)
+  return changeResult(updated, alternativeId)
 }
 
 export function decideReviewChange(
