@@ -58,7 +58,7 @@ describe('portable document core', () => {
       ok: false,
       source: null,
       diagnostics: [expect.objectContaining({
-        code: 'final-projection-overlap-dm-r01',
+        code: 'final-projection-conflict:dm-c01+dm-c02',
         level: 'error',
         message: expect.stringContaining('dm-c01 (Alice Martin, open); dm-c02 (Marcus Chen, open)'),
       })],
