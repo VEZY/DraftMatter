@@ -1,6 +1,7 @@
 import type { Mark, Node as ProseMirrorNode } from 'prosemirror-model'
 import { parseCitationCluster, serializeCitationCluster } from './citation'
 import { formatCrossReferenceTarget } from './crossReference'
+import { parseDisplayEquation } from './displayEquation'
 import { sourceHash } from './document'
 import { extractExecutableCells } from './executionCells'
 import { manuscriptSchema } from './manuscriptSchema'
@@ -190,6 +191,7 @@ function parseCodeAttributes(cell: ReturnType<typeof extractExecutableCells>['ce
 
 function parseBlocks(lines: SourceLine[], diagnostics: DocumentDiagnostic[], ordinalRef: { value: number }): ProseMirrorNode[] {
   const blocks: ProseMirrorNode[] = []
+  const contents = lines.map((line) => line.content)
   let index = 0
   const id = (kind: string, raw: string) => nodeId(kind, raw, ++ordinalRef.value)
 
@@ -329,16 +331,21 @@ function parseBlocks(lines: SourceLine[], diagnostics: DocumentDiagnostic[], ord
       continue
     }
 
-    if (/^\s*\$\$/.test(value)) {
-      const equationLines = [value.replace(/^\s*\$\$\s*/, '')]
-      index += 1
-      while (index < lines.length && !/\$\$\s*$/.test(equationLines.at(-1) ?? '')) {
-        equationLines.push(lines[index].content)
-        index += 1
+    const equation = parseDisplayEquation(contents, index)
+    if (equation) {
+      if (!equation.closed) {
+        const raw = lines.slice(index, equation.end).map((line) => line.raw).join('')
+        blocks.push(manuscriptSchema.nodes.raw_block.createChecked({ id: id('raw', raw), raw, format: 'unclosed-equation' }))
+        diagnostics.push({ code: 'equation-unclosed', level: 'warning', message: 'An unclosed display equation was preserved as editable raw source.' })
+      } else {
+        blocks.push(manuscriptSchema.nodes.equation_block.createChecked({
+          id: id('equation', equation.tex),
+          tex: equation.tex,
+          label: equation.label ?? null,
+          sourceAttributes: equation.sourceAttributes ?? null,
+        }))
       }
-      equationLines[equationLines.length - 1] = equationLines.at(-1)?.replace(/\s*\$\$\s*$/, '') ?? ''
-      const tex = equationLines.join('\n').trim()
-      blocks.push(manuscriptSchema.nodes.equation_block.createChecked({ id: id('equation', tex), tex, label: null }))
+      index = equation.end
       continue
     }
 
@@ -509,7 +516,10 @@ function serializeBlock(node: ProseMirrorNode, ending: string, index = 0): strin
     return items.join(ending)
   }
   if (node.type === manuscriptSchema.nodes.horizontal_rule) return '---'
-  if (node.type === manuscriptSchema.nodes.equation_block) return `$$${ending}${node.attrs.tex}${ending}$$${node.attrs.label ? ` {#${node.attrs.label}}` : ''}`
+  if (node.type === manuscriptSchema.nodes.equation_block) {
+    const sourceAttributes = node.attrs.sourceAttributes ?? (node.attrs.label ? `#${node.attrs.label}` : null)
+    return `$$${ending}${node.attrs.tex}${ending}$$${sourceAttributes ? ` {${sourceAttributes}}` : ''}`
+  }
   if (node.type === manuscriptSchema.nodes.figure) {
     const image = node.firstChild
     const caption = node.childCount > 1 ? node.child(1) : undefined

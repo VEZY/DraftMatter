@@ -1,5 +1,6 @@
 import { validateCleanProjection } from './document'
 import { formatCrossReferenceTarget } from './crossReference'
+import { parseDisplayEquation } from './displayEquation'
 import { parsePublicationMetadata, removeDuplicateLeadingTitle } from './publicationMetadata'
 
 export interface NativeHtmlExportOptions {
@@ -72,7 +73,7 @@ function tableCells(line: string) {
 
 function startsBlock(lines: string[], index: number) {
   const line = lines[index] ?? ''
-  return /^\s*(?:#{1,6}\s+|```|~~~|>\s?|[-+*]\s+|\d+[.)]\s+|\$\$\s*$|!\[[^\]]*\]\([^)]*\))/.test(line)
+  return /^\s*(?:#{1,6}\s+|```|~~~|>\s?|[-+*]\s+|\d+[.)]\s+|\$\$|!\[[^\]]*\]\([^)]*\))/.test(line)
     || (line.includes('|') && isTableSeparator(lines[index + 1] ?? ''))
 }
 
@@ -109,16 +110,15 @@ function renderBody(source: string, options: NativeHtmlExportOptions) {
       html.push(`<figure class="source-code"><figcaption>${escapeHtml(language)} source · not executed during export</figcaption><pre><code class="language-${escapeHtml(language)}">${escapeHtml(code.join('\n'))}</code></pre></figure>`)
       continue
     }
-    if (/^\s*\$\$\s*$/.test(line)) {
-      const equation: string[] = []
-      index += 1
-      while (index < lines.length && !/^\s*\$\$\s*$/.test(lines[index])) {
-        equation.push(lines[index])
-        index += 1
+    const equation = parseDisplayEquation(lines, index)
+    if (equation) {
+      if (equation.closed) {
+        const id = equation.label ? ` id="${escapeHtml(equation.label)}"` : ''
+        html.push(`<div${id} class="equation display-equation" data-tex="${escapeHtml(equation.tex)}" role="math">${escapeHtml(equation.tex)}</div>`)
+      } else {
+        html.push(`<pre class="raw-source" aria-label="Unclosed display equation">${escapeHtml(lines.slice(index, equation.end).join('\n'))}</pre>`)
       }
-      if (index < lines.length) index += 1
-      const tex = equation.join('\n').trim()
-      html.push(`<div class="equation display-equation" data-tex="${escapeHtml(tex)}" role="math">${escapeHtml(tex)}</div>`)
+      index = equation.end
       continue
     }
     const figure = line.match(/^\s*!\[([^\]]*)\]\(([^)]+)\)(?:\{#([a-zA-Z][\w.:-]*)[^}]*\})?\s*$/)

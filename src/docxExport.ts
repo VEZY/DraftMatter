@@ -1,5 +1,6 @@
 import { validateCleanProjection } from './document'
 import { formatCrossReferenceTarget } from './crossReference'
+import { parseDisplayEquation } from './displayEquation'
 import { parsePublicationMetadata, removeDuplicateLeadingTitle } from './publicationMetadata'
 
 export interface DocxExportDiagnostic {
@@ -185,15 +186,15 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
       parts.push(paragraph(code.join('\n'), 'CodeBlock'))
       continue
     }
-    if (/^\s*\$\$\s*$/.test(line)) {
-      const equation: string[] = []
-      index += 1
-      while (index < lines.length && !/^\s*\$\$\s*$/.test(lines[index])) {
-        equation.push(lines[index])
-        index += 1
+    const equation = parseDisplayEquation(lines, index)
+    if (equation) {
+      if (equation.closed) {
+        parts.push(paragraph(equation.tex.replaceAll('\n', ' '), 'Equation'))
+      } else {
+        parts.push(paragraph(lines.slice(index, equation.end).join('\n'), 'CodeBlock'))
+        diagnostics.push({ code: 'raw-source', level: 'warning', message: 'An unclosed display equation was preserved as visible source in the DOCX.' })
       }
-      if (index < lines.length) index += 1
-      parts.push(paragraph(equation.join(' ').trim(), 'Equation'))
+      index = equation.end
       continue
     }
     const figure = line.match(/^\s*!\[([^\]]*)\]\(([^)]+)\)(?:\{#[^}]+\})?\s*$/)
@@ -245,7 +246,7 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
     }
     const text = [line]
     index += 1
-    while (index < lines.length && lines[index].trim() && !/^(?:#{1,6}\s+|```|~~~|\s*!\[|\s*[-+*]\s+|\s*\d+[.)]\s+)/.test(lines[index])) {
+    while (index < lines.length && lines[index].trim() && !/^(?:#{1,6}\s+|```|~~~|\s*\$\$|\s*!\[|\s*[-+*]\s+|\s*\d+[.)]\s+)/.test(lines[index])) {
       text.push(lines[index])
       index += 1
     }

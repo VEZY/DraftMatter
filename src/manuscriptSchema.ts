@@ -57,12 +57,17 @@ const nodes: Record<string, NodeSpec> = {
   ordered_list: { ...orderedList, attrs: { ...identified, order: { default: 1, validate: 'number' } }, content: 'list_item+', group: 'block' },
   list_item: { ...listItem, attrs: identified, content: 'paragraph block*' },
   equation_block: {
-    attrs: { ...identified, tex: { default: '' }, label: { default: null } },
+    attrs: { ...identified, tex: { default: '' }, label: { default: null }, sourceAttributes: { default: null } },
     group: 'block',
     atom: true,
     isolating: true,
     parseDOM: [{ tag: 'figure[data-dm-node="equation"]' }],
-    toDOM: (node) => ['figure', { 'data-dm-node': 'equation', 'data-dm-id': node.attrs.id ?? '', 'data-label': node.attrs.label ?? '' }, ['code', node.attrs.tex]],
+    toDOM: (node) => ['figure', {
+      id: node.attrs.label ?? undefined,
+      'data-dm-node': 'equation',
+      'data-dm-id': node.attrs.id ?? '',
+      'data-label': node.attrs.label ?? '',
+    }, ['code', node.attrs.tex]],
   },
   figure: {
     attrs: identified,

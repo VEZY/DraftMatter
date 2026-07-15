@@ -18,7 +18,7 @@ Canopy area differed by **18%** [@field2026]. The fitted response was $y = ax + 
 
 $$
 R^2 = 0.94
-$$
+$$ {#eq-fit .unnumbered}
 
 ![Canopy response through time](data:image/svg+xml;base64,${figure}){#fig-response}
 
@@ -77,6 +77,8 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(html).not.toContain('>@fig-response<')
     expect(html).toContain('Independent measurements of canopy area')
     expect(html).toContain('<figure id="fig-response">')
+    expect(html).toContain('<div id="eq-fit" class="equation display-equation"')
+    expect(html).not.toContain('{#eq-fit')
     expect(html).toContain('<table>')
     expect(html).toContain('role="math"')
     expect(html).toContain('print(&quot;must remain inert&quot;)')
@@ -136,6 +138,7 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(readableDocx).not.toContain('data:image/svg+xml;base64')
     expect(readableDocx).not.toContain('$y = ax + b$')
     expect(readableDocx).not.toContain('@fig-response')
+    expect(readableDocx).not.toContain('{#eq-fit')
     expect(readableDocx).toContain('word/document.xml')
     expect(readableDocx).not.toContain('Drought acclimation reshapes canopy development')
     expect(readableDocx).not.toMatch(/\.dm-anchor|\.draftmatter-reviews|<w:(?:ins|del)\b/)

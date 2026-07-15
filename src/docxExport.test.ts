@@ -13,6 +13,10 @@ author:
 
 Leaf area declined by **18%** [@vezy2020]. The relationship was $y = ax + b$; see @fig-response.
 
+$$
+R^2 = 0.91
+$$ {#eq-fit .unnumbered}
+
 ![Response](figures/response.svg){#fig-response}
 
 | Treatment | Area |
@@ -49,6 +53,8 @@ describe('native DOCX export', () => {
     expect(readable).toContain('y = ax + b; see Figure response')
     expect(readable).not.toContain('$y = ax + b$')
     expect(readable).not.toContain('@fig-response')
+    expect(readable).toContain('R^2 = 0.91')
+    expect(readable).not.toContain('{#eq-fit')
     expect(readable).toContain('<w:tbl>')
     expect(readable).toContain('not executed during export')
     expect(readable).toContain('print(&quot;inert&quot;)')

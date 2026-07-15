@@ -130,6 +130,30 @@ describe('generic structured manuscript bridge', () => {
     expect(literal.document.firstChild?.attrs.sourceAttributes).toBeNull()
   })
 
+  it('reopens labeled display equations without consuming following manuscript blocks', () => {
+    const source = '$$\nE = mc^2\n$$ {#eq-mass .unnumbered}\n\nParagraph after math.\n'
+    const parsed = parseStructuredManuscript(source)
+
+    expect(parsed.document.childCount).toBe(2)
+    expect(parsed.document.firstChild?.type).toBe(manuscriptSchema.nodes.equation_block)
+    expect(parsed.document.firstChild?.attrs).toMatchObject({
+      tex: 'E = mc^2',
+      label: 'eq-mass',
+      sourceAttributes: '#eq-mass .unnumbered',
+    })
+    expect(parsed.document.lastChild?.textContent).toBe('Paragraph after math.')
+    expect(serializeStructuredManuscript(parsed.document, parsed.metadata)).toBe(source)
+  })
+
+  it('preserves an unclosed display equation as raw source with a visible diagnostic', () => {
+    const source = '$$\nE = mc^2\nParagraph that must not disappear.\n'
+    const parsed = parseStructuredManuscript(source)
+
+    expect(parsed.document.firstChild?.type).toBe(manuscriptSchema.nodes.raw_block)
+    expect(parsed.document.firstChild?.attrs.raw).toBe(source)
+    expect(parsed.diagnostics).toContainEqual(expect.objectContaining({ code: 'equation-unclosed', level: 'warning' }))
+  })
+
   it('enumerates citation clusters across arbitrary sections for CSL rendering and cache diagnostics', () => {
     expect(structuredCitationClusters(representativeSource)).toEqual([
       expect.objectContaining({
