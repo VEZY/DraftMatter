@@ -12,6 +12,7 @@ use tauri_plugin_opener::OpenerExt;
 mod direct_execution;
 mod execution_manifests;
 mod execution_trust;
+mod export_adapter;
 mod git_adapter;
 use direct_execution::{
     execute_direct_impl, interrupt_direct_impl, restart_direct_impl, terminate_direct_impl,
@@ -24,6 +25,10 @@ mod runtime;
 use execution_trust::{
     execution_trust_status_impl, revoke_project_trust_impl, trust_project_for_session_impl,
     ExecutionTrustStatus, ExecutionTrustStore,
+};
+use export_adapter::{
+    probe_external_export_tools_impl, render_external_export_impl, ExternalExportRequest,
+    ExternalExportResult, ExternalExportTools,
 };
 use git_adapter::{
     git_branches_impl, git_create_branch_impl, git_create_checkpoint_impl, git_create_commit_impl,
@@ -2247,6 +2252,18 @@ fn git_push(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
     git_push_impl(request)
 }
 
+#[tauri::command]
+fn probe_external_export_tools() -> ExternalExportTools {
+    probe_external_export_tools_impl()
+}
+
+#[tauri::command]
+fn render_external_export(
+    request: ExternalExportRequest,
+) -> Result<ExternalExportResult, HostError> {
+    render_external_export_impl(request)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2294,7 +2311,9 @@ pub fn run() {
             git_switch_branch,
             git_fetch,
             git_pull,
-            git_push
+            git_push,
+            probe_external_export_tools,
+            render_external_export
         ])
         .run(tauri::generate_context!())
         .expect("error while running DraftMatter");

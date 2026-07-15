@@ -75,6 +75,8 @@ describe('desktop host adapter', () => {
     await host.gitFetch({ root: '/research/canopy', remote: 'origin' })
     await host.gitPull({ root: '/research/canopy', remote: 'origin', branch: 'main' })
     await host.gitPush({ root: '/research/canopy', remote: 'origin', branch: 'main' })
+    await host.probeExternalExportTools()
+    await host.renderExternalExport({ root: '/research/canopy', adapter: 'pandoc', format: 'docx', source: '# Clean', outputName: 'paper.docx' })
 
     expect(calls).toEqual([
       ['open_project', { root: '/research/canopy' }],
@@ -118,6 +120,8 @@ describe('desktop host adapter', () => {
       ['git_fetch', { request: { root: '/research/canopy', remote: 'origin' } }],
       ['git_pull', { request: { root: '/research/canopy', remote: 'origin', branch: 'main' } }],
       ['git_push', { request: { root: '/research/canopy', remote: 'origin', branch: 'main' } }],
+      ['probe_external_export_tools', undefined],
+      ['render_external_export', { request: { root: '/research/canopy', adapter: 'pandoc', format: 'docx', source: '# Clean', outputName: 'paper.docx' } }],
     ])
   })
 

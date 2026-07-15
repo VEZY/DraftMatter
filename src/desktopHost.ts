@@ -163,6 +163,38 @@ export interface GitRemoteResult {
   status: GitRepositoryStatus
 }
 
+export type ExternalExportAdapter = 'pandoc' | 'quarto'
+export type ExternalExportFormat = 'html' | 'docx' | 'pdf'
+
+export interface ExternalToolProbe {
+  adapter: ExternalExportAdapter
+  available: boolean
+  version?: string
+  executable?: string
+  message: string
+}
+
+export interface ExternalExportTools {
+  pandoc: ExternalToolProbe
+  quarto: ExternalToolProbe
+}
+
+export interface ExternalExportRequest {
+  root: string
+  adapter: ExternalExportAdapter
+  format: ExternalExportFormat
+  source: string
+  outputName: string
+}
+
+export interface ExternalExportResult {
+  adapter: ExternalExportAdapter
+  format: ExternalExportFormat
+  path: string
+  bytes: number
+  message: string
+}
+
 export interface AcquireCitationsRequest {
   root: string
   documentPath: string
@@ -292,6 +324,10 @@ export function createDesktopHost(
   const gitUnavailable = () => Promise.reject<never>({
     kind: 'integration',
     message: 'Local Git is unavailable in browser collaboration sessions.',
+  } satisfies HostFailure)
+  const externalExportUnavailable = () => Promise.reject<never>({
+    kind: 'integration',
+    message: 'External desktop renderers are unavailable in browser collaboration sessions.',
   } satisfies HostFailure)
   return {
     available,
@@ -478,6 +514,16 @@ export function createDesktopHost(
       return available
         ? invokeBridge<GitRemoteResult>('git_push', { request })
         : gitUnavailable()
+    },
+    probeExternalExportTools() {
+      return available
+        ? invokeBridge<ExternalExportTools>('probe_external_export_tools')
+        : externalExportUnavailable()
+    },
+    renderExternalExport(request: ExternalExportRequest) {
+      return available
+        ? invokeBridge<ExternalExportResult>('render_external_export', { request })
+        : externalExportUnavailable()
     },
   }
 }
