@@ -44,8 +44,22 @@ describe('accessibility baseline', () => {
     expect(container.querySelector<HTMLButtonElement>('.run-button')?.disabled).toBe(true)
     expect(container.querySelector<HTMLButtonElement>('[aria-label="Execution environments and options"]')?.disabled).toBe(true)
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open command menu"]')!.click())
+    const search = container.querySelector<HTMLInputElement>('[aria-label="Search commands"]')!
+    const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+    await act(async () => {
+      setValue?.call(search, 'run code')
+      search.dispatchEvent(new Event('input', { bubbles: true }))
+    })
     const runCommand = [...container.querySelectorAll<HTMLButtonElement>('.command-menu button')].find((button) => button.textContent?.includes('Run code cell'))
     expect(runCommand?.disabled).toBe(true)
     expect(runCommand?.textContent).toContain('unavailable to browser collaborators')
+    await act(async () => search.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })))
+    expect(container.querySelector('.command-menu')).not.toBeNull()
+
+    await act(async () => {
+      setValue?.call(search, 'not a real command')
+      search.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('No matching commands')
   })
 })

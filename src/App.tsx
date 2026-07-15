@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { convertFileSrc, isTauri } from '@tauri-apps/api/core'
 import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, searchCitations } from './bibliography'
 import { desktopHost, normaliseHostFailure, resolveMainDocument, type ProjectExecutionPreferences, type ProjectSnapshot } from './desktopHost'
@@ -60,6 +60,17 @@ const LAST_PROJECT_ROOT_KEY = 'draftmatter.last-project-root.v1'
 const ZOTERO_VERSION_KEY = 'draftmatter.zotero-version.v1'
 const PRIMARY_EXECUTION_CELL = 'fig-canopy'
 const LEGACY_SAMPLE_CODE = 'weeks = [0, 2, 4, 6, 8, 10, 12]\ncontrol = [0, 8, 21, 39, 58, 76, 91]\ndrought = [0, 7, 19, 33, 47, 60, 72]\nplot_response(weeks, control, drought)'
+
+interface CommandPaletteEntry {
+  id: string
+  label: string
+  description: string
+  keywords?: string
+  icon: ReactNode
+  shortcut?: string
+  disabled?: boolean
+  action: () => void
+}
 
 const directExecutionProvider = createDirectExecutionProvider(createDesktopDirectExecutionTransport(desktopHost))
 const kernelSelections: Partial<Record<ExecutionLanguage, JupyterKernelProbe>> = {}
@@ -323,6 +334,8 @@ function App() {
   const [sourceEditing, setSourceEditing] = useState(false)
   const [sourceBuffer, setSourceBuffer] = useState('')
   const [commandOpen, setCommandOpen] = useState(false)
+  const [commandQuery, setCommandQuery] = useState('')
+  const [commandActiveIndex, setCommandActiveIndex] = useState(0)
   const [reply, setReply] = useState('')
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'conflict' | 'error'>('saved')
   const [saveProblem, setSaveProblem] = useState('')
@@ -917,6 +930,12 @@ function App() {
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
   }, [canRedo, canUndo, draft, executionTrustBusy])
+
+  useEffect(() => {
+    if (!commandOpen) return
+    setCommandQuery('')
+    setCommandActiveIndex(0)
+  }, [commandOpen])
 
   useEffect(() => {
     if (!toast) return
@@ -2611,6 +2630,117 @@ function App() {
     if (root) void openDesktopProject(root, false)
   }, [])
 
+  const commandEntries: CommandPaletteEntry[] = [
+    {
+      id: 'citation',
+      label: 'Insert citation',
+      description: 'Search Zotero and project bibliography',
+      keywords: 'reference source cite bibliography zotero crossref',
+      icon: <span className="command-icon">@</span>,
+      shortcut: '⌘ ⇧ C',
+      action: () => { setCommandOpen(false); openCitationPicker() },
+    },
+    {
+      id: 'comment',
+      label: 'Add comment',
+      description: 'Attach a note to selected text',
+      keywords: 'review feedback thread note',
+      icon: <span className="command-icon"><Icon name="message" size={17} /></span>,
+      action: () => { setCommandOpen(false); showReviewPanel() },
+    },
+    {
+      id: 'section',
+      label: 'Add section',
+      description: 'Insert a heading and update the outline',
+      keywords: 'heading h2 structure outline',
+      icon: <span className="command-icon">H2</span>,
+      action: () => { setCommandOpen(false); addStructuredSection() },
+    },
+    {
+      id: 'inline-equation',
+      label: 'Insert inline equation',
+      description: 'Rendered TeX kept as portable Markdown math',
+      keywords: 'math latex tex formula',
+      icon: <span className="command-icon">∑</span>,
+      action: () => { setCommandOpen(false); insertStructuredEquation() },
+    },
+    {
+      id: 'display-equation',
+      label: 'Insert display equation',
+      description: 'Add an optional portable equation label',
+      keywords: 'math latex tex formula block',
+      icon: <span className="command-icon">∫</span>,
+      action: () => { setCommandOpen(false); insertStructuredEquation(true) },
+    },
+    {
+      id: 'cross-reference',
+      label: 'Insert cross-reference',
+      description: 'Link a figure, table, equation, or section',
+      keywords: 'xref link target figure table equation section',
+      icon: <span className="command-icon">§</span>,
+      action: () => { setCommandOpen(false); insertStructuredCrossReference() },
+    },
+    {
+      id: 'footnote',
+      label: 'Insert footnote',
+      description: 'Add a reference here and its definition below',
+      keywords: 'note reference definition',
+      icon: <span className="command-icon">¹</span>,
+      action: () => { setCommandOpen(false); insertStructuredFootnote() },
+    },
+    {
+      id: 'table',
+      label: 'Insert table',
+      description: 'Create an editable table with an optional caption',
+      keywords: 'rows columns data grid caption',
+      icon: <span className="command-icon"><Icon name="table" size={17} /></span>,
+      action: () => { setCommandOpen(false); insertStructuredTable() },
+    },
+    {
+      id: 'figure',
+      label: 'Insert figure',
+      description: 'Use a project-relative image with alt text',
+      keywords: 'image picture graphic caption',
+      icon: <span className="command-icon"><Icon name="image" size={17} /></span>,
+      action: () => { setCommandOpen(false); insertStructuredFigure() },
+    },
+    {
+      id: 'code-cell',
+      label: 'Insert code cell',
+      description: 'Choose Python, R, or Julia explicitly',
+      keywords: 'execute python r julia source',
+      icon: <span className="command-icon"><Icon name="code" size={17} /></span>,
+      action: () => { setCommandOpen(false); insertStructuredCodeCell() },
+    },
+    {
+      id: 'run-cell',
+      label: 'Run code cell',
+      description: desktopSession ? 'Execute the current cell explicitly' : 'Desktop project required · unavailable to browser collaborators',
+      keywords: 'execute play python r julia',
+      icon: <span className="command-icon"><Icon name="play" size={17} /></span>,
+      shortcut: '⌘ ↵',
+      disabled: !desktopSession,
+      action: () => { setCommandOpen(false); runCell() },
+    },
+    {
+      id: 'source',
+      label: 'Inspect portable source',
+      description: 'Compare reviewed and clean projections',
+      keywords: 'markdown qmd original final projection raw',
+      icon: <span className="command-icon"><Icon name="code" size={17} /></span>,
+      action: () => { setCommandOpen(false); openSourceInspector() },
+    },
+  ]
+  const normalizedCommandQuery = commandQuery.trim().toLocaleLowerCase()
+  const filteredCommandEntries = normalizedCommandQuery
+    ? commandEntries.filter((entry) => `${entry.label} ${entry.description} ${entry.keywords ?? ''}`.toLocaleLowerCase().includes(normalizedCommandQuery))
+    : commandEntries
+  const resolvedCommandActiveIndex = Math.min(commandActiveIndex, Math.max(0, filteredCommandEntries.length - 1))
+  const runCommandEntry = (entry: CommandPaletteEntry | undefined) => {
+    if (!entry || entry.disabled) return
+    entry.action()
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -3562,20 +3692,51 @@ function App() {
       {commandOpen && (
         <div className="modal-backdrop command-backdrop" onMouseDown={() => setCommandOpen(false)}>
           <div className="command-menu" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Command menu">
-            <div className="picker-search"><Icon name="search" /><input autoFocus placeholder="Search commands…" /><kbd>esc</kbd></div>
-            <span className="command-group-title">Suggested</span>
-            <button onClick={() => { setCommandOpen(false); openCitationPicker() }}><span className="command-icon">@</span><span><strong>Insert citation</strong><small>Search Zotero and project bibliography</small></span><kbd>⌘ ⇧ C</kbd></button>
-            <button onClick={() => { setCommandOpen(false); showReviewPanel() }}><span className="command-icon"><Icon name="message" size={17} /></span><span><strong>Add comment</strong><small>Attach a note to selected text</small></span></button>
-            <button onClick={() => { setCommandOpen(false); addStructuredSection() }}><span className="command-icon">H2</span><span><strong>Add section</strong><small>Insert a heading and update the outline</small></span></button>
-            <button onClick={() => { setCommandOpen(false); insertStructuredEquation() }}><span className="command-icon">∑</span><span><strong>Insert inline equation</strong><small>Rendered TeX kept as portable Markdown math</small></span></button>
-            <button onClick={() => { setCommandOpen(false); insertStructuredEquation(true) }}><span className="command-icon">∫</span><span><strong>Insert display equation</strong><small>Add an optional portable equation label</small></span></button>
-            <button onClick={() => { setCommandOpen(false); insertStructuredCrossReference() }}><span className="command-icon">§</span><span><strong>Insert cross-reference</strong><small>Link a figure, table, equation, or section</small></span></button>
-            <button onClick={() => { setCommandOpen(false); insertStructuredFootnote() }}><span className="command-icon">¹</span><span><strong>Insert footnote</strong><small>Add a reference here and its definition below</small></span></button>
-            <button onClick={() => { setCommandOpen(false); insertStructuredTable() }}><span className="command-icon"><Icon name="table" size={17} /></span><span><strong>Insert table</strong><small>Create an editable table with an optional caption</small></span></button>
-            <button onClick={() => { setCommandOpen(false); insertStructuredFigure() }}><span className="command-icon"><Icon name="image" size={17} /></span><span><strong>Insert figure</strong><small>Use a project-relative image with alt text</small></span></button>
-            <button onClick={() => { setCommandOpen(false); insertStructuredCodeCell() }}><span className="command-icon"><Icon name="code" size={17} /></span><span><strong>Insert code cell</strong><small>Choose Python, R, or Julia explicitly</small></span></button>
-            <button onClick={() => { setCommandOpen(false); runCell() }} disabled={!desktopSession}><span className="command-icon"><Icon name="play" size={17} /></span><span><strong>Run code cell</strong><small>{desktopSession ? 'Execute the current cell explicitly' : 'Desktop project required · unavailable to browser collaborators'}</small></span><kbd>⌘ ↵</kbd></button>
-            <button onClick={() => { setCommandOpen(false); openSourceInspector() }}><span className="command-icon"><Icon name="code" size={17} /></span><span><strong>Inspect portable source</strong><small>Compare reviewed and clean projections</small></span></button>
+            <div className="picker-search">
+              <Icon name="search" />
+              <input
+                autoFocus
+                value={commandQuery}
+                onChange={(event) => { setCommandQuery(event.target.value); setCommandActiveIndex(0) }}
+                onKeyDown={(event) => {
+                  if (event.key === 'ArrowDown') {
+                    event.preventDefault()
+                    if (filteredCommandEntries.length) setCommandActiveIndex((current) => (current + 1) % filteredCommandEntries.length)
+                  } else if (event.key === 'ArrowUp') {
+                    event.preventDefault()
+                    if (filteredCommandEntries.length) setCommandActiveIndex((current) => (current - 1 + filteredCommandEntries.length) % filteredCommandEntries.length)
+                  } else if (event.key === 'Enter') {
+                    event.preventDefault()
+                    runCommandEntry(filteredCommandEntries[resolvedCommandActiveIndex])
+                  }
+                }}
+                placeholder="Search commands…"
+                aria-label="Search commands"
+                aria-controls="command-results"
+                aria-activedescendant={filteredCommandEntries.length ? `command-${filteredCommandEntries[resolvedCommandActiveIndex].id}` : undefined}
+              />
+              <kbd>esc</kbd>
+            </div>
+            <span className="command-group-title" aria-live="polite">{normalizedCommandQuery ? `${filteredCommandEntries.length} result${filteredCommandEntries.length === 1 ? '' : 's'}` : 'Suggested'}</span>
+            <div className="command-results" id="command-results">
+              {filteredCommandEntries.map((entry, index) => (
+                <button
+                  id={`command-${entry.id}`}
+                  className={index === resolvedCommandActiveIndex ? 'active' : ''}
+                  key={entry.id}
+                  onClick={() => runCommandEntry(entry)}
+                  onMouseEnter={() => setCommandActiveIndex(index)}
+                  disabled={entry.disabled}
+                >
+                  {entry.icon}
+                  <span><strong>{entry.label}</strong><small>{entry.description}</small></span>
+                  {entry.shortcut && <kbd>{entry.shortcut}</kbd>}
+                </button>
+              ))}
+              {!filteredCommandEntries.length && (
+                <div className="command-empty" role="status"><Icon name="search" size={18} /><strong>No matching commands</strong><small>Try “citation”, “table”, “review”, or “source”.</small></div>
+              )}
+            </div>
           </div>
         </div>
       )}
