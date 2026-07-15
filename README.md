@@ -31,4 +31,4 @@ Useful implementation notes:
 - [Release, diagnostics, and compliance](./docs/release-compliance.md)
 - [Product and architecture brief](./draftmatter-app-design.md)
 
-Paid browser collaboration is a later phase. Browser builds intentionally have no filesystem, process, execution, or Git capability.
+Paid browser collaboration is a later phase. Its shared editor/reviewer surface now has a tested browser-safe entrypoint; browser builds intentionally have no filesystem, process, execution, Git, or external-renderer capability. See [the collaboration boundary](docs/collaboration-boundary.md).
