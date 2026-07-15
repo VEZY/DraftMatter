@@ -62,14 +62,18 @@ export function ExecutionOutputView({
   artifactUrl = (path) => path,
 }: {
   result: NormalizedExecutionResult
-  artifactUrl?: (path: string) => string
+  artifactUrl?: (path: string) => string | null | undefined
 }) {
   const outputs = renderExecutionOutputs(result)
   return <div className="execution-output-stack" aria-live="polite">
     {outputs.map((output, index) => {
       if (output.kind === 'stream') return <pre key={index} className={`execution-stream ${output.stream.name}`}>{output.stream.text}</pre>
       if (output.kind === 'error') return <div key={index} className="execution-error" role="alert"><strong>{output.error.name}</strong><span>{output.error.message}</span>{output.error.traceback.length > 0 && <pre>{output.error.traceback.join('\n')}</pre>}</div>
-      if (output.kind === 'image') return <figure key={index} className="execution-image"><img src={output.artifactPath ? artifactUrl(output.source) : output.source} alt={output.alt} />{output.artifactPath && <figcaption>{output.artifactPath}</figcaption>}</figure>
+      if (output.kind === 'image') {
+        const source = output.artifactPath ? artifactUrl(output.source) : output.source
+        if (!source) return <div key={index} className="execution-artifact blocked" role="alert"><span>Artifact unavailable</span><small>Its path does not stay inside this project.</small></div>
+        return <figure key={index} className="execution-image"><img src={source} alt={output.alt} />{output.artifactPath && <figcaption>{output.artifactPath}</figcaption>}</figure>
+      }
       if (output.kind === 'html') return <iframe key={index} className="execution-html" title={`Isolated HTML output ${index + 1}`} sandbox={output.sandbox} referrerPolicy="no-referrer" srcDoc={output.sourceDocument} />
       if (output.kind === 'markdown') return <SafeMarkdown key={index} source={output.source} />
       if (output.kind === 'text') return <pre key={index} className="execution-text">{output.source}</pre>

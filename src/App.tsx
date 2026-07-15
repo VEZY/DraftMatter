@@ -51,6 +51,7 @@ import { ExternalExportDialog } from './ExternalExportDialog'
 import { CollaborationDialog } from './CollaborationDialog'
 import type { CollaborationCheckpoint, CollaborationClientStatus } from './sharedEditor'
 import { motionAwareScrollBehavior } from './accessibility'
+import { normalizeProjectRelativePath, projectFilePath } from './projectPaths'
 
 const STORAGE_KEY = 'draftmatter.prototype.v2'
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
@@ -85,16 +86,17 @@ function cellStatusLabel(status: DraftState['cellStatus'] | ExecutionCellFreshne
   return status[0].toUpperCase() + status.slice(1).replaceAll('-', ' ')
 }
 
-function projectArtifactPath(root: string, relative: string) {
-  const separator = root.includes('\\') && !root.includes('/') ? '\\' : '/'
-  const base = root.replace(/[\\/]+$/, '')
-  const child = relative.replace(/^[\\/]+/, '').replaceAll(/[\\/]/g, separator)
-  return `${base}${separator}${child}`
+function projectArtifactUrl(root: string, relative: string) {
+  const portable = normalizeProjectRelativePath(relative)
+  const absolute = projectFilePath(root, relative)
+  if (!portable || !absolute) return undefined
+  return isTauri() ? convertFileSrc(absolute) : portable
 }
 
-function projectArtifactUrl(root: string, relative: string) {
-  const absolute = projectArtifactPath(root, relative)
-  return isTauri() ? convertFileSrc(absolute) : relative
+function RetainedArtifactImage({ root, path, loading }: { root: string; path: string; loading: boolean }) {
+  const source = projectArtifactUrl(root, path)
+  if (!source) return <div className="execution-artifact blocked" role="alert"><span>Retained artifact unavailable</span><small>Its path does not stay inside this project.</small></div>
+  return <div className={`chart-wrap retained-artifact ${loading ? 'loading' : ''}`}><img src={source} alt="Retained canopy response output" /></div>
 }
 
 function runtimeName(language: RuntimeLanguage) {
@@ -517,8 +519,6 @@ function App() {
   const activeCitationItem = detailCitationItems.find((item) => item.citekey === citationEditKey) ?? detailCitationItems[0]
   const activeCitationRecord = citations.find((record) => record.citekey === activeCitationItem?.citekey)
   const activeCitationBadge = citationSourceBadge(activeCitationRecord)
-  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics, ...executionDiagnostics]
-
   const replaceDesktopSession = (next: DesktopSession | null) => {
     desktopSessionRef.current = next
     setDesktopSession(next)
@@ -993,7 +993,9 @@ function App() {
   const reviewProposalStatus = reviewProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
   const executableCells = extractExecutableCells(executionSource).cells
   const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL) ?? executableCells[0]
-  const retainedOutputs = parseRetainedOutputs(executionSource).outputs
+  const retainedOutputParse = parseRetainedOutputs(executionSource)
+  const retainedOutputs = retainedOutputParse.outputs
+  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics, ...executionDiagnostics, ...retainedOutputParse.diagnostics]
   const configuredProvider = (cell: ExecutableCell): ExecutionProviderKind => {
     const explicit = cell.attributes.provider
     return explicit === 'kernel' || explicit === 'direct' ? explicit : executionProviders[cell.language]
@@ -3037,7 +3039,7 @@ function App() {
               codeCellStatuses={Object.fromEntries(executionCellStates.map((state) => [state.cellId, state.status] as const))}
               markupView={markupView}
               readOnly={Boolean(structuredReviewProjection)}
-              resolveAssetUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) : path}
+              resolveAssetUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) ?? 'data:,' : path}
             />
             {citationOpen && structuredCitationSelection && (
               <div className="citation-detail popover structured-citation-detail">
@@ -3167,7 +3169,7 @@ function App() {
                     artifactUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) : path}
                   />}
                   {(!executionResult || executionResult.status !== 'succeeded') && (desktopSession && executionView?.retained?.artifactPaths[0]
-                    ? <div className={`chart-wrap retained-artifact ${draft.cellStatus === 'running' ? 'loading' : ''}`}><img src={projectArtifactUrl(desktopSession.root, executionView.retained.artifactPaths[0])} alt="Retained canopy response output" /></div>
+                    ? <RetainedArtifactImage root={desktopSession.root} path={executionView.retained.artifactPaths[0]} loading={draft.cellStatus === 'running'} />
                     : <div className={`chart-wrap ${draft.cellStatus === 'running' ? 'loading' : ''}`}>
                     <svg viewBox="0 0 620 250" role="img" aria-label="Line chart comparing control and drought canopy response over twelve weeks">
                       <g className="grid-lines">

@@ -77,4 +77,11 @@ describe('isolated execution output rendering', () => {
     expect(container.querySelector('.execution-table-wrap td')?.textContent).toBe('1')
     expect(container.querySelector('[role="alert"]')?.textContent).toContain('invalid row')
   })
+
+  it('does not mount an artifact image when its project URL is rejected', async () => {
+    await act(async () => root.render(<ExecutionOutputView result={result()} artifactUrl={() => undefined} />))
+
+    expect(container.querySelector('img[src*="figures/generated/plot.png"]')).toBeNull()
+    expect(container.querySelector('.execution-artifact.blocked')?.textContent).toContain('does not stay inside this project')
+  })
 })

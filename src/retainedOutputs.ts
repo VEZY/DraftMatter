@@ -2,6 +2,7 @@ import type { ExecutableCell, ExecutionLanguage } from './executionCells'
 import type { ExecutionProviderKind } from './executionProvider'
 import type { ExecutionCellFreshness, ExecutionFreshnessStatus } from './executionFreshness'
 import { parseLosslessPortableSource } from './portableSource'
+import { normalizeProjectRelativePath } from './projectPaths'
 import { healthyKernelsFor, type RuntimeHealth, type RuntimeInventory } from './runtimeDiscovery'
 import type { DocumentDiagnostic } from './types'
 
@@ -33,10 +34,10 @@ export interface ExecutionAvailabilityView {
 
 const languageName: Record<ExecutionLanguage, string> = { python: 'Python', r: 'R', julia: 'Julia' }
 
-function artifactPaths(markdown: string) {
+function artifactPathCandidates(markdown: string) {
   return [...markdown.matchAll(/!?(?:\[[^\]]*\])\((?:<([^>]+)>|([^\s)]+))(?:\s+[^)]*)?\)/g)]
     .map((match) => match[1] ?? match[2])
-    .filter((path): path is string => Boolean(path) && !/^[a-z]+:/i.test(path))
+    .filter((path): path is string => Boolean(path) && !/^[a-z][a-z0-9+.-]+:/i.test(path))
 }
 
 export function parseRetainedOutputs(source: string): RetainedOutputParseResult {
@@ -58,11 +59,21 @@ export function parseRetainedOutputs(source: string): RetainedOutputParseResult 
     const openingEnd = node.raw.indexOf('-->')
     const closingStart = node.raw.lastIndexOf('<!-- dm-output:end -->')
     const markdown = node.raw.slice(openingEnd + 3, closingStart).trim()
+    const artifactPaths = artifactPathCandidates(markdown).flatMap((path, index) => {
+      const normalized = normalizeProjectRelativePath(path)
+      if (normalized) return [normalized]
+      diagnostics.push({
+        code: `retained-output-unsafe-artifact-${cellId}-${index + 1}`,
+        level: 'error',
+        message: `The retained output for ${cellId} references an artifact outside the project.`,
+      })
+      return []
+    })
     outputs.push({
       cellId,
       runHash: node.raw.match(/<!-- dm-output:start[^>]*\brun="([^"]+)"/)?.[1],
       markdown,
-      artifactPaths: artifactPaths(markdown),
+      artifactPaths,
     })
   }
   return { outputs, diagnostics }

@@ -80,6 +80,19 @@ describe('retained output availability', () => {
     ])
   })
 
+  it('rejects retained artifact paths that escape the project on any desktop OS', () => {
+    const parsed = parseRetainedOutputs(`<!-- dm-output:start cell="unsafe" -->
+![Traversal](../../outside.svg)
+![Absolute](/etc/passwd)
+[Windows](<C:\\outside\\data.csv>)
+<!-- dm-output:end -->`)
+
+    expect(parsed.outputs[0].artifactPaths).toEqual([])
+    expect(parsed.diagnostics).toHaveLength(3)
+    expect(parsed.diagnostics.every((diagnostic) => diagnostic.level === 'error')).toBe(true)
+    expect(parsed.diagnostics[0].message).toContain('outside the project')
+  })
+
   it('keeps current and stale output visible when Python is unavailable', () => {
     const cells = [cell('py-current', 'python'), cell('py-stale', 'python')]
     const views = buildExecutionAvailability({
