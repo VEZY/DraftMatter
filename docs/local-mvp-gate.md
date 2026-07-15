@@ -1,5 +1,7 @@
 # Local MVP gate evidence
 
+The `DM-P1-GATE` application workflow creates a named local project through the typed desktop boundary, opens its generated `paper.qmd` in the rendered editor, applies an explicit structured-source edit, waits for the conflict-aware autosave, and records a manual recovery point. After a full React application teardown, the remembered project root is reopened and the exact saved UTF-8 source is visible again, alongside both the initial and edited recovery versions. Native temporary-directory tests separately prove that creation refuses non-empty folders, opening never executes document code, atomic replacement preserves the prior valid file on interruption, and on-disk recovery remains bounded.
+
 The `DM-P5-GATE` automated dogfood path starts from the same portable reviewed QMD used by the rendered application. It verifies that a close/reopen cycle retains citation keys, an executable cell, its portable retained-output block, two overlapping suggestions, a comment thread, and author attribution.
 
 One alternative is then selected through the conflict-aware projector. The resulting bytes are the single clean publication source used for:
