@@ -10,6 +10,8 @@ import {
 } from './reviewMarkup'
 import { parseLosslessPortableSource } from './portableSource'
 import { conflictingChangeIds } from './reviewConflicts'
+import { projectPortableAcceptedBase } from './reviewProjector'
+import { reanchorPortableReviews } from './reviewReanchor'
 
 export interface ReviewAuthorIdentity {
   id: string
@@ -58,6 +60,22 @@ export interface CreateReviewChangeRequest {
   anchorId?: string
   startMarkerId?: string
   endMarkerId?: string
+  rebasedFrom?: string
+}
+
+export interface RebaseReviewChangeRequest {
+  changeId: string
+  quote: string
+  occurrence?: number
+  proposal?: string
+  rationale?: string
+  author: ReviewAuthorIdentity
+  timestamp?: string
+  decisionId?: string
+  replacementChangeId?: string
+  anchorId?: string
+  startMarkerId?: string
+  endMarkerId?: string
 }
 
 export interface CreateReviewAlternativeRequest {
@@ -85,6 +103,12 @@ export interface DecideReviewChangeRequest {
 export interface ReviewDecisionOperationResult extends ReviewChangeOperationResult {
   decision: ReviewDecision
   rebasedChangeIds: string[]
+}
+
+export interface ReviewRebaseOperationResult extends ReviewChangeOperationResult {
+  decision: ReviewDecision
+  previousChangeId: string
+  appliedChangeIds: string[]
 }
 
 export class ReviewOperationError extends Error {
@@ -268,13 +292,15 @@ function changeRecord(
   context: ReviewAnchorContext,
   timestamp: string,
   ending: string,
+  rebasedFrom?: string,
 ) {
   const proposalBlock = proposal === undefined ? '' : literalBlock('dm-proposal', proposal, ending)
   const rationaleBlock = rationale?.trim() ? literalBlock('dm-rationale', rationale, ending) : ''
-  return `:::: {#${changeId} .dm-change data-anchor="${anchorId}" data-kind="${kind}" data-author="${authorId}" data-status="open" data-created="${timestamp}"}${ending}${anchorContextBlocks(context, ending)}${proposalBlock}${rationaleBlock}::::${ending}`
+  const rebaseAttribute = rebasedFrom ? ` data-rebased-from="${rebasedFrom}"` : ''
+  return `:::: {#${changeId} .dm-change data-anchor="${anchorId}" data-kind="${kind}" data-author="${authorId}" data-status="open" data-created="${timestamp}"${rebaseAttribute}}${ending}${anchorContextBlocks(context, ending)}${proposalBlock}${rationaleBlock}::::${ending}`
 }
 
-function decisionRecord(decisionId: string, changeId: string, authorId: string, action: 'accepted' | 'rejected', timestamp: string, ending: string) {
+function decisionRecord(decisionId: string, changeId: string, authorId: string, action: 'accepted' | 'rejected' | 'rebased', timestamp: string, ending: string) {
   return `:::: {#${decisionId} .dm-decision data-change="${changeId}" data-author="${authorId}" data-action="${action}" data-at="${timestamp}"}${ending}::::${ending}`
 }
 
@@ -419,6 +445,7 @@ export function createReviewChange(source: string, request: CreateReviewChangeRe
   }
   if (request.proposal !== undefined) validatePayload(request.proposal, 'A suggestion')
   if (request.rationale !== undefined) validatePayload(request.rationale, 'A rationale')
+  if (request.rebasedFrom !== undefined) safeId(request.rebasedFrom, 'Rebased change ID')
 
   const original = parseReviewMarkup(source)
   assertWritable(original)
@@ -453,6 +480,7 @@ export function createReviewChange(source: string, request: CreateReviewChangeRe
     anchorContext(source, request.start, request.end),
     timestamp,
     ending,
+    request.rebasedFrom,
   )}`
   const updated = parseReviewMarkup(appendSectionRecords(anchoredDocument, additions))
   assertWritable(updated)
@@ -499,6 +527,148 @@ export function createReviewAlternative(
   const updated = parseReviewMarkup(appendSectionRecords(document, additions))
   assertWritable(updated)
   return changeResult(updated, alternativeId)
+}
+
+function attachReviewSection(base: string, document: ReviewMarkupDocument) {
+  if (document.sectionStart === undefined || document.sectionEnd === undefined) {
+    throw new ReviewOperationError('review-section-missing', 'The review audit section was not found while rebasing.')
+  }
+  const ending = lineEnding(base)
+  const spacer = base.length === 0
+    ? ''
+    : base.endsWith(`${ending}${ending}`) ? '' : base.endsWith(ending) ? ending : `${ending}${ending}`
+  return `${base}${spacer}${document.source.slice(document.sectionStart, document.sectionEnd)}`
+}
+
+function quoteOffsets(source: string, quote: string) {
+  const matches: number[] = []
+  let offset = source.indexOf(quote)
+  while (offset >= 0) {
+    matches.push(offset)
+    offset = source.indexOf(quote, offset + Math.max(1, quote.length))
+  }
+  return matches
+}
+
+function anchorFreeManuscriptView(source: string) {
+  const document = parseReviewMarkup(source)
+  const limit = document.sectionStart ?? source.length
+  const anchors = [...document.anchors].filter((anchor) => anchor.start < limit).sort((left, right) => left.start - right.start)
+  const segments: Array<{ viewStart: number; viewEnd: number; sourceStart: number; sourceEnd: number }> = []
+  let cursor = 0
+  let view = ''
+  for (const anchor of anchors) {
+    if (anchor.start < cursor) continue
+    const content = source.slice(cursor, anchor.start)
+    segments.push({ viewStart: view.length, viewEnd: view.length + content.length, sourceStart: cursor, sourceEnd: anchor.start })
+    view += content
+    cursor = anchor.end
+  }
+  const tail = source.slice(cursor, limit)
+  segments.push({ viewStart: view.length, viewEnd: view.length + tail.length, sourceStart: cursor, sourceEnd: limit })
+  view += tail
+  return {
+    source: view,
+    startOffset(offset: number) {
+      const segment = segments.find((candidate) => offset >= candidate.viewStart && offset < candidate.viewEnd)
+        ?? segments.find((candidate) => offset === candidate.viewStart)
+      return segment ? segment.sourceStart + offset - segment.viewStart : limit
+    },
+    endOffset(offset: number) {
+      const segment = [...segments].reverse().find((candidate) => offset > candidate.viewStart && offset <= candidate.viewEnd)
+        ?? [...segments].reverse().find((candidate) => offset === candidate.viewEnd)
+      return segment ? segment.sourceStart + offset - segment.viewStart : limit
+    },
+  }
+}
+
+export function rebaseReviewChange(
+  document: ReviewMarkupDocument,
+  request: RebaseReviewChangeRequest,
+): ReviewRebaseOperationResult {
+  assertWritable(document)
+  const previous = document.changes.find((change) => change.id === request.changeId)
+  if (!previous) throw new ReviewOperationError('review-change-missing', `Review change ${request.changeId} was not found.`)
+  if (previous.status !== 'needs-rebase') {
+    throw new ReviewOperationError('review-change-not-rebasable', `Review change ${request.changeId} cannot be rebased while it is ${previous.status}.`)
+  }
+  const quote = request.quote
+  if (!quote) throw new ReviewOperationError('review-rebase-quote-empty', 'Select exact text in the accepted manuscript before rebasing.')
+  validatePayload(quote, 'A rebase target')
+  safeId(request.author.id, 'Author ID')
+  if (!request.author.name.trim()) throw new ReviewOperationError('review-author-name-empty', 'An author name is required.')
+
+  const accepted = projectPortableAcceptedBase(document.source)
+  if (!accepted.ok || accepted.source === null) {
+    throw new ReviewOperationError('review-accepted-base-unavailable', accepted.diagnostics.at(-1)?.message ?? 'The accepted manuscript could not be materialized safely.')
+  }
+  const acceptedView = anchorFreeManuscriptView(accepted.source)
+  const matches = quoteOffsets(acceptedView.source, quote)
+  const occurrence = request.occurrence
+  const selected = occurrence === undefined ? (matches.length === 1 ? matches[0] : undefined) : matches[occurrence]
+  if (selected === undefined) {
+    throw new ReviewOperationError(
+      matches.length === 0 ? 'review-rebase-quote-missing' : 'review-rebase-quote-ambiguous',
+      matches.length === 0 ? 'The selected text was not found in the accepted manuscript.' : 'The selected text occurs more than once in the accepted manuscript; select a longer phrase.',
+    )
+  }
+
+  let audited = document
+  for (const change of document.changes.filter((change) => change.status === 'accepted')) {
+    audited = updateReviewRecordStatus(audited, change.id, 'applied')
+  }
+  audited = updateReviewRecordStatus(audited, previous.id, 'rebased')
+  audited = ensureReviewAuthor(audited, request.author, request.timestamp).document
+  const decisionId = safeId(request.decisionId ?? generatedId('dm-decision'), 'Decision ID')
+  requireUniqueIds(audited, [decisionId])
+  const timestamp = reviewTimestamp(request.timestamp)
+  audited = parseReviewMarkup(appendSectionRecords(audited, decisionRecord(decisionId, previous.id, request.author.id, 'rebased', timestamp, lineEnding(audited.source))))
+  assertWritable(audited)
+
+  const kind = previous.changeKind as ReviewChangeKind
+  if (!['insert', 'delete', 'replace', 'format', 'structural'].includes(kind)) {
+    throw new ReviewOperationError('review-change-kind-unsupported', `Review change ${previous.id} uses unsupported kind ${previous.changeKind}.`)
+  }
+  const proposal = kind === 'delete' ? undefined : request.proposal ?? previous.proposal
+  const attached = attachReviewSection(accepted.source, audited)
+  const recovered = reanchorPortableReviews(attached)
+  const unrecoveredOpen = recovered.document.changes.find((change) => change.status === 'open'
+    && !recovered.document.ranges.some((range) => range.anchorId === change.anchorId && range.complete))
+  if (unrecoveredOpen) {
+    throw new ReviewOperationError('review-rebase-open-anchor-unresolved', `Open review change ${unrecoveredOpen.id} could not be placed on the accepted manuscript.`)
+  }
+  const recoveredView = anchorFreeManuscriptView(recovered.source)
+  const recoveredMatches = quoteOffsets(recoveredView.source, quote)
+  const recoveredSelected = occurrence === undefined ? (recoveredMatches.length === 1 ? recoveredMatches[0] : undefined) : recoveredMatches[occurrence]
+  if (recoveredSelected === undefined) {
+    throw new ReviewOperationError('review-rebase-target-shifted', 'The selected text could not be mapped after preserving independent review anchors.')
+  }
+  const start = kind === 'insert'
+    ? recoveredView.endOffset(recoveredSelected + quote.length)
+    : recoveredView.startOffset(recoveredSelected)
+  const end = kind === 'insert' ? start : recoveredView.endOffset(recoveredSelected + quote.length)
+  const replacement = createReviewChange(recovered.source, {
+    start,
+    end,
+    author: request.author,
+    kind,
+    proposal,
+    rationale: request.rationale ?? previous.rationale,
+    timestamp,
+    changeId: request.replacementChangeId,
+    anchorId: request.anchorId,
+    startMarkerId: request.startMarkerId,
+    endMarkerId: request.endMarkerId,
+    rebasedFrom: previous.id,
+  })
+  const decision = replacement.document.decisions.find((candidate) => candidate.id === decisionId)
+  if (!decision) throw new ReviewOperationError('review-decision-missing', `Review rebase decision ${decisionId} was not created.`)
+  return {
+    ...replacement,
+    decision,
+    previousChangeId: previous.id,
+    appliedChangeIds: accepted.appliedChangeIds,
+  }
 }
 
 export function decideReviewChange(

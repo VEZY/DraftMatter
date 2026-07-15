@@ -36,6 +36,8 @@ export interface ReviewProjectionOptions {
   selectedChangeIds?: string[]
 }
 
+const projectableStatuses = new Set(['open', 'accepted'])
+
 interface Patch {
   start: number
   end: number
@@ -111,11 +113,11 @@ export function projectPortableReviewSource(source: string, options: ReviewProje
   for (const anchor of review.anchors) markersByAnchor.set(anchor.anchorId, [...(markersByAnchor.get(anchor.anchorId) ?? []), anchor])
   const authorNames = new Map(review.authors.map((author) => [author.id, author.name]))
   const selected = new Set(options.selectedChangeIds ?? [])
-  const candidates = review.changes.filter((change) => change.status !== 'rejected')
+  const candidates = review.changes.filter((change) => projectableStatuses.has(change.status))
   const candidateById = new Map(candidates.map((change) => [change.id, change]))
   const components = buildReviewConflictGraph(review).components.map((component) =>
     component.changeIds.flatMap((id) => candidateById.get(id) ?? []),
-  )
+  ).filter((component) => component.length > 0)
   const chosen: ReviewChange[] = []
   const conflicts: ReviewProjectionConflict[] = []
 
@@ -173,4 +175,74 @@ export function projectPortableReviewSource(source: string, options: ReviewProje
     }
   }
   return { ok: true, source: projected, diagnostics: projectionDiagnostics, appliedChangeIds: chosen.map((change) => change.id), conflicts: [] }
+}
+
+/**
+ * Materializes only decisions already accepted by reviewers. Open and
+ * needs-rebase proposals stay out of this base so a new proposal can be
+ * anchored against the manuscript that those accepted decisions created.
+ */
+export function projectPortableAcceptedBase(source: string): ReviewProjectionResult {
+  const review = parseReviewMarkup(source)
+  const baseDiagnostics = review.diagnostics.filter((diagnostic) => diagnostic.level !== 'info')
+  if (baseDiagnostics.some((diagnostic) => diagnostic.level === 'error')) {
+    return { ok: false, source: null, diagnostics: baseDiagnostics, appliedChangeIds: [], conflicts: [] }
+  }
+
+  const accepted = review.changes.filter((change) => change.status === 'accepted')
+  const acceptedIds = new Set(accepted.map((change) => change.id))
+  const authorNames = new Map(review.authors.map((author) => [author.id, author.name]))
+  const conflicts = buildReviewConflictGraph(review).components.flatMap((component) => {
+    const selected = component.changeIds.filter((id) => acceptedIds.has(id))
+    return selected.length > 1
+      ? [conflictRecord(selected.map((id) => accepted.find((change) => change.id === id)!), authorNames)]
+      : []
+  })
+  if (conflicts.length) {
+    return {
+      ok: false,
+      source: null,
+      diagnostics: [...baseDiagnostics, {
+        code: 'accepted-base-conflict',
+        level: 'error',
+        message: `Accepted decisions still conflict: ${conflicts.flatMap((conflict) => conflict.candidates.map((candidate) => candidate.changeId)).join(', ')}.`,
+      }],
+      appliedChangeIds: [],
+      conflicts,
+    }
+  }
+
+  const markersByAnchor = new Map<string, typeof review.anchors>()
+  for (const anchor of review.anchors) markersByAnchor.set(anchor.anchorId, [...(markersByAnchor.get(anchor.anchorId) ?? []), anchor])
+  const changePatches: Patch[] = []
+  const diagnostics = [...baseDiagnostics]
+  for (const change of accepted) {
+    const patch = patchForChange(change, markersByAnchor)
+    if ('code' in patch) diagnostics.push(patch)
+    else changePatches.push(patch)
+  }
+  if (diagnostics.some((diagnostic) => diagnostic.level === 'error')) {
+    return { ok: false, source: null, diagnostics, appliedChangeIds: [], conflicts: [] }
+  }
+
+  const coveredAnchors = (anchor: typeof review.anchors[number]) => changePatches.some((patch) => anchor.start >= patch.start && anchor.end <= patch.end)
+  const sectionPatch = review.sectionStart === undefined
+    ? []
+    : [{ start: review.sectionStart, end: review.sectionEnd ?? source.length, replacement: '' }]
+  const projected = applyPatches(source, [
+    ...changePatches,
+    ...review.anchors.filter((anchor) => !coveredAnchors(anchor)).map((anchor) => ({ start: anchor.start, end: anchor.end, replacement: '' })),
+    ...sectionPatch,
+  ])
+  const clean = parseReviewMarkup(projected)
+  if (clean.anchors.length || clean.sectionStart !== undefined) {
+    return {
+      ok: false,
+      source: null,
+      diagnostics: [...diagnostics, { code: 'accepted-base-review-leak', level: 'error', message: 'Review structures remained while materializing accepted decisions.' }],
+      appliedChangeIds: [],
+      conflicts: [],
+    }
+  }
+  return { ok: true, source: projected, diagnostics, appliedChangeIds: accepted.map((change) => change.id), conflicts: [] }
 }

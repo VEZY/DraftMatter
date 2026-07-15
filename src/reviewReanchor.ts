@@ -179,13 +179,17 @@ function recoveredMarkerId(anchorId: string, edge: 'start' | 'end' | 'point', us
 
 function contextFor(document: ReviewMarkupDocument, anchorId: string) {
   return [...document.changes, ...document.threads]
-    .filter((record) => record.anchorId === anchorId && record.status !== 'deleted')
+    .filter((record) => record.anchorId === anchorId && (record.kind === 'thread'
+      ? record.status !== 'deleted'
+      : record.status === 'open' || record.status === 'accepted' || record.status === 'needs-rebase'))
     .find((record) => record.anchorContext)?.anchorContext
 }
 
 function recordsFor(document: ReviewMarkupDocument, anchorId: string) {
   return [...document.changes, ...document.threads]
-    .filter((record) => record.anchorId === anchorId && record.status !== 'deleted')
+    .filter((record) => record.anchorId === anchorId && (record.kind === 'thread'
+      ? record.status !== 'deleted'
+      : record.status === 'open' || record.status === 'accepted' || record.status === 'needs-rebase'))
     .map((record) => record.id)
 }
 
@@ -230,7 +234,9 @@ function reanchorPortableReviewsWithSelections(source: string, selections = new 
   const document = parseReviewMarkup(source)
   const complete = new Set(document.ranges.filter((range) => range.complete).map((range) => range.anchorId))
   const referenced = new Set([...document.changes, ...document.threads]
-    .filter((record) => record.status !== 'deleted')
+    .filter((record) => record.kind === 'thread'
+      ? record.status !== 'deleted'
+      : record.status === 'open' || record.status === 'accepted' || record.status === 'needs-rebase')
     .map((record) => record.anchorId))
   const targets = [...referenced].filter((anchorId) => !complete.has(anchorId))
   if (targets.length === 0) return { source, document, items: [], recovered: 0, unresolved: 0 }

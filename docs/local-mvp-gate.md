@@ -15,6 +15,8 @@ The native Git suite completes the remaining gate step in real temporary reposit
 
 The rendered DM-P4-02 browser path switches a generic portable manuscript from Editing to Suggesting, then types a replacement, pastes a second replacement, deletes a selection, and inserts at a caret. The short grouping window emits exactly one attributed portable proposal per gesture, restores the unchanged accepted prose after each capture, and verifies the resulting replace/delete/insert records in the autosaved source.
 
+The rendered DM-P4-04 rebase path accepts one of two identical alternatives, opens the preserved `Needs rebase` proposal, and anchors revised wording to the accepted manuscript. The transaction materializes accepted decisions into the portable base once, marks old records `applied`/`rebased` for audit, preserves independent review anchors, appends a `rebased` decision, and leaves exactly one new open proposal linked by `data-rebased-from`.
+
 Run the full local gate with:
 
 ```sh

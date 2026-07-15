@@ -7,6 +7,7 @@ import identicalSource from './fixtures/portable/25-review-identical.qmd?raw'
 import { PortableReviewItems } from './PortableReviewItems'
 import { parseReviewMarkup } from './reviewMarkup'
 import { createReviewThread } from './reviewOperations'
+import { projectPortableReviewSource } from './reviewProjector'
 
 function text(element: Element | null) {
   return element?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
@@ -74,6 +75,33 @@ describe('portable review panel items', () => {
     expect(parsed.authors).toContainEqual(expect.objectContaining({ id: 'dm-local-author', name: 'Remi Vezy' }))
     expect(parsed.decisions).toEqual([expect.objectContaining({ changeId: 'dm-i02', authorId: 'dm-local-author', action: 'accepted' })])
     expect(notices.at(-1)).toContain('overlapping alternative')
+  })
+
+  it('rebases a needs-rebase alternative onto accepted text and retains the audit', async () => {
+    await click(container.querySelectorAll('.proposal-option')[1])
+    await click(button(container, 'Accept'))
+    await click(container.querySelector('#review-item-dm-i01 .proposal-option')!)
+    await click(button(container, 'Rebase suggestion'))
+
+    const form = container.querySelector('.review-rebase-form')!
+    await input(form.querySelector('input')!, 'leaf expansion slowed')
+    await input(form.querySelector('textarea')!, 'leaf area declined by 16%')
+    await click(button(form, 'Create rebased proposal'))
+
+    const parsed = parseReviewMarkup(latestSource)
+    expect(parsed.changes.map((change) => [change.id, change.status])).toEqual([
+      ['dm-i01', 'rebased'],
+      ['dm-i02', 'applied'],
+      [expect.stringMatching(/^dm-change-/), 'open'],
+    ])
+    expect(parsed.decisions.map((decision) => decision.action)).toEqual(['accepted', 'rebased'])
+    expect(parsed.changes.at(-1)?.attributes['data-rebased-from']).toBe('dm-i01')
+    expect(container.querySelectorAll('.proposal-option')).toHaveLength(1)
+    const original = projectPortableReviewSource(latestSource, { view: 'original' })
+    expect(original.source).toContain('The leaf expansion slowed.')
+    const final = projectPortableReviewSource(latestSource, { view: 'final' })
+    expect(final.source).toContain('The leaf area declined by 16%.')
+    expect(notices.at(-1)).toContain('accepted decision')
   })
 
   it('filters the portable queue by author without changing source records', async () => {

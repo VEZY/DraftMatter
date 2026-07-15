@@ -47,7 +47,7 @@ export function buildReviewQueue(document: ReviewMarkupDocument, filters: Review
   ]
 
   return records.flatMap<ReviewQueueItem>((record) => {
-    if (!filters.includeDeleted && record.status === 'deleted') return []
+    if (!filters.includeDeleted && (record.status === 'deleted' || record.status === 'applied' || record.status === 'rebased')) return []
     if (authorFilter && !authorFilter.has(record.authorId)) return []
     if (statusFilter && !statusFilter.has(record.status)) return []
     if (kindFilter && !kindFilter.has(record.queueKind)) return []

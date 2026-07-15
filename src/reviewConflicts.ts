@@ -33,7 +33,7 @@ function relation(left: ReviewAnchorRange, right: ReviewAnchorRange): ReviewConf
 }
 
 function activeChanges(document: ReviewMarkupDocument) {
-  return document.changes.filter((change) => change.status !== 'rejected' && change.status !== 'deleted')
+  return document.changes.filter((change) => change.status === 'open' || change.status === 'accepted' || change.status === 'needs-rebase')
 }
 
 export function buildReviewConflictGraph(document: ReviewMarkupDocument): ReviewConflictGraph {

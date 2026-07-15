@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { parseReviewMarkup } from './reviewMarkup'
 import identicalSource from './fixtures/portable/25-review-identical.qmd?raw'
 import aliceFinalGolden from './fixtures/golden/review-identical.alice-final.md?raw'
-import { projectPortableReviewSource } from './reviewProjector'
+import { projectPortableAcceptedBase, projectPortableReviewSource } from './reviewProjector'
 import {
   appendReviewThreadMessage,
   createReviewChange,
@@ -10,6 +10,7 @@ import {
   decideReviewChange,
   deleteReviewThread,
   ReviewOperationError,
+  rebaseReviewChange,
   setReviewThreadStatus,
 } from './reviewOperations'
 
@@ -266,6 +267,93 @@ describe('portable suggestion operations', () => {
     expect(rejected.rebasedChangeIds).toEqual([])
     expect(rejected.document.changes.find((change) => change.id === 'dm-i01')?.status).toBe('accepted')
     expect(rejected.document.decisions).toHaveLength(2)
+  })
+
+  it('rebases a preserved alternative onto the accepted manuscript exactly once', () => {
+    const discussionStart = identicalSource.indexOf('Results')
+    const withIndependentThread = createReviewThread(identicalSource, {
+      start: discussionStart,
+      end: discussionStart + 'Results'.length,
+      author: { id: 'dm-a01', name: 'Alice Martin' },
+      message: 'Keep this independent discussion anchored while rebasing.',
+      timestamp: '2026-07-15T14:19:00.000Z',
+      threadId: 'dm-independent-thread',
+      anchorId: 'dm-independent-anchor',
+      startMarkerId: 'dm-independent-start',
+      endMarkerId: 'dm-independent-end',
+    })
+    const accepted = decideReviewChange(withIndependentThread.document, {
+      changeId: 'dm-i01',
+      action: 'accepted',
+      authorId: 'dm-a01',
+      timestamp: '2026-07-15T14:20:00.000Z',
+      decisionId: 'dm-decision-accepted',
+    })
+    expect(projectPortableAcceptedBase(accepted.document.source)).toMatchObject({
+      ok: true,
+      source: aliceFinalGolden,
+      appliedChangeIds: ['dm-i01'],
+    })
+
+    const rebased = rebaseReviewChange(accepted.document, {
+      changeId: 'dm-i02',
+      quote: 'declined by 18%',
+      proposal: 'declined by 16%',
+      rationale: 'Retain the conservative estimate on the accepted wording.',
+      author: { id: 'dm-a02', name: 'Marcus Chen' },
+      timestamp: '2026-07-15T14:21:00.000Z',
+      decisionId: 'dm-decision-rebased',
+      replacementChangeId: 'dm-i02-rebased',
+      anchorId: 'dm-r-identical-rebased',
+      startMarkerId: 'dm-r-identical-rebased-start',
+      endMarkerId: 'dm-r-identical-rebased-end',
+    })
+
+    expect(rebased.previousChangeId).toBe('dm-i02')
+    expect(rebased.appliedChangeIds).toEqual(['dm-i01'])
+    expect(rebased.document.changes.map((change) => [change.id, change.status])).toEqual([
+      ['dm-i01', 'applied'],
+      ['dm-i02', 'rebased'],
+      ['dm-i02-rebased', 'open'],
+    ])
+    expect(rebased.change.attributes['data-rebased-from']).toBe('dm-i02')
+    expect(rebased.document.decisions.map((decision) => [decision.id, decision.action])).toEqual([
+      ['dm-decision-accepted', 'accepted'],
+      ['dm-decision-rebased', 'rebased'],
+    ])
+    expect(rebased.document.ranges.find((range) => range.anchorId === 'dm-independent-anchor')?.complete).toBe(true)
+    expect(rebased.document.threads.find((thread) => thread.id === 'dm-independent-thread')?.messages).toEqual(['Keep this independent discussion anchored while rebasing.'])
+    const original = projectPortableReviewSource(rebased.document.source, { view: 'original' })
+    expect(original.ok).toBe(true)
+    expect(original.source?.trimEnd()).toBe(aliceFinalGolden.trimEnd())
+    const final = projectPortableReviewSource(rebased.document.source, { view: 'final' })
+    expect(final).toMatchObject({ ok: true, appliedChangeIds: ['dm-i02-rebased'] })
+    expect(final.source).toContain('The leaf area declined by 16%.')
+    expect(final.source).not.toMatch(/\.dm-anchor|\.draftmatter-reviews/)
+
+    expect(() => rebaseReviewChange(rebased.document, {
+      changeId: 'dm-i02',
+      quote: 'declined by 16%',
+      author: { id: 'dm-a02', name: 'Marcus Chen' },
+    })).toThrowError(expect.objectContaining({ code: 'review-change-not-rebasable' }))
+  })
+
+  it('fails a rebase closed when accepted text cannot be identified uniquely', () => {
+    const accepted = decideReviewChange(parseReviewMarkup(identicalSource), {
+      changeId: 'dm-i01',
+      action: 'accepted',
+      authorId: 'dm-a01',
+      decisionId: 'dm-decision-before-failed-rebase',
+    })
+    const before = accepted.document.source
+    expect(() => rebaseReviewChange(accepted.document, {
+      changeId: 'dm-i02',
+      quote: 'text that is absent from the accepted manuscript',
+      proposal: 'revised wording',
+      author: { id: 'dm-a02', name: 'Marcus Chen' },
+    })).toThrowError(expect.objectContaining({ code: 'review-rebase-quote-missing' }))
+    expect(accepted.document.source).toBe(before)
+    expect(parseReviewMarkup(before).changes.map((change) => change.status)).toEqual(['accepted', 'needs-rebase'])
   })
 
   it('validates change geometry and proposal requirements before touching source', () => {

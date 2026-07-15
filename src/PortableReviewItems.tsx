@@ -7,6 +7,7 @@ import {
   createReviewThread,
   decideReviewChange,
   ensureReviewAuthor,
+  rebaseReviewChange,
   setReviewThreadStatus,
 } from './reviewOperations'
 import { buildReviewQueue, navigateReviewQueue, type ReviewQueueItem } from './reviewQueue'
@@ -75,6 +76,9 @@ export function PortableReviewItems({
   const [body, setBody] = useState('')
   const [placementAnchorId, setPlacementAnchorId] = useState<string>()
   const [placementQuote, setPlacementQuote] = useState('')
+  const [rebaseChangeId, setRebaseChangeId] = useState<string>()
+  const [rebaseQuote, setRebaseQuote] = useState('')
+  const [rebaseProposal, setRebaseProposal] = useState('')
   const composerRef = useRef<HTMLDivElement>(null)
   const autoRecoveredSourceRef = useRef<string | undefined>(undefined)
 
@@ -130,6 +134,30 @@ export function PortableReviewItems({
     try {
       const result = setReviewThreadStatus(document, threadId, status)
       apply(result.document.source, status === 'open' ? 'Comment thread reopened' : status === 'resolved' ? 'Comment thread resolved' : 'Comment thread removed from the active queue')
+    } catch (error) {
+      fail(error)
+    }
+  }
+
+  const rebase = (changeId: string) => {
+    const change = document.changes.find((candidate) => candidate.id === changeId)
+    if (!change) return
+    if (!rebaseQuote.trim() || (change.changeKind !== 'delete' && !rebaseProposal.trim())) {
+      setProblem('Select exact text in the accepted manuscript and enter the revised proposal.')
+      return
+    }
+    try {
+      const result = rebaseReviewChange(document, {
+        changeId,
+        quote: rebaseQuote,
+        proposal: change.changeKind === 'delete' ? undefined : rebaseProposal,
+        rationale: change.rationale,
+        author: localAuthor,
+      })
+      setRebaseChangeId(undefined)
+      setRebaseQuote('')
+      setRebaseProposal('')
+      apply(result.document.source, `Suggestion rebased onto the accepted manuscript · ${result.appliedChangeIds.length} accepted decision${result.appliedChangeIds.length === 1 ? '' : 's'} folded into the portable base`)
     } catch (error) {
       fail(error)
     }
@@ -213,7 +241,19 @@ export function PortableReviewItems({
               {active && change.status === 'open' && item.kind !== 'unplaced-change' && (
                 <div className="review-actions"><button className="accept" onClick={() => decide(item.id, 'accepted')}><Icon name="check" size={15} /> Accept</button><button className="reject" onClick={() => decide(item.id, 'rejected')}><Icon name="x" size={15} /> Reject</button></div>
               )}
-              {active && change.status === 'needs-rebase' && <div className="review-actions"><button className="reject" onClick={() => decide(item.id, 'rejected')}><Icon name="x" size={15} /> Reject alternative</button></div>}
+              {active && change.status === 'needs-rebase' && (
+                <>
+                  <div className="review-actions"><button className="accept" onClick={() => { setRebaseChangeId(item.id); setRebaseQuote(selectedTarget?.quote ?? ''); setRebaseProposal(change.proposal ?? '') }}><Icon name="branch" size={15} /> Rebase suggestion</button><button className="reject" onClick={() => decide(item.id, 'rejected')}><Icon name="x" size={15} /> Reject alternative</button></div>
+                  {rebaseChangeId === item.id && (
+                    <div className="review-rebase-form" role="group" aria-label="Rebase suggestion">
+                      <p>Anchor the revised proposal to text in the accepted manuscript. Accepted decisions are folded into the portable base once; their audit records remain.</p>
+                      <label><span>Text in accepted manuscript</span><input value={rebaseQuote} onChange={(event) => setRebaseQuote(event.target.value)} placeholder="Select text in Final preview or paste it here" /></label>
+                      {change.changeKind !== 'delete' && <label><span>Revised proposal</span><textarea value={rebaseProposal} onChange={(event) => setRebaseProposal(event.target.value)} rows={3} /></label>}
+                      <div><button onClick={() => setRebaseChangeId(undefined)}>Cancel</button><button className="primary-button" onClick={() => rebase(item.id)}>Create rebased proposal</button></div>
+                    </div>
+                  )}
+                </>
+              )}
               {active && item.kind === 'unplaced-change' && recovery && (
                 <div className="unplaced-review-placement">
                   <p>{recovery.reason}</p>

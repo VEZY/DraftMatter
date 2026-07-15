@@ -5,7 +5,7 @@ import crossingSource from './fixtures/portable/27-review-crossing.qmd?raw'
 import aliceFinalGolden from './fixtures/golden/review-identical.alice-final.md?raw'
 import originalGolden from './fixtures/golden/review-identical.original.md?raw'
 import { parseReviewMarkup } from './reviewMarkup'
-import { projectPortableReviewSource } from './reviewProjector'
+import { projectPortableAcceptedBase, projectPortableReviewSource } from './reviewProjector'
 
 describe('portable review projector', () => {
   it('matches the clean Original golden without leaking review structures', () => {
@@ -90,5 +90,24 @@ new B
     const result = projectPortableReviewSource(decided, { view: 'final' })
 
     expect(result).toMatchObject({ ok: true, source: aliceFinalGolden, appliedChangeIds: ['dm-i01'] })
+  })
+
+  it('keeps a standalone needs-rebase proposal as audit-only until it is revised', () => {
+    const pending = identicalSource
+      .replaceAll('data-status="open"', 'data-status="needs-rebase"')
+    const result = projectPortableReviewSource(pending, { view: 'final' })
+
+    expect(result.ok).toBe(true)
+    expect(result.appliedChangeIds).toEqual([])
+    expect(result.source).toBe(originalGolden)
+  })
+
+  it('refuses to materialize externally corrupted conflicting accept decisions', () => {
+    const corrupted = identicalSource.replaceAll('data-status="open"', 'data-status="accepted"')
+    const result = projectPortableAcceptedBase(corrupted)
+
+    expect(result).toMatchObject({ ok: false, source: null })
+    expect(result.conflicts).toHaveLength(1)
+    expect(result.diagnostics.at(-1)?.code).toBe('accepted-base-conflict')
   })
 })

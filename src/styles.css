@@ -2542,6 +2542,50 @@ button:disabled {
   height: 28px;
 }
 
+.review-rebase-form {
+  background: #fffaf4;
+  border: 1px solid #eadbc8;
+  border-radius: 6px;
+  display: grid;
+  gap: 8px;
+  margin: 8px 0 2px;
+  padding: 9px;
+}
+
+.review-rebase-form > p {
+  color: #756858;
+  font-size: 8px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.review-rebase-form label {
+  color: #7c756c;
+  display: grid;
+  font-size: 7.5px;
+  gap: 4px;
+}
+
+.review-rebase-form input,
+.review-rebase-form textarea {
+  background: white;
+  border: 1px solid #d9c9b7;
+  border-radius: 4px;
+  color: #46514b;
+  font: inherit;
+  font-size: 9px;
+  padding: 7px;
+  resize: vertical;
+}
+
+.review-rebase-form > div {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.review-rebase-form > div button { font-size: 8px; min-height: 28px; }
+
 .portable-review-footer {
   bottom: -18px;
   margin: 12px -13px -18px;
