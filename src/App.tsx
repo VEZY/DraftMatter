@@ -4,7 +4,7 @@ import { desktopHost, normaliseHostFailure, resolveMainDocument, type ProjectSna
 import { parsePortableDocument } from './document'
 import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
-import { cleanProjection, downloadText, reviewedProjection } from './projections'
+import { downloadText, projectCleanSource, reviewedProjection } from './projections'
 import { sampleCitations } from './sampleCitations'
 import { initialDraft } from './sampleDraft'
 import { readRecoverySnapshots, saveRecoverySnapshot, type RecoverySnapshot } from './storage'
@@ -373,9 +373,14 @@ function App() {
     return text.trim().split(/\s+/).length
   }, [draft])
 
+  const cleanSourceResult = sourceTab === 'reviewed' ? null : projectCleanSource(draft, sourceTab)
+  const sourceDiagnostics = cleanSourceResult && !cleanSourceResult.ok ? cleanSourceResult.diagnostics : []
+  const sourceBlocked = sourceDiagnostics.length > 0
   const source = sourceTab === 'reviewed'
     ? reviewedProjection(draft)
-    : cleanProjection(draft, sourceTab)
+    : cleanSourceResult?.ok
+      ? cleanSourceResult.source
+      : `Final projection unavailable.\n\n${sourceDiagnostics.map((diagnostic) => `- ${diagnostic.message}`).join('\n')}`
   const displayedSource = sourceEditing ? sourceBuffer : source
 
   const openSourceInspector = () => {
@@ -446,7 +451,23 @@ function App() {
   }
 
   const download = (kind: 'reviewed' | 'final' | 'original') => {
-    const content = kind === 'reviewed' ? reviewedProjection(draft) : cleanProjection(draft, kind)
+    let content: string
+    if (kind === 'reviewed') {
+      content = reviewedProjection(draft)
+    } else {
+      const projection = projectCleanSource(draft, kind)
+      if (!projection.ok) {
+        setDiagnostics((current) => [
+          ...current.filter((diagnostic) => !diagnostic.code.startsWith('final-projection-')),
+          ...projection.diagnostics,
+        ])
+        setExportOpen(false)
+        setToast('Final export blocked · resolve the overlapping alternatives')
+        return
+      }
+      content = projection.source
+      setDiagnostics((current) => current.filter((diagnostic) => !diagnostic.code.startsWith('final-projection-')))
+    }
     const base = filename.replace(/\.(qmd|md)$/i, '')
     downloadText(kind === 'reviewed' ? filename : `${base}.${kind}.qmd`, content)
     setExportOpen(false)
@@ -1130,9 +1151,9 @@ function App() {
               <button role="tab" aria-selected={sourceTab === 'final'} className={sourceTab === 'final' ? 'active' : ''} onClick={() => setSourceTab('final')} disabled={sourceEditing}>Clean final</button>
               <button role="tab" aria-selected={sourceTab === 'original'} className={sourceTab === 'original' ? 'active' : ''} onClick={() => setSourceTab('original')} disabled={sourceEditing}>Original</button>
             </div>
-            <div className="projection-note">
-              <Icon name={sourceTab === 'reviewed' ? 'branch' : 'check'} size={16} />
-              <span>{sourceEditing ? 'Editing is explicit and reversible. Unsupported blocks remain portable.' : sourceTab === 'reviewed' ? 'Portable source includes stable anchors and review records.' : 'Clean projection contains no DraftMatter review structures.'}</span>
+            <div className={`projection-note${sourceBlocked ? ' blocked' : ''}`} role={sourceBlocked ? 'alert' : undefined}>
+              <Icon name={sourceBlocked || sourceTab === 'reviewed' ? 'branch' : 'check'} size={16} />
+              <span>{sourceEditing ? 'Editing is explicit and reversible. Unsupported blocks remain portable.' : sourceBlocked ? sourceDiagnostics[0]?.message : sourceTab === 'reviewed' ? 'Portable source includes stable anchors and review records.' : 'Clean projection contains no DraftMatter review structures.'}</span>
               {sourceTab === 'reviewed' && !sourceEditing && <button onClick={startSourceEditing}><Icon name="code" size={13} /> Edit source</button>}
             </div>
             {sourceEditing ? (
@@ -1145,7 +1166,7 @@ function App() {
               {sourceEditing ? (
                 <div className="source-editor-actions"><button className="secondary" onClick={cancelSourceEditing}>Cancel</button><button onClick={applySourceEditing} disabled={!sourceBuffer.trim()}><Icon name="check" size={15} /> Apply source</button></div>
               ) : (
-                <button onClick={() => download(sourceTab)}><Icon name="download" size={15} /> Download projection</button>
+                <button onClick={() => download(sourceTab)} disabled={sourceBlocked}><Icon name="download" size={15} /> {sourceBlocked ? 'Resolve review first' : 'Download projection'}</button>
               )}
             </div>
           </div>

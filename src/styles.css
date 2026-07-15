@@ -2072,6 +2072,12 @@ kbd {
 
 .projection-note > span { flex: 1; }
 
+.projection-note.blocked {
+  background: var(--danger-soft);
+  border-color: #ead4cf;
+  color: #884f45;
+}
+
 .projection-note > button {
   align-items: center;
   background: white;

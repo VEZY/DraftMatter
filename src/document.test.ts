@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import { parsePortableDocument, sourceHash, validateCleanProjection } from './document'
-import { cleanProjection, reviewedProjection } from './projections'
+import { cleanProjection, projectCleanSource, reviewedProjection } from './projections'
 import { initialDraft } from './sampleDraft'
 
 describe('portable document core', () => {
@@ -49,6 +49,22 @@ describe('portable document core', () => {
     expect(clean).toContain('reduced leaf area by 18%')
     expect(clean).not.toContain('.dm-anchor')
     expect(clean).not.toContain('.draftmatter-reviews')
+  })
+
+  it('fails the final projection closed when overlapping alternatives are unresolved', () => {
+    const blocked = projectCleanSource(initialDraft, 'final')
+
+    expect(blocked).toEqual({
+      ok: false,
+      source: null,
+      diagnostics: [expect.objectContaining({
+        code: 'final-projection-overlap-dm-r01',
+        level: 'error',
+        message: expect.stringContaining('dm-c01 (Alice Martin, open); dm-c02 (Marcus Chen, open)'),
+      })],
+    })
+    expect(projectCleanSource({ ...initialDraft, aliceStatus: 'accepted', marcusStatus: 'needs-rebase' }, 'final')).toMatchObject({ ok: true })
+    expect(projectCleanSource(initialDraft, 'original')).toMatchObject({ ok: true })
   })
 
   it('creates stable source fingerprints', () => {

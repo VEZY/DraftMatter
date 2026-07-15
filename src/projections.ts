@@ -1,7 +1,11 @@
-import type { DraftState, SectionKey } from './types'
+import type { DocumentDiagnostic, DraftState, SectionKey } from './types'
 
 const REVIEW_START = '::::: {.draftmatter-reviews .hidden data-schema="1"}'
 const REVIEW_END = ':::::'
+
+export type CleanProjectionResult =
+  | { ok: true; source: string; diagnostics: DocumentDiagnostic[] }
+  | { ok: false; source: null; diagnostics: DocumentDiagnostic[] }
 
 function proposalSentence(state: DraftState, view: 'original' | 'final') {
   if (view === 'original') return 'did not substantially alter leaf expansion'
@@ -75,6 +79,33 @@ ${state.resultsLead} The drought treatment ${result}, while root allocation incr
 
 ${state.conclusion}${preservedAfter(state, 'conclusion')}
 `
+}
+
+export function projectCleanSource(state: DraftState, view: 'original' | 'final'): CleanProjectionResult {
+  if (view === 'final') {
+    const proposals = [
+      { id: 'dm-c01', author: 'Alice Martin', status: state.aliceStatus },
+      { id: 'dm-c02', author: 'Marcus Chen', status: state.marcusStatus },
+    ]
+    const accepted = proposals.filter((proposal) => proposal.status === 'accepted')
+    const unresolved = proposals.filter((proposal) => proposal.status === 'open' || proposal.status === 'needs-rebase')
+    if (accepted.length > 1 || (accepted.length === 0 && unresolved.length > 1)) {
+      const candidates = (accepted.length > 1 ? accepted : unresolved)
+        .map((proposal) => `${proposal.id} (${proposal.author}, ${proposal.status})`)
+        .join('; ')
+      return {
+        ok: false,
+        source: null,
+        diagnostics: [{
+          code: 'final-projection-overlap-dm-r01',
+          level: 'error',
+          message: `Final export is blocked at dm-r01. Choose exactly one alternative before publishing: ${candidates}.`,
+        }],
+      }
+    }
+  }
+
+  return { ok: true, source: cleanProjection(state, view), diagnostics: [] }
 }
 
 export function reviewedProjection(state: DraftState) {
