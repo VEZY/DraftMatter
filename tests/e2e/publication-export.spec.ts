@@ -80,6 +80,8 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(docxDownload.suggestedFilename()).toBe('canopy-drought.docx')
     expect(docx.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]))
     expect(readableDocx).toContain('Independent canopy synthesis')
+    expect(readableDocx.match(/Independent canopy synthesis/g)).toHaveLength(1)
+    expect(readableDocx).toContain('Ada Researcher · Lin Reviewer')
     expect(readableDocx).toContain('word/document.xml')
     expect(readableDocx).not.toContain('Drought acclimation reshapes canopy development')
     expect(readableDocx).not.toMatch(/\.dm-anchor|\.draftmatter-reviews|<w:(?:ins|del)\b/)

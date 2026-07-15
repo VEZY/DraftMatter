@@ -7,6 +7,8 @@ author:
   - Remi Vezy
 ---
 
+# Canopy response
+
 ## Results
 
 Leaf area declined by **18%** [@vezy2020]. The relationship was $y = ax + b$.
@@ -34,6 +36,8 @@ describe('native DOCX export', () => {
     expect(readable).toContain('word/document.xml')
     expect(readable).toContain('word/styles.xml')
     expect(readable).toContain('Canopy response')
+    expect(readable.match(/Canopy response/g)).toHaveLength(1)
+    expect(readable).toContain('Remi Vezy')
     expect(readable).toContain('<w:tbl>')
     expect(readable).toContain('not executed during export')
     expect(readable).toContain('print(&quot;inert&quot;)')

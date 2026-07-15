@@ -1,4 +1,5 @@
 import { validateCleanProjection } from './document'
+import { parsePublicationMetadata, removeDuplicateLeadingTitle } from './publicationMetadata'
 
 export interface DocxExportDiagnostic {
   code: 'figure-reference' | 'raw-source'
@@ -138,14 +139,12 @@ function stripInlineMarkdown(value: string) {
 }
 
 function documentBody(source: string, diagnostics: DocxExportDiagnostic[]) {
-  const frontmatter = source.match(/^---(?:\r\n|\n|\r)([\s\S]*?)(?:\r\n|\n|\r)---(?:\r\n|\n|\r|$)/)
-  const title = frontmatter?.[1].match(/^title\s*:\s*(.+)$/m)?.[1]?.trim().replace(/^(["'])(.*)\1$/, '$2')
-  const authors = [...(frontmatter?.[1] ?? '').matchAll(/^\s*-\s*(.+)$/gm)].map((match) => match[1].trim())
-  const body = frontmatter ? source.slice(frontmatter[0].length) : source
+  const metadata = parsePublicationMetadata(source)
+  const body = removeDuplicateLeadingTitle(metadata.body, metadata.title)
   const lines = body.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n')
   const parts: string[] = []
-  if (title) parts.push(paragraph(title, 'Title'))
-  if (authors.length) parts.push(paragraph(authors.join(' · '), 'Subtitle'))
+  if (metadata.title) parts.push(paragraph(metadata.title, 'Title'))
+  if (metadata.authors.length) parts.push(paragraph(metadata.authors.join(' · '), 'Subtitle'))
   let index = 0
   while (index < lines.length) {
     const line = lines[index]
