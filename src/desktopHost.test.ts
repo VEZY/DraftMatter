@@ -63,6 +63,17 @@ describe('desktop host adapter', () => {
     await host.terminateDirect('julia')
     await host.readExecutionManifests('/research/canopy')
     await host.saveExecutionManifest({ root: '/research/canopy', cellId: 'cell-1', content: '{"schemaVersion":1}', expectedHash: null })
+    await host.gitStatus('/research/canopy')
+    await host.gitInitialize('/research/canopy')
+    await host.gitDiff({ root: '/research/canopy', path: 'paper.qmd', staged: false })
+    await host.gitStage({ root: '/research/canopy', paths: ['paper.qmd'] })
+    await host.gitCreateCommit({ root: '/research/canopy', message: 'Results checkpoint' })
+    await host.gitBranches('/research/canopy')
+    await host.gitCreateBranch({ root: '/research/canopy', name: 'results' })
+    await host.gitSwitchBranch({ root: '/research/canopy', name: 'main' })
+    await host.gitFetch({ root: '/research/canopy', remote: 'origin' })
+    await host.gitPull({ root: '/research/canopy', remote: 'origin', branch: 'main' })
+    await host.gitPush({ root: '/research/canopy', remote: 'origin', branch: 'main' })
 
     expect(calls).toEqual([
       ['open_project', { root: '/research/canopy' }],
@@ -94,6 +105,17 @@ describe('desktop host adapter', () => {
       ['terminate_direct', { language: 'julia' }],
       ['read_execution_manifests', { root: '/research/canopy' }],
       ['save_execution_manifest', { request: { root: '/research/canopy', cellId: 'cell-1', content: '{"schemaVersion":1}', expectedHash: null } }],
+      ['git_status', { root: '/research/canopy' }],
+      ['git_initialize', { root: '/research/canopy' }],
+      ['git_diff', { request: { root: '/research/canopy', path: 'paper.qmd', staged: false } }],
+      ['git_stage', { request: { root: '/research/canopy', paths: ['paper.qmd'] } }],
+      ['git_create_commit', { request: { root: '/research/canopy', message: 'Results checkpoint' } }],
+      ['git_branches', { root: '/research/canopy' }],
+      ['git_create_branch', { request: { root: '/research/canopy', name: 'results' } }],
+      ['git_switch_branch', { request: { root: '/research/canopy', name: 'main' } }],
+      ['git_fetch', { request: { root: '/research/canopy', remote: 'origin' } }],
+      ['git_pull', { request: { root: '/research/canopy', remote: 'origin', branch: 'main' } }],
+      ['git_push', { request: { root: '/research/canopy', remote: 'origin', branch: 'main' } }],
     ])
   })
 
@@ -105,6 +127,7 @@ describe('desktop host adapter', () => {
     await expect(host.pickProjectFolder()).resolves.toBeNull()
     await expect(host.executionTrustStatus('/project')).rejects.toMatchObject({ kind: 'integration' })
     await expect(host.trustProjectForSession('/project', 'run-project-code-with-user-permissions')).rejects.toMatchObject({ kind: 'integration' })
+    await expect(host.gitStatus('/project')).rejects.toMatchObject({ kind: 'integration', message: expect.stringContaining('browser') })
     expect(picker).not.toHaveBeenCalled()
     expect(invoke).not.toHaveBeenCalled()
   })

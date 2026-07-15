@@ -12,6 +12,7 @@ use tauri_plugin_opener::OpenerExt;
 mod direct_execution;
 mod execution_manifests;
 mod execution_trust;
+mod git_adapter;
 use direct_execution::{
     execute_direct_impl, interrupt_direct_impl, restart_direct_impl, terminate_direct_impl,
     DirectExecutionRequest, DirectExecutionResult, DirectProcessRegistry,
@@ -23,6 +24,13 @@ mod runtime;
 use execution_trust::{
     execution_trust_status_impl, revoke_project_trust_impl, trust_project_for_session_impl,
     ExecutionTrustStatus, ExecutionTrustStore,
+};
+use git_adapter::{
+    git_branches_impl, git_create_branch_impl, git_create_commit_impl, git_diff_impl,
+    git_fetch_impl, git_initialize_impl, git_pull_impl, git_push_impl, git_stage_impl,
+    git_status_impl, git_switch_branch_impl, GitBranchRequest, GitBranchStatus, GitCommitRequest,
+    GitCommitResult, GitDiffRequest, GitDiffResult, GitInitializeResult, GitRemoteRequest,
+    GitRemoteResult, GitRepositoryStatus, GitStageRequest,
 };
 use runtime::{
     discover_jupyter_kernels_impl, probe_runtime_executable_impl, JupyterKernelInventory,
@@ -2179,6 +2187,61 @@ fn save_execution_manifest(
     save_execution_manifest_impl(request)
 }
 
+#[tauri::command]
+fn git_status(root: String) -> Result<GitRepositoryStatus, HostError> {
+    git_status_impl(&root)
+}
+
+#[tauri::command]
+fn git_initialize(root: String) -> Result<GitInitializeResult, HostError> {
+    git_initialize_impl(&root)
+}
+
+#[tauri::command]
+fn git_diff(request: GitDiffRequest) -> Result<GitDiffResult, HostError> {
+    git_diff_impl(request)
+}
+
+#[tauri::command]
+fn git_stage(request: GitStageRequest) -> Result<GitRepositoryStatus, HostError> {
+    git_stage_impl(request)
+}
+
+#[tauri::command]
+fn git_create_commit(request: GitCommitRequest) -> Result<GitCommitResult, HostError> {
+    git_create_commit_impl(request)
+}
+
+#[tauri::command]
+fn git_branches(root: String) -> Result<GitBranchStatus, HostError> {
+    git_branches_impl(&root)
+}
+
+#[tauri::command]
+fn git_create_branch(request: GitBranchRequest) -> Result<GitBranchStatus, HostError> {
+    git_create_branch_impl(request)
+}
+
+#[tauri::command]
+fn git_switch_branch(request: GitBranchRequest) -> Result<GitBranchStatus, HostError> {
+    git_switch_branch_impl(request)
+}
+
+#[tauri::command]
+fn git_fetch(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
+    git_fetch_impl(request)
+}
+
+#[tauri::command]
+fn git_pull(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
+    git_pull_impl(request)
+}
+
+#[tauri::command]
+fn git_push(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
+    git_push_impl(request)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2214,7 +2277,18 @@ pub fn run() {
             restart_direct,
             terminate_direct,
             read_execution_manifests,
-            save_execution_manifest
+            save_execution_manifest,
+            git_status,
+            git_initialize,
+            git_diff,
+            git_stage,
+            git_create_commit,
+            git_branches,
+            git_create_branch,
+            git_switch_branch,
+            git_fetch,
+            git_pull,
+            git_push
         ])
         .run(tauri::generate_context!())
         .expect("error while running DraftMatter");

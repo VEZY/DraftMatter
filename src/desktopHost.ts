@@ -65,6 +65,100 @@ export interface SaveExecutionManifestRequest {
   expectedHash: string | null
 }
 
+export type GitChangeKind = 'modified' | 'added' | 'deleted' | 'renamed' | 'copied' | 'untracked' | 'conflicted'
+
+export interface GitStatusEntry {
+  path: string
+  originalPath?: string
+  kind: GitChangeKind
+  indexStatus: string
+  worktreeStatus: string
+  staged: boolean
+  unstaged: boolean
+  conflicted: boolean
+  binary: boolean
+}
+
+export interface GitRepositoryStatus {
+  gitAvailable: boolean
+  gitVersion?: string
+  repository: boolean
+  repositoryRoot?: string
+  projectPrefix: string
+  branch?: string
+  detached: boolean
+  upstream?: string
+  ahead: number
+  behind: number
+  entries: GitStatusEntry[]
+}
+
+export interface GitInitializeResult {
+  repositoryRoot: string
+  createdIgnore: boolean
+  status: GitRepositoryStatus
+}
+
+export interface GitDiffRequest {
+  root: string
+  path: string
+  staged: boolean
+}
+
+export interface GitDiffResult {
+  path: string
+  staged: boolean
+  text: string
+  binary: boolean
+  truncated: boolean
+}
+
+export interface GitStageRequest {
+  root: string
+  paths: string[]
+}
+
+export interface GitCommitRequest {
+  root: string
+  message: string
+}
+
+export interface GitCommitResult {
+  hash: string
+  shortHash: string
+  message: string
+  files: string[]
+}
+
+export interface GitBranch {
+  name: string
+  current: boolean
+}
+
+export interface GitBranchStatus {
+  current?: string
+  detached: boolean
+  branches: GitBranch[]
+  remotes: string[]
+}
+
+export interface GitBranchRequest {
+  root: string
+  name: string
+}
+
+export interface GitRemoteRequest {
+  root: string
+  remote?: string
+  branch?: string
+}
+
+export interface GitRemoteResult {
+  action: 'fetch' | 'pull' | 'push'
+  summary: string
+  status: GitRepositoryStatus
+}
+
 export interface AcquireCitationsRequest {
   root: string
   documentPath: string
@@ -191,6 +285,10 @@ export function createDesktopHost(
     kind: 'integration',
     message: 'Local code execution is unavailable in browser collaboration sessions.',
   } satisfies HostFailure)
+  const gitUnavailable = () => Promise.reject<never>({
+    kind: 'integration',
+    message: 'Local Git is unavailable in browser collaboration sessions.',
+  } satisfies HostFailure)
   return {
     available,
     async pickProjectFolder(title = 'Choose a DraftMatter project folder') {
@@ -316,6 +414,61 @@ export function createDesktopHost(
     },
     saveExecutionManifest(request: SaveExecutionManifestRequest) {
       return invokeBridge<DocumentSnapshot>('save_execution_manifest', { request })
+    },
+    gitStatus(root: string) {
+      return available
+        ? invokeBridge<GitRepositoryStatus>('git_status', { root })
+        : gitUnavailable()
+    },
+    gitInitialize(root: string) {
+      return available
+        ? invokeBridge<GitInitializeResult>('git_initialize', { root })
+        : gitUnavailable()
+    },
+    gitDiff(request: GitDiffRequest) {
+      return available
+        ? invokeBridge<GitDiffResult>('git_diff', { request })
+        : gitUnavailable()
+    },
+    gitStage(request: GitStageRequest) {
+      return available
+        ? invokeBridge<GitRepositoryStatus>('git_stage', { request })
+        : gitUnavailable()
+    },
+    gitCreateCommit(request: GitCommitRequest) {
+      return available
+        ? invokeBridge<GitCommitResult>('git_create_commit', { request })
+        : gitUnavailable()
+    },
+    gitBranches(root: string) {
+      return available
+        ? invokeBridge<GitBranchStatus>('git_branches', { root })
+        : gitUnavailable()
+    },
+    gitCreateBranch(request: GitBranchRequest) {
+      return available
+        ? invokeBridge<GitBranchStatus>('git_create_branch', { request })
+        : gitUnavailable()
+    },
+    gitSwitchBranch(request: GitBranchRequest) {
+      return available
+        ? invokeBridge<GitBranchStatus>('git_switch_branch', { request })
+        : gitUnavailable()
+    },
+    gitFetch(request: GitRemoteRequest) {
+      return available
+        ? invokeBridge<GitRemoteResult>('git_fetch', { request })
+        : gitUnavailable()
+    },
+    gitPull(request: GitRemoteRequest) {
+      return available
+        ? invokeBridge<GitRemoteResult>('git_pull', { request })
+        : gitUnavailable()
+    },
+    gitPush(request: GitRemoteRequest) {
+      return available
+        ? invokeBridge<GitRemoteResult>('git_push', { request })
+        : gitUnavailable()
     },
   }
 }
