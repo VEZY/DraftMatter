@@ -54,6 +54,7 @@ describe('rendered portable citation acquisition', () => {
     vi.spyOn(desktopHost, 'setCitationPreferences').mockResolvedValue(project)
     vi.spyOn(desktopHost, 'documentStatus').mockResolvedValue({ kind: 'current', hash: 'doc-old', modifiedMs: 1 })
     vi.spyOn(desktopHost, 'zoteroStatus').mockResolvedValue({ available: false, message: 'closed' })
+    vi.spyOn(desktopHost, 'searchZotero').mockResolvedValue({ items: [] })
     vi.spyOn(desktopHost, 'searchCrossref').mockResolvedValue([dynacof])
     vi.spyOn(desktopHost, 'resolveDoiCsl').mockResolvedValue({
       type: 'article-journal', title: 'Canonical DynACof title', author: [{ family: 'Vezy', given: 'Rémi' }], issued: { 'date-parts': [[2020]] }, DOI: dynacof.doi,
@@ -126,5 +127,37 @@ describe('rendered portable citation acquisition', () => {
     expect(container.querySelector('[role="dialog"][aria-label="Insert citation"]')).not.toBeNull()
     expect(container.textContent).toContain('Citation was not inserted')
     expect(localStorage.getItem('draftmatter.citations.v1')).not.toContain(dynacof.doi)
+  })
+
+  it('routes a keyboard-selected Zotero result through the same portable transaction', async () => {
+    vi.mocked(desktopHost.zoteroStatus).mockResolvedValueOnce({ available: true, apiVersion: '3', schemaVersion: '31' })
+    vi.mocked(desktopHost.searchZotero).mockResolvedValueOnce({
+      libraryVersion: '902',
+      items: [{
+        itemKey: 'PXW99EKT', version: 42, itemType: 'journalArticle', title: 'Canopy responses from Zotero',
+        creators: [{ creatorType: 'author', firstName: 'Alice', lastName: 'Martin' }], date: '2025', doi: '10.1000/canopy', citationKey: 'martinCanopy2025',
+      }],
+    })
+    vi.mocked(desktopHost.resolveDoiCsl).mockResolvedValueOnce({
+      type: 'article-journal', title: 'Canopy responses from Zotero', author: [{ family: 'Martin', given: 'Alice' }], issued: { 'date-parts': [[2025]] }, DOI: '10.1000/canopy',
+    })
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, shiftKey: true, bubbles: true })))
+    const search = container.querySelector<HTMLInputElement>('input[aria-label="Search citation sources"]')!
+    await enter(search, 'canopy')
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 330)) })
+    const zoteroResult = container.querySelector<HTMLElement>('.source-icon.zotero')!.closest('button')!
+    await act(async () => zoteroResult.click())
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('.confirm-citation')!.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+
+    expect(desktopHost.acquireCitations).toHaveBeenCalledWith(expect.objectContaining({
+      bibliographyRecords: [expect.objectContaining({
+        id: 'martinCanopy2025',
+        _draftmatter: expect.objectContaining({ provider: 'zotero', providerId: 'PXW99EKT', providerVersion: 42, libraryVersion: '902' }),
+      })],
+      lockContent: expect.stringContaining('PXW99EKT'),
+    }))
   })
 })
