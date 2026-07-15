@@ -17,6 +17,14 @@ The observed trajectories are summarized in @fig-canopy.
 ![Canopy response](/fixtures/canopy-response.svg "Observed canopy"){#fig-canopy .wide data-owner="field-team"}
 : Canopy response over time.
 
+The measurements are summarized in @tbl-canopy.
+
+| Month | Index |
+| :--- | ---: |
+| August | 0.54 |
+| September | 0.68 |
+: Monthly canopy index. {#tbl-canopy .striped data-owner="field-team"}
+
 The fitted response was $y = \\frac{x}{2}$; see @eq-fit.
 
 $$
@@ -62,6 +70,10 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(manuscript.getByRole('link', { name: 'Figure canopy' })).toHaveAttribute('href', '#fig-canopy')
     await expect(manuscript.locator('#fig-canopy')).toBeVisible()
     await expect(manuscript.getByRole('img', { name: 'Canopy response' })).toBeVisible()
+    await expect(manuscript.getByRole('link', { name: 'Table canopy' })).toHaveAttribute('href', '#tbl-canopy')
+    await expect(manuscript.locator('#tbl-canopy')).toBeVisible()
+    await expect(manuscript.locator('#tbl-canopy figcaption')).toHaveText('Monthly canopy index.')
+    await expect(manuscript.locator('#tbl-canopy th').nth(1)).toHaveCSS('text-align', 'right')
     await expect(manuscript.getByRole('link', { name: 'Equation fit' })).toHaveAttribute('href', '#eq-fit')
     await expect(manuscript.locator('.structured-equation-inline .katex')).toBeVisible()
     await expect(manuscript.locator('#eq-fit .katex')).toBeVisible()
@@ -94,6 +106,22 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect.poll(async () => manuscript.getByRole('img', { name: 'Revised canopy response' }).evaluate((image: HTMLImageElement) => image.naturalWidth)).toBeGreaterThan(0)
     await expect(manuscript.locator('#fig-trajectory')).toHaveScreenshot('semantic-figure.png')
 
+    await manuscript.getByRole('button', { name: 'Edit table tbl-canopy details' }).click()
+    await manuscript.getByRole('textbox', { name: 'Table caption' }).fill('Revised **monthly canopy index**.')
+    await manuscript.getByRole('textbox', { name: 'Table label' }).fill('tbl-response')
+    await manuscript.locator('#tbl-canopy').evaluate((element) => element.scrollIntoView({ block: 'center' }))
+    await expect(manuscript.locator('#tbl-canopy')).toHaveScreenshot('semantic-table-editor.png')
+    await manuscript.getByRole('button', { name: 'Save table details' }).click()
+    await expect(manuscript.getByRole('link', { name: 'Table response' })).toHaveAttribute('href', '#tbl-response')
+    await expect(manuscript.locator('#tbl-response figcaption')).toHaveText('Revised monthly canopy index.')
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1')))
+      .toContain(': Revised **monthly canopy index**. {#tbl-response .striped data-owner="field-team"}')
+    const septemberIndex = manuscript.locator('#tbl-response tbody tr').nth(2).locator('td').nth(1).locator('p')
+    await septemberIndex.selectText()
+    await page.keyboard.type('0.72')
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('| September | 0.72 |')
+    await expect(manuscript.locator('#tbl-response')).toHaveScreenshot('semantic-table.png')
+
     await manuscript.getByRole('button', { name: 'Edit footnote 1' }).click()
     await manuscript.getByRole('textbox', { name: 'Footnote 1 content' }).fill('Calibration details were **independently checked**.')
     await manuscript.getByRole('button', { name: 'Save note' }).click()
@@ -108,6 +136,8 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(page.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveValue('println("after")')
     await expect(page.getByRole('img', { name: 'Revised canopy response' })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Figure trajectory' })).toHaveAttribute('href', '#fig-trajectory')
+    await expect(page.getByRole('link', { name: 'Table response' })).toHaveAttribute('href', '#tbl-response')
+    await expect(page.locator('#tbl-response')).toContainText('0.72')
     await expect(page.locator('#eq-fit .katex')).toBeVisible()
     await expect(page.getByText('Calibration details were independently checked.', { exact: true })).toBeVisible()
     let saved = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))
@@ -144,6 +174,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     expect(saved).toContain('# Portable field notes\n\n## Background')
     expect(saved).toContain('@eq-fit')
     expect(saved).toContain('@fig-trajectory')
+    expect(saved).toContain('@tbl-response')
     expect(saved).not.toMatch(/^#\s+\[@martin2023/m)
 
     await page.getByRole('button', { name: 'Edit citation @martin2023' }).click()

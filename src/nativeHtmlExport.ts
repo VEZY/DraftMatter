@@ -3,6 +3,7 @@ import { formatCrossReferenceTarget } from './crossReference'
 import { parseDisplayEquation } from './displayEquation'
 import { resolveFootnotes, type ResolvedFootnoteDocument } from './footnotes'
 import { parsePublicationMetadata, removeDuplicateLeadingTitle } from './publicationMetadata'
+import { parseTableCaptionLine, pipeTableAlignments, pipeTableCells } from './tableSyntax'
 
 export interface NativeHtmlExportOptions {
   title?: string
@@ -85,10 +86,6 @@ function isTableSeparator(line: string) {
   return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line)
 }
 
-function tableCells(line: string) {
-  return line.trim().replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim())
-}
-
 function startsBlock(lines: string[], index: number) {
   const line = lines[index] ?? ''
   return /^\s*(?:#{1,6}\s+|```|~~~|>\s?|[-+*]\s+|\d+[.)]\s+|\$\$|!\[[^\]]*\]\([^)]*\))/.test(line)
@@ -150,14 +147,19 @@ function renderBody(source: string, options: NativeHtmlExportOptions, footnotes:
       continue
     }
     if (line.includes('|') && isTableSeparator(lines[index + 1] ?? '')) {
-      const headers = tableCells(line)
+      const headers = pipeTableCells(line)
+      const alignments = pipeTableAlignments(lines[index + 1])
       index += 2
       const rows: string[][] = []
       while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
-        rows.push(tableCells(lines[index]))
+        rows.push(pipeTableCells(lines[index]))
         index += 1
       }
-      html.push(`<div class="table-wrap"><table><thead><tr>${headers.map((cell) => `<th>${renderInline(cell, options, footnotes)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${headers.map((_header, cellIndex) => `<td>${renderInline(row[cellIndex] ?? '', options, footnotes)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`)
+      const caption = parseTableCaptionLine(lines[index] ?? '')
+      if (caption) index += 1
+      const id = caption?.label ? ` id="${escapeHtml(caption.label)}"` : ''
+      const alignment = (cellIndex: number) => alignments[cellIndex] ? ` style="text-align:${alignments[cellIndex]}"` : ''
+      html.push(`<div class="table-wrap"><table${id}>${caption ? `<caption>${renderInline(caption.captionMarkdown, options, footnotes)}</caption>` : ''}<thead><tr>${headers.map((cell, cellIndex) => `<th${alignment(cellIndex)}>${renderInline(cell, options, footnotes)}</th>`).join('')}</tr></thead><tbody>${rows.map((row) => `<tr>${headers.map((_header, cellIndex) => `<td${alignment(cellIndex)}>${renderInline(row[cellIndex] ?? '', options, footnotes)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`)
       continue
     }
     if (/^\s*(?:[-+*]|\d+[.)])\s+/.test(line)) {
@@ -237,7 +239,7 @@ export function renderNativeHtmlExport(source: string, options: NativeHtmlExport
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
 <style>
-:root{color-scheme:light;--ink:#26312c;--muted:#69756f;--line:#dfe4e0;--paper:#fff;--wash:#f5f7f5;--accent:#466b59}*{box-sizing:border-box}html{background:var(--wash);font-family:Georgia,"Times New Roman",serif;color:var(--ink);line-height:1.65}body{background:var(--paper);box-shadow:0 10px 40px rgba(31,44,37,.08);margin:40px auto;max-width:840px;padding:72px 84px}h1,h2,h3,h4,h5,h6{font-family:Inter,system-ui,sans-serif;line-height:1.25;margin:1.8em 0 .65em}h1{font-size:2.35rem;margin-top:0}h2{border-bottom:1px solid var(--line);font-size:1.35rem;padding-bottom:.35em}p{margin:.75em 0}.authors{color:var(--muted);font-family:Inter,system-ui,sans-serif;margin-top:-1.4rem}a{color:var(--accent)}cite{font-style:normal;color:#385e4c}.equation{font-family:"STIX Two Math",Cambria,serif}.display-equation{margin:1.4rem 0;overflow:auto;text-align:center}figure{margin:1.6rem 0}figure img{display:block;height:auto;max-width:100%}figcaption{color:var(--muted);font-family:Inter,system-ui,sans-serif;font-size:.82rem;margin-top:.45rem}.source-code{background:#f7f8f7;border:1px solid var(--line);border-radius:6px;padding:.8rem 1rem}.source-code pre{overflow:auto;margin:.5rem 0 0}.source-code code,.raw-source{font-family:"SFMono-Regular",Consolas,monospace;font-size:.78rem}.raw-source{background:#fff8f3;border-left:3px solid #c98b65;overflow:auto;padding:.75rem}.table-wrap{overflow-x:auto}table{border-collapse:collapse;margin:1.25rem 0;width:100%}th,td{border-bottom:1px solid var(--line);padding:.5rem;text-align:left}th{font-family:Inter,system-ui,sans-serif;font-size:.82rem}blockquote{border-left:3px solid #afbeb6;color:#53615a;margin:1.2rem 0;padding:.2rem 1rem}.footnote-reference{font-size:.75em;text-decoration:none;vertical-align:super}.footnotes{color:#46534c;font-size:.85rem;margin-top:2rem}.footnotes hr{border:0;border-top:1px solid var(--line);margin:0 0 1rem;width:28%}.footnotes li{padding-left:.25rem}.footnote-backref{text-decoration:none}.missing-footnote{color:#8b4f36}.bibliography p{font-size:.9rem;padding-left:1.5rem;text-indent:-1.5rem}@media print{html{background:#fff}body{box-shadow:none;margin:0;max-width:none;padding:0}@page{margin:18mm 16mm}a{color:inherit;text-decoration:none}h1{font-size:2.1rem}h1,h2,h3{break-after:avoid}h2{margin-top:1.2em}.display-equation,figure,table{margin-top:1rem;margin-bottom:1rem}.source-code,figure,table,.footnotes li,.bibliography p{break-inside:avoid}.bibliography h2{margin-top:1em}}@media(max-width:700px){body{box-shadow:none;margin:0;padding:36px 24px}}
+:root{color-scheme:light;--ink:#26312c;--muted:#69756f;--line:#dfe4e0;--paper:#fff;--wash:#f5f7f5;--accent:#466b59}*{box-sizing:border-box}html{background:var(--wash);font-family:Georgia,"Times New Roman",serif;color:var(--ink);line-height:1.65}body{background:var(--paper);box-shadow:0 10px 40px rgba(31,44,37,.08);margin:40px auto;max-width:840px;padding:72px 84px}h1,h2,h3,h4,h5,h6{font-family:Inter,system-ui,sans-serif;line-height:1.25;margin:1.8em 0 .65em}h1{font-size:2.35rem;margin-top:0}h2{border-bottom:1px solid var(--line);font-size:1.35rem;padding-bottom:.35em}p{margin:.75em 0}.authors{color:var(--muted);font-family:Inter,system-ui,sans-serif;margin-top:-1.4rem}a{color:var(--accent)}cite{font-style:normal;color:#385e4c}.equation{font-family:"STIX Two Math",Cambria,serif}.display-equation{margin:1.4rem 0;overflow:auto;text-align:center}figure{margin:1.6rem 0}figure img{display:block;height:auto;max-width:100%}figcaption{color:var(--muted);font-family:Inter,system-ui,sans-serif;font-size:.82rem;margin-top:.45rem}.source-code{background:#f7f8f7;border:1px solid var(--line);border-radius:6px;padding:.8rem 1rem}.source-code pre{overflow:auto;margin:.5rem 0 0}.source-code code,.raw-source{font-family:"SFMono-Regular",Consolas,monospace;font-size:.78rem}.raw-source{background:#fff8f3;border-left:3px solid #c98b65;overflow:auto;padding:.75rem}.table-wrap{overflow-x:auto}table{border-collapse:collapse;margin:1.25rem 0;width:100%}caption{caption-side:bottom;color:var(--muted);font-family:Inter,system-ui,sans-serif;font-size:.82rem;padding-top:.45rem;text-align:left}th,td{border-bottom:1px solid var(--line);padding:.5rem;text-align:left}th{font-family:Inter,system-ui,sans-serif;font-size:.82rem}blockquote{border-left:3px solid #afbeb6;color:#53615a;margin:1.2rem 0;padding:.2rem 1rem}.footnote-reference{font-size:.75em;text-decoration:none;vertical-align:super}.footnotes{color:#46534c;font-size:.85rem;margin-top:2rem}.footnotes hr{border:0;border-top:1px solid var(--line);margin:0 0 1rem;width:28%}.footnotes li{padding-left:.25rem}.footnote-backref{text-decoration:none}.missing-footnote{color:#8b4f36}.bibliography p{font-size:.9rem;padding-left:1.5rem;text-indent:-1.5rem}@media print{html{background:#fff}body{box-shadow:none;margin:0;max-width:none;padding:0}@page{margin:18mm 16mm}a{color:inherit;text-decoration:none}h1{font-size:2.1rem}h1,h2,h3{break-after:avoid}h2{margin-top:1.2em}.display-equation,figure,table{margin-top:1rem;margin-bottom:1rem}.source-code,figure,table,.footnotes li,.bibliography p{break-inside:avoid}.bibliography h2{margin-top:1em}}@media(max-width:700px){body{box-shadow:none;margin:0;padding:36px 24px}}
 </style>
 </head>
 <body>

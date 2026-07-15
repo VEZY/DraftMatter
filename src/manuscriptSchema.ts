@@ -8,7 +8,22 @@ function atomDOM(name: string, text: (node: Parameters<NonNullable<NodeSpec['toD
   return (node) => ['span', { 'data-dm-node': name, 'data-dm-id': node.attrs.id ?? '' }, text(node)]
 }
 
-const tableSpecs = tableNodes({ tableGroup: 'block', cellContent: 'block+', cellAttributes: {} })
+const tableSpecs = tableNodes({
+  tableGroup: 'block',
+  cellContent: 'block+',
+  cellAttributes: {
+    alignment: {
+      default: null,
+      getFromDOM: (dom) => dom.getAttribute('data-alignment') || null,
+      setDOMAttr: (value, attrs) => {
+        if (value === 'left' || value === 'center' || value === 'right') {
+          attrs['data-alignment'] = value
+          attrs.style = `text-align: ${value}`
+        }
+      },
+    },
+  },
+})
 
 const nodes: Record<string, NodeSpec> = {
   doc: { content: 'block+' },
@@ -219,7 +234,16 @@ const nodes: Record<string, NodeSpec> = {
     toDOM: (node) => ['span', { 'data-dm-node': 'review-anchor', 'data-dm-id': node.attrs.id ?? '', 'data-anchor': node.attrs.anchorId, 'data-edge': node.attrs.edge }],
     leafText: () => '',
   },
-  table: { ...tableSpecs.table, attrs: identified },
+  table: {
+    ...tableSpecs.table,
+    attrs: {
+      ...tableSpecs.table.attrs,
+      ...identified,
+      captionMarkdown: { default: '' },
+      label: { default: null },
+      sourceAttributes: { default: null },
+    },
+  },
   table_row: { ...tableSpecs.table_row, attrs: identified },
   table_cell: { ...tableSpecs.table_cell, attrs: { ...tableSpecs.table_cell.attrs, ...identified } },
   table_header: { ...tableSpecs.table_header, attrs: { ...tableSpecs.table_header.attrs, ...identified } },

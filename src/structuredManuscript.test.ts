@@ -150,6 +150,26 @@ describe('generic structured manuscript bridge', () => {
       .toBe('#fig-canopy .wide data-credit="Field team"')
   })
 
+  it('round-trips table captions, labels, attributes, and column alignment after an edit', () => {
+    const source = '# Tables\n\nSee @tbl-yield for the summary.\n\n| Treatment | Mean | Range |\n| :--- | ---: | :---: |\n| Dry | 18 | 16–20 |\n: Yield **summary**. {#tbl-yield .striped data-owner="Field team"}\n'
+    const parsed = parseStructuredManuscript(source)
+    const table = parsed.document.lastChild
+
+    expect(table?.attrs).toMatchObject({
+      captionMarkdown: 'Yield **summary**.',
+      label: 'tbl-yield',
+      sourceAttributes: '#tbl-yield .striped data-owner="Field team"',
+    })
+    expect([0, 1, 2].map((index) => table?.firstChild?.child(index).attrs.alignment)).toEqual(['left', 'right', 'center'])
+    const edited = replaceFirstText(parsed.document, 'summary.', 'overview.')
+    const saved = serializeStructuredManuscript(edited, parsed.metadata)
+    expect(saved).toContain('| :--- | ---: | :---: |')
+    expect(saved).toContain(': Yield **summary**. {#tbl-yield .striped data-owner="Field team"}')
+    expect(saved).toContain('See @tbl-yield for the overview.')
+    const reopened = parseStructuredManuscript(saved).document.lastChild
+    expect([0, 1, 2].map((index) => reopened?.firstChild?.child(index).attrs.alignment)).toEqual(['left', 'right', 'center'])
+  })
+
   it('reopens labeled display equations without consuming following manuscript blocks', () => {
     const source = '$$\nE = mc^2\n$$ {#eq-mass .unnumbered}\n\nParagraph after math.\n'
     const parsed = parseStructuredManuscript(source)

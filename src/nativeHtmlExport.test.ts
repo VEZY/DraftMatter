@@ -12,7 +12,7 @@ author:
 
 ## Results {#results}
 
-Leaf area declined by **18%** [@vezy2020].[^methods] See @fig-response and the model $y = ax + b$.
+Leaf area declined by **18%** [@vezy2020].[^methods] See @fig-response, @tbl-summary, and the model $y = ax + b$.
 
 $$
 R^2 = 0.94
@@ -21,9 +21,10 @@ $$ {#eq-fit .unnumbered}
 ![Leaf-area response](figures/response.svg){#fig-response}
 
 | Treatment | Leaf area |
-| --- | ---: |
+| :--- | ---: |
 | Control | 100 |
 | Drought | 82 |
+: Treatment **summary**. {#tbl-summary .striped}
 
 \`\`\`python {#fit .execute}
 print("must remain inert")
@@ -49,12 +50,15 @@ describe('native HTML export', () => {
     expect(html).toContain('<li id="fn-methods">Calibration details were checked with <strong>manual review</strong>.')
     expect(html).not.toContain('[^methods]')
     expect(html).toContain('<a class="cross-reference" href="#fig-response">Figure response</a>')
+    expect(html).toContain('<a class="cross-reference" href="#tbl-summary">Table summary</a>')
     expect(html).not.toContain('>@fig-response<')
     expect(html).toContain('role="math"')
     expect(html).toContain('<div id="eq-fit" class="equation display-equation" data-tex="R^2 = 0.94" role="math">')
     expect(html).not.toContain('{#eq-fit')
     expect(html).toContain('<figure id="fig-response">')
-    expect(html).toContain('<table>')
+    expect(html).toContain('<table id="tbl-summary"><caption>Treatment <strong>summary</strong>.</caption>')
+    expect(html).toContain('<th style="text-align:right">Leaf area</th>')
+    expect(html).not.toContain('{#tbl-summary')
     expect(html).toContain('not executed during export')
     expect(html).toContain('print(&quot;must remain inert&quot;)')
     expect(html).not.toMatch(/<script|\.dm-anchor|\.draftmatter-reviews/)

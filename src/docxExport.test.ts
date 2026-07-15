@@ -11,7 +11,7 @@ author:
 
 ## Results
 
-Leaf area declined by **18%** [@vezy2020].[^methods] The relationship was $y = ax + b$; see @fig-response.
+Leaf area declined by **18%** [@vezy2020].[^methods] The relationship was $y = ax + b$; see @fig-response and @tbl-summary.
 
 $$
 R^2 = 0.91
@@ -20,9 +20,10 @@ $$ {#eq-fit .unnumbered}
 ![Response](figures/response.svg){#fig-response}
 
 | Treatment | Area |
-| --- | ---: |
+| :--- | ---: |
 | Control | 100 |
 | Drought | 82 |
+: Treatment **summary**. {#tbl-summary .striped}
 
 \`\`\`python
 print("inert")
@@ -61,12 +62,15 @@ describe('native DOCX export', () => {
     expect(readable).toContain('<w:footnote w:id="1">')
     expect(readable).toContain('Calibration details were checked against field measurements.')
     expect(readable).not.toContain('[^methods]')
-    expect(readable).toContain('y = ax + b; see Figure response')
+    expect(readable).toContain('y = ax + b; see Figure response and Table summary')
     expect(readable).not.toContain('$y = ax + b$')
     expect(readable).not.toContain('@fig-response')
     expect(readable).toContain('R^2 = 0.91')
     expect(readable).not.toContain('{#eq-fit')
     expect(readable).toContain('<w:tbl>')
+    expect(readable).toContain('<w:jc w:val="right"/>')
+    expect(readable).toContain('Table: Treatment summary.')
+    expect(readable).not.toContain('{#tbl-summary')
     expect(readable).toContain('not executed during export')
     expect(readable).toContain('print(&quot;inert&quot;)')
     expect(readable).not.toMatch(/\.dm-anchor|\.draftmatter-reviews|<w:(?:ins|del)\b/)

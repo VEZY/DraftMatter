@@ -1206,6 +1206,17 @@ function App() {
     runStructuredCommand((editor) => editor.insertFigure(path, alt, caption), 'Insert image')
   }
 
+  const insertStructuredTable = () => {
+    const caption = window.prompt('Table caption (optional)')?.trim() ?? ''
+    const label = caption ? window.prompt('Table label (optional, for example tbl-results)')?.trim() : undefined
+    const normalizedLabel = label?.replace(/^#/, '')
+    if (normalizedLabel && !/^tbl-[a-zA-Z0-9](?:[a-zA-Z0-9_.:-]*[a-zA-Z0-9])?$/.test(normalizedLabel)) {
+      setToast('Table labels use the portable tbl-… form, for example tbl-results')
+      return
+    }
+    runStructuredCommand((editor) => editor.insertTable(2, 2, caption, normalizedLabel), 'Insert table')
+  }
+
   const insertStructuredEquation = (display = false) => {
     const tex = window.prompt(`${display ? 'Display' : 'Inline'} equation (TeX, without $ delimiters)`)?.trim()
     if (!tex) return
@@ -3558,7 +3569,7 @@ function App() {
             <button onClick={() => { setCommandOpen(false); insertStructuredEquation(true) }}><span className="command-icon">∫</span><span><strong>Insert display equation</strong><small>Add an optional portable equation label</small></span></button>
             <button onClick={() => { setCommandOpen(false); insertStructuredCrossReference() }}><span className="command-icon">§</span><span><strong>Insert cross-reference</strong><small>Link a figure, table, equation, or section</small></span></button>
             <button onClick={() => { setCommandOpen(false); insertStructuredFootnote() }}><span className="command-icon">¹</span><span><strong>Insert footnote</strong><small>Add a reference here and its definition below</small></span></button>
-            <button onClick={() => { setCommandOpen(false); runStructuredCommand((editor) => editor.insertTable(), 'Insert table') }}><span className="command-icon"><Icon name="table" size={17} /></span><span><strong>Insert table</strong><small>Create an editable two-column table</small></span></button>
+            <button onClick={() => { setCommandOpen(false); insertStructuredTable() }}><span className="command-icon"><Icon name="table" size={17} /></span><span><strong>Insert table</strong><small>Create an editable table with an optional caption</small></span></button>
             <button onClick={() => { setCommandOpen(false); insertStructuredFigure() }}><span className="command-icon"><Icon name="image" size={17} /></span><span><strong>Insert figure</strong><small>Use a project-relative image with alt text</small></span></button>
             <button onClick={() => { setCommandOpen(false); insertStructuredCodeCell() }}><span className="command-icon"><Icon name="code" size={17} /></span><span><strong>Insert code cell</strong><small>Choose Python, R, or Julia explicitly</small></span></button>
             <button onClick={() => { setCommandOpen(false); runCell() }} disabled={!desktopSession}><span className="command-icon"><Icon name="play" size={17} /></span><span><strong>Run code cell</strong><small>{desktopSession ? 'Execute the current cell explicitly' : 'Desktop project required · unavailable to browser collaborators'}</small></span><kbd>⌘ ↵</kbd></button>

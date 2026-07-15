@@ -6,6 +6,7 @@ import { sourceHash } from './document'
 import { extractExecutableCells } from './executionCells'
 import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
+import { parseTableCaptionLine, pipeTableAlignments, pipeTableCells } from './tableSyntax'
 import type { CitationItem, DocumentDiagnostic } from './types'
 
 interface SourceLine {
@@ -163,10 +164,6 @@ function isTableSeparator(value: string) {
   return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(value)
 }
 
-function splitTableRow(value: string) {
-  return value.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim())
-}
-
 function isBlockStart(lines: SourceLine[], index: number) {
   const value = lines[index]?.content ?? ''
   return !value.trim()
@@ -304,23 +301,41 @@ function parseBlocks(lines: SourceLine[], diagnostics: DocumentDiagnostic[], ord
 
     if (lines[index + 1] && isTableSeparator(lines[index + 1].content)) {
       const rows: ProseMirrorNode[] = []
-      const headerValues = splitTableRow(value)
+      const tableStart = index
+      const headerValues = pipeTableCells(value)
+      const alignments = pipeTableAlignments(lines[index + 1].content)
       const headerCells = headerValues.map((cell, cellIndex) => manuscriptSchema.nodes.table_header.createChecked(
-        { id: id('table-header', `${cellIndex}:${cell}`), colspan: 1, rowspan: 1, colwidth: null },
+        { id: id('table-header', `${cellIndex}:${cell}`), colspan: 1, rowspan: 1, colwidth: null, alignment: alignments[cellIndex] ?? null },
         [paragraph(id('table-paragraph', cell), cell)],
       ))
       rows.push(manuscriptSchema.nodes.table_row.createChecked({ id: id('table-row', value) }, headerCells))
       index += 2
       while (index < lines.length && /\|/.test(lines[index].content) && lines[index].content.trim()) {
-        const values = splitTableRow(lines[index].content)
+        const values = pipeTableCells(lines[index].content)
         const cells = values.map((cell, cellIndex) => manuscriptSchema.nodes.table_cell.createChecked(
-          { id: id('table-cell', `${cellIndex}:${cell}`), colspan: 1, rowspan: 1, colwidth: null },
+          { id: id('table-cell', `${cellIndex}:${cell}`), colspan: 1, rowspan: 1, colwidth: null, alignment: alignments[cellIndex] ?? null },
           [paragraph(id('table-paragraph', cell), cell)],
         ))
         rows.push(manuscriptSchema.nodes.table_row.createChecked({ id: id('table-row', lines[index].raw) }, cells))
         index += 1
       }
-      blocks.push(manuscriptSchema.nodes.table.createChecked({ id: id('table', value) }, rows))
+      let captionMarkdown = ''
+      let sourceAttributes: string | null = null
+      let label: string | null = null
+      const captionLine = parseTableCaptionLine(lines[index]?.content ?? '')
+      if (captionLine) {
+        captionMarkdown = captionLine.captionMarkdown
+        sourceAttributes = captionLine.sourceAttributes
+        label = captionLine.label
+        index += 1
+      }
+      const tableRaw = lines.slice(tableStart, index).map((line) => line.raw).join('')
+      blocks.push(manuscriptSchema.nodes.table.createChecked({
+        id: id('table', tableRaw),
+        captionMarkdown,
+        label,
+        sourceAttributes,
+      }, rows))
       continue
     }
 
@@ -490,19 +505,37 @@ function serializeInlineContent(node: ProseMirrorNode) {
 
 function serializeTable(node: ProseMirrorNode, ending: string) {
   const rows: string[][] = []
+  const alignments: Array<string | null> = []
   node.forEach((row) => {
     const cells: string[] = []
-    row.forEach((cell) => cells.push(serializeInlineContent(cell.firstChild ?? cell)))
+    row.forEach((cell, _offset, index) => {
+      cells.push(serializeInlineContent(cell.firstChild ?? cell))
+      if (rows.length === 0) alignments[index] = cell.attrs.alignment ?? null
+    })
     rows.push(cells)
   })
   if (!rows.length) return ''
   const width = Math.max(...rows.map((row) => row.length))
   const normalized = rows.map((row) => [...row, ...Array.from({ length: width - row.length }, () => '')])
-  return [
+  const table = [
     `| ${normalized[0].join(' | ')} |`,
-    `| ${Array.from({ length: width }, () => '---').join(' | ')} |`,
+    `| ${Array.from({ length: width }, (_, index) => alignments[index] === 'center'
+      ? ':---:'
+      : alignments[index] === 'right'
+        ? '---:'
+        : alignments[index] === 'left'
+          ? ':---'
+          : '---').join(' | ')} |`,
     ...normalized.slice(1).map((row) => `| ${row.join(' | ')} |`),
   ].join(ending)
+  const caption = String(node.attrs.captionMarkdown ?? '').trim()
+  if (!caption) return table
+  const attributes = node.attrs.sourceAttributes
+    ? ` {${node.attrs.sourceAttributes}}`
+    : node.attrs.label
+      ? ` {#${node.attrs.label}}`
+      : ''
+  return `${table}${ending}: ${caption}${attributes}`
 }
 
 function serializeBlock(node: ProseMirrorNode, ending: string, index = 0): string {

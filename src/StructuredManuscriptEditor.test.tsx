@@ -11,15 +11,16 @@ title: Generic
 
 # Generic manuscript
 
-Evidence [@vezy2024] points to @fig-growth, follows $x^2 + y^2$, and includes note[^one].
+Evidence [@vezy2024] points to @fig-growth and @tbl-means, follows $x^2 + y^2$, and includes note[^one].
 
 $$
 R^2 = \\frac{a}{b}
 $$ {#eq-fit .unnumbered}
 
 | Treatment | Mean |
-| --- | ---: |
+| :--- | ---: |
 | Drought | 18 |
+: Treatment **means**. {#tbl-means .striped data-owner="field-team"}
 
 ![Growth](figures/growth.svg){#fig-growth .wide data-owner="field-team"}
 : Growth response.
@@ -92,6 +93,9 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelectorAll('.structured-equation math')).toHaveLength(2)
     expect(container.querySelector('.structured-equation-display .katex-html')?.textContent).not.toContain('\\frac')
     expect(container.querySelector('table')?.textContent).toContain('Drought')
+    expect(container.querySelector('.structured-table-card')?.id).toBe('tbl-means')
+    expect(container.querySelector('.structured-table-caption')?.textContent).toBe('Treatment means.')
+    expect(container.querySelector<HTMLTableCellElement>('th:nth-child(2)')?.dataset.alignment).toBe('right')
     expect(container.querySelector('.structured-code-editor')).toHaveProperty('value', 'print("before")')
     expect(container.querySelector('img')?.getAttribute('src')).toBe('asset://figures/growth.svg')
     expect(container.querySelector('.structured-output pre')?.textContent).toContain('<script>window.__unsafe = true</script>')
@@ -129,6 +133,8 @@ describe('full structured manuscript editor', () => {
     expect(changed.at(-1)).toContain('::::: {.draftmatter-reviews .hidden data-schema="1"}')
     expect(changed.at(-1)).toContain('[]{#dm-point .dm-anchor data-anchor="dm-comment" data-edge="point"}')
     expect(changed.at(-1)).toContain('{#fig-growth .wide data-owner="field-team"}')
+    expect(changed.at(-1)).toContain('| :--- | ---: |')
+    expect(changed.at(-1)).toContain(': Treatment **means**. {#tbl-means .striped data-owner="field-team"}')
 
     await act(async () => { expect(editorRef.current?.setHeading(2)).toBe(true) })
     expect(changed.at(-1)).toContain('## Generic manuscript')
@@ -317,8 +323,42 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector('[data-dm-node="cross-reference"]')?.getAttribute('href')).toBe('#fig-response')
   })
 
+  it('edits semantic table details without losing column alignment or matching references', async () => {
+    const changed: string[] = []
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={source} onChange={(next) => changed.push(next)} />,
+    ))
+
+    const table = container.querySelector<HTMLElement>('.structured-table-card')!
+    expect(table.id).toBe('tbl-means')
+    expect(table.querySelector<HTMLTableCellElement>('th:nth-child(2)')?.style.textAlign).toBe('right')
+    expect(container.querySelector<HTMLAnchorElement>('a[href="#tbl-means"]')?.textContent).toBe('Table means')
+
+    await act(async () => table.querySelector<HTMLButtonElement>('[aria-label="Edit table tbl-means details"]')?.click())
+    const caption = table.querySelector<HTMLTextAreaElement>('[aria-label="Table caption"]')!
+    caption.value = ''
+    caption.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(table.querySelector('.structured-table-validation')?.textContent).toContain('needs a caption')
+    expect(table.querySelector<HTMLButtonElement>('.structured-table-actions .primary-button')?.disabled).toBe(true)
+
+    caption.value = 'Revised **treatment means**.'
+    caption.dispatchEvent(new Event('input', { bubbles: true }))
+    const label = table.querySelector<HTMLInputElement>('[aria-label="Table label"]')!
+    label.value = 'tbl-results'
+    label.dispatchEvent(new Event('input', { bubbles: true }))
+    await act(async () => table.querySelector<HTMLButtonElement>('.structured-table-actions .primary-button')?.click())
+
+    expect(changed.at(-1)).toContain('| :--- | ---: |')
+    expect(changed.at(-1)).toContain(': Revised **treatment means**. {#tbl-results .striped data-owner="field-team"}')
+    expect(changed.at(-1)).toContain('@tbl-results')
+    expect(changed.at(-1)).not.toContain('@tbl-means')
+    expect(table.id).toBe('tbl-results')
+    expect(table.querySelector('.structured-table-caption')?.textContent).toBe('Revised treatment means.')
+    expect(container.querySelector<HTMLAnchorElement>('a[href="#tbl-results"]')?.textContent).toBe('Table results')
+  })
+
   it.each([
-    ['table', (editor: StructuredManuscriptEditorHandle) => editor.insertTable(), '| --- | --- |'],
+    ['table', (editor: StructuredManuscriptEditorHandle) => editor.insertTable(2, 2, 'Treatment summary.', 'tbl-summary'), ': Treatment summary. {#tbl-summary}'],
     ['figure', (editor: StructuredManuscriptEditorHandle) => editor.insertFigure('figures/growth.svg', 'Growth', 'Growth response.', 'fig-growth'), '![Growth](figures/growth.svg){#fig-growth}'],
     ['Julia code cell', (editor: StructuredManuscriptEditorHandle) => editor.insertCodeCell('julia'), '```julia {#cell-julia-'],
     ['display equation', (editor: StructuredManuscriptEditorHandle) => editor.insertEquation('E = mc^2', true, 'eq-mass'), '$$\nE = mc^2\n$$ {#eq-mass}'],
@@ -342,5 +382,6 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector<HTMLButtonElement>('.structured-footnote-edit')?.disabled).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-equation-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-figure-edit')].every((button) => button.disabled)).toBe(true)
+    expect([...container.querySelectorAll<HTMLButtonElement>('.structured-table-edit')].every((button) => button.disabled)).toBe(true)
   })
 })

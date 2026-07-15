@@ -14,7 +14,7 @@ author:
 
 ## Results {#results}
 
-Canopy area differed by **18%** [@field2026].[^methods] The fitted response was $y = ax + b$; see @fig-response.
+Canopy area differed by **18%** [@field2026].[^methods] The fitted response was $y = ax + b$; see @fig-response and @tbl-summary.
 
 $$
 R^2 = 0.94
@@ -23,9 +23,10 @@ $$ {#eq-fit .unnumbered}
 ![Canopy response through time](data:image/svg+xml;base64,${figure}){#fig-response}
 
 | Treatment | Final area |
-| --- | ---: |
+| :--- | ---: |
 | Control | 100 |
 | Drought | 82 |
+: Final canopy **area**. {#tbl-summary .striped}
 
 \`\`\`python {#fit .execute}
 print("must remain inert")
@@ -80,12 +81,15 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(html).toContain('Canopy area was checked against independent field measurements.')
     expect(html).not.toContain('[^methods]')
     expect(html).toContain('<a class="cross-reference" href="#fig-response">Figure response</a>')
+    expect(html).toContain('<a class="cross-reference" href="#tbl-summary">Table summary</a>')
     expect(html).not.toContain('>@fig-response<')
     expect(html).toContain('Independent measurements of canopy area')
     expect(html).toContain('<figure id="fig-response">')
     expect(html).toContain('<div id="eq-fit" class="equation display-equation"')
     expect(html).not.toContain('{#eq-fit')
-    expect(html).toContain('<table>')
+    expect(html).toContain('<table id="tbl-summary"><caption>Final canopy <strong>area</strong>.</caption>')
+    expect(html).toContain('<th style="text-align:right">Final area</th>')
+    expect(html).not.toContain('{#tbl-summary')
     expect(html).toContain('role="math"')
     expect(html).toContain('print(&quot;must remain inert&quot;)')
     expect(html).not.toContain('Drought acclimation reshapes canopy development')
@@ -150,6 +154,10 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(readableDocx).not.toContain('data:image/svg+xml;base64')
     expect(readableDocx).not.toContain('$y = ax + b$')
     expect(readableDocx).not.toContain('@fig-response')
+    expect(readableDocx).toContain('Table summary')
+    expect(readableDocx).toContain('Table: Final canopy area.')
+    expect(readableDocx).toContain('<w:jc w:val="right"/>')
+    expect(readableDocx).not.toContain('{#tbl-summary')
     expect(readableDocx).not.toContain('{#eq-fit')
     expect(readableDocx).toContain('word/document.xml')
     expect(readableDocx).not.toContain('Drought acclimation reshapes canopy development')

@@ -4,7 +4,7 @@ import { history, redo, undo } from 'prosemirror-history'
 import { keymap } from 'prosemirror-keymap'
 import { wrapInList } from 'prosemirror-schema-list'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
-import { EditorState, NodeSelection, type Command } from 'prosemirror-state'
+import { EditorState, NodeSelection, type Command, type Transaction } from 'prosemirror-state'
 import { tableEditing } from 'prosemirror-tables'
 import { Decoration, DecorationSet, EditorView, type NodeView } from 'prosemirror-view'
 import { baseKeymap } from 'prosemirror-commands'
@@ -50,7 +50,7 @@ export interface StructuredManuscriptEditorHandle {
   citationSource: (items: CitationItem[], rendered?: string) => string | null
   replaceCitation: (id: string, items: CitationItem[], rendered?: string) => boolean
   citationReplacementSource: (id: string, items: CitationItem[], rendered?: string) => string | null
-  insertTable: (rows?: number, columns?: number) => boolean
+  insertTable: (rows?: number, columns?: number, caption?: string, label?: string) => boolean
   insertFigure: (source: string, alt: string, caption?: string, label?: string) => boolean
   scrollToNode: (id: string) => boolean
   source: () => string
@@ -409,7 +409,7 @@ function footnoteNumbers(document: ProseMirrorNode) {
   return numbers
 }
 
-function footnotePreviewText(value: string) {
+function inlineMarkdownPreviewText(value: string) {
   return value
     .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
     .replace(/\[([^\]\r\n]*?)@([a-zA-Z0-9_:.+-]+)([^\]\r\n]*)\]/g, '$1$2$3')
@@ -532,7 +532,7 @@ function footnoteDefinitionNodeView(initialNode: ProseMirrorNode, view: EditorVi
     dom.id = footnoteDomId(String(node.attrs.label))
     numberLabel.textContent = number ? `Footnote ${number}` : `Unreferenced footnote ${String(node.attrs.label)}`
     dom.setAttribute('aria-label', number ? `Footnote ${number}` : `Unreferenced footnote ${String(node.attrs.label)}`)
-    preview.textContent = footnotePreviewText(String(node.attrs.contentMarkdown)) || 'Empty footnote'
+    preview.textContent = inlineMarkdownPreviewText(String(node.attrs.contentMarkdown)) || 'Empty footnote'
     edit.disabled = !isEditable()
     edit.setAttribute('aria-label', number ? `Edit footnote ${number}` : `Edit unreferenced footnote ${String(node.attrs.label)}`)
     textarea.setAttribute('aria-label', number ? `Footnote ${number} content` : `Footnote ${String(node.attrs.label)} content`)
@@ -632,6 +632,32 @@ function updatePortableAttributeId(sourceAttributes: unknown, previousLabel: str
   return withoutId || null
 }
 
+function hasCrossReferences(document: ProseMirrorNode, target: string) {
+  let found = false
+  if (!target) return found
+  document.descendants((candidate) => {
+    if (candidate.type === manuscriptSchema.nodes.cross_reference && candidate.attrs.target === target) found = true
+    return !found
+  })
+  return found
+}
+
+function retargetCrossReferences(transaction: Transaction, previousTarget: string, nextTarget: string) {
+  if (!previousTarget || !nextTarget || previousTarget === nextTarget) return transaction
+  let updated = transaction
+  transaction.doc.descendants((candidate, position) => {
+    if (candidate.type === manuscriptSchema.nodes.cross_reference && candidate.attrs.target === previousTarget) {
+      updated = updated.setNodeMarkup(position, undefined, {
+        ...candidate.attrs,
+        target: nextTarget,
+        rendered: formatCrossReferenceTarget(nextTarget),
+      })
+    }
+    return true
+  })
+  return updated
+}
+
 function imageNodeView(
   initialNode: ProseMirrorNode,
   view: EditorView,
@@ -716,15 +742,6 @@ function imageNodeView(
   editor.append(fields, validation, actions)
 
   const normalizedLabel = () => labelInput.value.trim().replace(/^#/, '')
-  const hasMatchingReferences = (target: string) => {
-    let found = false
-    if (!target) return found
-    view.state.doc.descendants((candidate) => {
-      if (candidate.type === manuscriptSchema.nodes.cross_reference && candidate.attrs.target === target) found = true
-      return !found
-    })
-    return found
-  }
   const updateSave = () => {
     const nextLabel = normalizedLabel()
     const previousLabel = node.attrs.label ? String(node.attrs.label) : ''
@@ -732,7 +749,7 @@ function imageNodeView(
     const validFigureLabel = !nextLabel
       || nextLabel === previousLabel
       || (nextLabel.startsWith('fig-') && isCrossReferenceTarget(nextLabel))
-    const referenced = hasMatchingReferences(previousLabel)
+    const referenced = hasCrossReferences(view.state.doc, previousLabel)
     const keepsReferences = !referenced || (Boolean(nextLabel) && nextLabel.startsWith('fig-') && isCrossReferenceTarget(nextLabel))
     validation.textContent = !validLabelSyntax
       ? 'Labels must start with a letter and contain only letters, numbers, dots, colons, underscores, or hyphens.'
@@ -784,7 +801,7 @@ function imageNodeView(
     const sourcePath = source.value.trim()
     const nextLabel = normalizedLabel()
     const previousLabel = node.attrs.label ? String(node.attrs.label) : ''
-    const referenced = hasMatchingReferences(previousLabel)
+    const referenced = hasCrossReferences(view.state.doc, previousLabel)
     if (
       typeof position !== 'number'
       || !isEditable()
@@ -801,18 +818,7 @@ function imageNodeView(
       label: nextLabel || null,
       sourceAttributes: updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
     })
-    if (previousLabel && nextLabel && previousLabel !== nextLabel) {
-      transaction.doc.descendants((candidate, candidatePosition) => {
-        if (candidate.type === manuscriptSchema.nodes.cross_reference && candidate.attrs.target === previousLabel) {
-          transaction = transaction.setNodeMarkup(candidatePosition, undefined, {
-            ...candidate.attrs,
-            target: nextLabel,
-            rendered: formatCrossReferenceTarget(nextLabel),
-          })
-        }
-        return true
-      })
-    }
+    transaction = retargetCrossReferences(transaction, previousLabel, nextLabel)
     view.dispatch(transaction)
     closeEditor()
   }
@@ -846,6 +852,201 @@ function imageNodeView(
     dom,
     stopEvent: (event) => dom.contains(event.target as Node),
     ignoreMutation: () => true,
+    update(next) {
+      if (next.type !== node.type) return false
+      node = next
+      updateDom()
+      return true
+    },
+  }
+}
+
+function tableNodeView(
+  initialNode: ProseMirrorNode,
+  view: EditorView,
+  getPos: () => number | undefined,
+  isEditable: () => boolean,
+): NodeView {
+  let node = initialNode
+  let editing = false
+  const dom = document.createElement('figure')
+  dom.className = 'structured-table-card'
+
+  const header = document.createElement('div')
+  header.className = 'structured-table-header'
+  header.contentEditable = 'false'
+  const descriptor = document.createElement('span')
+  descriptor.className = 'structured-table-label'
+  const edit = document.createElement('button')
+  edit.type = 'button'
+  edit.className = 'structured-table-edit'
+  edit.textContent = 'Edit table details'
+  header.append(descriptor, edit)
+
+  const scroll = document.createElement('div')
+  scroll.className = 'structured-table-scroll'
+  const table = document.createElement('table')
+  const contentDOM = document.createElement('tbody')
+  table.append(contentDOM)
+  scroll.append(table)
+
+  const preview = document.createElement('figcaption')
+  preview.className = 'structured-table-caption'
+  preview.contentEditable = 'false'
+
+  const editor = document.createElement('div')
+  editor.className = 'structured-table-editor'
+  editor.contentEditable = 'false'
+  editor.hidden = true
+  const captionLabel = document.createElement('label')
+  const captionDescriptor = document.createElement('span')
+  captionDescriptor.textContent = 'Table caption'
+  const caption = document.createElement('textarea')
+  caption.className = 'structured-table-input'
+  caption.setAttribute('aria-label', 'Table caption')
+  captionLabel.append(captionDescriptor, caption)
+  const labelLabel = document.createElement('label')
+  const labelDescriptor = document.createElement('span')
+  labelDescriptor.textContent = 'Cross-reference label'
+  const labelInput = document.createElement('input')
+  labelInput.type = 'text'
+  labelInput.className = 'structured-table-input'
+  labelInput.setAttribute('aria-label', 'Table label')
+  labelInput.spellcheck = false
+  const labelHint = document.createElement('small')
+  labelHint.textContent = 'Optional; use tbl-… when the table is referenced.'
+  labelLabel.append(labelDescriptor, labelInput, labelHint)
+  const validation = document.createElement('p')
+  validation.className = 'structured-table-validation'
+  validation.hidden = true
+  const actions = document.createElement('div')
+  actions.className = 'structured-table-actions'
+  const cancel = document.createElement('button')
+  cancel.type = 'button'
+  cancel.textContent = 'Cancel'
+  const save = document.createElement('button')
+  save.type = 'button'
+  save.className = 'primary-button'
+  save.textContent = 'Save table details'
+  actions.append(cancel, save)
+  editor.append(captionLabel, labelLabel, validation, actions)
+
+  const normalizedLabel = () => labelInput.value.trim().replace(/^#/, '')
+  const updateSave = () => {
+    const nextCaption = caption.value.trim()
+    const nextLabel = normalizedLabel()
+    const previousLabel = node.attrs.label ? String(node.attrs.label) : ''
+    const validLabelSyntax = !nextLabel || /^[a-zA-Z][\w.:-]*$/.test(nextLabel)
+    const validTableLabel = !nextLabel
+      || nextLabel === previousLabel
+      || (nextLabel.startsWith('tbl-') && isCrossReferenceTarget(nextLabel))
+    const captionedLabel = !nextLabel || Boolean(nextCaption)
+    const referenced = hasCrossReferences(view.state.doc, previousLabel)
+    const keepsReferences = !referenced || (Boolean(nextLabel) && nextLabel.startsWith('tbl-') && isCrossReferenceTarget(nextLabel))
+    validation.textContent = !validLabelSyntax
+      ? 'Labels must start with a letter and contain only letters, numbers, dots, colons, underscores, or hyphens.'
+      : !validTableLabel
+        ? 'New table labels must use the portable tbl-… form.'
+        : !captionedLabel
+          ? 'A labeled table needs a caption.'
+          : !keepsReferences
+            ? 'This table is referenced in the manuscript. Keep a valid tbl-… label so those links remain portable.'
+            : ''
+    validation.hidden = validLabelSyntax && validTableLabel && captionedLabel && keepsReferences
+    save.disabled = !isEditable() || !validLabelSyntax || !validTableLabel || !captionedLabel || !keepsReferences
+  }
+  const updateDom = () => {
+    const tableLabel = node.attrs.label ? String(node.attrs.label) : ''
+    const captionMarkdown = String(node.attrs.captionMarkdown ?? '')
+    const captionId = `dm-table-caption-${String(node.attrs.id).replace(/[^a-zA-Z0-9_.:-]+/g, '-')}`
+    dom.dataset.dmNode = 'table'
+    dom.dataset.dmId = String(node.attrs.id)
+    dom.dataset.label = tableLabel
+    if (tableLabel) dom.id = tableLabel
+    else dom.removeAttribute('id')
+    descriptor.textContent = tableLabel ? `Table · ${tableLabel}` : 'Table'
+    edit.disabled = !isEditable()
+    edit.setAttribute('aria-label', tableLabel ? `Edit table ${tableLabel} details` : 'Edit table details')
+    preview.id = captionId
+    preview.textContent = inlineMarkdownPreviewText(captionMarkdown)
+    preview.hidden = editing || !captionMarkdown
+    if (captionMarkdown) table.setAttribute('aria-describedby', captionId)
+    else table.removeAttribute('aria-describedby')
+    table.setAttribute('aria-label', tableLabel ? `Table ${tableLabel}` : 'Editable table')
+    if (!editing) {
+      caption.value = captionMarkdown
+      labelInput.value = tableLabel
+    }
+    caption.readOnly = !isEditable()
+    labelInput.readOnly = !isEditable()
+    updateSave()
+  }
+  const closeEditor = () => {
+    editing = false
+    editor.hidden = true
+    preview.hidden = !String(node.attrs.captionMarkdown ?? '')
+    edit.hidden = false
+    caption.value = String(node.attrs.captionMarkdown ?? '')
+    labelInput.value = node.attrs.label ? String(node.attrs.label) : ''
+    updateSave()
+    edit.focus()
+  }
+  const saveEditor = () => {
+    const position = getPos()
+    const nextCaption = caption.value.trim()
+    const nextLabel = normalizedLabel()
+    const previousLabel = node.attrs.label ? String(node.attrs.label) : ''
+    const referenced = hasCrossReferences(view.state.doc, previousLabel)
+    if (
+      typeof position !== 'number'
+      || !isEditable()
+      || (nextLabel && !/^[a-zA-Z][\w.:-]*$/.test(nextLabel))
+      || (nextLabel !== previousLabel && nextLabel && (!nextLabel.startsWith('tbl-') || !isCrossReferenceTarget(nextLabel)))
+      || (nextLabel && !nextCaption)
+      || (referenced && (!nextLabel || !nextLabel.startsWith('tbl-') || !isCrossReferenceTarget(nextLabel)))
+    ) return
+    let transaction = view.state.tr.setNodeMarkup(position, undefined, {
+      ...node.attrs,
+      captionMarkdown: nextCaption,
+      label: nextLabel || null,
+      sourceAttributes: updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
+    })
+    transaction = retargetCrossReferences(transaction, previousLabel, nextLabel)
+    view.dispatch(transaction)
+    closeEditor()
+  }
+  edit.addEventListener('click', () => {
+    if (!isEditable()) return
+    editing = true
+    edit.hidden = true
+    editor.hidden = false
+    updateDom()
+    caption.focus()
+    caption.select()
+  })
+  cancel.addEventListener('click', closeEditor)
+  save.addEventListener('click', saveEditor)
+  for (const input of [caption, labelInput]) {
+    input.addEventListener('input', updateSave)
+    input.addEventListener('keydown', (event) => {
+      const keyboard = event as KeyboardEvent
+      if (keyboard.key === 'Escape') {
+        keyboard.preventDefault()
+        closeEditor()
+      } else if (keyboard.key === 'Enter' && (keyboard.metaKey || keyboard.ctrlKey)) {
+        keyboard.preventDefault()
+        saveEditor()
+      }
+    })
+  }
+
+  dom.append(header, scroll, preview, editor)
+  updateDom()
+  return {
+    dom,
+    contentDOM,
+    stopEvent: (event) => !contentDOM.contains(event.target as Node) && dom.contains(event.target as Node),
+    ignoreMutation: (mutation) => mutation.type !== 'selection' && !contentDOM.contains(mutation.target),
     update(next) {
       if (next.type !== node.type) return false
       node = next
@@ -1131,9 +1332,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       })
       return serializeStructuredManuscript(transaction.doc, metadata)
     },
-    insertTable: (rows = 2, columns = 2) => {
+    insertTable: (rows = 2, columns = 2, caption = '', label) => {
       const view = viewRef.current
       if (!view || readOnlyRef.current || rows < 1 || columns < 1) return false
+      const normalizedLabel = label?.trim().replace(/^#/, '') || null
+      if (normalizedLabel && (!normalizedLabel.startsWith('tbl-') || !isCrossReferenceTarget(normalizedLabel) || !caption.trim())) return false
       const tableRows = Array.from({ length: rows }, (_, rowIndex) => manuscriptSchema.nodes.table_row.createChecked(
         { id: randomId('row') },
         Array.from({ length: columns }, () => {
@@ -1143,7 +1346,12 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           ])
         }),
       ))
-      insertBlock(view, manuscriptSchema.nodes.table.createChecked({ id: randomId('table') }, tableRows))
+      insertBlock(view, manuscriptSchema.nodes.table.createChecked({
+        id: randomId('table'),
+        captionMarkdown: caption.trim(),
+        label: normalizedLabel,
+        sourceAttributes: normalizedLabel ? `#${normalizedLabel}` : null,
+      }, tableRows))
       view.focus()
       return true
     },
@@ -1213,6 +1421,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         equation_block: (node, editorView, getPos) => equationNodeView(node, editorView, getPos, true, () => !readOnlyRef.current),
         footnote_reference: (node, editorView) => footnoteReferenceNodeView(node, editorView),
         footnote_definition: (node, editorView, getPos) => footnoteDefinitionNodeView(node, editorView, getPos, () => !readOnlyRef.current),
+        table: (node, editorView, getPos) => tableNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         output_block: (node) => outputNodeView(node, (path) => resolveAssetUrlRef.current?.(path) ?? path),
         image: (node, editorView, getPos) => imageNodeView(
           node,
@@ -1316,6 +1525,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-equation-edit').forEach((button) => { button.disabled = readOnly })
     hostRef.current?.querySelectorAll<HTMLInputElement>('.structured-figure-input').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-figure-edit').forEach((button) => { button.disabled = readOnly })
+    hostRef.current?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('.structured-table-input').forEach((editor) => { editor.readOnly = readOnly })
+    hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-table-edit').forEach((button) => { button.disabled = readOnly })
   }, [readOnly])
 
   return <div ref={hostRef} className={`structured-manuscript-editor ${className}`.trim()} data-read-only={readOnly ? 'true' : 'false'} />

@@ -3,6 +3,7 @@ import { formatCrossReferenceTarget } from './crossReference'
 import { parseDisplayEquation } from './displayEquation'
 import { resolveFootnotes, type ResolvedFootnote } from './footnotes'
 import { parsePublicationMetadata, removeDuplicateLeadingTitle } from './publicationMetadata'
+import { parseTableCaptionLine, pipeTableAlignments, pipeTableCells, type TableAlignment } from './tableSyntax'
 
 export interface DocxExportDiagnostic {
   code: 'figure-reference' | 'raw-source'
@@ -124,17 +125,13 @@ function paragraph(value: string, style?: string) {
   return `<w:p>${properties}${runs}</w:p>`
 }
 
-function tableCells(line: string) {
-  return line.trim().replace(/^\||\|$/g, '').split('|').map((cell) => cell.trim())
-}
-
 function isTableSeparator(line: string) {
   return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line)
 }
 
-function table(rows: string[][], numbers: Record<string, number>, options: DocxExportOptions) {
+function table(rows: string[][], alignments: TableAlignment[], numbers: Record<string, number>, options: DocxExportOptions) {
   const columns = Math.max(...rows.map((row) => row.length))
-  return `<w:tbl><w:tblPr><w:tblStyle w:val="DraftMatterTable"/><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="D9E0DC"/><w:left w:val="nil"/><w:bottom w:val="single" w:sz="4" w:color="D9E0DC"/><w:right w:val="nil"/><w:insideH w:val="single" w:sz="4" w:color="E6EBE8"/><w:insideV w:val="nil"/></w:tblBorders></w:tblPr><w:tblGrid>${Array.from({ length: columns }, () => '<w:gridCol w:w="2400"/>').join('')}</w:tblGrid>${rows.map((row, rowIndex) => `<w:tr>${Array.from({ length: columns }, (_unused, index) => `<w:tc><w:tcPr><w:tcW w:w="2400" w:type="dxa"/></w:tcPr>${paragraphWithFootnotes(stripInlineMarkdown(row[index] ?? '', options), numbers, rowIndex === 0 ? 'TableHeader' : undefined)}</w:tc>`).join('')}</w:tr>`).join('')}</w:tbl>`
+  return `<w:tbl><w:tblPr><w:tblStyle w:val="DraftMatterTable"/><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="D9E0DC"/><w:left w:val="nil"/><w:bottom w:val="single" w:sz="4" w:color="D9E0DC"/><w:right w:val="nil"/><w:insideH w:val="single" w:sz="4" w:color="E6EBE8"/><w:insideV w:val="nil"/></w:tblBorders></w:tblPr><w:tblGrid>${Array.from({ length: columns }, () => '<w:gridCol w:w="2400"/>').join('')}</w:tblGrid>${rows.map((row, rowIndex) => `<w:tr>${Array.from({ length: columns }, (_unused, index) => `<w:tc><w:tcPr><w:tcW w:w="2400" w:type="dxa"/></w:tcPr>${paragraphWithFootnotes(stripInlineMarkdown(row[index] ?? '', options), numbers, rowIndex === 0 ? 'TableHeader' : undefined, alignments[index])}</w:tc>`).join('')}</w:tr>`).join('')}</w:tbl>`
 }
 
 function stripInlineMarkdown(value: string, options: DocxExportOptions) {
@@ -152,8 +149,9 @@ function stripInlineMarkdown(value: string, options: DocxExportOptions) {
     .replace(/`([^`]+)`/g, '$1')
 }
 
-function paragraphWithFootnotes(value: string, numbers: Record<string, number>, style?: string) {
-  const properties = style ? `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>` : ''
+function paragraphWithFootnotes(value: string, numbers: Record<string, number>, style?: string, alignment?: TableAlignment) {
+  const propertyContent = `${style ? `<w:pStyle w:val="${style}"/>` : ''}${alignment ? `<w:jc w:val="${alignment}"/>` : ''}`
+  const properties = propertyContent ? `<w:pPr>${propertyContent}</w:pPr>` : ''
   const runs: string[] = []
   let cursor = 0
   for (const match of value.matchAll(/\[\^([a-zA-Z0-9_.:-]+)\]/g)) {
@@ -233,13 +231,17 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
       continue
     }
     if (line.includes('|') && isTableSeparator(lines[index + 1] ?? '')) {
-      const rows = [tableCells(line)]
+      const rows = [pipeTableCells(line)]
+      const alignments = pipeTableAlignments(lines[index + 1])
       index += 2
       while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
-        rows.push(tableCells(lines[index]))
+        rows.push(pipeTableCells(lines[index]))
         index += 1
       }
-      parts.push(table(rows, resolvedFootnotes.numbers, options))
+      const caption = parseTableCaptionLine(lines[index] ?? '')
+      if (caption) index += 1
+      parts.push(table(rows, alignments, resolvedFootnotes.numbers, options))
+      if (caption) parts.push(paragraphWithFootnotes(`Table: ${stripInlineMarkdown(caption.captionMarkdown, options)}`, resolvedFootnotes.numbers, 'Caption'))
       continue
     }
     if (/^\s*(?:[-+*]|\d+[.)])\s+/.test(line)) {
