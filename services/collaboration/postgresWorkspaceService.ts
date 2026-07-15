@@ -263,6 +263,24 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
     }
   }
 
+  async listWorkspaces(token: string) {
+    const identity = await this.authenticate(token, 'read')
+    const result = await this.pool.query<{
+      id: string
+      name: string
+      created_at: Date | string
+      role: WorkspaceRole
+    }>(
+      `SELECT w.id, w.name, w.created_at, m.role
+       FROM draftmatter_workspaces w
+       JOIN draftmatter_memberships m ON m.workspace_id = w.id
+       WHERE m.user_id = $1 AND m.revoked_at IS NULL AND w.deleted_at IS NULL
+       ORDER BY w.created_at, w.id`,
+      [identity.userId],
+    )
+    return result.rows.map((row) => ({ id: row.id, name: row.name, createdAt: iso(row.created_at), role: row.role }))
+  }
+
   async getProject(token: string, workspaceId: string, projectId: string) {
     const identity = await this.authenticate(token, 'read')
     const access = await this.requireProjectAccess(this.pool, workspaceId, projectId, identity.userId, 'read')

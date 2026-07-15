@@ -1,4 +1,5 @@
 import { Server, type ServerConfiguration } from '@hocuspocus/server'
+import type { IncomingMessage, ServerResponse } from 'node:http'
 import * as Y from 'yjs'
 import type { ProjectAuthorizationService, WorkspaceRole } from '../../src/collaboration/workspaceService'
 import { CollaborationStoreError, type CollaborationProjectScope } from './fileStore'
@@ -32,6 +33,8 @@ export interface DraftMatterHocuspocusOptions {
   maxDebounceMs?: number
   maxPayloadBytes?: number
   tokenRefreshMs?: number
+  allowedOrigins?: string[]
+  httpHandler?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
 }
 
 export function collaborationDocumentName(scope: CollaborationProjectScope) {
@@ -191,6 +194,17 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
     maxUnauthenticatedQueueMessages: 256,
     maxPendingDocuments: 8,
     websocketOptions: { maxPayload: options.maxPayloadBytes ?? 1024 * 1024 },
+    async onConnect({ requestHeaders }) {
+      const origin = requestHeaders.get('origin')?.replace(/\/$/, '')
+      if (origin && options.allowedOrigins?.length && !options.allowedOrigins.includes(origin)) {
+        throw { code: 4403, reason: 'This browser origin is not allowed.' }
+      }
+    },
+    async onRequest({ request, response }) {
+      if (!options.httpHandler) return
+      await options.httpHandler(request, response)
+      throw null
+    },
     async onAuthenticate({ token, documentName, connectionConfig }) {
       const scope = parseCollaborationDocumentName(documentName)
       return authorizeConnection(token, scope, connectionConfig)

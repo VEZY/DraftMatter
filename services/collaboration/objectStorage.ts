@@ -1,6 +1,7 @@
 import {
   DeleteObjectCommand,
   GetObjectCommand,
+  HeadBucketCommand,
   ListObjectsV2Command,
   PutObjectCommand,
   S3Client,
@@ -18,6 +19,7 @@ export interface ObjectStorage {
   get(key: string): Promise<StoredObject>
   delete(key: string): Promise<void>
   list(prefix: string): Promise<string[]>
+  healthCheck(): Promise<void>
 }
 
 export class ObjectStorageError extends Error {
@@ -98,6 +100,14 @@ export class S3ObjectStorage implements ObjectStorage {
     } while (continuationToken)
     return keys.sort()
   }
+
+  async healthCheck() {
+    try {
+      await this.client.send(new HeadBucketCommand({ Bucket: this.bucket }))
+    } catch {
+      throw new ObjectStorageError('transport', 'Object storage is unavailable.')
+    }
+  }
 }
 
 export class MemoryObjectStorage implements ObjectStorage {
@@ -124,4 +134,6 @@ export class MemoryObjectStorage implements ObjectStorage {
   async list(prefix: string) {
     return [...this.objects.keys()].filter((key) => key.startsWith(prefix)).sort()
   }
+
+  async healthCheck() {}
 }

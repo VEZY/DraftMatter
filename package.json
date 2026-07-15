@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "npm run check:service && tsc -p tsconfig.app.json --noEmit && vite build",
+    "build": "npm run build:collaboration && tsc -p tsconfig.app.json --noEmit && vite build",
+    "build:collaboration": "npm run check:service && vite build --config vite.service.config.ts && node scripts/copy-collaboration-assets.mjs",
+    "collaboration:start": "node dist-service/main.js",
     "preview": "vite preview",
     "check": "tsc -p tsconfig.app.json --noEmit",
     "check:service": "tsc -p services/collaboration/tsconfig.json --noEmit",
