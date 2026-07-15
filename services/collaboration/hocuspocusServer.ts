@@ -1,6 +1,6 @@
 import { Server, type ServerConfiguration } from '@hocuspocus/server'
 import * as Y from 'yjs'
-import { AuthenticatedWorkspaceService, type WorkspaceRole } from '../../src/collaboration/workspaceService'
+import type { ProjectAuthorizationService, WorkspaceRole } from '../../src/collaboration/workspaceService'
 import { CollaborationStoreError, type CollaborationProjectScope } from './fileStore'
 import type { CollaborationPersistence } from './persistence'
 
@@ -23,7 +23,7 @@ export interface CollaborationConnectionContext extends CollaborationProjectScop
 }
 
 export interface DraftMatterHocuspocusOptions {
-  authorization: AuthenticatedWorkspaceService
+  authorization: ProjectAuthorizationService
   persistence: CollaborationPersistence
   port?: number
   address?: string
@@ -31,6 +31,7 @@ export interface DraftMatterHocuspocusOptions {
   debounceMs?: number
   maxDebounceMs?: number
   maxPayloadBytes?: number
+  tokenRefreshMs?: number
 }
 
 export function collaborationDocumentName(scope: CollaborationProjectScope) {
@@ -165,6 +166,20 @@ export function commenterUpdateAllowed(document: Y.Doc, update: Uint8Array, user
 
 export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocusOptions) {
   const snapshotIdFactory = options.snapshotIdFactory ?? (() => crypto.randomUUID())
+  const authorizeConnection = async (token: string, scope: CollaborationProjectScope, connectionConfig: { readOnly: boolean }) => {
+    const access = await options.authorization.authorizeProject(token, scope.workspaceId, scope.projectId, 'read')
+    let readOnly = access.role === 'viewer'
+    if (!readOnly) {
+      try {
+        await options.authorization.authorizeProject(token, scope.workspaceId, scope.projectId, access.role === 'commenter' ? 'comment' : 'edit')
+      } catch (error) {
+        if ((error as { code?: string }).code !== 'forbidden') throw error
+        readOnly = true
+      }
+    }
+    connectionConfig.readOnly = readOnly
+    return { ...scope, userId: access.userId, sessionId: access.sessionId, role: access.role }
+  }
   const configuration: Partial<ServerConfiguration<CollaborationConnectionContext>> = {
     port: options.port ?? 0,
     address: options.address ?? '127.0.0.1',
@@ -178,11 +193,32 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
     websocketOptions: { maxPayload: options.maxPayloadBytes ?? 1024 * 1024 },
     async onAuthenticate({ token, documentName, connectionConfig }) {
       const scope = parseCollaborationDocumentName(documentName)
-      const access = await options.authorization.authorizeProject(token, scope.workspaceId, scope.projectId, 'read')
-      connectionConfig.readOnly = access.role === 'viewer'
-      return { ...scope, userId: access.userId, sessionId: access.sessionId, role: access.role }
+      return authorizeConnection(token, scope, connectionConfig)
     },
-    async beforeHandleMessage({ context, document, update }) {
+    async connected({ connection }) {
+      const interval = setInterval(() => connection.requestToken(), options.tokenRefreshMs ?? 5 * 60_000)
+      interval.unref()
+      connection.onClose(() => clearInterval(interval))
+    },
+    async onTokenSync({ token, documentName, connectionConfig, connection }) {
+      const context = await authorizeConnection(token, parseCollaborationDocumentName(documentName), connectionConfig)
+      connection.readOnly = connectionConfig.readOnly
+      return context
+    },
+    async beforeHandleMessage({ context, document, update, connection }) {
+      if (options.authorization.reauthorizeProject) {
+        try {
+          await options.authorization.reauthorizeProject(
+            context,
+            context.workspaceId,
+            context.projectId,
+            context.role === 'commenter' ? 'comment' : context.role === 'viewer' ? 'read' : 'edit',
+          )
+        } catch (error) {
+          connection.close({ code: 4403, reason: 'Collaboration access was revoked.' })
+          throw error
+        }
+      }
       if (context.role === 'commenter' && !commenterUpdateAllowed(document, update, context.userId)) {
         throw new Error('Commenter updates may only create attributed threads or append attributed replies.')
       }

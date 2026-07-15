@@ -6,6 +6,29 @@ export interface CollaborationIdentity {
   sessionId: string
 }
 
+export interface VerifiedCollaborationIdentity extends CollaborationIdentity {
+  issuer?: string
+  subject?: string
+  email?: string
+  displayName?: string
+}
+
+export interface CollaborationIdentityVerifier {
+  verify(token: string): Promise<VerifiedCollaborationIdentity>
+}
+
+export interface ProjectAuthorization {
+  userId: string
+  sessionId: string
+  role: WorkspaceRole
+  capability: ProjectCapability
+}
+
+export interface ProjectAuthorizationService {
+  authorizeProject(token: string, workspaceId: string, projectId: string, capability: ProjectCapability): Promise<ProjectAuthorization>
+  reauthorizeProject?(identity: CollaborationIdentity, workspaceId: string, projectId: string, capability: ProjectCapability): Promise<ProjectAuthorization>
+}
+
 export interface WorkspaceRecord {
   id: string
   name: string
@@ -86,6 +109,10 @@ const CAPABILITIES: Record<WorkspaceRole, ReadonlySet<ProjectCapability>> = {
   viewer: new Set(['read']),
 }
 
+export function roleAllows(role: WorkspaceRole, capability: ProjectCapability) {
+  return CAPABILITIES[role].has(capability)
+}
+
 export class WorkspaceAccessError extends Error {
   constructor(
     readonly code: 'unauthenticated' | 'not-found' | 'forbidden' | 'rate-limited' | 'invalid-request' | 'invitation-unavailable',
@@ -132,7 +159,7 @@ function iso(time: number) {
   return new Date(time).toISOString()
 }
 
-export class AuthenticatedWorkspaceService {
+export class AuthenticatedWorkspaceService implements ProjectAuthorizationService {
   private readonly audience: string
   private readonly sessionTtlMs: number
   private readonly clock: () => number
@@ -215,7 +242,7 @@ export class AuthenticatedWorkspaceService {
     const workspace = this.workspaces.get(workspaceId)
     const membership = this.membership(workspaceId, userId)
     if (!workspace || !membership) throw new WorkspaceAccessError('not-found', 'The collaboration project was not found.')
-    if (!CAPABILITIES[membership.role].has(capability)) throw new WorkspaceAccessError('forbidden', 'Your workspace role does not allow this action.')
+    if (!roleAllows(membership.role, capability)) throw new WorkspaceAccessError('forbidden', 'Your workspace role does not allow this action.')
     return { workspace, membership }
   }
 

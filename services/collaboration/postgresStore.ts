@@ -18,6 +18,9 @@ interface PostgresCollaborationStoreOptions {
   maxUpdateBytes?: number
   dashboard?: CollaborationOperationsDashboard
   objectPrefix?: string
+  storageQuota?: {
+    assertStorageAvailable(workspaceId: string, incomingBytes: number, database?: Pick<PoolClient, 'query'>, reclaimedBytes?: number): Promise<unknown>
+  }
 }
 
 interface UpdateRow {
@@ -87,6 +90,7 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
   private readonly compactAfterBytes: number
   private readonly maxUpdateBytes: number
   private readonly objectPrefix: string
+  private readonly storageQuota?: PostgresCollaborationStoreOptions['storageQuota']
   readonly dashboard: CollaborationOperationsDashboard
 
   constructor(options: PostgresCollaborationStoreOptions) {
@@ -99,6 +103,7 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
     this.maxUpdateBytes = options.maxUpdateBytes ?? 4 * 1024 * 1024
     this.dashboard = options.dashboard ?? new CollaborationOperationsDashboard()
     this.objectPrefix = (options.objectPrefix ?? 'draftmatter').replace(/^\/+|\/+$/g, '')
+    this.storageQuota = options.storageQuota
   }
 
   private key(scope: CollaborationProjectScope) {
@@ -142,6 +147,7 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
     const at = iso(this.clock())
     const result = await transaction(this.pool, async (client) => {
       const sequence = await this.lockProject(client, scope)
+      await this.storageQuota?.assertStorageAvailable(scope.workspaceId, update.byteLength, client)
       await client.query(
         `INSERT INTO draftmatter_collaboration_updates(workspace_id, project_id, sequence, received_at, payload, payload_bytes)
          VALUES ($1, $2, $3, $4, $5, $6)`,
@@ -194,6 +200,12 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
         const nextSequence = await this.lockProject(client, scope)
         const duplicate = await client.query('SELECT 1 FROM draftmatter_collaboration_snapshots WHERE workspace_id = $1 AND project_id = $2 AND id = $3', [scope.workspaceId, scope.projectId, snapshotId])
         if (duplicate.rowCount) throw new CollaborationStoreError('already-exists', 'Snapshot identifiers are immutable and cannot be overwritten.')
+        const reclaimed = await client.query<{ bytes: string | number }>(
+          `SELECT COALESCE(SUM(payload_bytes), 0) AS bytes FROM draftmatter_collaboration_updates
+           WHERE workspace_id = $1 AND project_id = $2 AND sequence < $3`,
+          [scope.workspaceId, scope.projectId, nextSequence],
+        )
+        await this.storageQuota?.assertStorageAvailable(scope.workspaceId, stateUpdate.byteLength, client, Number(reclaimed.rows[0].bytes))
         await this.objects.put(objectKey, stateUpdate, {
           immutable: true,
           contentType: 'application/vnd.yjs-update',

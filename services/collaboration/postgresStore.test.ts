@@ -1,6 +1,7 @@
 import { DataType, newDb } from 'pg-mem'
 import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
+import { PostgresEntitlementService } from './entitlements'
 import { runCollaborationMigrations } from './migrations'
 import { MemoryObjectStorage, ObjectStorageError } from './objectStorage'
 import { PostgresCollaborationStore } from './postgresStore'
@@ -46,7 +47,7 @@ describe('managed PostgreSQL and object-storage persistence', () => {
   it('runs ordered migrations idempotently and enforces one active owner', async () => {
     const { pool } = await database()
     const repeated = await runCollaborationMigrations(pool)
-    expect(repeated).toEqual({ applied: [], alreadyApplied: ['001', '002'] })
+    expect(repeated).toEqual({ applied: [], alreadyApplied: ['001', '002', '003'] })
     await expect(pool.query(`INSERT INTO draftmatter_memberships(workspace_id, user_id, role) VALUES ('forest', 'editor', 'owner')`)).rejects.toThrow()
     const tables = await pool.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'draftmatter_%'`)
     expect(tables.rows.map((row: { table_name: string }) => row.table_name)).toEqual(expect.arrayContaining([
@@ -137,5 +138,21 @@ describe('managed PostgreSQL and object-storage persistence', () => {
     await objects.put('tenant/project/snapshot.bin', new Uint8Array([1, 2]), { immutable: true })
     await expect(objects.put('tenant/project/snapshot.bin', new Uint8Array([3]), { immutable: true })).rejects.toMatchObject({ code: 'already-exists' })
     expect((await objects.get('tenant/project/snapshot.bin')).bytes).toEqual(new Uint8Array([1, 2]))
+  })
+
+  it('enforces durable workspace storage entitlements before accepting updates', async () => {
+    const { pool } = await database()
+    await pool.query(`INSERT INTO draftmatter_entitlements(workspace_id, storage_limit_bytes) VALUES ('forest', 32)`)
+    const entitlement = new PostgresEntitlementService(pool)
+    const persistence = new PostgresCollaborationStore({ pool, objects: new MemoryObjectStorage(), storageQuota: entitlement })
+    const fixture = documentFixture()
+    const scope = { workspaceId: 'forest', projectId: 'paper' }
+    await expect(persistence.appendUpdate(scope, fixture.first)).rejects.toMatchObject({ code: 'forbidden' })
+    await pool.query(`UPDATE draftmatter_entitlements SET storage_limit_bytes = 4096 WHERE workspace_id = 'forest'`)
+    await expect(persistence.appendUpdate(scope, fixture.first)).resolves.toMatchObject({ pendingUpdates: 1 })
+    await pool.query(`UPDATE draftmatter_entitlements SET status = 'suspended' WHERE workspace_id = 'forest'`)
+    await expect(persistence.appendUpdate(scope, fixture.second)).rejects.toMatchObject({ code: 'forbidden' })
+    fixture.document.destroy()
+    await pool.end()
   })
 })
