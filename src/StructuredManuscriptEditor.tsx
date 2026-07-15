@@ -3,10 +3,10 @@ import { setBlockType, toggleMark, wrapIn } from 'prosemirror-commands'
 import { history, redo, undo } from 'prosemirror-history'
 import { keymap } from 'prosemirror-keymap'
 import { wrapInList } from 'prosemirror-schema-list'
-import type { Node as ProseMirrorNode } from 'prosemirror-model'
+import type { Mark as ProseMirrorMark, Node as ProseMirrorNode } from 'prosemirror-model'
 import { EditorState, NodeSelection, type Command, type Transaction } from 'prosemirror-state'
 import { tableEditing } from 'prosemirror-tables'
-import { Decoration, DecorationSet, EditorView, type NodeView } from 'prosemirror-view'
+import { Decoration, DecorationSet, EditorView, type MarkView, type NodeView } from 'prosemirror-view'
 import { baseKeymap } from 'prosemirror-commands'
 import { serializeCitationCluster } from './citation'
 import { formatCrossReferenceTarget, isCrossReferenceTarget } from './crossReference'
@@ -346,6 +346,180 @@ function citationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
       node = next
       updateDom()
       return true
+    },
+  }
+}
+
+function isSafePortableLinkDestination(value: string) {
+  const destination = value.trim()
+  return Boolean(destination)
+    && !/[\u0000-\u001f\u007f\s]/.test(destination)
+    && !/^(?:javascript|vbscript|data):/i.test(destination)
+}
+
+function linkMarkView(initialMark: ProseMirrorMark, view: EditorView, isEditable: () => boolean): MarkView {
+  let mark = initialMark
+  let editing = false
+  const dom = document.createElement('span')
+  dom.className = 'structured-link-mark'
+  const link = document.createElement('a')
+  link.className = 'structured-link-content'
+  const edit = document.createElement('button')
+  edit.type = 'button'
+  edit.className = 'structured-link-edit'
+  edit.contentEditable = 'false'
+  edit.textContent = 'Link details'
+
+  const backdrop = document.createElement('div')
+  backdrop.className = 'structured-link-dialog-backdrop'
+  const editor = document.createElement('div')
+  editor.className = 'structured-link-editor'
+  editor.contentEditable = 'false'
+  editor.setAttribute('role', 'dialog')
+  editor.setAttribute('aria-modal', 'true')
+  editor.setAttribute('aria-label', 'Link details')
+  const header = document.createElement('div')
+  header.className = 'structured-link-dialog-head'
+  const heading = document.createElement('strong')
+  heading.textContent = 'Link details'
+  const subtitle = document.createElement('small')
+  header.append(heading, subtitle)
+  const field = (text: string, input: HTMLInputElement, hint: string) => {
+    const label = document.createElement('label')
+    const caption = document.createElement('span')
+    caption.textContent = text
+    const note = document.createElement('small')
+    note.textContent = hint
+    label.append(caption, input, note)
+    return label
+  }
+  const destination = document.createElement('input')
+  destination.type = 'text'
+  destination.className = 'structured-link-input'
+  destination.setAttribute('aria-label', 'Link destination')
+  destination.placeholder = 'https://example.org or notes/methods.md'
+  destination.spellcheck = false
+  const title = document.createElement('input')
+  title.type = 'text'
+  title.className = 'structured-link-input'
+  title.setAttribute('aria-label', 'Link title')
+  title.placeholder = 'Optional hover title'
+  const validation = document.createElement('p')
+  validation.className = 'structured-link-validation'
+  validation.hidden = true
+  const actions = document.createElement('div')
+  actions.className = 'structured-link-actions'
+  const cancel = document.createElement('button')
+  cancel.type = 'button'
+  cancel.textContent = 'Cancel'
+  const save = document.createElement('button')
+  save.type = 'button'
+  save.className = 'primary-button structured-link-save'
+  save.textContent = 'Save link'
+  actions.append(cancel, save)
+  editor.append(
+    header,
+    field('Destination', destination, 'Use a web address, fragment, or project-relative path.'),
+    field('Title', title, 'Optional; shown as supplementary hover text.'),
+    validation,
+    actions,
+  )
+  backdrop.append(editor)
+
+  const updateSave = () => {
+    const valid = isSafePortableLinkDestination(destination.value)
+    validation.textContent = valid ? '' : 'Enter a portable destination without spaces or an unsafe script/data scheme.'
+    validation.hidden = valid
+    save.disabled = !isEditable() || !valid
+  }
+  const updateDom = () => {
+    const href = String(mark.attrs.href)
+    const linkTitle = mark.attrs.title ? String(mark.attrs.title) : ''
+    link.setAttribute('href', href)
+    if (linkTitle) link.setAttribute('title', linkTitle)
+    else link.removeAttribute('title')
+    edit.disabled = !isEditable()
+    edit.setAttribute('aria-label', 'Edit link details')
+    if (!editing) {
+      destination.value = href
+      title.value = linkTitle
+    }
+    updateSave()
+  }
+  const closeEditor = () => {
+    editing = false
+    backdrop.remove()
+    destination.value = String(mark.attrs.href)
+    title.value = mark.attrs.title ? String(mark.attrs.title) : ''
+    updateSave()
+    edit.focus()
+  }
+  const saveEditor = () => {
+    const href = destination.value.trim()
+    if (!isEditable() || !isSafePortableLinkDestination(href) || !link.isConnected) return
+    const from = view.posAtDOM(link, 0)
+    const to = view.posAtDOM(link, link.childNodes.length)
+    if (from >= to) return
+    const nextMark = manuscriptSchema.marks.link.create({ href, title: title.value.trim() || null })
+    view.dispatch(view.state.tr.removeMark(from, to, manuscriptSchema.marks.link).addMark(from, to, nextMark))
+    closeEditor()
+  }
+  edit.addEventListener('mousedown', (event) => event.preventDefault())
+  edit.addEventListener('click', () => {
+    if (!isEditable()) return
+    editing = true
+    subtitle.textContent = link.textContent || String(mark.attrs.href)
+    destination.value = String(mark.attrs.href)
+    title.value = mark.attrs.title ? String(mark.attrs.title) : ''
+    document.body.append(backdrop)
+    updateSave()
+    destination.focus()
+    destination.select()
+  })
+  backdrop.addEventListener('mousedown', (event) => {
+    if (event.target === backdrop) closeEditor()
+  })
+  editor.addEventListener('mousedown', (event) => event.stopPropagation())
+  cancel.addEventListener('click', closeEditor)
+  save.addEventListener('click', saveEditor)
+  destination.addEventListener('input', updateSave)
+  const handleEditorKeydown = (event: KeyboardEvent) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeEditor()
+      return
+    }
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault()
+      saveEditor()
+      return
+    }
+    if (event.key !== 'Tab') return
+    const focusable = [...editor.querySelectorAll<HTMLElement>('input, button:not([disabled])')]
+    if (!focusable.length) return
+    const current = focusable.indexOf(document.activeElement as HTMLElement)
+    const next = event.shiftKey
+      ? (current <= 0 ? focusable.length - 1 : current - 1)
+      : (current < 0 || current === focusable.length - 1 ? 0 : current + 1)
+    event.preventDefault()
+    focusable[next].focus()
+  }
+  editor.addEventListener('keydown', handleEditorKeydown)
+
+  dom.append(link, edit)
+  updateDom()
+  return {
+    dom,
+    contentDOM: link,
+    ignoreMutation: (mutation) => mutation.type === 'attributes' || !link.contains(mutation.target),
+    update(next) {
+      if (next.type !== mark.type) return false
+      mark = next
+      updateDom()
+      return true
+    },
+    destroy() {
+      backdrop.remove()
     },
   }
 }
@@ -1960,6 +2134,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       decorations: (state) => reviewDecorations(state.doc, reviewDecorationRef.current, markupViewRef.current),
       handleDOMEvents: {
         click: (_editorView, event) => {
+          if (event.target instanceof Element && event.target.closest('.structured-link-edit')) return true
           const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-review-anchor]') : null
           if (target?.dataset.reviewAnchor) onReviewAnchorSelectRef.current?.(target.dataset.reviewAnchor)
           return false
@@ -1974,6 +2149,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         if (!onCommandRequestRef.current) return false
         onCommandRequestRef.current()
         return true
+      },
+      markViews: {
+        link: (mark, editorView) => linkMarkView(mark, editorView, () => !readOnlyRef.current),
       },
       nodeViews: {
         heading: (node, editorView, getPos) => headingNodeView(node, editorView, getPos, () => !readOnlyRef.current),
@@ -2033,7 +2211,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     return () => {
       if (pendingSuggestionRef.current) window.clearTimeout(pendingSuggestionRef.current.timeout)
       pendingSuggestionRef.current = undefined
-      document.querySelectorAll('.structured-heading-dialog-backdrop').forEach((dialog) => dialog.remove())
+      document.querySelectorAll('.structured-heading-dialog-backdrop, .structured-link-dialog-backdrop').forEach((dialog) => dialog.remove())
       viewRef.current = null
       view.destroy()
     }
@@ -2103,6 +2281,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     document.querySelectorAll<HTMLInputElement>('.structured-heading-input').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-heading-edit').forEach((button) => { button.disabled = readOnly })
     document.querySelectorAll<HTMLButtonElement>('.structured-heading-save').forEach((button) => { button.disabled = readOnly })
+    document.querySelectorAll<HTMLInputElement>('.structured-link-input').forEach((editor) => { editor.readOnly = readOnly })
+    hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-link-edit').forEach((button) => { button.disabled = readOnly })
+    document.querySelectorAll<HTMLButtonElement>('.structured-link-save').forEach((button) => { button.disabled = readOnly })
   }, [readOnly])
 
   useEffect(() => {

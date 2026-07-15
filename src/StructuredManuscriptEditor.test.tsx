@@ -307,6 +307,39 @@ describe('full structured manuscript editor', () => {
     expect(document.activeElement).toBe(reference.querySelector('.structured-cross-reference-edit'))
   })
 
+  it('edits rendered link metadata while preserving linked text', async () => {
+    const changed: string[] = []
+    const linkSource = '# Links\n\nRead the [field protocol](https://example.test/protocol "Original protocol") before sampling.\n'
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={linkSource} onChange={(next) => changed.push(next)} />,
+    ))
+
+    const linkMark = container.querySelector<HTMLElement>('.structured-link-mark')!
+    expect(linkMark.querySelector<HTMLAnchorElement>('a')?.textContent).toBe('field protocol')
+    await act(async () => linkMark.querySelector<HTMLButtonElement>('.structured-link-edit')?.click())
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Link details"]')!
+    const destination = dialog.querySelector<HTMLInputElement>('[aria-label="Link destination"]')!
+    const title = dialog.querySelector<HTMLInputElement>('[aria-label="Link title"]')!
+    const save = dialog.querySelector<HTMLButtonElement>('.structured-link-save')!
+
+    destination.value = 'javascript:alert(1)'
+    destination.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(dialog.querySelector('.structured-link-validation')?.textContent).toContain('unsafe')
+    expect(save.disabled).toBe(true)
+
+    destination.value = 'notes/field-protocol.md'
+    destination.dispatchEvent(new Event('input', { bubbles: true }))
+    title.value = 'Field evidence protocol'
+    expect(save.disabled).toBe(false)
+    await act(async () => save.click())
+
+    expect(changed.at(-1)).toContain('[field protocol](notes/field-protocol.md "Field evidence protocol")')
+    expect(linkMark.querySelector<HTMLAnchorElement>('a')?.textContent).toBe('field protocol')
+    expect(linkMark.querySelector<HTMLAnchorElement>('a')?.getAttribute('href')).toBe('notes/field-protocol.md')
+    expect(linkMark.querySelector<HTMLAnchorElement>('a')?.getAttribute('title')).toBe('Field evidence protocol')
+    expect(document.activeElement).toBe(linkMark.querySelector('.structured-link-edit'))
+  })
+
   it('numbers repeated references by first use and edits definitions without exposing punctuation', async () => {
     const changed: string[] = []
     const numberedSource = '# Notes\n\nBeta first[^beta], alpha next[^alpha], and beta again[^beta].\n\n[^alpha]: Alpha **details**.\n[^beta]: Beta details.\n'
@@ -529,7 +562,7 @@ describe('full structured manuscript editor', () => {
   })
 
   it('makes both prose and embedded code read-only for non-editing roles', async () => {
-    await act(async () => root.render(<StructuredManuscriptEditor source={source} onChange={vi.fn()} readOnly />))
+    await act(async () => root.render(<StructuredManuscriptEditor source={`${source}\nRead [the protocol](https://example.test).\n`} onChange={vi.fn()} readOnly />))
 
     expect(container.querySelector('.structured-editor-content')?.getAttribute('contenteditable')).toBe('false')
     expect(container.querySelector<HTMLTextAreaElement>('.structured-code-editor')?.readOnly).toBe(true)
@@ -540,6 +573,7 @@ describe('full structured manuscript editor', () => {
     expect([...container.querySelectorAll<HTMLInputElement>('.structured-equation-label-input')].every((input) => input.readOnly)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-cross-reference-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLInputElement>('.structured-cross-reference-input')].every((input) => input.readOnly)).toBe(true)
+    expect([...container.querySelectorAll<HTMLButtonElement>('.structured-link-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-figure-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-table-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-heading-edit')].every((button) => button.disabled)).toBe(true)
