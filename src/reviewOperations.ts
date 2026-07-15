@@ -229,9 +229,10 @@ function stripAnchorMarkup(value: string) {
 }
 
 function anchorContext(source: string, start: number, end: number): ReviewAnchorContext {
+  const manuscriptEnd = parseReviewMarkup(source).sectionStart ?? source.length
   const prefix = stripAnchorMarkup(source.slice(Math.max(0, start - 256), start)).slice(-64)
   const quote = stripAnchorMarkup(source.slice(start, end))
-  const suffix = stripAnchorMarkup(source.slice(end, Math.min(source.length, end + 256))).slice(0, 64)
+  const suffix = stripAnchorMarkup(source.slice(end, Math.min(manuscriptEnd, end + 256))).slice(0, 64)
   return { quote, prefix, suffix }
 }
 

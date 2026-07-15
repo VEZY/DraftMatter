@@ -46,6 +46,27 @@ function errorCodes(source: string) {
 }
 
 describe('DraftMatter Review Markup', () => {
+  it('ignores section-like lines inside fenced manuscript and message payloads', () => {
+    const source = `~~~text
+::::: {.draftmatter-reviews .hidden data-schema="999"}
+~~~
+
+::::: {.draftmatter-reviews .hidden data-schema="1"}
+:::: {#author .dm-author data-name="Alice"}
+::::
+:::: {#thread .dm-thread data-anchor="point" data-author="author" data-status="open"}
+~~~{.dm-message}
+::::: {.draftmatter-reviews .hidden data-schema="999"}
+~~~
+::::
+:::::
+`
+    const parsed = parseReviewMarkup(source)
+    expect(parsed.schema).toBe('1')
+    expect(parsed.threads[0].messages).toEqual(['::::: {.draftmatter-reviews .hidden data-schema="999"}'])
+    expect(parsed.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain('review-section-duplicate')
+  })
+
   it('parses versioned anchors, authors, changes, threads, decisions, and unknown records', () => {
     const parsed = parseReviewMarkup(completeReviewSource)
 

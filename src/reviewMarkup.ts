@@ -190,6 +190,25 @@ function closingLineIndex(lines: IndexedLine[], start: number, limit: number, co
   return limit
 }
 
+function fencedLineIndexes(lines: IndexedLine[]) {
+  const fenced = new Set<number>()
+  let marker: { character: string; length: number } | undefined
+  for (let index = 0; index < lines.length; index += 1) {
+    const content = lines[index].content
+    if (marker) {
+      fenced.add(index)
+      const closing = new RegExp(`^[ \\t]*\\${marker.character}{${marker.length},}[ \\t]*$`)
+      if (closing.test(content)) marker = undefined
+      continue
+    }
+    const opening = content.match(/^[ \t]*(`{3,}|~{3,})(?:\{[^}]*\}|[^\s].*)?[ \t]*$/)
+    if (!opening) continue
+    fenced.add(index)
+    marker = { character: opening[1][0], length: opening[1].length }
+  }
+  return fenced
+}
+
 function deriveRanges(anchors: ReviewAnchor[], diagnostics: DocumentDiagnostic[]) {
   const grouped = new Map<string, ReviewAnchor[]>()
   for (const anchor of anchors) grouped.set(anchor.anchorId, [...(grouped.get(anchor.anchorId) ?? []), anchor])
@@ -229,9 +248,10 @@ export function parseReviewMarkup(source: string): ReviewMarkupDocument {
       raw: node.raw,
     }))
   const lines = indexedLines(source)
+  const fencedLines = fencedLineIndexes(lines)
   const sectionOpeners = lines
     .map((line, index) => ({ line, index, match: line.content.match(/^(:{5,})[ \t]+\{([^}]*)\}[ \t]*$/) }))
-    .filter((candidate) => candidate.match && parseAttributes(candidate.match[2]).classes.includes('draftmatter-reviews'))
+    .filter((candidate) => !fencedLines.has(candidate.index) && candidate.match && parseAttributes(candidate.match[2]).classes.includes('draftmatter-reviews'))
 
   if (sectionOpeners.length === 0) diagnostics.push({ code: 'review-section-missing', level: 'info', message: 'This manuscript has no DraftMatter review section.' })
   if (sectionOpeners.length > 1) diagnostics.push({ code: 'review-section-duplicate', level: 'error', message: 'A manuscript may contain only one DraftMatter review section.' })
