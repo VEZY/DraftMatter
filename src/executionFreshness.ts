@@ -20,6 +20,8 @@ export interface ExecutionManifest {
   codeHash: string
   inputsHash: string
   environmentFingerprint: string
+  environmentIdentity?: string
+  environmentVersion?: string
   resultHash: string
   artifacts: Array<{ path: string; bytes: number; hash: string; mediaType?: string }>
   provider: ExecutionProviderKind
@@ -57,6 +59,8 @@ function manifestFromResult(result: NormalizedExecutionResult, sequence: number,
     codeHash: result.hashes.code,
     inputsHash: result.hashes.inputs,
     environmentFingerprint: result.hashes.environment,
+    environmentIdentity: result.environment.identity,
+    ...(result.environment.version ? { environmentVersion: result.environment.version } : {}),
     resultHash: result.hashes.result,
     artifacts: result.artifacts.map((artifact) => ({ ...artifact })),
     provider: result.provenance.provider,
