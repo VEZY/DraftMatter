@@ -175,9 +175,7 @@ function reconcileText(text: Y.Text, next: string) {
   if (insertion) text.insert(prefix, insertion)
 }
 
-function reconcileMap<T extends { id: string }>(map: Y.Map<T>, records: T[]) {
-  const retained = new Set(records.map((record) => record.id))
-  for (const key of map.keys()) if (!retained.has(key)) map.delete(key)
+function upsertMap<T extends { id: string }>(map: Y.Map<T>, records: T[]) {
   for (const record of records) {
     const next = portableValue(record)
     if (JSON.stringify(map.get(record.id)) !== JSON.stringify(next)) map.set(record.id, next)
@@ -314,13 +312,13 @@ export class CollaborativeDocument {
         ...(decision.attributes['data-base-revision'] ? { baseRevision: decision.attributes['data-base-revision'] } : {}),
         ...(decision.attributes['data-resolves'] ? { resolves: decision.attributes['data-resolves'].split(',').filter(Boolean).sort() } : {}),
       }))
-      reconcileMap(this.authors, authors)
-      reconcileMap(this.anchors, anchors)
-      reconcileMap(this.proposals, proposals)
-      reconcileMap(this.threads, threads)
-      reconcileMap(this.threadMessages, threadMessages)
-      reconcileMap(this.threadStatuses, threadStatuses)
-      reconcileMap(this.decisions, decisions)
+      upsertMap(this.authors, authors)
+      upsertMap(this.anchors, anchors)
+      upsertMap(this.proposals, proposals)
+      upsertMap(this.threads, threads)
+      upsertMap(this.threadMessages, threadMessages)
+      upsertMap(this.threadStatuses, threadStatuses)
+      upsertMap(this.decisions, decisions)
     }, origin)
   }
 

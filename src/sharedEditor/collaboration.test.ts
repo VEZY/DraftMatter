@@ -198,6 +198,35 @@ describe('Yjs collaboration document', () => {
     right.destroy()
   })
 
+  it('does not delete a received reply when a stale portable source is published afterward', () => {
+    const seeded = ensureReviewAuthor(parseReviewMarkup(commentThreadSource), { id: 'dm-a02', name: 'Marcus Chen' }).document.source
+    const { left, right } = peersFrom(seeded)
+    const reply = appendReviewThreadMessage(parseReviewMarkup(projectCollaborationPortableSource(left)), 'dm-comment-01', {
+      authorId: 'dm-a01',
+      message: 'Alice added the interval while Marcus was still viewing the earlier source.',
+      timestamp: '2026-07-16T09:03:00.000Z',
+    })
+    left.reconcilePortableSource(reply.document.source, 'alice-reply')
+    syncCollaborativeDocuments(left, right)
+
+    right.reconcilePortableSource(seeded, 'stale-editor-publish')
+    syncCollaborativeDocuments(left, right)
+
+    expect(left.snapshot()).toEqual(right.snapshot())
+    expect(right.snapshot().threads[0].messages).toEqual([
+      { content: 'Please report the confidence interval.', index: 0 },
+      {
+        content: 'Alice added the interval while Marcus was still viewing the earlier source.',
+        authorId: 'dm-a01',
+        timestamp: '2026-07-16T09:03:00.000Z',
+        index: 1,
+      },
+    ])
+    expect(createCollaborationCheckpoint(right).source).toContain('Alice added the interval while Marcus was still viewing the earlier source.')
+    left.destroy()
+    right.destroy()
+  })
+
   it('preserves an offline reply made concurrently with resolving its thread', () => {
     const { left, right } = peersFrom(commentThreadSource)
     const leftReply = appendReviewThreadMessage(parseReviewMarkup(projectCollaborationPortableSource(left)), 'dm-comment-01', {
