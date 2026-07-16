@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { isTauri } from '@tauri-apps/api/core'
-import type { WorkspaceAuditEvent, WorkspaceInvitation, WorkspaceMembership, WorkspaceProjectAccess, WorkspaceRole } from './collaboration/workspaceService'
-import { CollaborationServiceClient, type CollaborationRecoveryCheckpoint, type WorkspaceDeletion, type WorkspaceSummary } from './collaboration/serviceClient'
+import type { WorkspaceAuditEvent, WorkspaceInvitation, WorkspaceMembership, WorkspaceProject, WorkspaceProjectAccess, WorkspaceRole } from './collaboration/workspaceService'
+import { CollaborationServiceClient, type CollaborationBackup, type CollaborationRecoveryCheckpoint, type WorkspaceDeletion, type WorkspaceSummary } from './collaboration/serviceClient'
 import { createCollaborationInvitationLink } from './collaboration/invitationLink'
 import { copyPlainText } from './clipboard'
 import { Icon } from './Icon'
@@ -11,24 +11,29 @@ export interface CollaborationAccessPanelProps {
   workspace: WorkspaceSummary
   projectId: string
   currentUserId: string
+  projects?: WorkspaceProject[]
 }
 
 function eventLabel(event: WorkspaceAuditEvent) {
   return event.action.replaceAll('.', ' ')
 }
 
-export function CollaborationAccessPanel({ client, workspace, projectId, currentUserId }: CollaborationAccessPanelProps) {
+export function CollaborationAccessPanel({ client, workspace, projectId, currentUserId, projects = [] }: CollaborationAccessPanelProps) {
   const [open, setOpen] = useState(false)
   const [dangerOpen, setDangerOpen] = useState(false)
   const [busy, setBusy] = useState('')
   const [problem, setProblem] = useState('')
   const [members, setMembers] = useState<WorkspaceMembership[]>([])
   const [projectAccess, setProjectAccess] = useState<WorkspaceProjectAccess[]>([])
+  const [availableProjects, setAvailableProjects] = useState<WorkspaceProject[]>(projects)
   const [invitations, setInvitations] = useState<WorkspaceInvitation[]>([])
   const [events, setEvents] = useState<WorkspaceAuditEvent[]>([])
   const [recoveries, setRecoveries] = useState<CollaborationRecoveryCheckpoint[]>([])
+  const [backups, setBackups] = useState<CollaborationBackup[]>([])
   const [deletion, setDeletion] = useState<WorkspaceDeletion | null>()
   const [recoveryName, setRecoveryName] = useState('')
+  const [restoreTargetProjectId, setRestoreTargetProjectId] = useState('')
+  const [backupNotice, setBackupNotice] = useState('')
   const [deletionConfirmation, setDeletionConfirmation] = useState('')
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Exclude<WorkspaceRole, 'owner'>>('editor')
@@ -40,20 +45,27 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
     setBusy('refresh')
     setProblem('')
     try {
-      const [nextMembers, nextProjectAccess, nextInvitations, nextEvents, nextRecoveries, nextDeletion] = await Promise.all([
+      const [nextMembers, nextProjects, nextProjectAccess, nextInvitations, nextEvents, nextRecoveries, nextBackups, nextDeletion] = await Promise.all([
         client.listMembers(workspace.id),
+        client.listProjects(workspace.id),
         projectId ? client.listProjectAccess(workspace.id, projectId) : Promise.resolve([]),
         client.listInvitations(workspace.id),
         client.listAuditEvents(workspace.id),
         projectId ? client.listRecoveryCheckpoints(workspace.id, projectId) : Promise.resolve([]),
+        projectId ? client.listBackups(workspace.id, projectId) : Promise.resolve([]),
         client.getWorkspaceDeletion(workspace.id),
       ])
       setMembers(nextMembers)
+      setAvailableProjects(nextProjects)
       setProjectAccess(nextProjectAccess)
       setInvitations(nextInvitations)
       setEvents(nextEvents)
       setRecoveries(nextRecoveries)
+      setBackups(nextBackups)
       setDeletion(nextDeletion.deletion)
+      setRestoreTargetProjectId((current) => current && nextProjects.some((project) => project.id === current && project.id !== projectId)
+        ? current
+        : nextProjects.find((project) => project.id !== projectId)?.id ?? '')
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error))
     } finally {
@@ -149,6 +161,54 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
     }
   }
 
+  const createManagedBackup = async () => {
+    setBusy('create-backup')
+    setProblem('')
+    setBackupNotice('')
+    try {
+      const backup = await client.createBackup(workspace.id, projectId)
+      setBackups((current) => [backup, ...current.filter((item) => item.id !== backup.id)])
+      setBackupNotice('Immutable backup created. Verify it before using it for a restore drill.')
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const verifyManagedBackup = async (backupId: string) => {
+    setBusy(`verify:${backupId}`)
+    setProblem('')
+    setBackupNotice('')
+    try {
+      const verified = await client.verifyBackup(workspace.id, projectId, backupId)
+      setBackups((current) => current.map((item) => item.id === backupId ? { ...item, ...verified } : item))
+      setBackupNotice('Backup object and embedded collaboration state passed integrity verification.')
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const restoreManagedBackup = async (backup: CollaborationBackup) => {
+    const target = availableProjects.find((project) => project.id === restoreTargetProjectId)
+    if (!target || target.id === projectId) return
+    if (!window.confirm(`Replace the live state in ${target.name} with backup ${backup.id}? Active collaborators in that target will reconnect.`)) return
+    setBusy(`restore:${backup.id}`)
+    setProblem('')
+    setBackupNotice('')
+    try {
+      await client.restoreBackup(workspace.id, projectId, backup.id, target.id)
+      setBackups(await client.listBackups(workspace.id, projectId))
+      setBackupNotice(`Restore drill completed in ${target.name}. Its live room was disconnected so reopening loads the restored snapshot.`)
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy('')
+    }
+  }
+
   const scheduleDeletion = async () => {
     if (deletionConfirmation !== workspace.name) return
     setBusy('delete-workspace')
@@ -197,7 +257,12 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
             <section><span className="collaboration-section-label">Open invitations · {invitations.filter((item) => !item.revokedAt && !item.acceptedAt).length}</span>{invitations.filter((item) => !item.revokedAt && !item.acceptedAt).map((invitation) => <div className="collaboration-admin-item" key={invitation.id}><span><strong>{invitation.email ?? 'Share link'}</strong><small>{invitation.role} · expires {new Date(invitation.expiresAt).toLocaleDateString()}</small></span><button onClick={() => void revokeInvitation(invitation.id)} disabled={Boolean(busy)}>Revoke</button></div>)}</section>
           </div>
 
-          <div className="collaboration-recovery-row"><span><strong>Named cloud recovery · {recoveries.length}</strong><small>{recoveries[0] ? `${recoveries[0].name} · ${new Date(recoveries[0].createdAt).toLocaleString()}` : 'Encrypted immutable history, independent of the local working tree.'}</small></span><input value={recoveryName} onChange={(event) => setRecoveryName(event.target.value)} placeholder="Before reviewer revisions" aria-label="Recovery checkpoint name" /><button onClick={() => void createRecovery()} disabled={Boolean(busy) || !projectId || !recoveryName.trim()}>{busy === 'backup' ? 'Saving…' : 'Save named point'}</button></div>
+          <div className="collaboration-recovery-row"><span><strong>Named cloud recovery · {recoveries.length}</strong><small>{recoveries[0] ? `${recoveries[0].name} · ${new Date(recoveries[0].createdAt).toLocaleString()}` : 'Immutable managed history, independent of the local working tree.'}</small></span><input value={recoveryName} onChange={(event) => setRecoveryName(event.target.value)} placeholder="Before reviewer revisions" aria-label="Recovery checkpoint name" /><button onClick={() => void createRecovery()} disabled={Boolean(busy) || !projectId || !recoveryName.trim()}>{busy === 'backup' ? 'Saving…' : 'Save named point'}</button></div>
+          <section className="collaboration-backup-drill" aria-label="Managed backup and restore drill">
+            <div className="collaboration-backup-heading"><span><strong>Managed backups · {backups.length}</strong><small>{backups[0] ? `${new Date(backups[0].createdAt).toLocaleString()} · ${Math.max(1, Math.ceil(backups[0].bytes / 1024))} KB · ${backups[0].verifiedAt ? 'verified' : 'verification needed'}` : 'Create and verify an immutable backup before running a restore drill.'}</small></span><button onClick={() => void createManagedBackup()} disabled={Boolean(busy) || !projectId}>{busy === 'create-backup' ? 'Creating…' : 'Create backup'}</button>{backups[0] && <button onClick={() => void verifyManagedBackup(backups[0].id)} disabled={Boolean(busy)}>{busy === `verify:${backups[0].id}` ? 'Verifying…' : backups[0].verifiedAt ? 'Verify again' : 'Verify backup'}</button>}</div>
+            {backups[0] && <div className="collaboration-backup-restore"><label><span>Restore into an empty drill project</span><select value={restoreTargetProjectId} onChange={(event) => setRestoreTargetProjectId(event.target.value)} aria-label="Backup restore target"><option value="">Choose a different project</option>{availableProjects.filter((project) => project.id !== projectId).map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select></label><span><strong>{backups[0].id}</strong><small>SHA-256 {backups[0].sha256.slice(0, 12)}…{backups[0].lastRestoredAt ? ` · last restored ${new Date(backups[0].lastRestoredAt).toLocaleString()}` : ''}</small></span><button onClick={() => void restoreManagedBackup(backups[0])} disabled={Boolean(busy) || !backups[0].verifiedAt || !restoreTargetProjectId}>{busy === `restore:${backups[0].id}` ? 'Restoring…' : 'Run restore drill'}</button></div>}
+            {backupNotice && <p className="collaboration-backup-notice" role="status">{backupNotice}</p>}
+          </section>
           <section className="collaboration-activity"><span className="collaboration-section-label">Recent activity</span>{events.slice(-6).reverse().map((event) => <div key={event.id}><span>{eventLabel(event)}</span><small>{event.targetId ?? event.actorId} · {new Date(event.at).toLocaleString()}</small></div>)}</section>
           <details className={`collaboration-danger-zone ${deletion ? 'pending' : ''}`} open={dangerOpen || Boolean(deletion)} onToggle={(event) => setDangerOpen(event.currentTarget.open)}>
             <summary>Workspace deletion</summary>

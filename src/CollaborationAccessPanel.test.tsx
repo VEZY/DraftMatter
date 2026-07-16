@@ -19,6 +19,10 @@ describe('collaboration workspace administration', () => {
         { workspaceId: 'forest', userId: 'owner-1', role: 'owner', joinedAt: '2026-07-15T00:00:00.000Z' },
         { workspaceId: 'forest', userId: 'editor-1', role: 'editor', joinedAt: '2026-07-15T00:01:00.000Z' },
       ]),
+      listProjects: vi.fn().mockResolvedValue([
+        { id: 'paper', workspaceId: 'forest', name: 'Canopy paper', role: 'owner', createdAt: '2026-07-15T00:00:00.000Z' },
+        { id: 'restore-drill', workspaceId: 'forest', name: 'Restore drill', role: 'owner', createdAt: '2026-07-15T00:02:00.000Z' },
+      ]),
       listProjectAccess: vi.fn().mockResolvedValue([
         { userId: 'owner-1', workspaceRole: 'owner', effectiveRole: 'owner', displayName: 'Owner Researcher' },
         { userId: 'editor-1', workspaceRole: 'editor', effectiveRole: 'editor', displayName: 'Editing Researcher' },
@@ -28,12 +32,18 @@ describe('collaboration workspace administration', () => {
       listInvitations: vi.fn().mockResolvedValue([]),
       listAuditEvents: vi.fn().mockResolvedValue([{ id: 'audit-1', workspaceId: 'forest', actorId: 'owner-1', action: 'project.created', targetId: 'paper', at: '2026-07-15T00:00:00.000Z' }]),
       listRecoveryCheckpoints: vi.fn().mockResolvedValue([{ id: 'recovery-1', snapshotId: 'snapshot-1', name: 'Initial review', createdBy: 'owner-1', createdAt: '2026-07-15T00:00:00.000Z' }]),
+      listBackups: vi.fn()
+        .mockResolvedValueOnce([{ id: 'backup-1', createdAt: '2026-07-15T00:00:00.000Z', bytes: 2048, sha256: 'a'.repeat(64), stateSha256: 'b'.repeat(64) }])
+        .mockResolvedValue([{ id: 'backup-2', createdAt: '2026-07-15T01:00:00.000Z', bytes: 3072, sha256: 'c'.repeat(64), stateSha256: 'd'.repeat(64), verifiedAt: '2026-07-15T01:01:00.000Z', lastRestoredAt: '2026-07-15T01:02:00.000Z' }]),
       getWorkspaceDeletion: vi.fn().mockResolvedValue({ deletion: null }),
       createInvitation: vi.fn().mockResolvedValue({
         invitation: { id: 'invite-1', workspaceId: 'forest', role: 'commenter', createdAt: '2026-07-15T00:00:00.000Z', expiresAt: '2026-07-22T00:00:00.000Z', createdBy: 'owner-1' },
         token: 'one-time-invitation-token',
       }),
       createRecoveryCheckpoint: vi.fn().mockResolvedValue({ id: 'recovery-2', snapshotId: 'snapshot-2', name: 'Before reviewer revisions', createdBy: 'owner-1', createdAt: '2026-07-15T01:00:00.000Z' }),
+      createBackup: vi.fn().mockResolvedValue({ id: 'backup-2', createdAt: '2026-07-15T01:00:00.000Z', bytes: 3072, sha256: 'c'.repeat(64), stateSha256: 'd'.repeat(64) }),
+      verifyBackup: vi.fn().mockResolvedValue({ id: 'backup-2', createdAt: '2026-07-15T01:00:00.000Z', bytes: 3072, sha256: 'c'.repeat(64), stateSha256: 'd'.repeat(64), verifiedAt: '2026-07-15T01:01:00.000Z' }),
+      restoreBackup: vi.fn().mockResolvedValue({ id: 'restore-backup-2', createdAt: '2026-07-15T01:02:00.000Z', bytes: 3072, sha256: 'e'.repeat(64) }),
       scheduleWorkspaceDeletion: vi.fn().mockResolvedValue({ id: 'delete-1', workspaceId: 'forest', requestedBy: 'owner-1', requestedAt: '2026-07-15T02:00:00.000Z', executeAfter: '2026-07-22T02:00:00.000Z', status: 'scheduled' }),
       cancelWorkspaceDeletion: vi.fn().mockResolvedValue({ id: 'delete-1', status: 'cancelled' }),
     } as unknown as CollaborationServiceClient
@@ -52,7 +62,9 @@ describe('collaboration workspace administration', () => {
     })
     expect(client.listMembers).toHaveBeenCalledWith('forest')
     expect(client.listProjectAccess).toHaveBeenCalledWith('forest', 'paper')
+    expect(client.listProjects).toHaveBeenCalledWith('forest')
     expect(client.listRecoveryCheckpoints).toHaveBeenCalledWith('forest', 'paper')
+    expect(client.listBackups).toHaveBeenCalledWith('forest', 'paper')
     expect(client.getWorkspaceDeletion).toHaveBeenCalledWith('forest')
     expect(container.textContent).toContain('Named cloud recovery · 1')
     expect(container.textContent).toContain('project created')
@@ -97,6 +109,26 @@ describe('collaboration workspace administration', () => {
     })
     expect(client.createRecoveryCheckpoint).toHaveBeenCalledWith('forest', 'paper', 'Before reviewer revisions')
     expect(container.textContent).toContain('Before reviewer revisions')
+
+    await act(async () => {
+      ;[...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Create backup')!.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    expect(client.createBackup).toHaveBeenCalledWith('forest', 'paper')
+    expect(container.textContent).toContain('verification needed')
+    await act(async () => {
+      ;[...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Verify backup')!.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    expect(client.verifyBackup).toHaveBeenCalledWith('forest', 'paper', 'backup-2')
+    expect(container.textContent).toContain('passed integrity verification')
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await act(async () => {
+      ;[...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Run restore drill')!.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    expect(client.restoreBackup).toHaveBeenCalledWith('forest', 'paper', 'backup-2', 'restore-drill')
+    expect(container.textContent).toContain('Restore drill completed in Restore drill')
 
     await act(async () => container.querySelector<HTMLElement>('.collaboration-danger-zone summary')!.click())
     const deletionConfirmation = container.querySelector<HTMLInputElement>('[aria-label="Workspace deletion confirmation"]')!

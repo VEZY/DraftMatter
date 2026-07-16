@@ -48,6 +48,7 @@ function fixture() {
     createRecoveryCheckpoint: vi.fn(async (_scope, request: { name: string; createdBy: string }) => ({ id: 'recovery-01', snapshotId: 'snapshot-01', ...request, createdAt: '2026-07-15T00:00:00.000Z' })),
     listRecoveryCheckpoints: vi.fn(async () => []),
   }
+  const onProjectRestored = vi.fn()
   const api = createCollaborationHttpApi({
     workspaces,
     entitlements: { get: vi.fn(async () => ({
@@ -67,8 +68,9 @@ function fixture() {
     publicConfig: { oidcIssuer: 'https://identity.example.test', oidcClientId: 'draftmatter-browser' },
     maxBodyBytes: 1024,
     backups,
+    onProjectRestored,
   })
-  return { api, workspaces, webhooks, readiness, backups }
+  return { api, workspaces, webhooks, readiness, backups, onProjectRestored }
 }
 
 function request(path: string, options: RequestInit = {}) {
@@ -209,7 +211,7 @@ describe('collaboration HTTP API', () => {
   })
 
   it('keeps backup creation and restoration behind the owner checkpoint capability', async () => {
-    const { api, workspaces, backups } = fixture()
+    const { api, workspaces, backups, onProjectRestored } = fixture()
     const response = await api(request('/api/workspaces/forest/projects/paper/backups', {
       method: 'POST',
       headers: { authorization: 'Bearer oidc-token' },
@@ -230,6 +232,7 @@ describe('collaboration HTTP API', () => {
       'backup-01',
       { workspaceId: 'forest', projectId: 'restore-drill' },
     )
+    expect(onProjectRestored).toHaveBeenCalledWith({ workspaceId: 'forest', projectId: 'restore-drill' })
   })
 
   it('creates named immutable recovery history with verified owner attribution', async () => {

@@ -53,6 +53,7 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
     publicConfig: { oidcIssuer: config.oidc.issuer, oidcClientId: config.oidc.clientId },
     maintenanceMetrics: () => maintenance.snapshot(),
     backups: persistence,
+    onProjectRestored: ({ workspaceId, projectId }) => server?.hocuspocus.closeConnections(`${workspaceId}:${projectId}`),
   })
   server = createDraftMatterHocuspocusServer({
     authorization: workspaces,

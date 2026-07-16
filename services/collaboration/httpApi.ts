@@ -28,6 +28,7 @@ export interface CollaborationHttpApiOptions {
   publicConfig: { oidcIssuer: string; oidcClientId: string }
   maxBodyBytes?: number
   maintenanceMetrics?: () => MaintenanceMetrics
+  onProjectRestored?: (scope: { workspaceId: string; projectId: string }) => void
   backups?: Pick<PostgresCollaborationStore,
     'createBackup' | 'listBackups' | 'verifyBackup' | 'restoreBackup'
     | 'createRecoveryCheckpoint' | 'listRecoveryCheckpoints'>
@@ -286,7 +287,10 @@ export function createCollaborationHttpApi(options: CollaborationHttpApiOptions)
             const restore = await body<{ targetProjectId?: string }>(request, maximum)
             if (!restore.targetProjectId) throw new CollaborationHttpError(400, 'invalid-request', 'A target project is required for a restore drill.')
             await options.workspaces.authorizeProject(token, workspaceId, restore.targetProjectId, 'checkpoint')
-            return json(200, await options.backups.restoreBackup(scope, backupId, { workspaceId, projectId: restore.targetProjectId }), headers)
+            const target = { workspaceId, projectId: restore.targetProjectId }
+            const snapshot = await options.backups.restoreBackup(scope, backupId, target)
+            options.onProjectRestored?.(target)
+            return json(200, snapshot, headers)
           }
         }
       }

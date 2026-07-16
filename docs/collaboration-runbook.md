@@ -18,7 +18,8 @@ Run this at least quarterly and after changing PostgreSQL, object storage, encry
 2. `POST .../backups/{backup}/verify`. Stop if either digest check fails.
 3. Create a new empty drill project. Never use the active source project as the drill target.
 4. `POST .../backups/{backup}/restore` with `{"targetProjectId":"restore-drill"}`. The service checks owner checkpoint permission on both source and target before creating the recovery snapshot.
-5. Open the drill project, compare its deterministic portable checkpoint with the expected source checkpoint, then delete the drill workspace/project state according to the normal policy.
+   Owners can perform steps 1–4 from **Workspace access & recovery → Managed backups** in the collaboration dialog. The restore action requires an explicit target-project confirmation.
+5. The service disconnects the restored target room after the snapshot commits. Reopen the drill project, compare its deterministic portable checkpoint with the expected source checkpoint, then delete the drill workspace/project state according to the normal policy.
 6. Separately prove restoration of the PostgreSQL provider backup and the object-store versioned/replicated backup into an isolated environment. The application backup does not replace infrastructure backups.
 
 Record duration, byte counts, hashes, failures, operator, service version, database version, object-store version, and corrective actions. Do not put manuscript content or access tokens in the drill record.

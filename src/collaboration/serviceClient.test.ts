@@ -71,6 +71,24 @@ describe('browser collaboration service client', () => {
     expect(request).toHaveBeenNthCalledWith(3, 'https://collab.example.org/api/workspaces/forest/deletion/cancel', expect.objectContaining({ method: 'POST' }))
   })
 
+  it('creates, verifies, and restores managed backups through explicit owner routes', async () => {
+    const backup = { id: 'backup-1', createdAt: '2026-07-15T00:00:00.000Z', bytes: 42, sha256: 'a'.repeat(64), stateSha256: 'b'.repeat(64) }
+    const request = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ backups: [backup] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(backup), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...backup, verifiedAt: '2026-07-15T00:01:00.000Z' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'restore-backup-1', createdAt: '2026-07-15T00:02:00.000Z', bytes: 42, sha256: 'c'.repeat(64) }), { status: 200 }))
+    const client = new CollaborationServiceClient('https://collab.example.org', 'access-token', request)
+
+    await expect(client.listBackups('forest', 'paper')).resolves.toEqual([backup])
+    await expect(client.createBackup('forest', 'paper')).resolves.toEqual(backup)
+    await expect(client.verifyBackup('forest', 'paper', 'backup-1')).resolves.toMatchObject({ verifiedAt: '2026-07-15T00:01:00.000Z' })
+    await expect(client.restoreBackup('forest', 'paper', 'backup-1', 'restore-drill')).resolves.toMatchObject({ id: 'restore-backup-1' })
+
+    expect(request).toHaveBeenNthCalledWith(3, 'https://collab.example.org/api/workspaces/forest/projects/paper/backups/backup-1/verify', expect.objectContaining({ method: 'POST' }))
+    expect(request).toHaveBeenNthCalledWith(4, 'https://collab.example.org/api/workspaces/forest/projects/paper/backups/backup-1/restore', expect.objectContaining({ method: 'POST', body: JSON.stringify({ targetProjectId: 'restore-drill' }) }))
+  })
+
   it('coordinates durable review approvals and notification reads through project-scoped routes', async () => {
     const review = { id: 'review-1', workspaceId: 'forest', projectId: 'paper', requestedBy: 'owner', reviewerId: 'reviewer', message: 'Please verify.', status: 'open', createdAt: '2026-07-15T00:00:00.000Z' }
     const notification = { id: 'notice-1', workspaceId: 'forest', projectId: 'paper', userId: 'reviewer', actorId: 'owner', reviewRequestId: 'review-1', kind: 'review-requested', createdAt: '2026-07-15T00:00:00.000Z' }

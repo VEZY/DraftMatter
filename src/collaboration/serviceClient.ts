@@ -44,7 +44,16 @@ export interface CollaborationBackup {
   createdAt: string
   bytes: number
   sha256: string
-  objectKey: string
+  stateSha256: string
+  verifiedAt?: string
+  lastRestoredAt?: string
+}
+
+export interface CollaborationBackupRestore {
+  id: string
+  createdAt: string
+  bytes: number
+  sha256: string
 }
 
 export interface CollaborationRecoveryCheckpoint {
@@ -239,6 +248,14 @@ export class CollaborationServiceClient {
 
   createBackup(workspaceId: string, projectId: string) {
     return this.call<CollaborationBackup>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/backups`, { method: 'POST' })
+  }
+
+  verifyBackup(workspaceId: string, projectId: string, backupId: string) {
+    return this.call<CollaborationBackup>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/backups/${encoded(backupId)}/verify`, { method: 'POST' })
+  }
+
+  restoreBackup(workspaceId: string, projectId: string, backupId: string, targetProjectId: string) {
+    return this.call<CollaborationBackupRestore>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/backups/${encoded(backupId)}/restore`, { method: 'POST', body: JSON.stringify({ targetProjectId }) })
   }
 
   getWorkspaceDeletion(workspaceId: string) {

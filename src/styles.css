@@ -4403,6 +4403,20 @@ kbd {
 .collaboration-recovery-row strong { color: var(--ink); font-size: 10px; }
 .collaboration-recovery-row small { color: var(--muted); font-size: 8px; }
 .collaboration-recovery-row input { width: 180px; height: 34px; font-size: 9px; }
+.collaboration-backup-drill { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px solid #e0e6e3; border-radius: 7px; background: #fbfcfb; }
+.collaboration-backup-heading { display: flex; align-items: center; gap: 8px; }
+.collaboration-backup-heading > span,
+.collaboration-backup-restore > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
+.collaboration-backup-heading strong,
+.collaboration-backup-restore strong { overflow: hidden; color: var(--ink); font-size: 10px; text-overflow: ellipsis; }
+.collaboration-backup-heading small,
+.collaboration-backup-restore small { color: var(--muted); font-size: 8px; line-height: 1.4; }
+.collaboration-backup-heading button,
+.collaboration-backup-restore button { min-height: 32px; padding: 0 9px; border: 1px solid #d3dad7; border-radius: 6px; background: #fff; color: var(--ink); font-size: 9px; font-weight: 700; }
+.collaboration-backup-restore { display: grid; grid-template-columns: minmax(170px, .8fr) 1fr auto; align-items: end; gap: 9px; padding-top: 8px; border-top: 1px solid #e8ebe9; }
+.collaboration-backup-restore label { gap: 4px; }
+.collaboration-backup-restore select { height: 32px; font-size: 9px; }
+.collaboration-backup-notice { margin: 0; color: #537064; font-size: 8px; line-height: 1.45; }
 .collaboration-activity { display: flex; flex-direction: column; gap: 5px; }
 .collaboration-activity > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 2px; border-bottom: 1px solid #eceeed; color: var(--ink); font-size: 9px; text-transform: capitalize; }
 .collaboration-activity small { color: var(--muted); font-size: 8px; text-transform: none; }
@@ -4762,6 +4776,10 @@ img.ProseMirror-separator { border: 0 !important; display: inline !important; he
   .collaboration-recovery-row { align-items: stretch; flex-direction: column; }
   .collaboration-recovery-row input { width: 100%; }
   .collaboration-recovery-row button { align-self: flex-start; }
+  .collaboration-backup-heading { align-items: stretch; flex-wrap: wrap; }
+  .collaboration-backup-heading > span { flex-basis: 100%; }
+  .collaboration-backup-restore { align-items: stretch; grid-template-columns: 1fr; }
+  .collaboration-backup-restore button { justify-self: start; }
   .collaboration-deletion-form,
   .collaboration-deletion-pending { align-items: stretch; grid-template-columns: 1fr; }
   .collaboration-deletion-form button,

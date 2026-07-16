@@ -176,9 +176,13 @@ describe('managed PostgreSQL and object-storage persistence', () => {
     const backup = await persistence.createBackup(source, 'backup-01')
     expect(backup).toMatchObject({ id: 'backup-01', stateSha256: expect.stringMatching(/^[a-f0-9]{64}$/) })
     await expect(persistence.verifyBackup(source, 'backup-01')).resolves.toMatchObject({ id: 'backup-01', verifiedAt: expect.any(String) })
+    const verifiedBackups = await persistence.listBackups(source)
+    expect(verifiedBackups).toEqual([expect.objectContaining({ id: 'backup-01', verifiedAt: expect.any(String) })])
+    expect(verifiedBackups[0]).not.toHaveProperty('lastRestoredAt')
 
     await persistence.appendUpdate(target, fixture.second)
     await persistence.restoreBackup(source, 'backup-01', target)
+    expect(await persistence.listBackups(source)).toEqual([expect.objectContaining({ id: 'backup-01', verifiedAt: expect.any(String), lastRestoredAt: expect.any(String) })])
     const restored = await persistence.load(target)
     const document = new Y.Doc()
     if (restored.snapshot) Y.applyUpdate(document, restored.snapshot)

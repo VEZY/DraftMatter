@@ -45,6 +45,8 @@ interface BackupRow {
   bytes: string | number
   sha256: string
   state_sha256: string
+  verified_at?: Date | string | null
+  last_restored_at?: Date | string | null
 }
 
 interface BackupEnvelope {
@@ -391,13 +393,21 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
   async listBackups(scope: CollaborationProjectScope) {
     this.key(scope)
     const result = await this.pool.query<BackupRow>(
-      `SELECT id, created_at, object_key, bytes, sha256, state_sha256
+      `SELECT id, created_at, object_key, bytes, sha256, state_sha256, verified_at, last_restored_at
        FROM draftmatter_collaboration_backups
        WHERE workspace_id = $1 AND project_id = $2 AND state = 'ready'
        ORDER BY created_at DESC, id DESC`,
       [scope.workspaceId, scope.projectId],
     )
-    return result.rows.map((row) => ({ id: row.id, createdAt: iso(row.created_at), bytes: Number(row.bytes), sha256: row.sha256, stateSha256: row.state_sha256 }))
+    return result.rows.map((row) => ({
+      id: row.id,
+      createdAt: iso(row.created_at),
+      bytes: Number(row.bytes),
+      sha256: row.sha256,
+      stateSha256: row.state_sha256,
+      ...(row.verified_at ? { verifiedAt: iso(row.verified_at) } : {}),
+      ...(row.last_restored_at ? { lastRestoredAt: iso(row.last_restored_at) } : {}),
+    }))
   }
 
   private async readVerifiedBackup(scope: CollaborationProjectScope, backupId: string) {
