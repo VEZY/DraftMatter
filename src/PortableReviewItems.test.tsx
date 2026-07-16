@@ -8,6 +8,9 @@ import { PortableReviewItems } from './PortableReviewItems'
 import { parseReviewMarkup } from './reviewMarkup'
 import { createReviewThread } from './reviewOperations'
 import { projectPortableReviewSource } from './reviewProjector'
+import { CollaborativeDocument, syncCollaborativeDocuments } from './sharedEditor/collaboration'
+import { projectCollaborationPortableSource } from './sharedEditor/collaborationCheckpoint'
+import { CollaborativeReviewBinding } from './sharedEditor/collaborativeReview'
 
 function text(element: Element | null) {
   return element?.textContent?.replace(/\s+/g, ' ').trim() ?? ''
@@ -44,6 +47,7 @@ describe('portable review panel items', () => {
   let root: ReturnType<typeof createRoot>
   let latestSource = identicalSource
   let notices: string[] = []
+  let collaborativeDocuments: CollaborativeDocument[] = []
 
   function Harness() {
     const [source, setSource] = useState(identicalSource)
@@ -58,6 +62,7 @@ describe('portable review panel items', () => {
     ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
     latestSource = identicalSource
     notices = []
+    collaborativeDocuments = []
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
@@ -66,6 +71,7 @@ describe('portable review panel items', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount())
+    collaborativeDocuments.forEach((document) => document.destroy())
     container.remove()
   })
 
@@ -113,6 +119,44 @@ describe('portable review panel items', () => {
     expect(parseReviewMarkup(latestSource).decisions).toEqual([])
     expect(text(container.querySelector('[role="alert"]'))).toContain('overlap')
     expect(container.querySelectorAll<HTMLInputElement>('.review-batch-toggle input:checked')).toHaveLength(2)
+  })
+
+  it('explains and resolves incompatible offline decisions from the live review rail', async () => {
+    const seed = CollaborativeDocument.fromPortableSource(identicalSource)
+    const update = seed.encodeUpdate()
+    const left = new CollaborativeDocument()
+    const right = new CollaborativeDocument()
+    left.applyUpdate(update)
+    right.applyUpdate(update)
+    seed.destroy()
+    collaborativeDocuments.push(left, right)
+    const leftBinding = new CollaborativeReviewBinding(left)
+    const rightBinding = new CollaborativeReviewBinding(right)
+    leftBinding.decide({ changeIds: ['dm-i01'], action: 'accepted', author: { id: 'dm-a01', name: 'Alice Martin' } })
+    rightBinding.decide({ changeIds: ['dm-i01'], action: 'rejected', author: { id: 'dm-a02', name: 'Marcus Chen' } })
+    syncCollaborativeDocuments(left, right)
+    const conflictSource = projectCollaborationPortableSource(left)
+
+    function ConflictHarness() {
+      const [source, setSource] = useState(conflictSource)
+      return <PortableReviewItems source={source} collaborativeReview={leftBinding} onApply={(next, message) => {
+        latestSource = next
+        notices.push(message)
+        setSource(next)
+      }} />
+    }
+    await act(async () => root.render(<ConflictHarness />))
+    await click(container.querySelector('#review-item-dm-i01 .proposal-option')!)
+
+    expect(text(container.querySelector('.status-decision-conflict'))).toBe('Decision conflict')
+    expect(text(container.querySelector('.review-decision-conflict'))).toContain('No choice was discarded')
+    await click(button(container.querySelector('.review-decision-conflict')!, 'Keep rejected'))
+
+    expect(leftBinding.conflicts()).toEqual([])
+    expect(parseReviewMarkup(latestSource).changes.find((change) => change.id === 'dm-i01')?.status).toBe('rejected')
+    expect(parseReviewMarkup(latestSource).decisions.find((decision) => decision.attributes['data-resolves'])).toMatchObject({ action: 'rejected' })
+    expect(notices.at(-1)).toContain('Concurrent decisions resolved')
+    expect(container.querySelector('.review-decision-conflict')).toBeNull()
   })
 
   it('applies a batch to the currently filtered author only', async () => {

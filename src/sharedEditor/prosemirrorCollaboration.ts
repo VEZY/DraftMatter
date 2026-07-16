@@ -11,6 +11,7 @@ import {
 } from 'y-prosemirror'
 import type { Awareness } from 'y-protocols/awareness'
 import * as Y from 'yjs'
+import type { CollaborativeReviewBinding } from './collaborativeReview'
 
 export const COLLABORATIVE_PROSEMIRROR_ROOT = 'draftmatter:prosemirror'
 
@@ -24,6 +25,7 @@ export interface CollaborativeEditorBinding {
   document: Y.Doc
   awareness: Awareness
   publishPortableSource?: (source: string) => void
+  review?: CollaborativeReviewBinding
 }
 
 export interface CollaborativeProseMirrorState {

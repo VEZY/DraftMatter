@@ -2555,6 +2555,7 @@ button:disabled {
 .status-accepted { background: var(--sage-soft); color: var(--sage); }
 .status-rejected { background: var(--danger-soft); color: var(--danger); }
 .status-needs-rebase { background: var(--amber-soft); color: var(--amber); }
+.status-decision-conflict { background: #f3ede6; color: #785b43; }
 
 .proposal-copy {
   color: #56615b;
@@ -2604,6 +2605,33 @@ button:disabled {
 
 .review-actions .accept { background: var(--sage-dark); color: white; flex: 1; }
 .review-actions .reject { background: #f1f3f1; color: #626d67; flex: 1; }
+.review-actions .rebase { background: #f7f0e7; color: #785b43; flex: 1; }
+
+.review-decision-conflict {
+  background: #fcfaf7;
+  border-top: 1px solid #eadfd2;
+  color: #62584f;
+  display: grid;
+  gap: 2px;
+  padding-top: 8px;
+}
+
+.review-decision-conflict > div:first-child {
+  align-items: start;
+  display: flex;
+  gap: 7px;
+  padding: 0 10px 2px;
+}
+
+.review-decision-conflict > div:first-child > span {
+  display: grid;
+  gap: 3px;
+}
+
+.review-decision-conflict strong { font-size: 8.5px; }
+.review-decision-conflict small,
+.review-decision-conflict > p { color: #786d64; font-size: 7.5px; line-height: 1.45; margin: 0; }
+.review-decision-conflict > p { padding: 3px 10px 10px; }
 
 .decision-note {
   align-items: center;

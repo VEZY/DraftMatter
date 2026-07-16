@@ -13,6 +13,7 @@ import {
   setCollaborativeEditorPresence,
   type CollaborativeEditorBinding,
 } from './prosemirrorCollaboration'
+import { COLLABORATIVE_REVIEW_ORIGIN, CollaborativeReviewBinding } from './collaborativeReview'
 
 export type CollaborationClientStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
 
@@ -67,10 +68,11 @@ export class HocuspocusCollaborationClient {
       document: collaboration.doc,
       awareness: collaboration.awareness,
       publishPortableSource: (source) => { this.publishPortableSource(source) },
+      review: new CollaborativeReviewBinding(collaboration, (source) => { this.lastPortableSource = source }),
     }
     this.provider = provider
     this.stopUpdate = collaboration.onPortableUpdate((origin) => {
-      if (origin === LOCAL_ORIGIN || origin === 'collaboration-bootstrap') return
+      if (origin === LOCAL_ORIGIN || origin === COLLABORATIVE_REVIEW_ORIGIN || origin === 'collaboration-bootstrap') return
       try {
         const source = projectCollaborationPortableSource(collaboration)
         this.lastPortableSource = source

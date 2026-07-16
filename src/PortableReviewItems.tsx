@@ -16,13 +16,21 @@ import { placePortableReviewAtQuote, placePortableReviewCandidate, reanchorPorta
 import { DEFAULT_USER_SETTINGS, type LocalAuthorIdentity } from './userSettings'
 import { ReviewTimestamp } from './ReviewTimestamp'
 import { reviewProposalText } from './reviewPresentation'
+import {
+  portableReviewDecisionConflicts,
+  resolvePortableReviewDecisionConflict,
+  type CollaborativeReviewBinding,
+} from './sharedEditor/collaborativeReview'
+import type { TransactionalReviewAction } from './sharedEditor/reviewDecisions'
 
 function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'A'
 }
 
 function statusLabel(status: string) {
-  return status === 'needs-rebase' ? 'Needs rebase' : `${status.slice(0, 1).toUpperCase()}${status.slice(1)}`
+  if (status === 'needs-rebase') return 'Needs rebase'
+  if (status === 'decision-conflict') return 'Decision conflict'
+  return `${status.slice(0, 1).toUpperCase()}${status.slice(1)}`
 }
 
 function uniqueQuote(source: string, quote: string) {
@@ -47,6 +55,7 @@ export function PortableReviewItems({
   onActiveIdChange,
   onNavigateToItem,
   selectedTarget,
+  collaborativeReview,
   onApply,
   canComment = true,
   canSuggest = true,
@@ -61,6 +70,7 @@ export function PortableReviewItems({
   onActiveIdChange?: (id: string | undefined) => void
   onNavigateToItem?: (item: ReviewQueueItem) => void
   selectedTarget?: { quote: string; occurrence: number } | null
+  collaborativeReview?: CollaborativeReviewBinding | null
   onApply: (source: string, message: string) => void
   canComment?: boolean
   canSuggest?: boolean
@@ -69,6 +79,14 @@ export function PortableReviewItems({
   const document = useMemo(() => parseReviewMarkup(source), [source])
   const reanchorResult = useMemo(() => reanchorPortableReviews(source), [source])
   const recoveryByAnchor = useMemo(() => new Map(reanchorResult.items.map((item) => [item.anchorId, item])), [reanchorResult])
+  const decisionConflicts = useMemo(
+    () => collaborativeReview?.conflicts() ?? portableReviewDecisionConflicts(source),
+    [collaborativeReview, source],
+  )
+  const decisionConflictByChange = useMemo(
+    () => new Map(decisionConflicts.map((conflict) => [conflict.changeId, conflict])),
+    [decisionConflicts],
+  )
   const queue = useMemo(() => {
     const excluded = new Set(excludeIds)
     return buildReviewQueue(document, authorId ? { authorIds: [authorId] } : {}).filter((item) => !excluded.has(item.id))
@@ -150,6 +168,13 @@ export function PortableReviewItems({
   const decide = (changeId: string, action: 'accepted' | 'rejected') => {
     if (!canDecide) return
     try {
+      if (collaborativeReview) {
+        const result = collaborativeReview.decide({ changeIds: [changeId], action, author: localAuthor })
+        apply(result.source, action === 'accepted'
+          ? `Suggestion accepted transactionally${result.rebasedChangeIds.length ? ` · ${result.rebasedChangeIds.length} overlapping alternative${result.rebasedChangeIds.length === 1 ? '' : 's'} need rebase` : ''}`
+          : 'Suggestion rejected transactionally · accepted text unchanged')
+        return
+      }
       const withAuthor = ensureReviewAuthor(document, localAuthor).document
       const result = decideReviewChange(withAuthor, { changeId, action, authorId: localAuthor.id })
       apply(result.document.source, action === 'accepted'
@@ -170,6 +195,15 @@ export function PortableReviewItems({
   const decideBatch = (action: 'accepted' | 'rejected') => {
     if (!canDecide) return
     try {
+      if (collaborativeReview) {
+        const result = collaborativeReview.decide({ changeIds: selectedChangeIds, action, author: localAuthor })
+        setSelectedChangeIds([])
+        apply(
+          result.source,
+          `${result.decidedChangeIds.length} suggestion${result.decidedChangeIds.length === 1 ? '' : 's'} ${action} in one shared transaction${result.rebasedChangeIds.length ? ` · ${result.rebasedChangeIds.length} overlapping alternative${result.rebasedChangeIds.length === 1 ? '' : 's'} need rebase` : ''}`,
+        )
+        return
+      }
       const withAuthor = ensureReviewAuthor(document, localAuthor).document
       const result = decideReviewChanges(withAuthor, {
         changeIds: selectedChangeIds,
@@ -180,6 +214,28 @@ export function PortableReviewItems({
       apply(
         result.document.source,
         `${result.decidedChangeIds.length} suggestion${result.decidedChangeIds.length === 1 ? '' : 's'} ${action} atomically${result.rebasedChangeIds.length ? ` · ${result.rebasedChangeIds.length} overlapping alternative${result.rebasedChangeIds.length === 1 ? '' : 's'} need rebase` : ''}`,
+      )
+    } catch (error) {
+      fail(error)
+    }
+  }
+
+  const resolveDecisionConflict = (changeId: string, action: TransactionalReviewAction) => {
+    if (!canDecide) return
+    const conflict = decisionConflictByChange.get(changeId)
+    if (!conflict) {
+      setProblem('The concurrent decision set changed. Refresh before resolving it.')
+      return
+    }
+    try {
+      const request = { changeId, action, author: localAuthor, resolves: conflict.decisionIds }
+      const result = collaborativeReview
+        ? collaborativeReview.resolveConflict(request)
+        : resolvePortableReviewDecisionConflict(source, request)
+      const outcome = action === 'accepted' ? 'accepted' : action === 'rejected' ? 'rejected' : 'marked for rebase'
+      apply(
+        result.source,
+        `Concurrent decisions resolved · suggestion ${outcome}${result.rebasedChangeIds.length ? ` · ${result.rebasedChangeIds.length} overlapping alternative${result.rebasedChangeIds.length === 1 ? '' : 's'} need rebase` : ''}`,
       )
     } catch (error) {
       fail(error)
@@ -316,6 +372,7 @@ export function PortableReviewItems({
         if (item.kind === 'change' || item.kind === 'unplaced-change') {
           const change = document.changes.find((candidate) => candidate.id === item.id)!
           const recovery = recoveryByAnchor.get(item.anchorId)
+          const decisionConflict = decisionConflictByChange.get(item.id)
           return (
             <div className={`conflict-card portable-review-card ${active ? 'active' : ''} ${selectedChangeIds.includes(item.id) ? 'batch-selected' : ''}`} id={`review-item-${item.id}`} data-review-balloon={item.id} data-review-balloon-anchor={item.anchorId} key={item.id}>
               <div className="conflict-heading"><Icon name="branch" size={16} /><span>{item.conflictId ? 'Overlapping suggestion' : item.kind === 'unplaced-change' ? 'Unplaced suggestion' : 'Suggestion'}</span>{canDecide && batchableChangeIds.includes(item.id) && <label className="review-batch-toggle" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedChangeIds.includes(item.id)} onChange={() => toggleBatchSelection(item.id)} aria-label={`Select suggestion by ${item.authorName}`} /><span>Select</span></label>}<small>{item.anchorId}</small></div>
@@ -341,6 +398,14 @@ export function PortableReviewItems({
                     </div>
                   )}
                 </>
+              )}
+              {active && change.status === 'decision-conflict' && decisionConflict && (
+                <div className="review-decision-conflict" role="group" aria-label="Resolve concurrent review decisions">
+                  <div><Icon name="branch" size={15} /><span><strong>Concurrent decisions need review</strong><small>{decisionConflict.actions.map(statusLabel).join(' and ')} were recorded from the same shared revision. No choice was discarded.</small></span></div>
+                  {canDecide
+                    ? <div className="review-actions"><button className="accept" onClick={() => resolveDecisionConflict(item.id, 'accepted')}><Icon name="check" size={14} /> Keep accepted</button><button className="reject" onClick={() => resolveDecisionConflict(item.id, 'rejected')}><Icon name="x" size={14} /> Keep rejected</button><button className="rebase" onClick={() => resolveDecisionConflict(item.id, 'rebased')}><Icon name="branch" size={14} /> Require rebase</button></div>
+                    : <p>An owner or editor must choose the recorded outcome before the next checkpoint.</p>}
+                </div>
               )}
               {canDecide && active && item.kind === 'unplaced-change' && recovery && (
                 <div className="unplaced-review-placement">

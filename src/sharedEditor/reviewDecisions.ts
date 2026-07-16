@@ -100,7 +100,7 @@ function validateDecision(document: CollaborativeDocument, request: CommitReview
   return null
 }
 
-export function commitReviewDecision(document: CollaborativeDocument, request: CommitReviewDecisionRequest) {
+export function prepareReviewDecision(document: CollaborativeDocument, request: CommitReviewDecisionRequest) {
   const duplicate = validateDecision(document, request)
   if (duplicate) return duplicate
   const active = activeDecisions(document.snapshot(), request.changeId)
@@ -115,11 +115,17 @@ export function commitReviewDecision(document: CollaborativeDocument, request: C
     baseRevision: request.baseRevision,
     ...(request.timestamp ? { timestamp: request.timestamp } : {}),
   }
+  return decision
+}
+
+export function commitReviewDecision(document: CollaborativeDocument, request: CommitReviewDecisionRequest) {
+  const decision = prepareReviewDecision(document, request)
+  if (document.snapshot().decisions.some((candidate) => candidate.id === decision.id)) return decision
   document.putDecision(decision)
   return decision
 }
 
-export function resolveReviewDecisionConflict(document: CollaborativeDocument, request: ResolveReviewDecisionConflictRequest) {
+export function prepareReviewDecisionConflictResolution(document: CollaborativeDocument, request: ResolveReviewDecisionConflictRequest) {
   const duplicate = validateDecision(document, request)
   if (duplicate) return duplicate
   const conflict = reviewDecisionConflicts(document.snapshot()).find((candidate) => candidate.changeId === request.changeId)
@@ -136,6 +142,12 @@ export function resolveReviewDecisionConflict(document: CollaborativeDocument, r
     resolves: expected,
     ...(request.timestamp ? { timestamp: request.timestamp } : {}),
   }
+  return decision
+}
+
+export function resolveReviewDecisionConflict(document: CollaborativeDocument, request: ResolveReviewDecisionConflictRequest) {
+  const decision = prepareReviewDecisionConflictResolution(document, request)
+  if (document.snapshot().decisions.some((candidate) => candidate.id === decision.id)) return decision
   document.putDecision(decision)
   return decision
 }

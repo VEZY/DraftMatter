@@ -46,6 +46,17 @@ export {
   type CollaborativeProseMirrorState,
 } from './prosemirrorCollaboration'
 export {
+  COLLABORATIVE_REVIEW_ORIGIN,
+  CollaborativeReviewBinding,
+  CollaborativeReviewBindingError,
+  portableReviewDecisionConflicts,
+  resolvePortableReviewDecisionConflict,
+  type CollaborativeReviewConflictResolutionRequest,
+  type CollaborativeReviewConflictResolutionResult,
+  type CollaborativeReviewDecisionRequest,
+  type CollaborativeReviewDecisionResult,
+} from './collaborativeReview'
+export {
   HocuspocusCollaborationClient,
   validateCollaborationServiceUrl,
   type CollaborationClientOptions,

@@ -3872,6 +3872,7 @@ function App() {
                   requestAnimationFrame(() => structuredEditorRef.current?.scrollToReviewAnchor(item.anchorId))
                 }}
                 selectedTarget={structuredMode ? structuredReviewSelection : null}
+                collaborativeReview={collaborativeEditorBinding?.review}
                 onApply={applyPortableReviewSource}
                 canComment={canCommentReview}
                 canSuggest={canSuggestReview}
