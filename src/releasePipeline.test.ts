@@ -5,6 +5,7 @@ import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 
 const workflow = readFileSync('.github/workflows/desktop-release.yml', 'utf8')
+const portabilityWorkflow = readFileSync('.github/workflows/desktop-portability.yml', 'utf8')
 const version = JSON.parse(readFileSync('package.json', 'utf8')).version as string
 
 describe('DM-P5-08 production release pipeline', () => {
@@ -57,5 +58,15 @@ describe('DM-P5-08 production release pipeline', () => {
     expect(workflow).toContain('--bundles deb,appimage')
     expect(workflow).toContain('--bundles nsis,msi')
     expect(workflow).toContain('--bundles app,dmg')
+  })
+
+  it('tests the standalone CLI on every platform and attaches one platform-neutral package', () => {
+    expect(portabilityWorkflow).toContain('Build standalone clean-export CLI')
+    expect(portabilityWorkflow).toContain('Test standalone clean-export CLI')
+    expect(portabilityWorkflow).toContain('npm run test:cli')
+    expect(workflow).toContain('Package platform-neutral CLI')
+    expect(workflow).toContain('npm pack ./dist-cli --pack-destination release-cli')
+    expect(workflow).toContain("-name 'draftmatter-*.tgz'")
+    expect(workflow).toContain('needs: [build, cli]')
   })
 })

@@ -29,7 +29,7 @@ The local MVP supports opening and creating `.md`/`.qmd` projects; deterministic
 
 ## Clean export CLI
 
-The build also produces a portable Node.js command at `dist-cli/draftmatter.js`. It uses the same review projector and inert native HTML renderer as the app and never executes manuscript code.
+The build also produces a dependency-free Node.js command and minimal package in `dist-cli`. It uses the same review projector and inert native HTML renderer as the app and never executes manuscript code.
 
 ```sh
 npm run build:cli
@@ -37,9 +37,10 @@ node dist-cli/draftmatter.js render paper.qmd --view original -o original.qmd
 node dist-cli/draftmatter.js render paper.qmd --view final --select dm-change-id -o final.qmd
 node dist-cli/draftmatter.js render paper.qmd --view final --format html -o article.html
 node dist-cli/draftmatter.js review-report paper.qmd -o review-report.md
+npm run pack:cli
 ```
 
-Final rendering exits with status `2` and writes no output when overlapping proposals still need a choice. The diagnostic lists every conflict and candidate; pass one `--select` ID from each conflict. Use `-` for standard input or output. Package managers that install this project’s `bin` entry expose the same command as `draftmatter`.
+Final rendering exits with status `2` and writes no output when overlapping proposals still need a choice. The diagnostic lists every conflict and candidate; pass one `--select` ID from each conflict. Use `-` for standard input or output. Install the generated `draftmatter-<version>.tgz` archive globally to expose the command as `draftmatter`; tagged releases attach the same platform-neutral archive.
 
 Useful implementation notes:
 

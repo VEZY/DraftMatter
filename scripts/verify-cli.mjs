@@ -19,6 +19,13 @@ function run(arguments_, input) {
 
 try {
   const source = await readFile(fixture, 'utf8')
+  const bundle = await readFile(cli, 'utf8')
+  const packageMetadata = JSON.parse(await readFile(join(root, 'dist-cli', 'package.json'), 'utf8'))
+  const externalImports = [...bundle.matchAll(/^import .* from "([^"]+)";$/gm)].map((match) => match[1])
+  assert.deepEqual(externalImports.filter((specifier) => !specifier.startsWith('node:')), [])
+  assert.deepEqual(packageMetadata.bin, { draftmatter: 'draftmatter.js' })
+  assert.deepEqual(packageMetadata.engines, { node: '>=20' })
+  assert.equal(packageMetadata.dependencies, undefined)
   const input = join(temporary, 'paper.qmd')
   await writeFile(input, source, 'utf8')
 

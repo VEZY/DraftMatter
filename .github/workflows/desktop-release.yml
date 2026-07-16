@@ -75,6 +75,36 @@ jobs:
           done
           exit "$missing"
 
+  cli:
+    needs: verify
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.1
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Build and test standalone clean-export CLI
+        run: |
+          npm run build:cli
+          npm run test:cli
+
+      - name: Package platform-neutral CLI
+        run: |
+          mkdir release-cli
+          npm pack ./dist-cli --pack-destination release-cli
+
+      - name: Upload CLI release artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: draftmatter-cli
+          path: release-cli/draftmatter-*.tgz
+
   build:
     needs: [verify, signing-policy]
     name: ${{ matrix.label }}
@@ -212,7 +242,7 @@ jobs:
 
   release-metadata:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: build
+    needs: [build, cli]
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/download-artifact@v7
@@ -227,6 +257,9 @@ jobs:
             artifact="$(basename "$(dirname "$(dirname "$file")")")"
             cp "$file" "release-metadata/${artifact}-$(basename "$file")"
           done < <(find release-assets -type f \( -name 'THIRD_PARTY_NOTICES.md' -o -name 'sbom.cdx.json' \) | sort)
+          cli="$(find release-assets -type f -name 'draftmatter-*.tgz' -print -quit)"
+          test -n "$cli"
+          cp "$cli" release-metadata/
           (cd release-assets && find . -type f -print0 | sort -z | xargs -0 sha256sum) > release-metadata/SHA256SUMS
 
       - name: Attach verified release metadata
