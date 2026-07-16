@@ -54,6 +54,7 @@ import { motionAwareScrollBehavior } from './accessibility'
 import { normalizeProjectRelativePath, projectFilePath } from './projectPaths'
 import { authorInitials, readUserSettings, renameLocalAuthor, saveUserSettings } from './userSettings'
 import { parsePublicationMetadata, updatePublicationAuthors } from './publicationMetadata'
+import { insertPortableSection } from './manuscriptOutline'
 
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
 const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
@@ -336,6 +337,9 @@ function App() {
   const [activeNav, setActiveNav] = useState<'manuscript' | 'review' | 'sources' | 'history'>('manuscript')
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
+  const [outlineOptionsOpen, setOutlineOptionsOpen] = useState(false)
+  const [outlineQuery, setOutlineQuery] = useState('')
+  const [outlineMaxDepth, setOutlineMaxDepth] = useState(6)
   const [citationOpen, setCitationOpen] = useState(false)
   const [citationSearchOpen, setCitationSearchOpen] = useState(false)
   const [citationPickerItems, setCitationPickerItems] = useState<CitationItem[]>([])
@@ -1012,6 +1016,7 @@ function App() {
         setCreateProjectOpen(false)
         setPendingProject(null)
         setEnvironmentOpen(false)
+        setOutlineOptionsOpen(false)
         setPublicationAuthorsOpen(false)
         if (!executionTrustBusy) setExecutionTrustOpen(false)
         setSourceOpen(false)
@@ -1384,7 +1389,19 @@ function App() {
       setToast('Section labels use the portable sec-… form, for example sec-methods')
       return
     }
-    runStructuredCommand((editor) => editor.insertHeading(title, level, label), 'Add section')
+    try {
+      const portable = insertPortableSection(manuscriptSource, { title, level, label })
+      const editor = structuredEditorRef.current
+      if (structuredMode && editor) {
+        if (!editor.insertHeading(title, level, label)) setToast('Choose a valid, unused section label before adding this heading')
+        return
+      }
+      setStructuredMode(true)
+      updateStructuredManuscript(portable)
+      setToast(`Section added · ${title}`)
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : String(error))
+    }
   }
 
   const discoverExecutionEnvironments = async (showDialog = false) => {
@@ -2868,6 +2885,24 @@ function App() {
     if (!entry || entry.disabled) return
     entry.action()
   }
+  const legacyOutlineItems = [
+    { id: 'title', title: draft.title, level: 1 },
+    { id: 'abstract', title: 'Abstract', level: 2, detail: '112' },
+    { id: 'introduction', title: 'Introduction', level: 2, detail: '146' },
+    { id: 'methods', title: 'Methods', level: 2, detail: '185' },
+    { id: 'code-cell', title: 'Canopy response', level: 3, detail: 'Fig. 1' },
+    { id: 'results', title: 'Results', level: 2, detail: '164' },
+    { id: 'conclusion', title: 'Conclusion', level: 2, detail: '88' },
+    { id: 'references', title: 'References', level: 2, detail: String(renderedBibliography.length) },
+  ]
+  const normalizedOutlineQuery = outlineQuery.trim().toLocaleLowerCase()
+  const outlineMatches = (item: { title: string; level: number }) => item.level <= outlineMaxDepth
+    && (!normalizedOutlineQuery || item.title.toLocaleLowerCase().includes(normalizedOutlineQuery))
+  const visibleStructuredOutline = structuredOutline.filter(outlineMatches)
+  const visibleLegacyOutline = legacyOutlineItems.filter(outlineMatches)
+  const outlineCount = structuredMode ? structuredOutline.length : legacyOutlineItems.length
+  const visibleOutlineCount = structuredMode ? visibleStructuredOutline.length : visibleLegacyOutline.length
+  const outlineFiltered = Boolean(normalizedOutlineQuery) || outlineMaxDepth < 6
 
   return (
     <div className="app-shell">
@@ -3010,27 +3045,70 @@ function App() {
                 <span className="eyebrow">Manuscript</span>
                 <h2>Outline</h2>
               </div>
-              <button className="icon-button subtle" aria-label="Outline options"><Icon name="more" /></button>
+              <div className="outline-options-wrap">
+                <button
+                  className="icon-button subtle"
+                  aria-label="Outline options"
+                  aria-controls="outline-options"
+                  aria-expanded={outlineOptionsOpen}
+                  aria-haspopup="dialog"
+                  onClick={() => setOutlineOptionsOpen((open) => !open)}
+                ><Icon name="more" /></button>
+                {outlineOptionsOpen && (
+                  <div className="outline-options-popover" id="outline-options" role="dialog" aria-label="Outline display options">
+                    <label className="outline-search">
+                      <span className="visually-hidden">Search outline</span>
+                      <Icon name="search" size={14} />
+                      <input
+                        autoFocus
+                        aria-label="Search outline"
+                        placeholder="Find a heading"
+                        value={outlineQuery}
+                        onChange={(event) => setOutlineQuery(event.currentTarget.value)}
+                      />
+                    </label>
+                    <label className="outline-depth">
+                      <span>Heading depth</span>
+                      <select aria-label="Heading depth" value={outlineMaxDepth} onChange={(event) => setOutlineMaxDepth(Number(event.currentTarget.value))}>
+                        <option value={6}>All heading levels</option>
+                        <option value={1}>Heading 1 only</option>
+                        <option value={2}>Through heading 2</option>
+                        <option value={3}>Through heading 3</option>
+                        <option value={4}>Through heading 4</option>
+                        <option value={5}>Through heading 5</option>
+                      </select>
+                    </label>
+                    <div className="outline-filter-summary" aria-live="polite">
+                      <span>{visibleOutlineCount} of {outlineCount} items</span>
+                      <button
+                        disabled={!outlineFiltered}
+                        onClick={() => { setOutlineQuery(''); setOutlineMaxDepth(6) }}
+                      >Reset</button>
+                    </div>
+                  </div>
+                )}
+              </div>
             </div>
 
             <div className="outline-tree">
               {structuredMode ? <>
-                {structuredOutline.length ? structuredOutline.map((item, index) => (
-                  <button className={`${item.level === 1 ? 'outline-title' : ''} ${item.level > 2 ? 'outline-nested' : ''} ${index === 0 ? 'active' : ''}`.trim()} onClick={() => structuredEditorRef.current?.scrollToNode(item.id)} key={item.id}>
+                {visibleStructuredOutline.length ? visibleStructuredOutline.map((item) => (
+                  <button className={`${item.level === 1 ? 'outline-title' : ''} ${item.level > 2 ? 'outline-nested' : ''} ${item.id === structuredOutline[0]?.id ? 'active' : ''}`.trim()} onClick={() => { setOutlineOptionsOpen(false); structuredEditorRef.current?.scrollToNode(item.id) }} key={item.id}>
                     <span>{item.title}</span><small>H{item.level}</small>
                   </button>
-                )) : <p className="outline-empty">Add a heading to build the outline.</p>}
-                <button className="add-section" onClick={addStructuredSection}><Icon name="plus" size={15} /> Add section</button>
+                )) : <p className="outline-empty">{structuredOutline.length ? 'No headings match these outline filters.' : 'Add a heading to build the outline.'}</p>}
+                <button className="add-section" onClick={() => { setOutlineOptionsOpen(false); addStructuredSection() }}><Icon name="plus" size={15} /> Add section</button>
               </> : <>
-                <button className="outline-title active" onClick={() => scrollTo('title')}>{draft.title}</button>
-                <button onClick={() => scrollTo('abstract')}><span>Abstract</span><small>112</small></button>
-                <button onClick={() => scrollTo('introduction')}><span>Introduction</span><small>146</small></button>
-                <button onClick={() => scrollTo('methods')}><span>Methods</span><small>185</small></button>
-                <button className="outline-nested" onClick={() => scrollTo('code-cell')}><span>Canopy response</span><small>Fig. 1</small></button>
-                <button onClick={() => scrollTo('results')}><span>Results</span><small>164</small></button>
-                <button onClick={() => scrollTo('conclusion')}><span>Conclusion</span><small>88</small></button>
-                <button onClick={() => scrollTo('references')}><span>References</span><small>{renderedBibliography.length}</small></button>
-                <button className="add-section"><Icon name="plus" size={15} /> Add section</button>
+                {visibleLegacyOutline.length ? visibleLegacyOutline.map((item) => (
+                  <button
+                    className={`${item.level === 1 ? 'outline-title' : ''} ${item.level > 2 ? 'outline-nested' : ''} ${item.id === 'title' ? 'active' : ''}`.trim()}
+                    key={item.id}
+                    onClick={() => { setOutlineOptionsOpen(false); scrollTo(item.id) }}
+                  >
+                    <span>{item.title}</span>{item.detail && <small>{item.detail}</small>}
+                  </button>
+                )) : <p className="outline-empty">No headings match these outline filters.</p>}
+                <button className="add-section" onClick={() => { setOutlineOptionsOpen(false); addStructuredSection() }}><Icon name="plus" size={15} /> Add section</button>
               </>}
             </div>
 

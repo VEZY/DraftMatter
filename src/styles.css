@@ -930,6 +930,103 @@ button:disabled {
   padding: 23px 16px 14px 18px;
 }
 
+.outline-options-wrap {
+  position: relative;
+}
+
+.outline-options-popover {
+  background: rgba(255, 255, 255, .98);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: 0 12px 30px rgba(48, 61, 54, .12);
+  display: grid;
+  gap: 11px;
+  padding: 11px;
+  position: absolute;
+  right: 0;
+  top: 34px;
+  width: min(216px, calc(100vw - 24px));
+  z-index: 60;
+}
+
+.outline-search {
+  align-items: center;
+  background: #f7f9f7;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: var(--faint);
+  display: flex;
+  gap: 6px;
+  padding: 0 8px;
+}
+
+.outline-search:focus-within {
+  border-color: var(--sage);
+  box-shadow: 0 0 0 2px rgba(94, 122, 105, .1);
+}
+
+.outline-search input {
+  background: transparent;
+  border: 0;
+  color: #3f4b45;
+  font: inherit;
+  font-size: 11px;
+  min-width: 0;
+  outline: none;
+  padding: 8px 0;
+  width: 100%;
+}
+
+.outline-search input::placeholder {
+  color: #9aa39e;
+}
+
+.outline-depth {
+  display: grid;
+  gap: 5px;
+}
+
+.outline-depth > span {
+  color: #69736e;
+  font-size: 9px;
+  font-weight: 700;
+  letter-spacing: .45px;
+  text-transform: uppercase;
+}
+
+.outline-depth select {
+  background: white;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  color: #4d5852;
+  font: inherit;
+  font-size: 10px;
+  padding: 7px 8px;
+  width: 100%;
+}
+
+.outline-filter-summary {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  display: flex;
+  font-size: 9px;
+  justify-content: space-between;
+  padding-top: 9px;
+}
+
+.outline-filter-summary button {
+  background: transparent;
+  color: var(--sage-dark);
+  font-size: 9px;
+  padding: 2px 0;
+}
+
+.outline-filter-summary button:disabled {
+  color: #afb6b2;
+  cursor: default;
+}
+
 .eyebrow {
   color: var(--faint);
   display: block;

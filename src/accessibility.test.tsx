@@ -75,4 +75,18 @@ describe('accessibility baseline', () => {
     await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
     expect(container.querySelector('[aria-labelledby="publication-authors-title"]')).toBeNull()
   })
+
+  it('labels the outline filters and closes them from the keyboard', async () => {
+    await act(async () => root.render(<App />))
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Outline options"]')!.click())
+
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Outline display options"]')
+    expect(dialog).not.toBeNull()
+    expect(dialog?.querySelector<HTMLInputElement>('[aria-label="Search outline"]')).toBe(document.activeElement)
+    const result = await axe.run(dialog!, { rules: { 'color-contrast': { enabled: false } } })
+    expect(result.violations).toEqual([])
+
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+    expect(container.querySelector('[aria-label="Outline display options"]')).toBeNull()
+  })
 })
