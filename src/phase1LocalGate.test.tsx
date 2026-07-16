@@ -83,6 +83,37 @@ describe('DM-P1-GATE local project workflow', () => {
       persistedHash = 'document-2'
       return { path: request.path, hash: persistedHash, bytes: request.content.length, recoveryPath: '.draftmatter/recovery/paper-document-1.qmd' }
     })
+    vi.spyOn(desktopHost, 'gitStatus').mockResolvedValue({
+      gitAvailable: true,
+      gitVersion: 'git version 2.50.0',
+      repository: true,
+      repositoryRoot: projectRoot,
+      projectPrefix: '',
+      branch: 'main',
+      detached: false,
+      ahead: 0,
+      behind: 0,
+      entries: [],
+    })
+    vi.spyOn(desktopHost, 'gitBranches').mockResolvedValue({ current: 'main', detached: false, branches: [{ name: 'main', current: true }], remotes: [] })
+    vi.spyOn(desktopHost, 'gitHistory').mockResolvedValue([{ hash: '1234567890abcdef1234567890abcdef12345678', shortHash: '12345678', authoredAt: '2026-07-16T10:00:00+02:00', author: 'Ada', message: 'Earlier draft' }])
+    vi.spyOn(desktopHost, 'gitCheckpointDiff').mockResolvedValue({ hash: '1234567890abcdef1234567890abcdef12345678', text: '@@ -1 +1 @@\n-current\n+earlier\n', truncated: false, files: ['paper.qmd'] })
+    vi.spyOn(desktopHost, 'gitRestoreCheckpoint').mockImplementation(async () => {
+      persistedSource = externalSource
+      persistedHash = 'checkpoint-restored'
+      return {
+        gitAvailable: true,
+        gitVersion: 'git version 2.50.0',
+        repository: true,
+        repositoryRoot: projectRoot,
+        projectPrefix: '',
+        branch: 'main',
+        detached: false,
+        ahead: 0,
+        behind: 0,
+        entries: [{ path: 'paper.qmd', kind: 'modified', indexStatus: ' ', worktreeStatus: 'M', staged: false, unstaged: true, conflicted: false, binary: false }],
+      }
+    })
 
     container = document.createElement('div')
     document.body.append(container)
@@ -207,5 +238,34 @@ describe('DM-P1-GATE local project workflow', () => {
     await flush(50)
     expect(container.querySelector('.structured-manuscript-editor')?.textContent).toContain('First observation.')
     expect(readRecoverySnapshots(localStorage).some((snapshot) => snapshot.source === editedSource)).toBe(true)
+  })
+
+  it('flushes the open manuscript and reloads an explicitly restored Git checkpoint', async () => {
+    localStorage.setItem('draftmatter.last-project-root.v1', projectRoot)
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    await act(async () => appRoot.render(<App />))
+    await flush(50)
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="History"]')!.click())
+    await flush()
+    const history = container.querySelector<HTMLElement>('.git-history-browser')!
+    await act(async () => buttonWithText(history, 'Rendered').click())
+    await flush()
+    await act(async () => buttonWithText(container, 'Restore clean files').click())
+    await flush(50)
+
+    expect(desktopHost.saveDocument).toHaveBeenCalledWith(expect.objectContaining({
+      root: projectRoot,
+      path: 'paper.qmd',
+      content: originalSource,
+      expectedHash: 'document-1',
+    }))
+    expect(desktopHost.gitRestoreCheckpoint).toHaveBeenCalledWith({
+      root: projectRoot,
+      hash: '1234567890abcdef1234567890abcdef12345678',
+      paths: ['paper.qmd'],
+    })
+    expect(container.querySelector('.structured-manuscript-editor')?.textContent).toContain('Changed safely in another editor.')
+    expect(container.querySelector('.toast')?.textContent).toContain('Restored 1 file from 12345678')
   })
 })

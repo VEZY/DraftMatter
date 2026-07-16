@@ -35,10 +35,12 @@ export function GitHistoryPanel({
   root,
   manuscriptPath,
   onNotice,
+  onRestoreCheckpoint,
 }: {
   root?: string
   manuscriptPath?: string
   onNotice: (message: string) => void
+  onRestoreCheckpoint?: (hash: string, paths: string[]) => Promise<void>
 }) {
   const [status, setStatus] = useState<GitRepositoryStatus>()
   const [branches, setBranches] = useState<GitBranchStatus>()
@@ -193,6 +195,25 @@ export function GitHistoryPanel({
     }
   }
 
+  async function restoreCheckpoint() {
+    if (!selectedCheckpoint || !checkpointDiff?.files.length || !onRestoreCheckpoint) return
+    const fileCount = checkpointDiff.files.length
+    const confirmed = window.confirm(`Restore ${fileCount} clean file${fileCount === 1 ? '' : 's'} to checkpoint ${selectedCheckpoint.shortHash}?\n\nDraftMatter will refuse if any selected file has staged or working-tree changes.`)
+    if (!confirmed) return
+    setBusy(`restore:${selectedCheckpoint.hash}`)
+    setProblem('')
+    try {
+      await onRestoreCheckpoint(selectedCheckpoint.hash, checkpointDiff.files)
+      onNotice(`Restored ${fileCount} file${fileCount === 1 ? '' : 's'} from ${selectedCheckpoint.shortHash} into the working tree. Review and checkpoint the result when ready.`)
+      setCheckpointDiff(undefined)
+      setSelectedCheckpoint(undefined)
+      await refresh()
+    } catch (error) {
+      setProblem(normaliseHostFailure(error).message)
+      setBusy('')
+    }
+  }
+
   async function createBranch() {
     if (!root || !branchName.trim()) return
     setBusy('branch')
@@ -314,6 +335,7 @@ export function GitHistoryPanel({
                 </div>
               )}
               {checkpointDiff.truncated && <small className="git-diff-limit">Diff truncated at the safe display limit.</small>}
+              {onRestoreCheckpoint && checkpointDiff.files.length > 0 && <div className="git-restore-checkpoint"><span><strong>{checkpointDiff.files.length} changed file{checkpointDiff.files.length === 1 ? '' : 's'}</strong><small title={checkpointDiff.files.join('\n')}>{checkpointDiff.files.join(', ')}</small></span><button onClick={() => void restoreCheckpoint()} disabled={Boolean(busy)}>Restore clean files…</button></div>}
             </div>
           )}
 

@@ -2,7 +2,7 @@
 
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
 import { desktopHost, type GitRepositoryStatus } from './desktopHost'
 import { GitHistoryPanel } from './GitHistoryPanel'
 
@@ -43,16 +43,19 @@ describe('Git history panel', () => {
   let container: HTMLDivElement
   let appRoot: ReturnType<typeof createRoot>
   let notices: string[]
+  let restoreCheckpoint: Mock<(hash: string, paths: string[]) => Promise<void>>
 
   beforeEach(async () => {
     ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
     notices = []
+    restoreCheckpoint = vi.fn(async () => undefined)
     vi.spyOn(desktopHost, 'gitStatus').mockResolvedValue(status)
     vi.spyOn(desktopHost, 'gitBranches').mockResolvedValue({ current: 'main', detached: false, branches: [{ name: 'main', current: true }], remotes: [] })
     vi.spyOn(desktopHost, 'gitHistory').mockResolvedValue([{ hash: '1234567890abcdef1234567890abcdef12345678', shortHash: '12345678', authoredAt: '2026-07-16T10:00:00+02:00', author: 'Ada', message: 'Results' }])
     vi.spyOn(desktopHost, 'gitCheckpointDiff').mockResolvedValue({
       hash: '1234567890abcdef1234567890abcdef12345678',
       truncated: false,
+      files: ['paper.qmd'],
       text: '@@ -1 +1 @@\n-Old checkpoint.\n+New checkpoint.\n',
     })
     vi.spyOn(desktopHost, 'gitCreateCheckpoint').mockResolvedValue({ hash: '1234567890', shortHash: '12345678', message: 'Results', files: ['paper.qmd'] })
@@ -66,7 +69,7 @@ describe('Git history panel', () => {
     container = document.createElement('div')
     document.body.append(container)
     appRoot = createRoot(container)
-    await act(async () => appRoot.render(<GitHistoryPanel root={rootPath} manuscriptPath="paper.qmd" onNotice={(message) => notices.push(message)} />))
+    await act(async () => appRoot.render(<GitHistoryPanel root={rootPath} manuscriptPath="paper.qmd" onNotice={(message) => notices.push(message)} onRestoreCheckpoint={restoreCheckpoint} />))
     await flush()
   })
 
@@ -111,5 +114,18 @@ describe('Git history panel', () => {
     expect(container.querySelector('.git-checkpoint-diff')?.textContent).toContain('Old checkpoint.')
     expect(container.querySelector('.git-checkpoint-diff')?.textContent).toContain('New checkpoint.')
     expect(container.querySelector('.git-checkpoint-diff')?.textContent).toContain('read-only checkpoint')
+  })
+
+  it('requires confirmation and delegates guarded checkpoint restoration', async () => {
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    const history = container.querySelector('.git-history-browser')!
+    await act(async () => button(history, 'Rendered').click())
+    await flush()
+    await act(async () => button(container, 'Restore clean files').click())
+    await flush()
+
+    expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining('refuse if any selected file has staged or working-tree changes'))
+    expect(restoreCheckpoint).toHaveBeenCalledWith('1234567890abcdef1234567890abcdef12345678', ['paper.qmd'])
+    expect(notices.at(-1)).toContain('Restored 1 file from 12345678')
   })
 })

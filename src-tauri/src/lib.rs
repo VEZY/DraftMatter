@@ -34,13 +34,14 @@ use export_adapter::{
     ExternalExportResult, ExternalExportTools,
 };
 use git_adapter::{
-    git_branches_impl, git_create_branch_impl, git_create_checkpoint_impl, git_create_commit_impl,
-    git_checkpoint_diff_impl, git_diff_impl, git_fetch_impl, git_history_impl, git_initialize_impl,
-    git_pull_impl, git_push_impl, git_stage_impl, git_status_impl, git_switch_branch_impl,
+    git_branches_impl, git_checkpoint_diff_impl, git_create_branch_impl,
+    git_create_checkpoint_impl, git_create_commit_impl, git_diff_impl, git_fetch_impl,
+    git_history_impl, git_initialize_impl, git_pull_impl, git_push_impl,
+    git_restore_checkpoint_impl, git_stage_impl, git_status_impl, git_switch_branch_impl,
     GitBranchRequest, GitBranchStatus, GitCheckpointDiffRequest, GitCheckpointDiffResult,
     GitCheckpointRequest, GitCommitRequest, GitCommitResult, GitDiffRequest, GitDiffResult,
     GitHistoryEntry, GitInitializeResult, GitRemoteRequest, GitRemoteResult, GitRepositoryStatus,
-    GitStageRequest,
+    GitRestoreCheckpointRequest, GitStageRequest,
 };
 use jupyter_execution::{
     execute_kernel_impl, interrupt_kernel_impl, restart_kernel_impl, terminate_kernel_impl,
@@ -2378,6 +2379,13 @@ fn git_checkpoint_diff(
 }
 
 #[tauri::command]
+fn git_restore_checkpoint(
+    request: GitRestoreCheckpointRequest,
+) -> Result<GitRepositoryStatus, HostError> {
+    git_restore_checkpoint_impl(request)
+}
+
+#[tauri::command]
 fn git_stage(request: GitStageRequest) -> Result<GitRepositoryStatus, HostError> {
     git_stage_impl(request)
 }
@@ -2483,6 +2491,7 @@ pub fn run() {
             git_diff,
             git_history,
             git_checkpoint_diff,
+            git_restore_checkpoint,
             git_stage,
             git_create_commit,
             git_create_checkpoint,

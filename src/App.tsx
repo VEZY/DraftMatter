@@ -1314,6 +1314,56 @@ function App() {
     await operation
   }
 
+  const restoreGitCheckpoint = async (hash: string, paths: string[]) => {
+    const session = desktopSessionRef.current
+    if (!session) throw new Error('The desktop project is no longer open.')
+    if (collaborationSessionActiveRef.current) throw new Error('Create a portable collaboration checkpoint before restoring local Git history.')
+    if (desktopSaveBlockedRef.current) throw new Error(saveProblem || 'Resolve the external manuscript change before restoring Git history.')
+
+    const operation = desktopSaveQueueRef.current.then(async () => {
+      let current = desktopSessionRef.current
+      if (!current || current.root !== session.root) throw new Error('The desktop project changed before restoration began.')
+      const restoresOpenManuscript = paths.includes(current.path)
+      if (restoresOpenManuscript) {
+        setSaveState('saving')
+        writeRecoverySnapshot(draft, filename, manuscriptSourceRef.current)
+        try {
+          const saved = await desktopHost.saveDocument({
+            root: current.root,
+            path: current.path,
+            content: manuscriptSourceRef.current,
+            expectedHash: current.hash,
+          })
+          current = { ...current, hash: saved.hash, savedRevision: draftRevisionRef.current }
+          replaceDesktopSession(current)
+          setSaveState('saved')
+        } catch (error) {
+          const failure = normaliseHostFailure(error)
+          if (failure.kind === 'conflict') preserveDesktopConflict(failure.message)
+          else {
+            setSaveProblem(failure.message)
+            setSaveState('error')
+          }
+          throw error
+        }
+      }
+
+      await desktopHost.gitRestoreCheckpoint({ root: current.root, hash, paths })
+      if (!restoresOpenManuscript) return
+      const document = await desktopHost.readDocument(current.root, current.path)
+      const parsed = parsePortableDocument(document.content, initialDraft)
+      replaceManuscriptSource(document.content)
+      resetDraftHistory(parsed.draft)
+      resetDraftRevision()
+      replaceDesktopSession({ ...current, hash: document.hash, savedRevision: 0 })
+      setDiagnostics(parsed.diagnostics)
+      setSaveProblem('')
+      setSaveState('saved')
+    })
+    desktopSaveQueueRef.current = operation.catch(() => undefined)
+    await operation
+  }
+
   const scrollTo = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: motionAwareScrollBehavior(), block: 'start' })
   }
@@ -3114,7 +3164,7 @@ function App() {
         </nav>
 
         {leftPanelOpen && (activeNav === 'history' ? (
-          <GitHistoryPanel root={desktopSession?.root} manuscriptPath={desktopSession?.path} onNotice={setToast} />
+          <GitHistoryPanel root={desktopSession?.root} manuscriptPath={desktopSession?.path} onNotice={setToast} onRestoreCheckpoint={restoreGitCheckpoint} />
         ) : (
           <aside className="left-panel" aria-label="Manuscript outline">
             <div className="panel-heading-row">

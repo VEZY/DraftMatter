@@ -841,6 +841,21 @@ button:disabled {
 .git-history-entry button:hover { color: var(--sage-dark); text-decoration: underline; }
 .git-history-note { color: #929b96; display: block; font-size: 8px; line-height: 1.4; margin-top: 7px; }
 
+.git-restore-checkpoint {
+  align-items: center;
+  background: #f7f9f7;
+  border-top: 1px solid var(--line);
+  display: flex;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 8px 9px;
+}
+
+.git-restore-checkpoint > span { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.git-restore-checkpoint strong { color: #56635c; font-size: 8px; }
+.git-restore-checkpoint small { color: #929b96; font-size: 7.5px; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.git-restore-checkpoint button { background: white; border: 1px solid #d4ded8; color: #5b7065; flex: 0 0 auto; font-size: 8px; padding: 5px 7px; }
+
 .git-checkpoint-form {
   border-top: 1px solid var(--line);
   display: flex;

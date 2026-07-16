@@ -104,6 +104,15 @@ pub struct GitCheckpointDiffResult {
     pub hash: String,
     pub text: String,
     pub truncated: bool,
+    pub files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRestoreCheckpointRequest {
+    pub root: String,
+    pub hash: String,
+    pub paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -211,6 +220,7 @@ fn git_command(current_dir: &Path) -> Command {
         .current_dir(current_dir)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "Never")
+        .env("GIT_LITERAL_PATHSPECS", "1")
         .env("GIT_CONFIG_COUNT", "2")
         .env("GIT_CONFIG_KEY_0", "core.hooksPath")
         .env("GIT_CONFIG_VALUE_0", disabled_hooks)
@@ -670,27 +680,42 @@ pub fn git_history_impl(raw_root: &str) -> Result<Vec<GitHistoryEntry>, HostErro
         )?,
         "read checkpoint history",
     )?;
-    let fields = output
-        .stdout
-        .split(|byte| *byte == 0)
-        .filter(|field| !field.is_empty())
-        .map(|field| String::from_utf8_lossy(field).to_string())
-        .collect::<Vec<_>>();
-    if fields.len() % 5 != 0 {
-        return Err(HostError::Integration(
-            "Git returned malformed checkpoint history.".to_string(),
-        ));
+    let mut fields = output.stdout.split(|byte| *byte == 0).peekable();
+    let mut history = Vec::new();
+    loop {
+        while fields.peek().is_some_and(|field| field.is_empty()) {
+            fields.next();
+        }
+        let Some(hash) = fields.next() else { break };
+        let Some(short_hash) = fields.next() else {
+            return Err(HostError::Integration(
+                "Git returned malformed checkpoint history.".to_string(),
+            ));
+        };
+        let Some(authored_at) = fields.next() else {
+            return Err(HostError::Integration(
+                "Git returned malformed checkpoint history.".to_string(),
+            ));
+        };
+        let Some(author) = fields.next() else {
+            return Err(HostError::Integration(
+                "Git returned malformed checkpoint history.".to_string(),
+            ));
+        };
+        let Some(message) = fields.next() else {
+            return Err(HostError::Integration(
+                "Git returned malformed checkpoint history.".to_string(),
+            ));
+        };
+        history.push(GitHistoryEntry {
+            hash: String::from_utf8_lossy(hash).to_string(),
+            short_hash: String::from_utf8_lossy(short_hash).to_string(),
+            authored_at: String::from_utf8_lossy(authored_at).to_string(),
+            author: String::from_utf8_lossy(author).to_string(),
+            message: String::from_utf8_lossy(message).to_string(),
+        });
     }
-    Ok(fields
-        .chunks_exact(5)
-        .map(|fields| GitHistoryEntry {
-            hash: fields[0].clone(),
-            short_hash: fields[1].clone(),
-            authored_at: fields[2].clone(),
-            author: fields[3].clone(),
-            message: fields[4].clone(),
-        })
-        .collect())
+    Ok(history)
 }
 
 pub fn git_checkpoint_diff_impl(
@@ -700,7 +725,10 @@ pub fn git_checkpoint_diff_impl(
     let hash = validate_commit_hash(&request.hash)?;
     let verified = format!("{hash}^{{commit}}");
     require_success(
-        run_git(&context.repository_root, &["rev-parse", "--verify", &verified])?,
+        run_git(
+            &context.repository_root,
+            &["rev-parse", "--verify", &verified],
+        )?,
         "find the selected checkpoint",
     )?;
     let pathspec = project_history_pathspec(&context);
@@ -727,11 +755,123 @@ pub fn git_checkpoint_diff_impl(
     if truncated {
         text.push_str("\n… diff truncated at DraftMatter's 2 MB display limit …\n");
     }
+    let files = checkpoint_files(&context, hash)?;
     Ok(GitCheckpointDiffResult {
         hash: hash.to_string(),
         text,
         truncated,
+        files,
     })
+}
+
+fn checkpoint_files(context: &RepositoryContext, hash: &str) -> Result<Vec<String>, HostError> {
+    let pathspec = project_history_pathspec(context);
+    let output = require_success(
+        run_git(
+            &context.repository_root,
+            &[
+                "diff-tree",
+                "--root",
+                "--no-commit-id",
+                "--name-only",
+                "--find-renames",
+                "-r",
+                "-m",
+                "-z",
+                hash,
+                "--",
+                &pathspec,
+            ],
+        )?,
+        "read the selected checkpoint files",
+    )?;
+    let mut files = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|value| !value.is_empty())
+        .filter_map(|value| project_relative(context, &String::from_utf8_lossy(value)))
+        .collect::<Vec<_>>();
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+pub fn git_restore_checkpoint_impl(
+    request: GitRestoreCheckpointRequest,
+) -> Result<GitRepositoryStatus, HostError> {
+    let context = require_repository(&request.root)?;
+    let hash = validate_commit_hash(&request.hash)?;
+    let verified = format!("{hash}^{{commit}}");
+    require_success(
+        run_git(
+            &context.repository_root,
+            &["rev-parse", "--verify", &verified],
+        )?,
+        "find the selected checkpoint",
+    )?;
+    let repository_paths = selected_repository_paths(&context, &request.paths)?;
+    let available = checkpoint_files(&context, hash)?
+        .into_iter()
+        .collect::<HashSet<_>>();
+    if request.paths.iter().any(|path| !available.contains(path)) {
+        return Err(HostError::InvalidProject(
+            "Only files changed by the selected checkpoint can be restored from this view."
+                .to_string(),
+        ));
+    }
+    let dirty = status_entries(&context)?;
+    if let Some(path) = request.paths.iter().find(|path| {
+        dirty.iter().any(|entry| {
+            &entry.path == *path || entry.original_path.as_deref() == Some(path.as_str())
+        })
+    }) {
+        return Err(HostError::Conflict(format!(
+            "{path} has staged or working-tree changes. Create a checkpoint or resolve those changes before restoring it."
+        )));
+    }
+
+    let mut tree_arguments = vec!["ls-tree", "-r", "--name-only", "-z", hash, "--"];
+    tree_arguments.extend(repository_paths.iter().map(String::as_str));
+    let tree = require_success(
+        run_git(&context.repository_root, &tree_arguments)?,
+        "inspect checkpoint files",
+    )?;
+    let present = tree
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|value| !value.is_empty())
+        .map(|value| String::from_utf8_lossy(value).to_string())
+        .collect::<HashSet<_>>();
+    let present_paths = repository_paths
+        .iter()
+        .filter(|path| present.contains(*path))
+        .collect::<Vec<_>>();
+    let absent_paths = repository_paths
+        .iter()
+        .filter(|path| !present.contains(*path))
+        .collect::<Vec<_>>();
+    for path in &absent_paths {
+        if context.repository_root.join(path).is_dir() {
+            return Err(HostError::Conflict(format!(
+                "DraftMatter will not replace the directory {path} while restoring a checkpoint."
+            )));
+        }
+    }
+    if !present_paths.is_empty() {
+        let mut restore_arguments = vec!["restore", "--source", hash, "--worktree", "--"];
+        restore_arguments.extend(present_paths.iter().map(|path| path.as_str()));
+        require_success(
+            run_git(&context.repository_root, &restore_arguments)?,
+            "restore checkpoint files",
+        )?;
+    }
+    for path in absent_paths {
+        let destination = context.repository_root.join(path);
+        if destination.exists() {
+            fs::remove_file(destination)?;
+        }
+    }
+    git_status_impl(&request.root)
 }
 
 fn selected_repository_paths(
@@ -1203,6 +1343,7 @@ mod tests {
         .unwrap();
         assert!(diff.text.contains("-one"));
         assert!(diff.text.contains("+two"));
+        assert_eq!(diff.files, vec!["paper.qmd"]);
         assert!(git_status_impl(&root).unwrap().entries.is_empty());
         assert!(matches!(
             git_checkpoint_diff_impl(GitCheckpointDiffRequest {
@@ -1211,6 +1352,75 @@ mod tests {
             }),
             Err(HostError::InvalidProject(_))
         ));
+    }
+
+    #[test]
+    fn checkpoint_restore_refuses_dirty_files_and_restores_clean_content() {
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("paper.qmd"), "one\n").unwrap();
+        commit_all(project.path(), "First draft");
+        let first = String::from_utf8_lossy(&git(project.path(), ["rev-parse", "HEAD"]).stdout)
+            .trim()
+            .to_string();
+        fs::write(project.path().join("paper.qmd"), "two\n").unwrap();
+        commit_all(project.path(), "Second draft");
+        let root = project.path().to_string_lossy().to_string();
+
+        fs::write(project.path().join("paper.qmd"), "unsaved\n").unwrap();
+        let blocked = git_restore_checkpoint_impl(GitRestoreCheckpointRequest {
+            root: root.clone(),
+            hash: first.clone(),
+            paths: vec!["paper.qmd".to_string()],
+        });
+        assert!(matches!(blocked, Err(HostError::Conflict(_))));
+        assert_eq!(
+            fs::read_to_string(project.path().join("paper.qmd")).unwrap(),
+            "unsaved\n"
+        );
+
+        fs::write(project.path().join("paper.qmd"), "two\n").unwrap();
+        let status = git_restore_checkpoint_impl(GitRestoreCheckpointRequest {
+            root,
+            hash: first,
+            paths: vec!["paper.qmd".to_string()],
+        })
+        .unwrap();
+        assert_eq!(
+            fs::read_to_string(project.path().join("paper.qmd")).unwrap(),
+            "one\n"
+        );
+        assert_eq!(status.entries.len(), 1);
+        assert_eq!(status.entries[0].path, "paper.qmd");
+        assert!(status.entries[0].unstaged);
+    }
+
+    #[test]
+    fn checkpoint_restore_can_reapply_an_explicit_file_deletion() {
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("obsolete.md"), "old\n").unwrap();
+        commit_all(project.path(), "Add note");
+        fs::remove_file(project.path().join("obsolete.md")).unwrap();
+        commit_all(project.path(), "Remove note");
+        let deletion = String::from_utf8_lossy(&git(project.path(), ["rev-parse", "HEAD"]).stdout)
+            .trim()
+            .to_string();
+        fs::write(project.path().join("obsolete.md"), "new\n").unwrap();
+        commit_all(project.path(), "Restore note later");
+        let root = project.path().to_string_lossy().to_string();
+
+        git_restore_checkpoint_impl(GitRestoreCheckpointRequest {
+            root: root.clone(),
+            hash: deletion,
+            paths: vec!["obsolete.md".to_string()],
+        })
+        .unwrap();
+
+        assert!(!project.path().join("obsolete.md").exists());
+        let status = git_status_impl(&root).unwrap();
+        assert_eq!(status.entries.len(), 1);
+        assert_eq!(status.entries[0].kind, GitChangeKind::Deleted);
     }
 
     #[test]

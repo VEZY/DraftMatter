@@ -143,6 +143,13 @@ export interface GitCheckpointDiffResult {
   hash: string
   text: string
   truncated: boolean
+  files: string[]
+}
+
+export interface GitRestoreCheckpointRequest {
+  root: string
+  hash: string
+  paths: string[]
 }
 
 export interface GitStageRequest {
@@ -543,6 +550,11 @@ export function createDesktopHost(
     gitCheckpointDiff(request: GitCheckpointDiffRequest) {
       return available
         ? invokeBridge<GitCheckpointDiffResult>('git_checkpoint_diff', { request })
+        : gitUnavailable()
+    },
+    gitRestoreCheckpoint(request: GitRestoreCheckpointRequest) {
+      return available
+        ? invokeBridge<GitRepositoryStatus>('git_restore_checkpoint', { request })
         : gitUnavailable()
     },
     gitStage(request: GitStageRequest) {
