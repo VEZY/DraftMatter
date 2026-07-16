@@ -1964,30 +1964,61 @@ function App() {
   }
 
   const acceptProposal = (proposal = draft.activeProposal) => {
+    const timestamp = new Date().toISOString()
     if (proposal === 'alice') {
-      updateDraft({ aliceStatus: 'accepted', marcusStatus: draft.marcusStatus === 'open' ? 'needs-rebase' : draft.marcusStatus })
+      updateDraft({
+        aliceStatus: 'accepted',
+        marcusStatus: draft.marcusStatus === 'open' ? 'needs-rebase' : draft.marcusStatus,
+        reviewUpdatedAt: {
+          ...draft.reviewUpdatedAt,
+          alice: timestamp,
+          ...(draft.marcusStatus === 'open' ? { marcus: timestamp } : {}),
+        },
+      })
     } else {
-      updateDraft({ marcusStatus: 'accepted', aliceStatus: draft.aliceStatus === 'open' ? 'needs-rebase' : draft.aliceStatus })
+      updateDraft({
+        marcusStatus: 'accepted',
+        aliceStatus: draft.aliceStatus === 'open' ? 'needs-rebase' : draft.aliceStatus,
+        reviewUpdatedAt: {
+          ...draft.reviewUpdatedAt,
+          marcus: timestamp,
+          ...(draft.aliceStatus === 'open' ? { alice: timestamp } : {}),
+        },
+      })
     }
     setToast('Suggestion accepted · intersecting proposal preserved')
   }
 
   const rejectProposal = (proposal = draft.activeProposal) => {
-    if (proposal === 'alice') updateDraft({ aliceStatus: 'rejected', activeProposal: 'marcus' })
-    else updateDraft({ marcusStatus: 'rejected', activeProposal: 'alice' })
+    const timestamp = new Date().toISOString()
+    if (proposal === 'alice') updateDraft({ aliceStatus: 'rejected', activeProposal: 'marcus', reviewUpdatedAt: { ...draft.reviewUpdatedAt, alice: timestamp } })
+    else updateDraft({ marcusStatus: 'rejected', activeProposal: 'alice', reviewUpdatedAt: { ...draft.reviewUpdatedAt, marcus: timestamp } })
     setToast('Suggestion rejected · accepted text unchanged')
   }
 
   const addReply = () => {
     if (!reply.trim()) return
-    updateDraft({ commentReplies: [...draft.commentReplies, reply.trim()] })
+    const timestamp = new Date().toISOString()
+    updateDraft({
+      commentReplies: [...draft.commentReplies, reply.trim()],
+      commentReplyTimestamps: [...(draft.commentReplyTimestamps ?? []), timestamp],
+      reviewUpdatedAt: { ...draft.reviewUpdatedAt, comment: timestamp },
+    })
     setReply('')
   }
 
   const removeDemoComment = () => {
-    updateDraft({ commentDeleted: true, commentResolved: false })
+    updateDraft({ commentDeleted: true, commentResolved: false, reviewUpdatedAt: { ...draft.reviewUpdatedAt, comment: new Date().toISOString() } })
     setActiveReviewId(reviewQueue.find((item) => item.id !== 'dm-comment-01')?.id)
     setToast('Comment thread removed from the active queue')
+  }
+
+  const toggleDemoComment = () => {
+    updateDraft({
+      commentResolved: !draft.commentResolved,
+      commentDeleted: false,
+      reviewUpdatedAt: { ...draft.reviewUpdatedAt, comment: new Date().toISOString() },
+    })
   }
 
   const copyPortableReference = async (label: string) => {
@@ -3537,7 +3568,7 @@ function App() {
                 {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a01') &&
                 <button id="review-item-dm-c01" className={`proposal-option ${reviewProposal === 'alice' && activeReviewId !== 'dm-comment-01' ? 'selected' : ''}`} onClick={() => { setActiveReviewId('dm-c01'); updateDraft({ activeProposal: 'alice' }) }}>
                   <Avatar initials="AM" tone="blue" small />
-                  <span className="proposal-author"><strong>Alice Martin</strong><small><ReviewTimestamp value={demoAliceChange?.createdAt} fallback="Portable suggestion" /></small></span>
+                  <span className="proposal-author"><strong>Alice Martin</strong><small><ReviewTimestamp value={demoAliceChange?.updatedAt ?? demoAliceChange?.createdAt} verb={demoAliceChange?.updatedAt ? 'Updated' : 'Created'} fallback="Portable suggestion" /></small></span>
                   <StatusPill status={draft.aliceStatus} />
                   <span className="proposal-copy"><del>did not substantially alter leaf expansion</del><ins>reduced leaf area by 18%</ins></span>
                 </button>}
@@ -3545,7 +3576,7 @@ function App() {
                 {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
                 <button id="review-item-dm-c02" className={`proposal-option ${reviewProposal === 'marcus' && activeReviewId !== 'dm-comment-01' ? 'selected' : ''}`} onClick={() => { setActiveReviewId('dm-c02'); updateDraft({ activeProposal: 'marcus' }) }}>
                   <Avatar initials="MC" tone="clay" small />
-                  <span className="proposal-author"><strong>Marcus Chen</strong><small><ReviewTimestamp value={demoMarcusChange?.createdAt} fallback="Portable suggestion" /></small></span>
+                  <span className="proposal-author"><strong>Marcus Chen</strong><small><ReviewTimestamp value={demoMarcusChange?.updatedAt ?? demoMarcusChange?.createdAt} verb={demoMarcusChange?.updatedAt ? 'Updated' : 'Created'} fallback="Portable suggestion" /></small></span>
                   <StatusPill status={draft.marcusStatus} />
                   <span className="proposal-copy"><del>did not substantially alter leaf expansion</del><ins>lowered leaf expansion during the treatment period</ins></span>
                 </button>}
@@ -3563,7 +3594,7 @@ function App() {
 
               {demoCommentAvailable && (reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
               <div id="review-item-dm-comment-01" className={`comment-card ${activeReviewId === 'dm-comment-01' ? 'active' : ''} ${draft.commentResolved ? 'resolved' : ''}`} onClick={() => setActiveReviewId('dm-comment-01')}>
-                <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small><ReviewTimestamp value={demoCommentThread?.createdAt} fallback="Portable comment" /></small></span></div>
+                <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small><ReviewTimestamp value={demoCommentThread?.updatedAt ?? demoCommentThread?.createdAt} verb={demoCommentThread?.updatedAt ? 'Updated' : 'Created'} fallback="Portable comment" /></small></span></div>
                 <div className="comment-quote">“increased modestly”</div>
                 <p>Can we quantify this increase in the main text? The estimate is already in the supplement.</p>
                 {draft.commentReplies.map((message, index) => <div className="reply-message" key={`${message}-${index}`}><Avatar initials={currentAuthorInitials} tone="sage" small label={userSettings.author.name} /><p><strong>You</strong>{message}</p></div>)}
@@ -3571,7 +3602,7 @@ function App() {
                   <div className="reply-box"><input value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addReply() }} placeholder="Reply…" aria-label="Reply to comment" /><button onClick={addReply} disabled={!reply.trim()} aria-label="Send reply"><Icon name="arrowRight" size={15} /></button></div>
                 )}
                 <div className="portable-thread-actions">
-                  <button className="resolve-button" onClick={() => updateDraft({ commentResolved: !draft.commentResolved, commentDeleted: false })}><Icon name="check" size={14} /> {draft.commentResolved ? 'Reopen thread' : 'Resolve thread'}</button>
+                  <button className="resolve-button" onClick={toggleDemoComment}><Icon name="check" size={14} /> {draft.commentResolved ? 'Reopen thread' : 'Resolve thread'}</button>
                   <button className="portable-delete-thread" onClick={(event) => { event.stopPropagation(); removeDemoComment() }}><Icon name="x" size={13} /> Remove</button>
                 </div>
               </div>}

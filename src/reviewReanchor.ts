@@ -205,7 +205,7 @@ function refreshedContext(document: ReviewMarkupDocument, anchorId: string): Rev
   }
 }
 
-function refreshRecordContexts(document: ReviewMarkupDocument, anchorIds: string[]) {
+function refreshRecordContexts(document: ReviewMarkupDocument, anchorIds: string[], updatedAt?: string) {
   let updated = document
   for (const anchorId of anchorIds) {
     const context = refreshedContext(updated, anchorId)
@@ -213,7 +213,7 @@ function refreshRecordContexts(document: ReviewMarkupDocument, anchorIds: string
     const recordIds = recordsFor(updated, anchorId)
     for (const recordId of recordIds) {
       const record = [...updated.changes, ...updated.threads].find((candidate) => candidate.id === recordId)
-      if (record) updated = updateReviewRecordAnchorContext(updated, recordId, context)
+      if (record) updated = updateReviewRecordAnchorContext(updated, recordId, context, updatedAt)
     }
   }
   return updated
@@ -230,7 +230,7 @@ function idsForRecoveredAnchor(anchorId: string, existing: ReviewAnchor[], quote
   }
 }
 
-function reanchorPortableReviewsWithSelections(source: string, selections = new Map<string, ReviewReanchorSelection>()): ReviewReanchorResult {
+function reanchorPortableReviewsWithSelections(source: string, selections = new Map<string, ReviewReanchorSelection>(), updatedAt?: string): ReviewReanchorResult {
   const document = parseReviewMarkup(source)
   const complete = new Set(document.ranges.filter((range) => range.complete).map((range) => range.anchorId))
   const referenced = new Set([...document.changes, ...document.threads]
@@ -297,7 +297,7 @@ function reanchorPortableReviewsWithSelections(source: string, selections = new 
 
   const updatedSource = applyPatches(source, patches)
   const recoveredAnchorIds = items.filter((item) => item.status === 'recovered').map((item) => item.anchorId)
-  const updated = refreshRecordContexts(parseReviewMarkup(updatedSource), recoveredAnchorIds)
+  const updated = refreshRecordContexts(parseReviewMarkup(updatedSource), recoveredAnchorIds, updatedAt)
   const recovered = items.filter((item) => item.status === 'recovered').length
   return {
     source: updated.source,
@@ -312,17 +312,17 @@ export function reanchorPortableReviews(source: string): ReviewReanchorResult {
   return reanchorPortableReviewsWithSelections(source)
 }
 
-export function placePortableReviewCandidate(source: string, anchorId: string, selection: ReviewReanchorSelection) {
+export function placePortableReviewCandidate(source: string, anchorId: string, selection: ReviewReanchorSelection, updatedAt?: string) {
   const preview = reanchorPortableReviews(source)
   const item = preview.items.find((candidate) => candidate.anchorId === anchorId)
   if (!item) throw new Error(`Review anchor ${anchorId} is already placed or does not exist.`)
   if (!item.candidates.some((candidate) => candidate.start === selection.start && candidate.end === selection.end)) {
     throw new Error(`The selected location is no longer a candidate for review anchor ${anchorId}.`)
   }
-  return reanchorPortableReviewsWithSelections(source, new Map([[anchorId, selection]]))
+  return reanchorPortableReviewsWithSelections(source, new Map([[anchorId, selection]]), updatedAt)
 }
 
-export function placePortableReviewAtQuote(source: string, anchorId: string, quote: string, occurrence?: number) {
+export function placePortableReviewAtQuote(source: string, anchorId: string, quote: string, occurrence?: number, updatedAt?: string) {
   const selected = quote.trim()
   if (!selected) throw new Error('Enter exact manuscript text for the review location.')
   const document = parseReviewMarkup(source)
@@ -342,5 +342,5 @@ export function placePortableReviewAtQuote(source: string, anchorId: string, quo
   if (occurrence === undefined && starts.length !== 1) throw new Error('That text occurs more than once; enter a longer selection.')
   const start = starts[occurrence ?? 0]
   if (start === undefined) throw new Error('The selected text occurrence is no longer available.')
-  return reanchorPortableReviewsWithSelections(source, new Map([[anchorId, { start, end: start + selected.length }]]))
+  return reanchorPortableReviewsWithSelections(source, new Map([[anchorId, { start, end: start + selected.length }]]), updatedAt)
 }

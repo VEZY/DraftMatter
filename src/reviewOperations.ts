@@ -1,6 +1,7 @@
 import {
   parseReviewMarkup,
   updateReviewRecordStatus,
+  updateReviewRecordTimestamp,
   type ReviewAuthor,
   type ReviewAnchorContext,
   type ReviewChange,
@@ -409,7 +410,8 @@ export function appendReviewThreadMessage(
   const nextIndex = Math.max(-1, ...thread.messageRecords.map((message, index) => message.index ?? index)) + 1
   const insertion = recordClosingStart(thread)
   const raw = messageBlock(request.message, request.authorId, timestamp, nextIndex, ending)
-  const updated = parseReviewMarkup(`${document.source.slice(0, insertion)}${raw}${document.source.slice(insertion)}`)
+  const withMessage = parseReviewMarkup(`${document.source.slice(0, insertion)}${raw}${document.source.slice(insertion)}`)
+  const updated = updateReviewRecordTimestamp(withMessage, threadId, timestamp)
   assertWritable(updated)
   return threadResult(updated, threadId)
 }
@@ -418,15 +420,16 @@ export function setReviewThreadStatus(
   document: ReviewMarkupDocument,
   threadId: string,
   status: 'open' | 'resolved' | 'deleted',
+  timestamp?: string,
 ): ReviewOperationResult {
   requireThread(document, threadId)
-  const updated = updateReviewRecordStatus(document, threadId, status)
+  const updated = updateReviewRecordStatus(document, threadId, status, reviewTimestamp(timestamp))
   assertWritable(updated)
   return threadResult(updated, threadId)
 }
 
-export function deleteReviewThread(document: ReviewMarkupDocument, threadId: string) {
-  return setReviewThreadStatus(document, threadId, 'deleted')
+export function deleteReviewThread(document: ReviewMarkupDocument, threadId: string, timestamp?: string) {
+  return setReviewThreadStatus(document, threadId, 'deleted', timestamp)
 }
 
 export function createReviewChange(source: string, request: CreateReviewChangeRequest): ReviewChangeOperationResult {
@@ -597,6 +600,7 @@ export function rebaseReviewChange(
   validatePayload(quote, 'A rebase target')
   safeId(request.author.id, 'Author ID')
   if (!request.author.name.trim()) throw new ReviewOperationError('review-author-name-empty', 'An author name is required.')
+  const timestamp = reviewTimestamp(request.timestamp)
 
   const accepted = projectPortableAcceptedBase(document.source)
   if (!accepted.ok || accepted.source === null) {
@@ -615,13 +619,12 @@ export function rebaseReviewChange(
 
   let audited = document
   for (const change of document.changes.filter((change) => change.status === 'accepted')) {
-    audited = updateReviewRecordStatus(audited, change.id, 'applied')
+    audited = updateReviewRecordStatus(audited, change.id, 'applied', timestamp)
   }
-  audited = updateReviewRecordStatus(audited, previous.id, 'rebased')
-  audited = ensureReviewAuthor(audited, request.author, request.timestamp).document
+  audited = updateReviewRecordStatus(audited, previous.id, 'rebased', timestamp)
+  audited = ensureReviewAuthor(audited, request.author, timestamp).document
   const decisionId = safeId(request.decisionId ?? generatedId('dm-decision'), 'Decision ID')
   requireUniqueIds(audited, [decisionId])
-  const timestamp = reviewTimestamp(request.timestamp)
   audited = parseReviewMarkup(appendSectionRecords(audited, decisionRecord(decisionId, previous.id, request.author.id, 'rebased', timestamp, lineEnding(audited.source))))
   assertWritable(audited)
 
@@ -702,22 +705,22 @@ export function decideReviewChange(
     if (acceptedConflict) throw new ReviewOperationError('review-decision-conflict', `Conflicting change ${acceptedConflict.id} is already accepted.`)
   }
 
+  const timestamp = reviewTimestamp(request.timestamp)
   let updated = document
   const targetStatus = request.action === 'accepted' ? 'accepted' : 'rejected'
-  if (change.status !== targetStatus) updated = updateReviewRecordStatus(updated, request.changeId, targetStatus)
+  if (change.status !== targetStatus) updated = updateReviewRecordStatus(updated, request.changeId, targetStatus, timestamp)
   const rebasedChangeIds: string[] = []
   if (request.action === 'accepted') {
     for (const conflictId of conflicting) {
       const candidate = updated.changes.find((item) => item.id === conflictId)
       if (candidate?.status !== 'open') continue
-      updated = updateReviewRecordStatus(updated, conflictId, 'needs-rebase')
+      updated = updateReviewRecordStatus(updated, conflictId, 'needs-rebase', timestamp)
       rebasedChangeIds.push(conflictId)
     }
   }
 
   const decisionId = safeId(request.decisionId ?? generatedId('dm-decision'), 'Decision ID')
   requireUniqueIds(updated, [decisionId])
-  const timestamp = reviewTimestamp(request.timestamp)
   const ending = lineEnding(updated.source)
   updated = parseReviewMarkup(appendSectionRecords(updated, decisionRecord(decisionId, request.changeId, request.authorId, request.action, timestamp, ending)))
   assertWritable(updated)

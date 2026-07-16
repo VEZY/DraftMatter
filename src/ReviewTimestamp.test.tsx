@@ -13,8 +13,8 @@ describe('portable review timestamps', () => {
   })
 
   it('renders semantic source-backed time with optional detail', () => {
-    expect(renderToStaticMarkup(<ReviewTimestamp value="2026-07-15T09:00:00Z" fallback="Portable suggestion" detail="Results excerpt" />)).toBe(
-      '<time dateTime="2026-07-15T09:00:00.000Z" title="Recorded 15 Jul 2026 · 09:00 UTC">15 Jul 2026 · 09:00 UTC</time> · Results excerpt',
+    expect(renderToStaticMarkup(<ReviewTimestamp value="2026-07-15T09:00:00Z" verb="Updated" fallback="Portable suggestion" detail="Results excerpt" />)).toBe(
+      '<time dateTime="2026-07-15T09:00:00.000Z" title="Updated 15 Jul 2026 · 09:00 UTC">15 Jul 2026 · 09:00 UTC</time> · Results excerpt',
     )
   })
 

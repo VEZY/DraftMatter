@@ -49,6 +49,12 @@ describe('portable draft source envelope', () => {
       marcusStatus: 'needs-rebase' as const,
       commentResolved: true,
       commentReplies: ['Added the interval.', 'The raw block is still present.'],
+      reviewUpdatedAt: {
+        alice: '2026-07-15T15:00:00.000Z',
+        marcus: '2026-07-15T15:00:00.000Z',
+        comment: '2026-07-15T15:05:00.000Z',
+      },
+      commentReplyTimestamps: ['2026-07-15T15:04:00.000Z', '2026-07-15T15:05:00.000Z'],
     }
 
     const saved = reviewedProjection(edited)
@@ -57,6 +63,9 @@ describe('portable draft source envelope', () => {
     expect(saved).toContain('future-yaml-key: preserve-me')
     expect(saved).toContain('::: {.future-extension data-mode="opaque"}\nRaw records remain archived.\n:::')
     expect(saved).toContain('data-schema="1" data-future="preserve-review"')
+    expect(saved).toContain('data-status="accepted" data-created="2026-07-15T09:00:00.000Z" data-updated="2026-07-15T15:00:00.000Z"')
+    expect(saved).toContain('data-status="resolved" data-created="2026-07-15T09:08:00.000Z" data-updated="2026-07-15T15:05:00.000Z"')
+    expect(saved).toContain('data-at="2026-07-15T15:05:00.000Z" data-index="2"')
     expect(saved).toContain('<!-- dm-output:start cell="fig-canopy" run="sha256:6f42f1a" -->')
     expect(reopened.draft).toMatchObject({
       title: edited.title,
@@ -71,6 +80,8 @@ describe('portable draft source envelope', () => {
       marcusStatus: 'needs-rebase',
       commentResolved: true,
       commentReplies: edited.commentReplies,
+      reviewUpdatedAt: edited.reviewUpdatedAt,
+      commentReplyTimestamps: edited.commentReplyTimestamps,
     })
   })
 

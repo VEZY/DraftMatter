@@ -150,6 +150,8 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
   const intro = cleanCitation(sectionContent(sections, 'introduction', fallback.introduction, diagnostics))
   const methods = parseMethods(sectionContent(sections, 'methods', fallback.methods, diagnostics), fallback, diagnostics)
   const modeledThread = reviewDocument.threads.find((thread) => thread.id === 'dm-comment-01')
+  const modeledAliceChange = reviewDocument.changes.find((change) => change.id === 'dm-c01')
+  const modeledMarcusChange = reviewDocument.changes.find((change) => change.id === 'dm-c02')
 
   const draft: DraftState = {
     ...fallback,
@@ -168,6 +170,12 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
     commentResolved: modeledThread?.status === 'resolved',
     commentDeleted: modeledThread?.status === 'deleted',
     commentReplies: modeledThread?.messages.slice(1) ?? [],
+    reviewUpdatedAt: {
+      ...(modeledAliceChange?.updatedAt ? { alice: modeledAliceChange.updatedAt } : {}),
+      ...(modeledMarcusChange?.updatedAt ? { marcus: modeledMarcusChange.updatedAt } : {}),
+      ...(modeledThread?.updatedAt ? { comment: modeledThread.updatedAt } : {}),
+    },
+    commentReplyTimestamps: modeledThread?.messageRecords.slice(1).map((message) => message.timestamp ?? '') ?? [],
     cellStatus: 'stale',
     lastSavedAt: new Date().toISOString(),
     frontmatterSource: frontmatter,

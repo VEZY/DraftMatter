@@ -19,6 +19,14 @@ function quoted(value: string) {
   return value.split(/\r\n|\n|\r/).map((line) => `> ${safeText(line)}`).join('\n')
 }
 
+function activity(createdAt?: string, updatedAt?: string) {
+  const values = [
+    ...(createdAt ? [`Created: ${safeText(createdAt)}`] : []),
+    ...(updatedAt ? [`Updated: ${safeText(updatedAt)}`] : []),
+  ]
+  return values.length ? values.join(' · ') : undefined
+}
+
 function summary(document: ReviewMarkupDocument) {
   const openChanges = document.changes.filter((change) => change.status === 'open').length
   const openThreads = document.threads.filter((thread) => thread.status === 'open').length
@@ -65,6 +73,8 @@ export function renderReviewReport(source: string) {
         `Status: ${safeText(change.status)} · Kind: ${safeText(change.changeKind)} · Anchor: ${safeText(change.anchorId)}`,
         '',
       )
+      const changeActivity = activity(change.createdAt, change.updatedAt)
+      if (changeActivity) lines.push(changeActivity, '')
       if (change.proposal !== undefined) lines.push('Proposed content:', '', quoted(change.proposal), '')
       if (change.rationale) lines.push('Rationale:', '', quoted(change.rationale), '')
     }
@@ -79,6 +89,8 @@ export function renderReviewReport(source: string) {
         `Status: ${safeText(thread.status)} · Anchor: ${safeText(thread.anchorId)}`,
         '',
       )
+      const threadActivity = activity(thread.createdAt, thread.updatedAt)
+      if (threadActivity) lines.push(threadActivity, '')
       for (const [index, message] of thread.messageRecords.entries()) {
         const messageAuthor = message.authorId ? authors.get(message.authorId) ?? message.authorId : thread.authorId
         lines.push(`Message ${index + 1} — ${safeText(messageAuthor)}${message.timestamp ? ` · ${safeText(message.timestamp)}` : ''}`, '', quoted(message.content), '')

@@ -148,6 +148,18 @@ describe('DraftMatter Review Markup', () => {
     expect(updated.unknownRecords[0].raw).toBe(parsed.unknownRecords[0].raw)
   })
 
+  it('records an explicit update timestamp without changing creation metadata', () => {
+    const parsed = parseReviewMarkup(completeReviewSource)
+    const updated = updateReviewRecordStatus(parsed, 'dm-change', 'accepted', '2026-07-15T08:45:00.000Z')
+
+    expect(updated.changes[0]).toMatchObject({
+      status: 'accepted',
+      createdAt: '2026-07-15T08:00:00Z',
+      updatedAt: '2026-07-15T08:45:00.000Z',
+    })
+    expect(updated.changes[0].raw).toContain('data-created="2026-07-15T08:00:00Z" data-updated="2026-07-15T08:45:00.000Z"')
+  })
+
   it('updates thread messages without reformatting other review records', () => {
     const parsed = parseReviewMarkup(completeReviewSource)
     const messages = ['Can we quantify this?', 'Updated reply with a literal fence:\n~~~\nstill inside.', 'A second reply.']

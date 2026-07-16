@@ -64,6 +64,8 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
     await reviewPanel.getByRole('button', { name: 'Accept' }).click()
     await expect(reviewPanel.locator('#review-item-dm-c02')).toContainText('Accepted')
     await expect(reviewPanel.locator('#review-item-dm-c01')).toContainText('Needs rebase')
+    await expect(reviewPanel.locator('#review-item-dm-c02 time')).toHaveAttribute('title', /^Updated /)
+    await expect(reviewPanel.locator('#review-item-dm-c01 time')).toHaveAttribute('title', /^Updated /)
 
     await page.getByRole('button', { name: /View source/ }).click()
     await sourceInspector.getByRole('tab', { name: 'Clean final' }).click()

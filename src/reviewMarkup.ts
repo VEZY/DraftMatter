@@ -405,16 +405,36 @@ export function serializeReviewMarkup(document: ReviewMarkupDocument) {
   return document.source
 }
 
-export function updateReviewRecordStatus(document: ReviewMarkupDocument, recordId: string, status: string) {
+function updateReviewRecordHeader(
+  document: ReviewMarkupDocument,
+  recordId: string,
+  update: (header: string) => string,
+) {
   const record = [...document.changes, ...document.threads].find((candidate) => candidate.id === recordId)
-  if (!record) throw new Error(`Review record ${recordId} does not support a status update.`)
+  if (!record) throw new Error(`Review record ${recordId} does not support an update.`)
   const headerEnd = record.raw.search(/\r\n|\n|\r/)
   const header = headerEnd < 0 ? record.raw : record.raw.slice(0, headerEnd)
-  const updatedHeader = /\bdata-status="[^"]*"/.test(header)
-    ? header.replace(/\bdata-status="[^"]*"/, `data-status="${status}"`)
-    : header.replace(/\}[ \t]*$/, ` data-status="${status}"}`)
+  const updatedHeader = update(header)
   const updatedRaw = `${updatedHeader}${headerEnd < 0 ? '' : record.raw.slice(headerEnd)}`
   return parseReviewMarkup(`${document.source.slice(0, record.start)}${updatedRaw}${document.source.slice(record.end)}`)
+}
+
+function setReviewHeaderAttribute(header: string, name: string, value: string) {
+  const attribute = new RegExp(`\\b${name}="[^"]*"`)
+  return attribute.test(header)
+    ? header.replace(attribute, `${name}="${value}"`)
+    : header.replace(/\}[ \t]*$/, ` ${name}="${value}"}`)
+}
+
+export function updateReviewRecordTimestamp(document: ReviewMarkupDocument, recordId: string, updatedAt: string) {
+  return updateReviewRecordHeader(document, recordId, (header) => setReviewHeaderAttribute(header, 'data-updated', updatedAt))
+}
+
+export function updateReviewRecordStatus(document: ReviewMarkupDocument, recordId: string, status: string, updatedAt?: string) {
+  return updateReviewRecordHeader(document, recordId, (header) => {
+    const withStatus = setReviewHeaderAttribute(header, 'data-status', status)
+    return updatedAt ? setReviewHeaderAttribute(withStatus, 'data-updated', updatedAt) : withStatus
+  })
 }
 
 function anchorContextBlock(className: string, content: string, ending: string) {
@@ -423,7 +443,7 @@ function anchorContextBlock(className: string, content: string, ending: string) 
   return `${fence}{.${className}}${ending}${content}${ending}${fence}${ending}`
 }
 
-export function updateReviewRecordAnchorContext(document: ReviewMarkupDocument, recordId: string, context: ReviewAnchorContext) {
+export function updateReviewRecordAnchorContext(document: ReviewMarkupDocument, recordId: string, context: ReviewAnchorContext, updatedAt?: string) {
   const record = [...document.changes, ...document.threads].find((candidate) => candidate.id === recordId)
   if (!record) throw new Error(`Review record ${recordId} does not support anchor context.`)
   const blocks = literalBlocks(record.raw)
@@ -441,14 +461,16 @@ export function updateReviewRecordAnchorContext(document: ReviewMarkupDocument, 
     const insertion = headerEnd + (record.raw.slice(headerEnd).match(/^(?:\r\n|\n|\r)/)?.[0].length ?? 0)
     const contextRaw = [...values].map(([className, content]) => anchorContextBlock(className, content, ending)).join('')
     updatedRaw = `${record.raw.slice(0, insertion)}${contextRaw}${record.raw.slice(insertion)}`
-    return parseReviewMarkup(`${document.source.slice(0, record.start)}${updatedRaw}${document.source.slice(record.end)}`)
+    const updated = parseReviewMarkup(`${document.source.slice(0, record.start)}${updatedRaw}${document.source.slice(record.end)}`)
+    return updatedAt ? updateReviewRecordTimestamp(updated, recordId, updatedAt) : updated
   }
   if (contextBlocks.length !== values.size) throw new Error(`Review record ${recordId} does not contain complete portable anchor context.`)
   for (const block of [...contextBlocks].sort((left, right) => right.start - left.start)) {
     const replacement = anchorContextBlock(block.className, values.get(block.className) ?? '', ending)
     updatedRaw = `${updatedRaw.slice(0, block.start)}${replacement}${updatedRaw.slice(block.end)}`
   }
-  return parseReviewMarkup(`${document.source.slice(0, record.start)}${updatedRaw}${document.source.slice(record.end)}`)
+  const updated = parseReviewMarkup(`${document.source.slice(0, record.start)}${updatedRaw}${document.source.slice(record.end)}`)
+  return updatedAt ? updateReviewRecordTimestamp(updated, recordId, updatedAt) : updated
 }
 
 function messageFence(message: string) {
@@ -467,7 +489,14 @@ function rewrittenMessageBlock(raw: string, block: ReturnType<typeof literalBloc
   return `${fence}${header.slice(marker.length)}${ending}${message}${ending}${fence}${ending}`
 }
 
-export function updateReviewThreadMessages(document: ReviewMarkupDocument, recordId: string, messages: string[], authorId = 'dm-a01') {
+export function updateReviewThreadMessages(
+  document: ReviewMarkupDocument,
+  recordId: string,
+  messages: string[],
+  authorId = 'dm-a01',
+  timestamps: (string | undefined)[] = [],
+  updatedAt?: string,
+) {
   const record = document.threads.find((candidate) => candidate.id === recordId)
   if (!record) throw new Error(`Review thread ${recordId} was not found.`)
   if (messages.length === 0) throw new Error(`Review thread ${recordId} must retain its opening message.`)
@@ -492,7 +521,9 @@ export function updateReviewThreadMessages(document: ReviewMarkupDocument, recor
     const lineEnding = document.source.includes('\r\n') ? '\r\n' : document.source.includes('\r') ? '\r' : '\n'
     const added = messages.slice(blocks.length).map((message, offset) => {
       const fence = messageFence(message)
-      return `${fence}{.dm-message data-author="${authorId}" data-index="${blocks.length + offset}"}${lineEnding}${message}${lineEnding}${fence}${lineEnding}`
+      const index = blocks.length + offset
+      const timestamp = timestamps[index] ? ` data-at="${timestamps[index]}"` : ''
+      return `${fence}{.dm-message data-author="${authorId}"${timestamp} data-index="${index}"}${lineEnding}${message}${lineEnding}${fence}${lineEnding}`
     }).join('')
     patches.push({ start: blocks.at(-1)!.end, end: blocks.at(-1)!.end, replacement: added })
   }
@@ -501,5 +532,6 @@ export function updateReviewThreadMessages(document: ReviewMarkupDocument, recor
   for (const patch of patches.sort((left, right) => right.start - left.start || right.end - left.end)) {
     updatedRaw = `${updatedRaw.slice(0, patch.start)}${patch.replacement}${updatedRaw.slice(patch.end)}`
   }
-  return parseReviewMarkup(`${document.source.slice(0, record.start)}${updatedRaw}${document.source.slice(record.end)}`)
+  const updated = parseReviewMarkup(`${document.source.slice(0, record.start)}${updatedRaw}${document.source.slice(record.end)}`)
+  return updatedAt ? updateReviewRecordTimestamp(updated, recordId, updatedAt) : updated
 }

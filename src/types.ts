@@ -48,6 +48,8 @@ export interface DraftState {
   commentResolved: boolean
   commentDeleted: boolean
   commentReplies: string[]
+  reviewUpdatedAt?: Partial<Record<'alice' | 'marcus' | 'comment', string>>
+  commentReplyTimestamps?: string[]
   cellStatus: 'current' | 'stale' | 'running' | 'failed' | 'interrupted' | 'environment-changed' | 'output-missing'
   lastSavedAt: string
   frontmatterSource?: string

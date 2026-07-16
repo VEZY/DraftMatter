@@ -44,6 +44,7 @@ describe('review re-anchoring after external edits', () => {
     expect(recovered.source.slice(range!.start, range!.end)).toBe('increased modestly')
     expect(recovered.document.threads[0].messages).toEqual(['Please quantify this response.'])
     expect(recovered.document.threads[0].anchorContext?.prefix).toContain('After irrigation')
+    expect(recovered.document.threads[0].updatedAt).toBeUndefined()
     expect(recovered.document.diagnostics.filter((diagnostic) => diagnostic.level === 'error')).toEqual([])
   })
 
@@ -80,11 +81,12 @@ describe('review re-anchoring after external edits', () => {
     expect(result.items[0].candidates).toHaveLength(2)
     expect(result).toMatchObject({ recovered: 0, unresolved: 1 })
 
-    const placed = placePortableReviewCandidate(without, 'dm-anchor-ambiguous', result.items[0].candidates[1])
+    const placed = placePortableReviewCandidate(without, 'dm-anchor-ambiguous', result.items[0].candidates[1], '2026-07-15T15:30:00.000Z')
     const range = placed.document.ranges.find((candidate) => candidate.anchorId === 'dm-anchor-ambiguous')
     expect(placed.source.slice(range!.start, range!.end)).toBe('target phrase')
     expect(placed.source.slice(0, range!.start)).toContain('target phrase · ')
     expect(placed.document.threads[0].anchorContext?.quote).toBe('target phrase')
+    expect(placed.document.threads[0].updatedAt).toBe('2026-07-15T15:30:00.000Z')
   })
 
   it('queues missing text and legacy records without quote context as unplaced', () => {
@@ -94,10 +96,11 @@ describe('review re-anchoring after external edits', () => {
     expect(result.source).toBe(missing)
     expect(result.items[0]).toMatchObject({ status: 'unplaced', candidates: [expect.objectContaining({ excerpt: expect.stringContaining('biomass') })] })
 
-    const placedOnChangedText = placePortableReviewAtQuote(missing, 'dm-anchor-response', 'changed externally')
+    const placedOnChangedText = placePortableReviewAtQuote(missing, 'dm-anchor-response', 'changed externally', undefined, '2026-07-15T15:31:00.000Z')
     const changedRange = placedOnChangedText.document.ranges.find((range) => range.anchorId === 'dm-anchor-response')
     expect(placedOnChangedText.source.slice(changedRange!.start, changedRange!.end)).toBe('changed externally')
     expect(placedOnChangedText.document.threads[0].anchorContext?.quote).toBe('changed externally')
+    expect(placedOnChangedText.document.threads[0].updatedAt).toBe('2026-07-15T15:31:00.000Z')
 
     const legacy = parseReviewMarkup(identicalSource)
     const legacyWithout = legacy.anchors.sort((left, right) => right.start - left.start)

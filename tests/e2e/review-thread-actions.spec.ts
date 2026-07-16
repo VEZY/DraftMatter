@@ -10,6 +10,34 @@ test.describe('DM-P4-01 review thread actions', () => {
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('@fig-canopy-result')
   })
 
+  test('persists reply and resolve activity timestamps across reload', async ({ page }) => {
+    await page.goto('/')
+    const review = page.getByRole('complementary', { name: 'Review feedback' })
+    const comment = review.locator('#review-item-dm-comment-01')
+
+    await review.getByLabel('Reply to comment').fill('The interval is now included.')
+    await review.getByLabel('Reply to comment').press('Enter')
+    await expect(comment).toContainText('The interval is now included.')
+    await expect(comment.locator('time')).toHaveAttribute('title', /^Updated /)
+
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toContain('data-index="1"')
+    const replied = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')
+    expect(replied).toMatch(/#dm-comment-01 \.dm-thread[^}]*data-updated="\d{4}-\d{2}-\d{2}T[^}]+Z"/)
+    expect(replied).toMatch(/\.dm-message data-author="dm-a01" data-at="\d{4}-\d{2}-\d{2}T[^"]+Z" data-index="1"/)
+
+    await comment.getByRole('button', { name: 'Resolve thread' }).click()
+    await expect(comment.getByRole('button', { name: 'Reopen thread' })).toBeVisible()
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toMatch(/#dm-comment-01 \.dm-thread[^}]*data-status="resolved"[^}]*data-updated=/)
+
+    await page.reload()
+    const reopenedReview = page.getByRole('complementary', { name: 'Review feedback' })
+    const reopenedComment = reopenedReview.locator('#review-item-dm-comment-01')
+    await expect(reopenedComment).toContainText('The interval is now included.')
+    await expect(reopenedComment.getByRole('button', { name: 'Reopen thread' })).toBeVisible()
+    await reopenedComment.getByRole('button', { name: 'Reopen thread' }).click()
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toMatch(/#dm-comment-01 \.dm-thread[^}]*data-status="open"[^}]*data-updated=/)
+  })
+
   test('removes a sample comment from the active queue and reopens its deleted audit record', async ({ page }) => {
     await page.goto('/')
     const review = page.getByRole('complementary', { name: 'Review feedback' })
@@ -33,5 +61,6 @@ test.describe('DM-P4-01 review thread actions', () => {
     const portable = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')
     expect(portable).toContain('{#dm-comment-01 .dm-thread')
     expect(portable).toContain('data-status="deleted"')
+    expect(portable).toMatch(/data-status="deleted"[^}]*data-updated="\d{4}-\d{2}-\d{2}T[^}]+Z"/)
   })
 })

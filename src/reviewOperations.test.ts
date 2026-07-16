@@ -54,6 +54,7 @@ describe('portable review thread operations', () => {
       anchorId: 'dm-anchor-estimate',
       authorId: author.id,
       status: 'open',
+      createdAt: '2026-07-15T13:00:00.000Z',
       messages: ['Can we report the estimate and interval?'],
       messageRecords: [{
         content: 'Can we report the estimate and interval?',
@@ -81,30 +82,33 @@ describe('portable review thread operations', () => {
       timestamp: '2026-07-15T13:05:00.000Z',
       index: 1,
     })
+    expect(replied.thread.updatedAt).toBe('2026-07-15T13:05:00.000Z')
     expect(replied.document.threads).toHaveLength(1)
     expect(replied.document.diagnostics.filter((diagnostic) => diagnostic.level === 'error')).toEqual([])
   })
 
   it('resolves, reopens, and audit-deletes a thread without discarding its messages', () => {
     const created = createRangeThread()
-    const resolved = setReviewThreadStatus(created.document, created.thread.id, 'resolved')
+    const resolved = setReviewThreadStatus(created.document, created.thread.id, 'resolved', '2026-07-15T13:06:00.000Z')
 
     expect(resolved.thread.status).toBe('resolved')
+    expect(resolved.thread.updatedAt).toBe('2026-07-15T13:06:00.000Z')
     expect(() => appendReviewThreadMessage(resolved.document, resolved.thread.id, {
       authorId: author.id,
       message: 'A reply while resolved',
     })).toThrowError(ReviewOperationError)
 
-    const reopened = setReviewThreadStatus(resolved.document, resolved.thread.id, 'open')
+    const reopened = setReviewThreadStatus(resolved.document, resolved.thread.id, 'open', '2026-07-15T13:07:00.000Z')
     const replied = appendReviewThreadMessage(reopened.document, reopened.thread.id, {
       authorId: author.id,
       message: 'A reply after reopening',
       timestamp: '2026-07-15T13:10:00.000Z',
     })
-    const deleted = deleteReviewThread(replied.document, replied.thread.id)
+    const deleted = deleteReviewThread(replied.document, replied.thread.id, '2026-07-15T13:11:00.000Z')
 
     expect(deleted.thread.status).toBe('deleted')
     expect(deleted.thread.messages).toEqual(['Can we report the estimate and interval?', 'A reply after reopening'])
+    expect(deleted.thread.updatedAt).toBe('2026-07-15T13:11:00.000Z')
     expect(deleted.document.source).toContain('data-status="deleted"')
   })
 
@@ -223,6 +227,10 @@ describe('portable suggestion operations', () => {
       ['dm-i01', 'accepted'],
       ['dm-i02', 'needs-rebase'],
     ])
+    expect(accepted.document.changes.map((change) => change.updatedAt)).toEqual([
+      '2026-07-15T14:10:00.000Z',
+      '2026-07-15T14:10:00.000Z',
+    ])
     expect(accepted.decision).toMatchObject({
       id: 'dm-decision-i01',
       changeId: 'dm-i01',
@@ -264,6 +272,7 @@ describe('portable suggestion operations', () => {
     })
 
     expect(rejected.change.status).toBe('rejected')
+    expect(rejected.change.updatedAt).toBe('2026-07-15T14:20:00.000Z')
     expect(rejected.rebasedChangeIds).toEqual([])
     expect(rejected.document.changes.find((change) => change.id === 'dm-i01')?.status).toBe('accepted')
     expect(rejected.document.decisions).toHaveLength(2)
@@ -315,6 +324,10 @@ describe('portable suggestion operations', () => {
       ['dm-i01', 'applied'],
       ['dm-i02', 'rebased'],
       ['dm-i02-rebased', 'open'],
+    ])
+    expect(rebased.document.changes.slice(0, 2).map((change) => change.updatedAt)).toEqual([
+      '2026-07-15T14:21:00.000Z',
+      '2026-07-15T14:21:00.000Z',
     ])
     expect(rebased.change.attributes['data-rebased-from']).toBe('dm-i02')
     expect(rebased.document.decisions.map((decision) => [decision.id, decision.action])).toEqual([

@@ -35,6 +35,7 @@ describe('clean review exports', () => {
     expect(first.final).toBe(aliceFinalGolden)
     expect(first.final).not.toMatch(/\.draftmatter-reviews|\.dm-(?:anchor|change|thread|decision)|data-anchor=/)
     expect(first.report).toContain('dm-i01: accepted by Alice Martin at 2026-07-15T16:00:00.000Z')
+    expect(first.report).toContain('Updated: 2026-07-15T16:00:00.000Z')
     expect(first.report).toContain('dm-i02 — Marcus Chen')
     expect(first.report).toContain('Status: needs-rebase')
     expect(first.report).not.toMatch(/\.draftmatter-reviews|\.dm-(?:anchor|change|thread|decision)|data-anchor=/)

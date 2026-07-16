@@ -108,8 +108,14 @@ export function reviewedProjection(state: DraftState) {
   if (materialized !== null) return materialized
   const citation = ` ${serializeCitationCluster(citationItemsForDraft(state))}`
   const replyBlocks = state.commentReplies
-    .map((reply, index) => `~~~{.dm-message data-author="dm-a01" data-index="${index + 1}"}\n${reply}\n~~~`)
+    .map((reply, index) => {
+      const timestamp = state.commentReplyTimestamps?.[index]
+      return `~~~{.dm-message data-author="dm-a01"${timestamp ? ` data-at="${timestamp}"` : ''} data-index="${index + 1}"}\n${reply}\n~~~`
+    })
     .join('\n')
+  const aliceUpdated = state.reviewUpdatedAt?.alice ? ` data-updated="${state.reviewUpdatedAt.alice}"` : ''
+  const marcusUpdated = state.reviewUpdatedAt?.marcus ? ` data-updated="${state.reviewUpdatedAt.marcus}"` : ''
+  const commentUpdated = state.reviewUpdatedAt?.comment ? ` data-updated="${state.reviewUpdatedAt.comment}"` : ''
 
   return `${frontmatter(state)}${preservedAfter(state, 'frontmatter')}
 
@@ -143,7 +149,7 @@ ${state.resultsLead} The drought treatment []{#dm-m01 .dm-anchor data-anchor="dm
 ${state.conclusion}${preservedAfter(state, 'conclusion')}
 
 ${REVIEW_START}
-:::: {#dm-c01 .dm-change data-anchor="dm-r01" data-kind="replace" data-author="dm-a01" data-status="${state.aliceStatus}" data-created="2026-07-15T09:00:00.000Z"}
+:::: {#dm-c01 .dm-change data-anchor="dm-r01" data-kind="replace" data-author="dm-a01" data-status="${state.aliceStatus}" data-created="2026-07-15T09:00:00.000Z"${aliceUpdated}}
 ~~~{.dm-proposal}
 reduced leaf area by 18%
 ~~~
@@ -151,7 +157,7 @@ reduced leaf area by 18%
 State the measured effect directly.
 ~~~
 ::::
-:::: {#dm-c02 .dm-change data-anchor="dm-r01" data-kind="replace" data-author="dm-a02" data-status="${state.marcusStatus}" data-created="2026-07-15T09:04:00.000Z"}
+:::: {#dm-c02 .dm-change data-anchor="dm-r01" data-kind="replace" data-author="dm-a02" data-status="${state.marcusStatus}" data-created="2026-07-15T09:04:00.000Z"${marcusUpdated}}
 ~~~{.dm-proposal}
 lowered leaf expansion during the treatment period
 ~~~
@@ -159,7 +165,7 @@ lowered leaf expansion during the treatment period
 Keep the interpretation conservative.
 ~~~
 ::::
-:::: {#dm-comment-01 .dm-thread data-anchor="dm-comment-01" data-author="dm-a02" data-status="${state.commentDeleted ? 'deleted' : state.commentResolved ? 'resolved' : 'open'}" data-created="2026-07-15T09:08:00.000Z"}
+:::: {#dm-comment-01 .dm-thread data-anchor="dm-comment-01" data-author="dm-a02" data-status="${state.commentDeleted ? 'deleted' : state.commentResolved ? 'resolved' : 'open'}" data-created="2026-07-15T09:08:00.000Z"${commentUpdated}}
 ~~~{.dm-message data-author="dm-a02" data-at="2026-07-15T09:08:00.000Z" data-index="0"}
 Can we quantify this increase in the main text?
 ~~~

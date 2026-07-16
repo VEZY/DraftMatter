@@ -168,18 +168,27 @@ export function materializePortableDraftSource(draft: DraftState) {
   let review = parseReviewMarkup(materialized)
   const baselineCommentStatus = baseline.commentDeleted ? 'deleted' : baseline.commentResolved ? 'resolved' : 'open'
   const draftCommentStatus = draft.commentDeleted ? 'deleted' : draft.commentResolved ? 'resolved' : 'open'
-  const statusUpdates: [string, string, string][] = [
-    ['dm-c01', baseline.aliceStatus, draft.aliceStatus],
-    ['dm-c02', baseline.marcusStatus, draft.marcusStatus],
-    ['dm-comment-01', baselineCommentStatus, draftCommentStatus],
+  const statusUpdates: [string, string, string, string | undefined][] = [
+    ['dm-c01', baseline.aliceStatus, draft.aliceStatus, draft.reviewUpdatedAt?.alice],
+    ['dm-c02', baseline.marcusStatus, draft.marcusStatus, draft.reviewUpdatedAt?.marcus],
+    ['dm-comment-01', baselineCommentStatus, draftCommentStatus, draft.reviewUpdatedAt?.comment],
   ]
-  for (const [recordId, previous, next] of statusUpdates) {
+  for (const [recordId, previous, next, updatedAt] of statusUpdates) {
     if (previous === next) continue
-    if ([...review.changes, ...review.threads].some((record) => record.id === recordId)) review = updateReviewRecordStatus(review, recordId, next)
+    if ([...review.changes, ...review.threads].some((record) => record.id === recordId)) review = updateReviewRecordStatus(review, recordId, next, updatedAt)
   }
   if (!sameStrings(baseline.commentReplies, draft.commentReplies)) {
     const thread = review.threads.find((candidate) => candidate.id === 'dm-comment-01')
-    if (thread?.messages[0]) review = updateReviewThreadMessages(review, thread.id, [thread.messages[0], ...draft.commentReplies])
+    if (thread?.messages[0]) {
+      review = updateReviewThreadMessages(
+        review,
+        thread.id,
+        [thread.messages[0], ...draft.commentReplies],
+        'dm-a01',
+        [thread.messageRecords[0]?.timestamp, ...(draft.commentReplyTimestamps ?? [])],
+        draft.reviewUpdatedAt?.comment,
+      )
+    }
   }
   materialized = serializeReviewMarkup(review)
   return materialized

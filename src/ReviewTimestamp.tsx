@@ -22,12 +22,14 @@ export function ReviewTimestamp({
   value,
   fallback,
   detail,
+  verb = 'Recorded',
 }: {
   value?: string
   fallback: string
   detail?: string
+  verb?: 'Created' | 'Updated' | 'Recorded'
 }) {
   const timestamp = portableReviewTime(value)
   if (!timestamp) return <>{fallback}</>
-  return <><time dateTime={timestamp.dateTime} title={`Recorded ${timestamp.label}`}>{timestamp.label}</time>{detail ? ` · ${detail}` : ''}</>
+  return <><time dateTime={timestamp.dateTime} title={`${verb} ${timestamp.label}`}>{timestamp.label}</time>{detail ? ` · ${detail}` : ''}</>
 }

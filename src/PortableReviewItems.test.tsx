@@ -82,6 +82,9 @@ describe('portable review panel items', () => {
     ])
     expect(parsed.authors).toContainEqual(expect.objectContaining({ id: 'dm-local-author', name: 'Remi Vezy' }))
     expect(parsed.decisions).toEqual([expect.objectContaining({ changeId: 'dm-i02', authorId: 'dm-local-author', action: 'accepted' })])
+    expect(parsed.changes.find((change) => change.id === 'dm-i02')?.updatedAt).toBe(parsed.decisions[0].timestamp)
+    expect(parsed.changes.find((change) => change.id === 'dm-i01')?.updatedAt).toBe(parsed.decisions[0].timestamp)
+    expect(container.querySelector('#review-item-dm-i02 time')?.getAttribute('title')).toMatch(/^Updated /)
     expect(notices.at(-1)).toContain('overlapping alternative')
   })
 
