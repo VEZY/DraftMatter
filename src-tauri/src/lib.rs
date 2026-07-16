@@ -1604,6 +1604,75 @@ fn scholar_search_url(query: &str) -> Result<String, HostError> {
     ))
 }
 
+#[derive(Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum CitationLinkKind {
+    Doi,
+    RecordUrl,
+    ZoteroItem,
+}
+
+fn citation_record_url(value: &str) -> Result<String, HostError> {
+    let url = value.trim();
+    if url.is_empty()
+        || url.len() > 2_048
+        || url
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace() || character == '\\')
+    {
+        return Err(HostError::Integration(
+            "The citation source URL is not safe to open.".to_string(),
+        ));
+    }
+    let scheme_end = url.find("://").ok_or_else(|| {
+        HostError::Integration("Citation source links must use HTTP or HTTPS.".to_string())
+    })?;
+    let scheme = &url[..scheme_end];
+    if !scheme.eq_ignore_ascii_case("https") && !scheme.eq_ignore_ascii_case("http") {
+        return Err(HostError::Integration(
+            "Citation source links must use HTTP or HTTPS.".to_string(),
+        ));
+    }
+    let remainder = &url[scheme_end + 3..];
+    let authority_end = remainder
+        .find(|character| matches!(character, '/' | '?' | '#'))
+        .unwrap_or(remainder.len());
+    let authority = &remainder[..authority_end];
+    if authority.is_empty()
+        || authority.contains('@')
+        || !authority.chars().any(|character| character.is_ascii_alphanumeric())
+    {
+        return Err(HostError::Integration(
+            "Citation source links cannot contain embedded credentials or an empty host."
+                .to_string(),
+        ));
+    }
+    Ok(url.to_string())
+}
+
+fn citation_link_url(kind: CitationLinkKind, value: &str) -> Result<String, HostError> {
+    match kind {
+        CitationLinkKind::Doi => doi_csl_request_url(value).map_err(|error| {
+            HostError::Integration(format!("Could not open the citation DOI: {}", error.message))
+        }),
+        CitationLinkKind::RecordUrl => citation_record_url(value),
+        CitationLinkKind::ZoteroItem => {
+            let item_key = value.trim();
+            if item_key.is_empty()
+                || item_key.len() > 64
+                || !item_key
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric())
+            {
+                return Err(HostError::Integration(
+                    "The citation does not contain a valid Zotero item identity.".to_string(),
+                ));
+            }
+            Ok(format!("zotero://select/library/items/{item_key}"))
+        }
+    }
+}
+
 fn zotero_status_impl() -> ZoteroStatus {
     zotero_status_at(zotero_address())
 }
@@ -2196,6 +2265,18 @@ fn open_scholar_search(app: tauri::AppHandle, query: String) -> Result<(), HostE
 }
 
 #[tauri::command]
+fn open_citation_link(
+    app: tauri::AppHandle,
+    kind: CitationLinkKind,
+    value: String,
+) -> Result<(), HostError> {
+    let url = citation_link_url(kind, &value)?;
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|error| HostError::Integration(format!("Could not open the citation link: {error}")))
+}
+
+#[tauri::command]
 fn probe_runtime_executable(language: RuntimeLanguage) -> RuntimeExecutableProbe {
     probe_runtime_executable_impl(language)
 }
@@ -2469,6 +2550,7 @@ pub fn run() {
             crossref_search,
             resolve_doi_csl,
             open_scholar_search,
+            open_citation_link,
             probe_runtime_executable,
             discover_jupyter_kernels,
             execution_trust_status,
@@ -2660,6 +2742,37 @@ mod tests {
         );
         assert!(scholar_search_url("   ").is_err());
         assert!(scholar_search_url(&"x".repeat(513)).is_err());
+    }
+
+    #[test]
+    fn opens_only_bounded_typed_citation_links() {
+        assert_eq!(
+            citation_link_url(
+                CitationLinkKind::Doi,
+                "https://doi.org/10.1016/J.ENVSOFT.2019.104609"
+            )
+            .unwrap(),
+            "https://doi.org/10.1016%2Fj.envsoft.2019.104609"
+        );
+        assert_eq!(
+            citation_link_url(
+                CitationLinkKind::RecordUrl,
+                "https://publisher.example/article?id=42"
+            )
+            .unwrap(),
+            "https://publisher.example/article?id=42"
+        );
+        assert_eq!(
+            citation_link_url(CitationLinkKind::ZoteroItem, "PXW99EKT").unwrap(),
+            "zotero://select/library/items/PXW99EKT"
+        );
+        assert!(citation_link_url(CitationLinkKind::RecordUrl, "javascript:alert(1)").is_err());
+        assert!(citation_link_url(
+            CitationLinkKind::RecordUrl,
+            "https://user:secret@publisher.example/article"
+        )
+        .is_err());
+        assert!(citation_link_url(CitationLinkKind::ZoteroItem, "../PXW99EKT").is_err());
     }
 
     #[test]

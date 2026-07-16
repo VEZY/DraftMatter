@@ -1602,6 +1602,59 @@ button:disabled {
 .citation-detail dt { color: var(--faint); }
 .citation-detail dd { color: #59645f; margin: 0; }
 
+.citation-record-inspector dl {
+  border-top: 0;
+  margin-top: -5px;
+}
+
+.citation-record-inspector dd {
+  line-height: 1.4;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.citation-record-inspector code {
+  background: #f4f6f5;
+  border-radius: 3px;
+  color: #4f6259;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 8px;
+  padding: 1px 3px;
+}
+
+.citation-record-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  margin: -2px 0 10px;
+}
+
+.citation-record-links button {
+  align-items: center;
+  background: #f4f7f5;
+  border: 1px solid #dce4df;
+  border-radius: 4px;
+  color: #50675c;
+  display: flex;
+  font-size: 8px;
+  gap: 4px;
+  min-height: 26px;
+  padding: 0 8px;
+}
+
+.citation-record-links button:hover { background: #ebf1ed; }
+
+.citation-record-missing {
+  background: #fbf8f1;
+  border: 1px solid #eadfcd;
+  border-radius: 5px;
+  color: #776652;
+  font-size: 8.5px;
+  line-height: 1.45;
+  margin: -3px 0 10px;
+  padding: 7px 8px;
+}
+
 .citation-cluster-list {
   border-bottom: 1px solid var(--line);
   border-top: 1px solid var(--line);

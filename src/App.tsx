@@ -58,6 +58,7 @@ import { insertPortableSection } from './manuscriptOutline'
 import { copyPlainText } from './clipboard'
 import { countWords, measurePortableManuscript } from './manuscriptMetrics'
 import { ReviewTimestamp } from './ReviewTimestamp'
+import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
 
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
 const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
@@ -279,6 +280,46 @@ function CitationChip({ onClick, label }: { onClick: () => void; label: string }
     <button className="citation-chip" onClick={onClick} aria-label="Open citation details">
       {label}
     </button>
+  )
+}
+
+function citationSourceLabel(record: CitationRecord) {
+  if (record.source === 'zotero') return 'Zotero local library'
+  if (record.source === 'crossref') return 'Crossref scholarly metadata'
+  if (record.source === 'bibtex') return 'Project BibTeX'
+  if (record.source === 'csl-json') return 'Project CSL JSON'
+  if (record.source === 'ris') return 'Project RIS / RefMan'
+  if (record.source === 'endnote') return 'Project EndNote'
+  return 'DraftMatter sample record'
+}
+
+function CitationRecordInspector({
+  record,
+  citekey,
+  onOpenLink,
+}: {
+  record?: CitationRecord
+  citekey: string
+  onOpenLink: (request: CitationLinkRequest) => void
+}) {
+  if (!record) return <div className="citation-record-missing" role="status">Metadata for @{citekey} is unavailable. The portable citekey remains unchanged.</div>
+  return (
+    <div className="citation-record-inspector" aria-label={`Citation metadata for ${record.title}`}>
+      <dl>
+        <div><dt>Authors</dt><dd>{record.authors.length ? record.authors.join(', ') : 'No creators recorded'}</dd></div>
+        <div><dt>Published</dt><dd>{[record.year, record.container].filter(Boolean).join(' · ') || 'Publication details unavailable'}</dd></div>
+        {record.doi && <div><dt>DOI</dt><dd><code>{record.doi}</code></dd></div>}
+        <div><dt>Source</dt><dd>{citationSourceLabel(record)}{record.availability === 'cached' ? ' · cached for offline use' : ''}{record.provenance?.locator ? ` · ${record.provenance.locator}` : ''}</dd></div>
+        {record.sourceIdentity?.provider === 'zotero' && <div><dt>Zotero</dt><dd>Item {record.sourceIdentity.itemKey} · version {record.sourceIdentity.itemVersion}</dd></div>}
+      </dl>
+      {(record.doi || record.url || record.sourceIdentity?.provider === 'zotero') && (
+        <div className="citation-record-links">
+          {record.doi && <button onClick={() => onOpenLink({ kind: 'doi', value: record.doi! })}><Icon name="link" size={13} /> Open DOI</button>}
+          {record.url && <button onClick={() => onOpenLink({ kind: 'record-url', value: record.url! })}><Icon name="arrowRight" size={13} /> Source page</button>}
+          {record.sourceIdentity?.provider === 'zotero' && <button onClick={() => onOpenLink({ kind: 'zotero-item', value: record.sourceIdentity!.itemKey })}><Icon name="book" size={13} /> Show in Zotero</button>}
+        </div>
+      )}
+    </div>
   )
 }
 
@@ -2607,6 +2648,20 @@ function App() {
     }
   }
 
+  const openCitationRecordLink = async (request: CitationLinkRequest) => {
+    try {
+      if (desktopHost.available) {
+        await desktopHost.openCitationLink(request.kind, request.value)
+      } else {
+        const opened = window.open(citationLinkUrl(request), '_blank', 'noopener,noreferrer')
+        if (!opened) throw new Error('The browser blocked the citation link. Allow pop-ups and try again.')
+      }
+      setToast(request.kind === 'zotero-item' ? 'Opening the cited item in Zotero' : 'Opening citation source')
+    } catch (error) {
+      setToast(desktopHost.available ? normaliseHostFailure(error).message : readableError(error))
+    }
+  }
+
   const refreshZoteroResults = () => {
     if (!desktopHost.available) {
       setToast('Zotero refresh is available in the desktop app')
@@ -3407,6 +3462,7 @@ function App() {
                     )
                   })}
                 </div>
+                {activeCitationItem && <CitationRecordInspector record={activeCitationRecord} citekey={activeCitationItem.citekey} onOpenLink={(request) => void openCitationRecordLink(request)} />}
                 {activeCitationItem && (
                   <div className="citation-modifiers">
                     <label><span>Prefix</span><input value={activeCitationItem.prefix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { prefix: event.target.value })} placeholder="e.g. see" /></label>
@@ -3468,6 +3524,7 @@ function App() {
                       )
                     })}
                   </div>
+                  {activeCitationItem && <CitationRecordInspector record={activeCitationRecord} citekey={activeCitationItem.citekey} onOpenLink={(request) => void openCitationRecordLink(request)} />}
                   {activeCitationItem && (
                     <div className="citation-modifiers">
                       <label><span>Prefix</span><input value={activeCitationItem.prefix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { prefix: event.target.value })} placeholder="e.g. see" /></label>

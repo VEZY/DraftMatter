@@ -50,6 +50,7 @@ describe('desktop host adapter', () => {
     await host.searchCrossref({ kind: 'doi', doi: '10.1016/j.envsoft.2019.104609' })
     await host.resolveDoiCsl('10.1016/j.envsoft.2019.104609')
     await host.openScholarSearch('vezy et al. 2020 DynACof')
+    await host.openCitationLink('doi', '10.1016/j.envsoft.2019.104609')
     await host.probeRuntime('julia')
     await host.discoverJupyterKernels()
     await host.executionTrustStatus('/research/canopy')
@@ -116,6 +117,7 @@ describe('desktop host adapter', () => {
       ['crossref_search', { request: { doi: '10.1016/j.envsoft.2019.104609' } }],
       ['resolve_doi_csl', { doi: '10.1016/j.envsoft.2019.104609' }],
       ['open_scholar_search', { query: 'vezy et al. 2020 DynACof' }],
+      ['open_citation_link', { kind: 'doi', value: '10.1016/j.envsoft.2019.104609' }],
       ['probe_runtime_executable', { language: 'julia' }],
       ['discover_jupyter_kernels', undefined],
       ['execution_trust_status', { root: '/research/canopy' }],

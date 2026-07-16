@@ -7,6 +7,7 @@ import type { DirectHostExecutionRequest } from './directExecutionTransport'
 import type { KernelHostExecutionRequest } from './kernelExecutionTransport'
 import type { ExecutionProviderKind, RawDirectExecution, RawKernelExecution } from './executionProvider'
 import type { ExecutionLanguage } from './executionCells'
+import type { CitationLinkKind } from './citationLinks'
 
 export interface ProjectConfig {
   schemaVersion: number
@@ -449,6 +450,9 @@ export function createDesktopHost(
     },
     openScholarSearch(query: string) {
       return invokeBridge<void>('open_scholar_search', { query })
+    },
+    openCitationLink(kind: CitationLinkKind, value: string) {
+      return invokeBridge<void>('open_citation_link', { kind, value })
     },
     probeRuntime(language: RuntimeLanguage) {
       return invokeBridge<RuntimeExecutableProbe>('probe_runtime_executable', { language })

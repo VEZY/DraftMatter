@@ -236,6 +236,11 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
 
     await page.getByRole('button', { name: 'Edit citation @martin2023' }).click()
     const citationDetails = page.locator('.structured-citation-detail')
+    const citationMetadata = citationDetails.getByLabel('Citation metadata for Growth coordination under fluctuating water availability')
+    await expect(citationMetadata).toContainText('Alice Martin, Marcus Chen')
+    await expect(citationMetadata).toContainText('2023 · New Phytologist')
+    await expect(citationMetadata).toContainText('10.1111/nph.19208')
+    await expect(citationMetadata.getByRole('button', { name: 'Open DOI' })).toBeVisible()
     await citationDetails.getByLabel('Locator').fill('p. 18')
     await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('[@martin2023, p. 18]')
     await citationDetails.getByRole('button', { name: 'Done' }).click()
