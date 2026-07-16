@@ -88,6 +88,55 @@ describe('portable review panel items', () => {
     expect(notices.at(-1)).toContain('overlapping alternative')
   })
 
+  it('rejects all selected alternatives in one attributed batch decision', async () => {
+    expect(text(container.querySelector('.portable-review-bulk'))).toContain('0 selected')
+    await click(button(container, 'Select all 2'))
+    expect(container.querySelectorAll<HTMLInputElement>('.review-batch-toggle input:checked')).toHaveLength(2)
+    await click(button(container, 'Reject selected'))
+
+    const parsed = parseReviewMarkup(latestSource)
+    expect(parsed.changes.map((change) => [change.id, change.status])).toEqual([
+      ['dm-i01', 'rejected'],
+      ['dm-i02', 'rejected'],
+    ])
+    expect(parsed.decisions).toHaveLength(2)
+    expect(new Set(parsed.decisions.map((decision) => decision.authorId))).toEqual(new Set(['dm-local-author']))
+    expect(new Set(parsed.decisions.map((decision) => decision.timestamp)).size).toBe(1)
+    expect(notices.at(-1)).toBe('2 suggestions rejected atomically')
+  })
+
+  it('blocks overlapping batch acceptance without partially deciding either alternative', async () => {
+    await click(button(container, 'Select all 2'))
+    await click(button(container, 'Accept selected'))
+
+    expect(latestSource).toBe(identicalSource)
+    expect(parseReviewMarkup(latestSource).decisions).toEqual([])
+    expect(text(container.querySelector('[role="alert"]'))).toContain('overlap')
+    expect(container.querySelectorAll<HTMLInputElement>('.review-batch-toggle input:checked')).toHaveLength(2)
+  })
+
+  it('applies a batch to the currently filtered author only', async () => {
+    await act(async () => root.render(
+      <PortableReviewItems
+        source={identicalSource}
+        authorId="dm-a01"
+        onApply={(next, message) => { latestSource = next; notices.push(message) }}
+      />,
+    ))
+
+    expect(text(container.querySelector('.portable-review-bulk'))).toContain("Alice Martin's visible suggestions")
+    await click(button(container, 'Select all 1'))
+    await click(button(container, 'Accept selected'))
+
+    const parsed = parseReviewMarkup(latestSource)
+    expect(parsed.changes.map((change) => [change.id, change.status])).toEqual([
+      ['dm-i01', 'accepted'],
+      ['dm-i02', 'needs-rebase'],
+    ])
+    expect(parsed.decisions).toEqual([expect.objectContaining({ changeId: 'dm-i01', authorId: 'dm-local-author' })])
+    expect(notices.at(-1)).toContain('1 suggestion accepted atomically')
+  })
+
   it('rebases a needs-rebase alternative onto accepted text and retains the audit', async () => {
     await click(container.querySelectorAll('.proposal-option')[1])
     await click(button(container, 'Accept'))

@@ -8,6 +8,7 @@ import {
   createReviewChange,
   createReviewThread,
   decideReviewChange,
+  decideReviewChanges,
   deleteReviewThread,
   ReviewOperationError,
   rebaseReviewChange,
@@ -367,6 +368,76 @@ describe('portable suggestion operations', () => {
     })).toThrowError(expect.objectContaining({ code: 'review-rebase-quote-missing' }))
     expect(accepted.document.source).toBe(before)
     expect(parseReviewMarkup(before).changes.map((change) => change.status)).toEqual(['accepted', 'needs-rebase'])
+  })
+
+  it('accepts a selected set of disjoint suggestions in one atomic batch', () => {
+    const firstStart = source.indexOf('Leaf area')
+    const first = createReviewChange(source, {
+      start: firstStart,
+      end: firstStart + 'Leaf area'.length,
+      author,
+      kind: 'replace',
+      proposal: 'Canopy area',
+      changeId: 'dm-change-canopy',
+      anchorId: 'dm-anchor-canopy',
+      startMarkerId: 'dm-canopy-start',
+      endMarkerId: 'dm-canopy-end',
+    })
+    const secondStart = first.document.source.indexOf('during recovery')
+    const second = createReviewChange(first.document.source, {
+      start: secondStart,
+      end: secondStart + 'during recovery'.length,
+      author,
+      kind: 'replace',
+      proposal: 'after rewetting',
+      changeId: 'dm-change-recovery',
+      anchorId: 'dm-anchor-recovery',
+      startMarkerId: 'dm-recovery-start',
+      endMarkerId: 'dm-recovery-end',
+    })
+
+    const result = decideReviewChanges(second.document, {
+      changeIds: ['dm-change-recovery', 'dm-change-canopy'],
+      action: 'accepted',
+      authorId: author.id,
+      timestamp: '2026-07-15T14:30:00.000Z',
+      decisionIds: {
+        'dm-change-recovery': 'dm-decision-recovery',
+        'dm-change-canopy': 'dm-decision-canopy',
+      },
+    })
+
+    expect(result.decidedChangeIds).toEqual(['dm-change-recovery', 'dm-change-canopy'])
+    expect(result.rebasedChangeIds).toEqual([])
+    expect(result.document.changes.map((change) => [change.id, change.status, change.updatedAt])).toEqual([
+      ['dm-change-canopy', 'accepted', '2026-07-15T14:30:00.000Z'],
+      ['dm-change-recovery', 'accepted', '2026-07-15T14:30:00.000Z'],
+    ])
+    expect(result.decisions.map((decision) => [decision.id, decision.timestamp])).toEqual([
+      ['dm-decision-recovery', '2026-07-15T14:30:00.000Z'],
+      ['dm-decision-canopy', '2026-07-15T14:30:00.000Z'],
+    ])
+  })
+
+  it('fails overlapping batch acceptance before changing source, while batch rejection remains safe', () => {
+    const document = parseReviewMarkup(identicalSource)
+    expect(() => decideReviewChanges(document, {
+      changeIds: ['dm-i01', 'dm-i02'],
+      action: 'accepted',
+      authorId: 'dm-a01',
+    })).toThrowError(expect.objectContaining({ code: 'review-batch-conflict' }))
+    expect(document.source).toBe(identicalSource)
+    expect(document.changes.map((change) => change.status)).toEqual(['open', 'open'])
+
+    const rejected = decideReviewChanges(document, {
+      changeIds: ['dm-i01', 'dm-i02'],
+      action: 'rejected',
+      authorId: 'dm-a01',
+      timestamp: '2026-07-15T14:31:00.000Z',
+      decisionIds: { 'dm-i01': 'dm-reject-i01', 'dm-i02': 'dm-reject-i02' },
+    })
+    expect(rejected.document.changes.map((change) => change.status)).toEqual(['rejected', 'rejected'])
+    expect(rejected.document.decisions).toHaveLength(2)
   })
 
   it('validates change geometry and proposal requirements before touching source', () => {

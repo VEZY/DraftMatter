@@ -10,7 +10,7 @@ import {
   type ReviewThread,
 } from './reviewMarkup'
 import { parseLosslessPortableSource } from './portableSource'
-import { conflictingChangeIds } from './reviewConflicts'
+import { buildReviewConflictGraph, conflictingChangeIds } from './reviewConflicts'
 import { projectPortableAcceptedBase } from './reviewProjector'
 import { reanchorPortableReviews } from './reviewReanchor'
 
@@ -103,6 +103,21 @@ export interface DecideReviewChangeRequest {
 
 export interface ReviewDecisionOperationResult extends ReviewChangeOperationResult {
   decision: ReviewDecision
+  rebasedChangeIds: string[]
+}
+
+export interface DecideReviewChangesRequest {
+  changeIds: string[]
+  action: 'accepted' | 'rejected'
+  authorId: string
+  timestamp?: string
+  decisionIds?: Record<string, string>
+}
+
+export interface ReviewBatchDecisionOperationResult {
+  document: ReviewMarkupDocument
+  decisions: ReviewDecision[]
+  decidedChangeIds: string[]
   rebasedChangeIds: string[]
 }
 
@@ -728,4 +743,60 @@ export function decideReviewChange(
   const decision = updated.decisions.find((candidate) => candidate.id === decisionId)
   if (!decision) throw new ReviewOperationError('review-decision-missing', `Review decision ${decisionId} was not created.`)
   return { ...decided, decision, rebasedChangeIds }
+}
+
+/**
+ * Applies a set of review decisions as one pure transaction. The returned
+ * document is the only observable mutation, so a failure at any point leaves
+ * the caller's source unchanged. Accepting overlapping alternatives is
+ * rejected before the first decision because there is no deterministic way to
+ * treat both alternatives as the accepted manuscript.
+ */
+export function decideReviewChanges(
+  document: ReviewMarkupDocument,
+  request: DecideReviewChangesRequest,
+): ReviewBatchDecisionOperationResult {
+  assertWritable(document)
+  const changeIds = [...new Set(request.changeIds)]
+  if (changeIds.length === 0) {
+    throw new ReviewOperationError('review-batch-empty', 'Select at least one suggestion before applying a batch decision.')
+  }
+  const requested = new Set(changeIds)
+  const missing = changeIds.find((changeId) => !document.changes.some((change) => change.id === changeId))
+  if (missing) throw new ReviewOperationError('review-change-missing', `Review change ${missing} was not found.`)
+
+  if (request.action === 'accepted') {
+    const overlap = buildReviewConflictGraph(document).edges.find((edge) =>
+      requested.has(edge.leftChangeId) && requested.has(edge.rightChangeId))
+    if (overlap) {
+      throw new ReviewOperationError(
+        'review-batch-conflict',
+        `Suggestions ${overlap.leftChangeId} and ${overlap.rightChangeId} overlap. Accept one alternative, then rebase or reject the other.`,
+      )
+    }
+  }
+
+  const timestamp = reviewTimestamp(request.timestamp)
+  let updated = document
+  const decisions: ReviewDecision[] = []
+  const rebasedChangeIds = new Set<string>()
+  for (const changeId of changeIds) {
+    const result = decideReviewChange(updated, {
+      changeId,
+      action: request.action,
+      authorId: request.authorId,
+      timestamp,
+      decisionId: request.decisionIds?.[changeId],
+    })
+    updated = result.document
+    decisions.push(result.decision)
+    result.rebasedChangeIds.forEach((id) => rebasedChangeIds.add(id))
+  }
+
+  return {
+    document: updated,
+    decisions,
+    decidedChangeIds: changeIds,
+    rebasedChangeIds: [...rebasedChangeIds],
+  }
 }
