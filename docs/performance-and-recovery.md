@@ -7,10 +7,12 @@ The release CI ceilings are deliberately above typical developer-machine timings
 | Operation | CI ceiling |
 | --- | ---: |
 | Lossless source and review parse | 2.5 s |
+| Rendered structured-editor mount | 5.0 s |
+| Structured edit + deterministic serialization | 1.5 s |
 | Native semantic HTML export | 2.5 s |
 | Native DOCX package export | 3.5 s |
 
-Interactive editing remains section-oriented; expensive publication exports run only after an explicit action. A later profiling pass should tighten these ceilings using release builds on each supported OS.
+The interactive gate mounts all 90 sections and tables in the real ProseMirror editor, inserts a labeled section through an editor transaction, and measures the complete portable-source serialization. Expensive publication exports still run only after an explicit action. Product-specific release profiling may tighten these conservative cross-platform CI ceilings without weakening them.
 
 ## Recovery invariants
 

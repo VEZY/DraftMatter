@@ -1,20 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import { renderDocxExport } from './docxExport'
 import { renderNativeHtmlExport } from './nativeHtmlExport'
+import { articleSizedFixture } from './performanceFixture'
 import { parseLosslessPortableSource } from './portableSource'
 import { parseReviewMarkup } from './reviewMarkup'
-
-function articleSizedFixture(pages = 90) {
-  const sections = Array.from({ length: pages }, (_unused, index) => `## Section ${index + 1}
-
-${`Canopy architecture and drought response remained measurable across cohort ${index + 1}. `.repeat(34)} [@vezy2020].
-
-| Week | Control | Drought |
-| ---: | ---: | ---: |
-| ${index + 1} | ${100 + index} | ${82 + index} |
-`).join('\n')
-  return `---\ntitle: "Article-sized resilience fixture"\n---\n\n${sections}`
-}
 
 describe('DM-P5-07 article-sized performance gate', () => {
   it('keeps a 90-page semantic source and clean exports within recorded CI budgets', () => {
