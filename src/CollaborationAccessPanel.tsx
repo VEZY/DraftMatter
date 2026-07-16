@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { WorkspaceAuditEvent, WorkspaceInvitation, WorkspaceMembership, WorkspaceRole } from './collaboration/workspaceService'
-import { CollaborationServiceClient, type CollaborationRecoveryCheckpoint, type WorkspaceSummary } from './collaboration/serviceClient'
+import { CollaborationServiceClient, type CollaborationRecoveryCheckpoint, type WorkspaceDeletion, type WorkspaceSummary } from './collaboration/serviceClient'
 import { Icon } from './Icon'
 
 export interface CollaborationAccessPanelProps {
@@ -16,13 +16,16 @@ function eventLabel(event: WorkspaceAuditEvent) {
 
 export function CollaborationAccessPanel({ client, workspace, projectId, currentUserId }: CollaborationAccessPanelProps) {
   const [open, setOpen] = useState(false)
+  const [dangerOpen, setDangerOpen] = useState(false)
   const [busy, setBusy] = useState('')
   const [problem, setProblem] = useState('')
   const [members, setMembers] = useState<WorkspaceMembership[]>([])
   const [invitations, setInvitations] = useState<WorkspaceInvitation[]>([])
   const [events, setEvents] = useState<WorkspaceAuditEvent[]>([])
   const [recoveries, setRecoveries] = useState<CollaborationRecoveryCheckpoint[]>([])
+  const [deletion, setDeletion] = useState<WorkspaceDeletion | null>()
   const [recoveryName, setRecoveryName] = useState('')
+  const [deletionConfirmation, setDeletionConfirmation] = useState('')
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Exclude<WorkspaceRole, 'owner'>>('editor')
   const [createdToken, setCreatedToken] = useState('')
@@ -31,16 +34,18 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
     setBusy('refresh')
     setProblem('')
     try {
-      const [nextMembers, nextInvitations, nextEvents, nextRecoveries] = await Promise.all([
+      const [nextMembers, nextInvitations, nextEvents, nextRecoveries, nextDeletion] = await Promise.all([
         client.listMembers(workspace.id),
         client.listInvitations(workspace.id),
         client.listAuditEvents(workspace.id),
         projectId ? client.listRecoveryCheckpoints(workspace.id, projectId) : Promise.resolve([]),
+        client.getWorkspaceDeletion(workspace.id),
       ])
       setMembers(nextMembers)
       setInvitations(nextInvitations)
       setEvents(nextEvents)
       setRecoveries(nextRecoveries)
+      setDeletion(nextDeletion.deletion)
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error))
     } finally {
@@ -111,6 +116,33 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
     }
   }
 
+  const scheduleDeletion = async () => {
+    if (deletionConfirmation !== workspace.name) return
+    setBusy('delete-workspace')
+    setProblem('')
+    try {
+      setDeletion(await client.scheduleWorkspaceDeletion(workspace.id))
+      setDeletionConfirmation('')
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const cancelDeletion = async () => {
+    setBusy('cancel-deletion')
+    setProblem('')
+    try {
+      await client.cancelWorkspaceDeletion(workspace.id)
+      setDeletion(null)
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy('')
+    }
+  }
+
   return (
     <section className="collaboration-access">
       <button className="collaboration-access-toggle" onClick={toggle} aria-expanded={open}><Icon name="users" size={15} /><span><strong>Workspace access & recovery</strong><small>Invitations, revocation, activity, and immutable cloud recovery</small></span><Icon name="chevronDown" size={14} /></button>
@@ -130,6 +162,10 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
 
           <div className="collaboration-recovery-row"><span><strong>Named cloud recovery · {recoveries.length}</strong><small>{recoveries[0] ? `${recoveries[0].name} · ${new Date(recoveries[0].createdAt).toLocaleString()}` : 'Encrypted immutable history, independent of the local working tree.'}</small></span><input value={recoveryName} onChange={(event) => setRecoveryName(event.target.value)} placeholder="Before reviewer revisions" aria-label="Recovery checkpoint name" /><button onClick={() => void createRecovery()} disabled={Boolean(busy) || !projectId || !recoveryName.trim()}>{busy === 'backup' ? 'Saving…' : 'Save named point'}</button></div>
           <section className="collaboration-activity"><span className="collaboration-section-label">Recent activity</span>{events.slice(-6).reverse().map((event) => <div key={event.id}><span>{eventLabel(event)}</span><small>{event.targetId ?? event.actorId} · {new Date(event.at).toLocaleString()}</small></div>)}</section>
+          <details className={`collaboration-danger-zone ${deletion ? 'pending' : ''}`} open={dangerOpen || Boolean(deletion)} onToggle={(event) => setDangerOpen(event.currentTarget.open)}>
+            <summary>Workspace deletion</summary>
+            {deletion ? <div className="collaboration-deletion-pending"><span><strong>{deletion.status === 'failed' ? 'Deletion needs attention' : 'Deletion scheduled'}</strong><small>{deletion.status === 'running' ? 'Permanent deletion is currently running.' : `All workspace projects and managed storage are scheduled for permanent deletion after ${new Date(deletion.executeAfter).toLocaleString()}.`}{deletion.failure ? ` ${deletion.failure}` : ''}</small></span><button onClick={() => void cancelDeletion()} disabled={Boolean(busy) || deletion.status === 'running'}>{busy === 'cancel-deletion' ? 'Cancelling…' : deletion.status === 'running' ? 'Deletion running' : 'Cancel deletion'}</button></div> : <div className="collaboration-deletion-form"><span><strong>Delete this managed workspace</strong><small>The service applies its configured grace period before permanently removing projects, live history, recoveries, backups, invitations, and membership records. You can cancel during that period.</small></span><label><span>Type {workspace.name} to confirm</span><input value={deletionConfirmation} onChange={(event) => setDeletionConfirmation(event.target.value)} aria-label="Workspace deletion confirmation" autoComplete="off" /></label><button onClick={() => void scheduleDeletion()} disabled={Boolean(busy) || deletionConfirmation !== workspace.name}>{busy === 'delete-workspace' ? 'Scheduling…' : 'Schedule deletion'}</button></div>}
+          </details>
           {problem && <div className="collaboration-error" role="alert">{problem}</div>}
           <button className="collaboration-refresh" onClick={() => void refresh()} disabled={Boolean(busy)}>{busy === 'refresh' ? 'Refreshing…' : 'Refresh workspace details'}</button>
         </div>

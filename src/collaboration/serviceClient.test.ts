@@ -54,4 +54,20 @@ describe('browser collaboration service client', () => {
     }))
     expect(vi.mocked(request).mock.calls[0][1]?.body).toBe(JSON.stringify({ role: 'commenter', email: 'reviewer@example.org' }))
   })
+
+  it('reads, schedules, and cancels the owner-controlled workspace deletion window', async () => {
+    const deletion = { id: 'delete-1', workspaceId: 'forest', requestedBy: 'owner', requestedAt: '2026-07-15T00:00:00.000Z', executeAfter: '2026-07-22T00:00:00.000Z', status: 'scheduled' }
+    const request = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ deletion: null }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(deletion), { status: 202 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ id: 'delete-1', status: 'cancelled' }), { status: 200 }))
+    const client = new CollaborationServiceClient('https://collab.example.org', 'access-token', request)
+
+    await expect(client.getWorkspaceDeletion('forest')).resolves.toEqual({ deletion: null })
+    await expect(client.scheduleWorkspaceDeletion('forest')).resolves.toMatchObject({ executeAfter: deletion.executeAfter, status: 'scheduled' })
+    await expect(client.cancelWorkspaceDeletion('forest')).resolves.toEqual({ id: 'delete-1', status: 'cancelled' })
+    expect(request).toHaveBeenNthCalledWith(1, 'https://collab.example.org/api/workspaces/forest/deletion', expect.objectContaining({ headers: expect.any(Headers) }))
+    expect(request).toHaveBeenNthCalledWith(2, 'https://collab.example.org/api/workspaces/forest', expect.objectContaining({ method: 'DELETE' }))
+    expect(request).toHaveBeenNthCalledWith(3, 'https://collab.example.org/api/workspaces/forest/deletion/cancel', expect.objectContaining({ method: 'POST' }))
+  })
 })

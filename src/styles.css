@@ -4154,6 +4154,25 @@ kbd {
 .collaboration-activity > div { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 5px 2px; border-bottom: 1px solid #eceeed; color: var(--ink); font-size: 9px; text-transform: capitalize; }
 .collaboration-activity small { color: var(--muted); font-size: 8px; text-transform: none; }
 .collaboration-refresh { align-self: flex-start; }
+.collaboration-danger-zone { border-top: 1px solid #eceeed; padding-top: 4px; }
+.collaboration-danger-zone summary { color: #8a6a60; cursor: pointer; font-size: 9px; font-weight: 700; padding: 7px 2px; }
+.collaboration-danger-zone.pending summary { color: #914f43; }
+.collaboration-deletion-form,
+.collaboration-deletion-pending { align-items: end; background: #fff9f7; border: 1px solid #eddbd5; border-radius: 7px; display: grid; gap: 10px; grid-template-columns: 1fr minmax(165px, .55fr) auto; padding: 10px; }
+.collaboration-deletion-pending { align-items: center; grid-template-columns: 1fr auto; }
+.collaboration-deletion-form > span,
+.collaboration-deletion-pending > span { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.collaboration-deletion-form strong,
+.collaboration-deletion-pending strong { color: #75473f; font-size: 10px; }
+.collaboration-deletion-form small,
+.collaboration-deletion-pending small { color: #8d746c; font-size: 8px; line-height: 1.45; }
+.collaboration-deletion-form label { gap: 4px; }
+.collaboration-deletion-form label span { color: #8a6258; font-size: 8px; }
+.collaboration-deletion-form input { height: 32px; font-size: 9px; }
+.collaboration-deletion-form button,
+.collaboration-deletion-pending button { min-height: 32px; padding: 0 10px; border: 1px solid #d9aaa0; border-radius: 6px; background: #fff; color: #8a493e; font-size: 9px; font-weight: 700; }
+.collaboration-deletion-form button:disabled,
+.collaboration-deletion-pending button:disabled { border-color: #e6d8d4; color: #aa928c; }
 .save-indicator.checkpoint-needed { background: #b88448; box-shadow: 0 0 0 3px rgba(184, 132, 72, .12); }
 
 .structured-manuscript-editor {
@@ -4488,6 +4507,10 @@ img.ProseMirror-separator { border: 0 !important; display: inline !important; he
   .collaboration-recovery-row { align-items: stretch; flex-direction: column; }
   .collaboration-recovery-row input { width: 100%; }
   .collaboration-recovery-row button { align-self: flex-start; }
+  .collaboration-deletion-form,
+  .collaboration-deletion-pending { align-items: stretch; grid-template-columns: 1fr; }
+  .collaboration-deletion-form button,
+  .collaboration-deletion-pending button { justify-self: start; }
   .structured-figure-fields { grid-template-columns: 1fr; }
 }
 

@@ -14,7 +14,7 @@ The separate loopback Hocuspocus integration test certifies the actual authentic
 
 This gate now extends through the managed PostgreSQL/S3-compatible adapters, OIDC roles and revocation, signed billing entitlements, scheduled verified backups, restore drills, retention/deletion automation, privacy-safe metrics, and a portable service deployment. A paid or broad public launch still requires environment-specific TLS and secret management, operated identity/billing configuration, provider-level database/object backups, alert routing, privacy/data-processing review, external security review, and production load/soak testing.
 
-The product workflow now covers browser PKCE sign-in, verified author identity, authorized workspace/project discovery and creation, invitation acceptance and revocation, member/activity administration, owner-named immutable recovery, live presence, and explicit owner-controlled local checkpointing. Live shared changes do not enter the desktop working tree through autosave, and browser execution controls are disabled.
+The product workflow now covers browser PKCE sign-in, verified author identity, authorized workspace/project discovery and creation, invitation acceptance and revocation, member/activity administration, owner-named immutable recovery, a typed-confirmation workspace deletion grace window with cancellation, live presence, and explicit owner-controlled local checkpointing. Live shared changes do not enter the desktop working tree through autosave, and browser execution controls are disabled.
 
 ## Current automated evidence
 

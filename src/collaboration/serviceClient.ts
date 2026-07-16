@@ -19,12 +19,18 @@ export interface WorkspaceSummary extends WorkspaceRecord {
 }
 
 export interface WorkspaceDeletion {
+  id: string
   workspaceId: string
   requestedBy: string
   requestedAt: string
-  deleteAfter: string
-  cancelledAt?: string
-  completedAt?: string
+  executeAfter: string
+  status: 'scheduled' | 'running' | 'failed'
+  failure?: string
+}
+
+export interface CancelledWorkspaceDeletion {
+  id: string
+  status: 'cancelled'
 }
 
 export interface CollaborationBackup {
@@ -200,6 +206,6 @@ export class CollaborationServiceClient {
   }
 
   cancelWorkspaceDeletion(workspaceId: string) {
-    return this.call<WorkspaceDeletion>(`/api/workspaces/${encoded(workspaceId)}/deletion/cancel`, { method: 'POST' })
+    return this.call<CancelledWorkspaceDeletion>(`/api/workspaces/${encoded(workspaceId)}/deletion/cancel`, { method: 'POST' })
   }
 }
