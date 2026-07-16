@@ -3179,6 +3179,15 @@ button:disabled {
 .editor-review-context-menu strong { font-size: 9px; }
 .editor-review-context-menu small { color: #8a9690; font-size: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+.export-file-backdrop { z-index: 205; }
+.export-file-dialog { background: #f8faf9; border: 1px solid #dfe5e1; border-radius: 9px; box-shadow: 0 24px 70px rgba(28, 37, 33, .22); display: grid; gap: 13px; padding: 16px; width: min(490px, calc(100vw - 36px)); }
+.export-file-name { display: grid; gap: 5px; }
+.export-file-name > span { color: #53625b; font-size: 9px; font-weight: 700; }
+.export-file-name input { background: #fff; border: 1px solid #d5ddd8; border-radius: 6px; color: #35443d; font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 9px 10px; }
+.export-file-name input:focus { border-color: #8ba296; outline: 2px solid rgba(63, 104, 89, .14); }
+.export-file-location { align-items: center; background: #f1f5f2; border: 1px solid #e0e7e2; border-radius: 6px; color: #718078; display: flex; font-size: 8px; gap: 7px; line-height: 1.5; margin: 0; padding: 8px 9px; }
+.export-file-problem { color: #9a5e4a; font-size: 8px; line-height: 1.45; margin: 0; }
+
 .export-menu {
   right: 0;
   top: 40px;

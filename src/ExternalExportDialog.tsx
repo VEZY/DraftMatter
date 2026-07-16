@@ -58,7 +58,11 @@ export function ExternalExportDialog({
     setBusy(true)
     setProblem('')
     try {
-      const result = await desktopHost.renderExternalExport({ root, adapter, format, source, outputName: outputName.trim() })
+      const result = await desktopHost.renderExternalExportToFile({ root, adapter, format, source, outputName: outputName.trim() })
+      if (!result) {
+        setBusy(false)
+        return
+      }
       onNotice(`${result.message} Saved to ${result.path}.`)
       onClose()
     } catch (error) {
@@ -85,11 +89,11 @@ export function ExternalExportDialog({
 
         <div className="external-export-options">
           <label><span>Format</span><select value={format} onChange={(event) => changeFormat(event.target.value as ExternalExportFormat)}><option value="html">HTML</option><option value="docx">DOCX</option><option value="pdf">PDF</option></select></label>
-          <label><span>Output file</span><input value={outputName} onChange={(event) => setOutputName(event.target.value)} /></label>
-          <p><Icon name="folder" size={14} /> .draftmatter/exports/{outputName || '…'}</p>
+          <label><span>Suggested file name</span><input value={outputName} onChange={(event) => setOutputName(event.target.value)} /></label>
+          <p><Icon name="folder" size={14} /> Choose any folder in the system save dialog.</p>
         </div>
 
-        <div className="external-safety-note"><Icon name="check" size={15} /><span><strong>Inert rendering boundary</strong><small>Review records are rejected. Quarto uses its Pandoc pass-through, not <code>quarto render</code>. Existing exports are never overwritten silently.</small></span></div>
+        <div className="external-safety-note"><Icon name="check" size={15} /><span><strong>Inert rendering boundary</strong><small>Review records are rejected. Quarto uses its Pandoc pass-through, not <code>quarto render</code>. The system save dialog confirms the destination and any overwrite.</small></span></div>
         {problem && <div className="external-export-problem" role="alert">{problem}</div>}
 
         <div className="execution-dialog-actions">

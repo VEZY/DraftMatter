@@ -66,6 +66,16 @@ export interface SaveDocumentResult {
   recoveryPath: string | null
 }
 
+export interface SaveExportFileRequest {
+  suggestedName: string
+  bytes: number[]
+}
+
+export interface SaveExportFileResult {
+  path: string
+  bytes: number
+}
+
 export interface SaveCitationLockRequest {
   root: string
   content: string
@@ -407,6 +417,11 @@ export function createDesktopHost(
     saveDocument(request: SaveDocumentRequest) {
       return invokeBridge<SaveDocumentResult>('save_document', { request })
     },
+    saveExportFile(request: SaveExportFileRequest) {
+      return available
+        ? invokeBridge<SaveExportFileResult | null>('save_export_file', { request })
+        : externalExportUnavailable()
+    },
     acquireCitations(request: AcquireCitationsRequest) {
       return invokeBridge<AcquireCitationsResult>('acquire_citations', { request })
     },
@@ -624,6 +639,11 @@ export function createDesktopHost(
     renderExternalExport(request: ExternalExportRequest) {
       return available
         ? invokeBridge<ExternalExportResult>('render_external_export', { request })
+        : externalExportUnavailable()
+    },
+    renderExternalExportToFile(request: ExternalExportRequest) {
+      return available
+        ? invokeBridge<ExternalExportResult | null>('render_external_export_to_file', { request })
         : externalExportUnavailable()
     },
   }

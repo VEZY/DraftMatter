@@ -24,6 +24,7 @@ describe('desktop host adapter', () => {
     await host.readCitationCache('/research/canopy')
     await host.saveCitationLock({ root: '/research/canopy', content: '{"schemaVersion":1,"entries":[]}', expectedHash: null })
     await host.saveDocument({ root: '/research/canopy', path: 'paper.qmd', content: '# Paper', expectedHash: 'old' })
+    await host.saveExportFile({ suggestedName: 'paper.docx', bytes: [80, 75] })
     await host.acquireCitations({
       root: '/research/canopy',
       documentPath: 'paper.qmd',
@@ -95,6 +96,7 @@ describe('desktop host adapter', () => {
     await host.gitPush({ root: '/research/canopy', remote: 'origin', branch: 'main' })
     await host.probeExternalExportTools()
     await host.renderExternalExport({ root: '/research/canopy', adapter: 'pandoc', format: 'docx', source: '# Clean', outputName: 'paper.docx' })
+    await host.renderExternalExportToFile({ root: '/research/canopy', adapter: 'pandoc', format: 'docx', source: '# Clean', outputName: 'paper.docx' })
 
     expect(calls).toEqual([
       ['open_project', { root: '/research/canopy' }],
@@ -104,6 +106,7 @@ describe('desktop host adapter', () => {
       ['read_citation_cache', { root: '/research/canopy' }],
       ['save_citation_lock', { request: { root: '/research/canopy', content: '{"schemaVersion":1,"entries":[]}', expectedHash: null } }],
       ['save_document', { request: { root: '/research/canopy', path: 'paper.qmd', content: '# Paper', expectedHash: 'old' } }],
+      ['save_export_file', { request: { suggestedName: 'paper.docx', bytes: [80, 75] } }],
       ['acquire_citations', { request: {
         root: '/research/canopy', documentPath: 'paper.qmd', documentContent: 'Cited [@vezy2020].', expectedDocumentHash: 'old', bibliographyPath: 'references.json', expectedBibliographyHash: null, bibliographyRecords: [{ id: 'vezy2020' }], lockContent: '{"schemaVersion":1,"entries":[]}', expectedLockHash: null, cacheContent: '{"schemaVersion":1,"records":[]}', expectedCacheHash: null,
       } }],
@@ -154,6 +157,7 @@ describe('desktop host adapter', () => {
       ['git_push', { request: { root: '/research/canopy', remote: 'origin', branch: 'main' } }],
       ['probe_external_export_tools', undefined],
       ['render_external_export', { request: { root: '/research/canopy', adapter: 'pandoc', format: 'docx', source: '# Clean', outputName: 'paper.docx' } }],
+      ['render_external_export_to_file', { request: { root: '/research/canopy', adapter: 'pandoc', format: 'docx', source: '# Clean', outputName: 'paper.docx' } }],
     ])
   })
 

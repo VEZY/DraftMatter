@@ -22,6 +22,7 @@ Author metadata remains part of the ordinary manuscript.
 test.describe('portable manuscript authors', () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript((portableSource) => {
+      Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined })
       if (!localStorage.getItem('draftmatter.structured-source.v1')) {
         localStorage.setItem('draftmatter.structured-source.v1', portableSource)
         localStorage.setItem('draftmatter.structured-mode.v1', 'true')
@@ -66,8 +67,10 @@ test.describe('portable manuscript authors', () => {
     await dialog.getByRole('button', { name: 'Close manuscript authors' }).click()
 
     await page.getByRole('button', { name: 'Export' }).click()
-    const downloadEvent = page.waitForEvent('download')
     await page.getByRole('button', { name: /Native HTML/ }).click()
+    const exportDialog = page.getByRole('dialog', { name: 'Save clean HTML document' })
+    const downloadEvent = page.waitForEvent('download')
+    await exportDialog.getByRole('button', { name: 'Choose location…' }).click()
     const download = await downloadEvent
     const path = await download.path()
     expect(path).not.toBeNull()

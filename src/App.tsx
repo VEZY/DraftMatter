@@ -9,7 +9,7 @@ import { ManuscriptTextEditor } from './ManuscriptTextEditor'
 import { StructuredManuscriptEditor, type StructuredManuscriptEditorHandle, type StructuredOutlineItem, type StructuredReviewSelection } from './StructuredManuscriptEditor'
 import { structuredCitationClusters } from './structuredManuscript'
 import { applyDraftCitationTransaction, applyDraftCodeTransaction, applyDraftTextTransaction, type ManuscriptTextField } from './manuscriptModel'
-import { downloadBlob, downloadText, projectCurrentManuscriptSource, reviewedProjection } from './projections'
+import { downloadText, projectCurrentManuscriptSource, reviewedProjection } from './projections'
 import { sampleCitations } from './sampleCitations'
 import { initialDraft } from './sampleDraft'
 import { LOCAL_DRAFT_KEY, readLocalDraft, readRecoverySnapshots, saveRecoverySnapshot, type RecoverySnapshot } from './storage'
@@ -50,6 +50,8 @@ import { renderReviewReport } from './reviewExport'
 import { printNativeHtml, renderNativeHtmlExport } from './nativeHtmlExport'
 import { renderDocxExport } from './docxExport'
 import { ExternalExportDialog } from './ExternalExportDialog'
+import { ExportFileDialog } from './ExportFileDialog'
+import { saveGeneratedFileInBrowser, type GeneratedFileExport } from './fileExport'
 import { InsertBlockDialog, type InsertBlockKind, type InsertBlockRequest } from './InsertBlockDialog'
 import { CollaborationDialog } from './CollaborationDialog'
 import type { CollaborationCheckpoint, CollaborationClientStatus, CollaborativeEditorBinding } from './sharedEditor'
@@ -426,6 +428,9 @@ function App() {
   const [citationIntakeSelected, setCitationIntakeSelected] = useState<string[]>([])
   const [citationDropActive, setCitationDropActive] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [pendingFileExport, setPendingFileExport] = useState<GeneratedFileExport>()
+  const [fileExportBusy, setFileExportBusy] = useState(false)
+  const [fileExportProblem, setFileExportProblem] = useState('')
   const [sourceOpen, setSourceOpen] = useState(false)
   const [sourceTab, setSourceTab] = useState<'reviewed' | 'final' | 'original'>('reviewed')
   const [sourceEditing, setSourceEditing] = useState(false)
@@ -2243,12 +2248,51 @@ function App() {
     setToast(message)
   }
 
+  const queueFileExport = (file: GeneratedFileExport) => {
+    setExportOpen(false)
+    setFileExportProblem('')
+    setFileExportBusy(false)
+    setPendingFileExport(file)
+  }
+
+  const savePendingFileExport = async (filename: string) => {
+    if (!pendingFileExport || fileExportBusy) return
+    const file = { ...pendingFileExport, suggestedName: filename }
+    setFileExportBusy(true)
+    setFileExportProblem('')
+    try {
+      if (desktopHost.available) {
+        const result = await desktopHost.saveExportFile({ suggestedName: filename, bytes: Array.from(file.bytes) })
+        if (!result) {
+          setFileExportBusy(false)
+          return
+        }
+        setToast(`${file.successMessage} · ${result.path}`)
+      } else {
+        const method = await saveGeneratedFileInBrowser(file)
+        if (method === 'cancelled') {
+          setFileExportBusy(false)
+          return
+        }
+        setToast(`${file.successMessage}${method === 'download' ? ' · saved through browser downloads' : ''}`)
+      }
+      setPendingFileExport(undefined)
+    } catch (error) {
+      setFileExportProblem(normaliseHostFailure(error).message || readableError(error))
+      setFileExportBusy(false)
+    }
+  }
+
   const download = (kind: 'reviewed' | 'final' | 'original' | 'report') => {
     const base = filename.replace(/\.(qmd|md)$/i, '')
     if (kind === 'report') {
-      downloadText(`${base}.review.md`, renderReviewReport(manuscriptSource))
-      setExportOpen(false)
-      setToast('Separate review report exported')
+      queueFileExport({
+        suggestedName: `${base}.review.md`,
+        bytes: new TextEncoder().encode(renderReviewReport(manuscriptSource)),
+        mimeType: 'text/markdown;charset=utf-8',
+        formatLabel: 'review report',
+        successMessage: 'Separate review report exported',
+      })
       return
     }
     let content: string
@@ -2268,9 +2312,13 @@ function App() {
       content = projection.source
       setDiagnostics((current) => current.filter((diagnostic) => !diagnostic.code.startsWith('final-projection-')))
     }
-    downloadText(kind === 'reviewed' ? filename : `${base}.${kind}.qmd`, content)
-    setExportOpen(false)
-    setToast(kind === 'reviewed' ? 'Portable project source exported' : `Clean ${kind} projection exported`)
+    queueFileExport({
+      suggestedName: kind === 'reviewed' ? filename : `${base}.${kind}.qmd`,
+      bytes: new TextEncoder().encode(content),
+      mimeType: 'text/markdown;charset=utf-8',
+      formatLabel: kind === 'reviewed' ? 'portable manuscript' : `${kind} manuscript projection`,
+      successMessage: kind === 'reviewed' ? 'Portable project source exported' : `Clean ${kind} projection exported`,
+    })
   }
 
   const exportPublication = (kind: 'html' | 'pdf') => {
@@ -2291,10 +2339,18 @@ function App() {
         bibliography: renderedBibliography,
       })
       const base = filename.replace(/\.(qmd|md)$/i, '')
-      if (kind === 'html') downloadBlob(`${base}.html`, html, 'text/html;charset=utf-8')
+      if (kind === 'html') queueFileExport({
+        suggestedName: `${base}.html`,
+        bytes: new TextEncoder().encode(html),
+        mimeType: 'text/html;charset=utf-8',
+        formatLabel: 'clean HTML document',
+        successMessage: 'Clean native HTML exported',
+      })
       else printNativeHtml(html)
-      setExportOpen(false)
-      setToast(kind === 'html' ? 'Clean native HTML exported' : 'Clean print view opened · choose Save as PDF')
+      if (kind === 'pdf') {
+        setExportOpen(false)
+        setToast('Clean print view opened · choose Save as PDF, its folder, and file name')
+      }
     } catch (error) {
       setExportOpen(false)
       setToast(`Export blocked · ${readableError(error)}`)
@@ -2314,11 +2370,15 @@ function App() {
         bibliography: renderedBibliography,
       })
       const base = filename.replace(/\.(qmd|md)$/i, '')
-      downloadBlob(`${base}.docx`, result.bytes, 'application/vnd.openxmlformats-officedocument.wordprocessingml.document')
-      setExportOpen(false)
-      setToast(result.diagnostics.length
-        ? `Clean DOCX exported · ${result.diagnostics.length} figure note${result.diagnostics.length === 1 ? '' : 's'} retained as path references`
-        : 'Clean DOCX exported')
+      queueFileExport({
+        suggestedName: `${base}.docx`,
+        bytes: result.bytes,
+        mimeType: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+        formatLabel: 'clean Word document',
+        successMessage: result.diagnostics.length
+          ? `Clean DOCX exported · ${result.diagnostics.length} figure note${result.diagnostics.length === 1 ? '' : 's'} retained as path references`
+          : 'Clean DOCX exported',
+      })
     } catch (error) {
       setExportOpen(false)
       setToast(`DOCX export blocked · ${readableError(error)}`)
@@ -3943,6 +4003,17 @@ function App() {
             <span><strong>Add comment</strong><small>Attach to “{reviewContextMenu.selection.quote.slice(0, 44)}{reviewContextMenu.selection.quote.length > 44 ? '…' : ''}”</small></span>
           </button>
         </div>
+      )}
+
+      {pendingFileExport && (
+        <ExportFileDialog
+          file={pendingFileExport}
+          desktop={desktopHost.available}
+          busy={fileExportBusy}
+          problem={fileExportProblem}
+          onClose={() => { if (!fileExportBusy) setPendingFileExport(undefined) }}
+          onSave={(name) => void savePendingFileExport(name)}
+        />
       )}
 
       {insertBlockKind && (

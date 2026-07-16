@@ -7,6 +7,7 @@ use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 use std::path::{Component, Path, PathBuf};
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
 mod direct_execution;
@@ -30,8 +31,9 @@ use execution_trust::{
     ExecutionTrustStatus, ExecutionTrustStore,
 };
 use export_adapter::{
-    probe_external_export_tools_impl, render_external_export_impl, ExternalExportRequest,
-    ExternalExportResult, ExternalExportTools,
+    external_export_extension, probe_external_export_tools_impl, render_external_export_impl,
+    render_external_export_to_path_impl, ExternalExportRequest, ExternalExportResult,
+    ExternalExportTools,
 };
 use git_adapter::{
     git_branches_impl, git_checkpoint_diff_impl, git_create_branch_impl,
@@ -58,6 +60,7 @@ const MAX_BIBLIOGRAPHY_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CITATION_LOCK_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_ZOTERO_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_CROSSREF_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
+const MAX_GENERATED_EXPORT_BYTES: usize = 128 * 1024 * 1024;
 const ZOTERO_PORT: u16 = 23119;
 const CROSSREF_WORKS_URL: &str = "https://api.crossref.org/works";
 const DOI_RESOLVER_URL: &str = "https://doi.org";
@@ -207,6 +210,20 @@ pub struct SaveDocumentResult {
     pub hash: String,
     pub bytes: u64,
     pub recovery_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveExportFileRequest {
+    pub suggested_name: String,
+    pub bytes: Vec<u8>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SaveExportFileResult {
+    pub path: String,
+    pub bytes: u64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1114,6 +1131,44 @@ fn write_atomic(path: &Path, bytes: &[u8], fail_before_replace: bool) -> Result<
         let _ = fs::remove_file(temp);
     }
     result
+}
+
+fn generated_export_extension(name: &str) -> Result<&str, HostError> {
+    let path = Path::new(name);
+    if name.is_empty()
+        || name.len() > 180
+        || path.is_absolute()
+        || path.components().count() != 1
+        || path.file_name().and_then(OsStr::to_str) != Some(name)
+    {
+        return Err(HostError::InvalidPath(
+            "Export filenames must be a single filename with no folders.".to_string(),
+        ));
+    }
+    let extension = path.extension().and_then(OsStr::to_str).unwrap_or_default();
+    if !matches!(extension, "md" | "qmd" | "html" | "docx") {
+        return Err(HostError::UnsupportedFile(
+            "Generated exports must use .md, .qmd, .html, or .docx.".to_string(),
+        ));
+    }
+    Ok(extension)
+}
+
+fn save_generated_export_to_path(
+    path: &Path,
+    expected_extension: &str,
+    bytes: &[u8],
+) -> Result<SaveExportFileResult, HostError> {
+    if !path.is_absolute() || path.extension().and_then(OsStr::to_str) != Some(expected_extension) {
+        return Err(HostError::InvalidPath(format!(
+            "Choose an absolute .{expected_extension} export path."
+        )));
+    }
+    write_atomic(path, bytes, false)?;
+    Ok(SaveExportFileResult {
+        path: path.to_string_lossy().to_string(),
+        bytes: bytes.len() as u64,
+    })
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2268,6 +2323,44 @@ fn save_document(request: SaveDocumentRequest) -> Result<SaveDocumentResult, Hos
 }
 
 #[tauri::command]
+async fn save_export_file(
+    app: tauri::AppHandle,
+    request: SaveExportFileRequest,
+) -> Result<Option<SaveExportFileResult>, HostError> {
+    if request.bytes.len() > MAX_GENERATED_EXPORT_BYTES {
+        return Err(HostError::UnsupportedFile(
+            "Generated exports cannot exceed 128 MB.".to_string(),
+        ));
+    }
+    let extension = generated_export_extension(&request.suggested_name)?.to_string();
+    let label = match extension.as_str() {
+        "md" | "qmd" => "Portable manuscript",
+        "html" => "HTML document",
+        "docx" => "Word document",
+        _ => unreachable!(),
+    };
+    let selected = app
+        .dialog()
+        .file()
+        .set_title("Save DraftMatter export")
+        .set_file_name(&request.suggested_name)
+        .add_filter(label, &[extension.as_str()])
+        .blocking_save_file();
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let mut path = selected.into_path().map_err(|_| {
+        HostError::InvalidPath(
+            "The selected export destination is not a local file path.".to_string(),
+        )
+    })?;
+    if path.extension().is_none() {
+        path.set_extension(&extension);
+    }
+    save_generated_export_to_path(&path, &extension, &request.bytes).map(Some)
+}
+
+#[tauri::command]
 fn acquire_citations(
     request: AcquireCitationsRequest,
 ) -> Result<AcquireCitationsResult, HostError> {
@@ -2599,6 +2692,33 @@ fn render_external_export(
     render_external_export_impl(request)
 }
 
+#[tauri::command]
+async fn render_external_export_to_file(
+    app: tauri::AppHandle,
+    request: ExternalExportRequest,
+) -> Result<Option<ExternalExportResult>, HostError> {
+    let extension = external_export_extension(request.format);
+    let selected = app
+        .dialog()
+        .file()
+        .set_title("Save rendered manuscript")
+        .set_file_name(&request.output_name)
+        .add_filter("Rendered manuscript", &[extension])
+        .blocking_save_file();
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+    let mut destination = selected.into_path().map_err(|_| {
+        HostError::InvalidPath(
+            "The selected export destination is not a local file path.".to_string(),
+        )
+    })?;
+    if destination.extension().is_none() {
+        destination.set_extension(extension);
+    }
+    render_external_export_to_path_impl(request, &destination).map(Some)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -2616,6 +2736,7 @@ pub fn run() {
             read_citation_cache,
             save_citation_lock,
             save_document,
+            save_export_file,
             acquire_citations,
             document_status,
             set_main_document,
@@ -2661,7 +2782,8 @@ pub fn run() {
             git_pull,
             git_push,
             probe_external_export_tools,
-            render_external_export
+            render_external_export,
+            render_external_export_to_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running DraftMatter");
@@ -3423,5 +3545,25 @@ mod tests {
         let status = zotero_status_at(address);
         assert!(!status.available);
         assert!(status.message.unwrap().contains("unavailable"));
+    }
+
+    #[test]
+    fn validates_and_atomically_writes_user_selected_generated_exports() {
+        assert_eq!(
+            generated_export_extension("paper.final.qmd").unwrap(),
+            "qmd"
+        );
+        assert!(generated_export_extension("../paper.qmd").is_err());
+        assert!(generated_export_extension("paper.pdf").is_err());
+
+        let directory = tempdir().unwrap();
+        let path = directory.path().join("paper.docx");
+        let result = save_generated_export_to_path(&path, "docx", b"word-package").unwrap();
+        assert_eq!(result.bytes, 12);
+        assert_eq!(fs::read(&path).unwrap(), b"word-package");
+        assert!(
+            save_generated_export_to_path(&directory.path().join("paper.html"), "docx", b"x")
+                .is_err()
+        );
     }
 }

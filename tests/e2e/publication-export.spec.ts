@@ -38,6 +38,7 @@ print("must remain inert")
 test.describe('DM-P5-01/02 native publication exports', () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(({ portableSource, citations }) => {
+      Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined })
       localStorage.setItem('draftmatter.structured-source.v1', portableSource)
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
       localStorage.setItem('draftmatter.citations.v1', JSON.stringify(citations))
@@ -62,8 +63,11 @@ test.describe('DM-P5-01/02 native publication exports', () => {
   test('downloads and renders the opened manuscript rather than the demo article', async ({ page, context }, testInfo) => {
     await expect(page.getByText('(Field and Stone, 2026)')).toBeVisible()
     await page.getByRole('button', { name: 'Export' }).click()
-    const htmlDownloadEvent = page.waitForEvent('download')
     await page.getByRole('button', { name: /Native HTML/ }).click()
+    const htmlDialog = page.getByRole('dialog', { name: 'Save clean HTML document' })
+    await expect(htmlDialog.getByLabel('File name')).toHaveValue('canopy-drought.html')
+    const htmlDownloadEvent = page.waitForEvent('download')
+    await htmlDialog.getByRole('button', { name: 'Choose location…' }).click()
     const htmlDownload = await htmlDownloadEvent
     const htmlPath = await htmlDownload.path()
     expect(htmlPath).not.toBeNull()
@@ -122,8 +126,11 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(await printFrame.getAttribute('srcdoc')).not.toMatch(/\.dm-anchor|\.draftmatter-reviews/)
 
     await page.getByRole('button', { name: 'Export' }).click()
-    const docxDownloadEvent = page.waitForEvent('download')
     await page.getByRole('button', { name: /Clean DOCX/ }).click()
+    const docxDialog = page.getByRole('dialog', { name: 'Save clean Word document' })
+    await expect(docxDialog.getByLabel('File name')).toHaveValue('canopy-drought.docx')
+    const docxDownloadEvent = page.waitForEvent('download')
+    await docxDialog.getByRole('button', { name: 'Choose location…' }).click()
     const docxDownload = await docxDownloadEvent
     const docxPath = await docxDownload.path()
     expect(docxPath).not.toBeNull()

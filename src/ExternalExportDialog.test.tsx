@@ -24,7 +24,7 @@ describe('external export dialog', () => {
       pandoc: { adapter: 'pandoc', available: true, version: 'pandoc 3.6', executable: 'pandoc', message: 'detected' },
       quarto: { adapter: 'quarto', available: false, message: 'not installed' },
     })
-    vi.spyOn(desktopHost, 'renderExternalExport').mockResolvedValue({ adapter: 'pandoc', format: 'html', path: '.draftmatter/exports/paper.html', bytes: 1200, message: 'No manuscript cells were executed.' })
+    vi.spyOn(desktopHost, 'renderExternalExportToFile').mockResolvedValue({ adapter: 'pandoc', format: 'html', path: '/Users/research/Exports/paper.html', bytes: 1200, message: 'No manuscript cells were executed.' })
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
@@ -45,8 +45,8 @@ describe('external export dialog', () => {
     await act(async () => exportButton.dispatchEvent(new MouseEvent('click', { bubbles: true })))
     await flush()
 
-    expect(desktopHost.renderExternalExport).toHaveBeenCalledWith({ root: '/research', adapter: 'pandoc', format: 'html', source: '# Clean', outputName: 'paper.html' })
-    expect(notices[0]).toContain('.draftmatter/exports/paper.html')
+    expect(desktopHost.renderExternalExportToFile).toHaveBeenCalledWith({ root: '/research', adapter: 'pandoc', format: 'html', source: '# Clean', outputName: 'paper.html' })
+    expect(notices[0]).toContain('/Users/research/Exports/paper.html')
     expect(closed).toBe(true)
   })
 })

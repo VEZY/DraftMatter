@@ -1,4 +1,4 @@
-use crate::{canonical_root, safe_relative, slash_path, HostError};
+use crate::{canonical_root, safe_relative, slash_path, write_atomic, HostError};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -166,6 +166,10 @@ fn format_name(format: ExternalExportFormat) -> (&'static str, &'static str) {
     }
 }
 
+pub fn external_export_extension(format: ExternalExportFormat) -> &'static str {
+    format_name(format).1
+}
+
 fn safe_output_name(raw: &str, extension: &str) -> Result<String, HostError> {
     let relative = safe_relative(raw)?;
     if relative.components().count() != 1 {
@@ -291,6 +295,71 @@ pub fn render_external_export_impl(
     })
 }
 
+pub fn render_external_export_to_path_impl(
+    request: ExternalExportRequest,
+    destination: &Path,
+) -> Result<ExternalExportResult, HostError> {
+    let root = canonical_root(&request.root)?;
+    let source = prepare_external_source(&request.source)?;
+    let (target, extension) = format_name(request.format);
+    safe_output_name(&request.output_name, extension)?;
+    if !destination.is_absolute()
+        || destination.extension().and_then(|value| value.to_str()) != Some(extension)
+    {
+        return Err(HostError::InvalidPath(format!(
+            "Choose an absolute .{extension} external export path."
+        )));
+    }
+    let work_directory = unique_work_directory(&root)?;
+    let input_path = work_directory.join("clean-projection.md");
+    let rendered_path = work_directory.join(format!("rendered.{extension}"));
+    fs::write(&input_path, source)?;
+    let output_string = rendered_path.to_string_lossy().to_string();
+    let input_string = input_path.to_string_lossy().to_string();
+    let arguments = render_arguments(request.adapter, target, &output_string, &input_string);
+    let output = Command::new(executable_name(request.adapter))
+        .current_dir(&root)
+        .args(arguments)
+        .output()
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                HostError::Integration(format!(
+                    "{} is not installed or is not available on PATH.",
+                    executable_name(request.adapter)
+                ))
+            } else {
+                HostError::Io(format!("Could not start the external renderer: {error}"))
+            }
+        })?;
+    if !output.status.success() {
+        let _ = fs::remove_dir_all(&work_directory);
+        return Err(HostError::Integration(format!(
+            "External export failed: {}",
+            bounded_message(&output)
+        )));
+    }
+    let bytes = fs::read(&rendered_path).map_err(|_| {
+        HostError::Integration(
+            "The external renderer succeeded but did not create the requested output.".to_string(),
+        )
+    })?;
+    let _ = fs::remove_dir_all(&work_directory);
+    if bytes.len() as u64 > MAX_EXPORT_OUTPUT_BYTES {
+        return Err(HostError::UnsupportedFile(
+            "External export exceeded the 128 MB safety limit and was removed.".to_string(),
+        ));
+    }
+    write_atomic(destination, &bytes, false)?;
+    Ok(ExternalExportResult {
+        adapter: request.adapter,
+        format: request.format,
+        path: destination.to_string_lossy().to_string(),
+        bytes: bytes.len() as u64,
+        message: "Rendered from DraftMatter's clean projection. No manuscript cells were executed."
+            .to_string(),
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -358,5 +427,20 @@ mod tests {
         assert!(html.contains("sourceCode"));
         assert!(!html.contains(".execute"));
         assert!(!html.contains(".draftmatter-reviews"));
+
+        let selected_path = project.path().join("chosen-output.html");
+        let selected = render_external_export_to_path_impl(
+            ExternalExportRequest {
+                root: project.path().to_string_lossy().to_string(),
+                adapter: ExternalExportAdapter::Pandoc,
+                format: ExternalExportFormat::Html,
+                source: source.to_string(),
+                output_name: "suggested.html".to_string(),
+            },
+            &selected_path,
+        )
+        .unwrap();
+        assert_eq!(selected.path, selected_path.to_string_lossy().to_string());
+        assert!(fs::read_to_string(selected_path).unwrap().contains("sentinel"));
     }
 }
