@@ -11,6 +11,7 @@ const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
 const MAX_STATUS_ENTRIES: usize = 10_000;
 const MAX_SELECTED_PATHS: usize = 512;
 const MAX_COMMIT_MESSAGE_BYTES: usize = 4_096;
+const MAX_HISTORY_ENTRIES: usize = 50;
 
 #[derive(Debug, Clone)]
 struct RepositoryContext {
@@ -77,6 +78,31 @@ pub struct GitDiffResult {
     pub staged: bool,
     pub text: String,
     pub binary: bool,
+    pub truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitHistoryEntry {
+    pub hash: String,
+    pub short_hash: String,
+    pub authored_at: String,
+    pub author: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCheckpointDiffRequest {
+    pub root: String,
+    pub hash: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCheckpointDiffResult {
+    pub hash: String,
+    pub text: String,
     pub truncated: bool,
 }
 
@@ -603,6 +629,111 @@ pub fn git_diff_impl(request: GitDiffRequest) -> Result<GitDiffResult, HostError
     })
 }
 
+fn validate_commit_hash(hash: &str) -> Result<&str, HostError> {
+    if (7..=40).contains(&hash.len()) && hash.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        Ok(hash)
+    } else {
+        Err(HostError::InvalidProject(
+            "The checkpoint identifier is not a valid abbreviated commit hash.".to_string(),
+        ))
+    }
+}
+
+fn project_history_pathspec(context: &RepositoryContext) -> String {
+    if context.project_prefix.as_os_str().is_empty() {
+        ".".to_string()
+    } else {
+        slash_path(&context.project_prefix)
+    }
+}
+
+pub fn git_history_impl(raw_root: &str) -> Result<Vec<GitHistoryEntry>, HostError> {
+    let context = require_repository(raw_root)?;
+    let head = run_git(&context.repository_root, &["rev-parse", "--verify", "HEAD"])?;
+    if !head.status.success() {
+        return Ok(Vec::new());
+    }
+    let limit = format!("--max-count={MAX_HISTORY_ENTRIES}");
+    let pathspec = project_history_pathspec(&context);
+    let output = require_success(
+        run_git(
+            &context.repository_root,
+            &[
+                "log",
+                "-z",
+                &limit,
+                "--date=iso-strict",
+                "--format=%H%x00%h%x00%aI%x00%an%x00%s%x00",
+                "--",
+                &pathspec,
+            ],
+        )?,
+        "read checkpoint history",
+    )?;
+    let fields = output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|field| !field.is_empty())
+        .map(|field| String::from_utf8_lossy(field).to_string())
+        .collect::<Vec<_>>();
+    if fields.len() % 5 != 0 {
+        return Err(HostError::Integration(
+            "Git returned malformed checkpoint history.".to_string(),
+        ));
+    }
+    Ok(fields
+        .chunks_exact(5)
+        .map(|fields| GitHistoryEntry {
+            hash: fields[0].clone(),
+            short_hash: fields[1].clone(),
+            authored_at: fields[2].clone(),
+            author: fields[3].clone(),
+            message: fields[4].clone(),
+        })
+        .collect())
+}
+
+pub fn git_checkpoint_diff_impl(
+    request: GitCheckpointDiffRequest,
+) -> Result<GitCheckpointDiffResult, HostError> {
+    let context = require_repository(&request.root)?;
+    let hash = validate_commit_hash(&request.hash)?;
+    let verified = format!("{hash}^{{commit}}");
+    require_success(
+        run_git(&context.repository_root, &["rev-parse", "--verify", &verified])?,
+        "find the selected checkpoint",
+    )?;
+    let pathspec = project_history_pathspec(&context);
+    let output = require_success(
+        run_git(
+            &context.repository_root,
+            &[
+                "show",
+                "--format=",
+                "--no-ext-diff",
+                "--no-color",
+                "--unified=3",
+                "--find-renames",
+                hash,
+                "--",
+                &pathspec,
+            ],
+        )?,
+        "read the selected checkpoint diff",
+    )?;
+    let truncated = output.stdout.len() > MAX_DIFF_BYTES;
+    let bytes = &output.stdout[..output.stdout.len().min(MAX_DIFF_BYTES)];
+    let mut text = String::from_utf8_lossy(bytes).to_string();
+    if truncated {
+        text.push_str("\n… diff truncated at DraftMatter's 2 MB display limit …\n");
+    }
+    Ok(GitCheckpointDiffResult {
+        hash: hash.to_string(),
+        text,
+        truncated,
+    })
+}
+
 fn selected_repository_paths(
     context: &RepositoryContext,
     paths: &[String],
@@ -1047,6 +1178,39 @@ mod tests {
         assert_eq!(status.entries.len(), 1);
         assert_eq!(status.entries[0].path, "notes.md");
         assert!(!status.entries[0].staged);
+    }
+
+    #[test]
+    fn checkpoint_history_is_bounded_and_exposes_read_only_diffs() {
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("paper.qmd"), "one\n").unwrap();
+        commit_all(project.path(), "First draft");
+        fs::write(project.path().join("paper.qmd"), "two\n").unwrap();
+        commit_all(project.path(), "Revise result");
+        let root = project.path().to_string_lossy().to_string();
+
+        let history = git_history_impl(&root).unwrap();
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].message, "Revise result");
+        assert_eq!(history[1].message, "First draft");
+        assert_eq!(history[0].hash.len(), 40);
+
+        let diff = git_checkpoint_diff_impl(GitCheckpointDiffRequest {
+            root: root.clone(),
+            hash: history[0].short_hash.clone(),
+        })
+        .unwrap();
+        assert!(diff.text.contains("-one"));
+        assert!(diff.text.contains("+two"));
+        assert!(git_status_impl(&root).unwrap().entries.is_empty());
+        assert!(matches!(
+            git_checkpoint_diff_impl(GitCheckpointDiffRequest {
+                root,
+                hash: "HEAD;rm".to_string(),
+            }),
+            Err(HostError::InvalidProject(_))
+        ));
     }
 
     #[test]

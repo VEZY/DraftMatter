@@ -126,6 +126,25 @@ export interface GitDiffResult {
   truncated: boolean
 }
 
+export interface GitHistoryEntry {
+  hash: string
+  shortHash: string
+  authoredAt: string
+  author: string
+  message: string
+}
+
+export interface GitCheckpointDiffRequest {
+  root: string
+  hash: string
+}
+
+export interface GitCheckpointDiffResult {
+  hash: string
+  text: string
+  truncated: boolean
+}
+
 export interface GitStageRequest {
   root: string
   paths: string[]
@@ -514,6 +533,16 @@ export function createDesktopHost(
     gitDiff(request: GitDiffRequest) {
       return available
         ? invokeBridge<GitDiffResult>('git_diff', { request })
+        : gitUnavailable()
+    },
+    gitHistory(root: string) {
+      return available
+        ? invokeBridge<GitHistoryEntry[]>('git_history', { root })
+        : gitUnavailable()
+    },
+    gitCheckpointDiff(request: GitCheckpointDiffRequest) {
+      return available
+        ? invokeBridge<GitCheckpointDiffResult>('git_checkpoint_diff', { request })
         : gitUnavailable()
     },
     gitStage(request: GitStageRequest) {

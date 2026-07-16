@@ -49,6 +49,12 @@ describe('Git history panel', () => {
     notices = []
     vi.spyOn(desktopHost, 'gitStatus').mockResolvedValue(status)
     vi.spyOn(desktopHost, 'gitBranches').mockResolvedValue({ current: 'main', detached: false, branches: [{ name: 'main', current: true }], remotes: [] })
+    vi.spyOn(desktopHost, 'gitHistory').mockResolvedValue([{ hash: '1234567890abcdef1234567890abcdef12345678', shortHash: '12345678', authoredAt: '2026-07-16T10:00:00+02:00', author: 'Ada', message: 'Results' }])
+    vi.spyOn(desktopHost, 'gitCheckpointDiff').mockResolvedValue({
+      hash: '1234567890abcdef1234567890abcdef12345678',
+      truncated: false,
+      text: '@@ -1 +1 @@\n-Old checkpoint.\n+New checkpoint.\n',
+    })
     vi.spyOn(desktopHost, 'gitCreateCheckpoint').mockResolvedValue({ hash: '1234567890', shortHash: '12345678', message: 'Results', files: ['paper.qmd'] })
     vi.spyOn(desktopHost, 'gitDiff').mockResolvedValue({
       path: 'paper.qmd',
@@ -91,5 +97,19 @@ describe('Git history panel', () => {
 
     expect(desktopHost.gitCreateCheckpoint).toHaveBeenCalledWith({ root: rootPath, paths: ['paper.qmd'], message: 'Results' })
     expect(notices).toContain('Checkpoint 12345678 created locally. Nothing was pushed.')
+  })
+
+  it('browses a checkpoint as a read-only rendered or source diff', async () => {
+    expect(container.textContent).toContain('Results')
+    expect(container.textContent).toContain('12345678 · Ada')
+
+    const history = container.querySelector('.git-history-browser')!
+    await act(async () => button(history, 'Rendered').click())
+    await flush()
+
+    expect(desktopHost.gitCheckpointDiff).toHaveBeenCalledWith({ root: rootPath, hash: '1234567890abcdef1234567890abcdef12345678' })
+    expect(container.querySelector('.git-checkpoint-diff')?.textContent).toContain('Old checkpoint.')
+    expect(container.querySelector('.git-checkpoint-diff')?.textContent).toContain('New checkpoint.')
+    expect(container.querySelector('.git-checkpoint-diff')?.textContent).toContain('read-only checkpoint')
   })
 })

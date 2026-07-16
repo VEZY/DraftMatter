@@ -35,10 +35,12 @@ use export_adapter::{
 };
 use git_adapter::{
     git_branches_impl, git_create_branch_impl, git_create_checkpoint_impl, git_create_commit_impl,
-    git_diff_impl, git_fetch_impl, git_initialize_impl, git_pull_impl, git_push_impl,
-    git_stage_impl, git_status_impl, git_switch_branch_impl, GitBranchRequest, GitBranchStatus,
+    git_checkpoint_diff_impl, git_diff_impl, git_fetch_impl, git_history_impl, git_initialize_impl,
+    git_pull_impl, git_push_impl, git_stage_impl, git_status_impl, git_switch_branch_impl,
+    GitBranchRequest, GitBranchStatus, GitCheckpointDiffRequest, GitCheckpointDiffResult,
     GitCheckpointRequest, GitCommitRequest, GitCommitResult, GitDiffRequest, GitDiffResult,
-    GitInitializeResult, GitRemoteRequest, GitRemoteResult, GitRepositoryStatus, GitStageRequest,
+    GitHistoryEntry, GitInitializeResult, GitRemoteRequest, GitRemoteResult, GitRepositoryStatus,
+    GitStageRequest,
 };
 use jupyter_execution::{
     execute_kernel_impl, interrupt_kernel_impl, restart_kernel_impl, terminate_kernel_impl,
@@ -2364,6 +2366,18 @@ fn git_diff(request: GitDiffRequest) -> Result<GitDiffResult, HostError> {
 }
 
 #[tauri::command]
+fn git_history(root: String) -> Result<Vec<GitHistoryEntry>, HostError> {
+    git_history_impl(&root)
+}
+
+#[tauri::command]
+fn git_checkpoint_diff(
+    request: GitCheckpointDiffRequest,
+) -> Result<GitCheckpointDiffResult, HostError> {
+    git_checkpoint_diff_impl(request)
+}
+
+#[tauri::command]
 fn git_stage(request: GitStageRequest) -> Result<GitRepositoryStatus, HostError> {
     git_stage_impl(request)
 }
@@ -2467,6 +2481,8 @@ pub fn run() {
             git_status,
             git_initialize,
             git_diff,
+            git_history,
+            git_checkpoint_diff,
             git_stage,
             git_create_commit,
             git_create_checkpoint,

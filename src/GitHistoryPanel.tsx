@@ -3,7 +3,9 @@ import {
   desktopHost,
   normaliseHostFailure,
   type GitBranchStatus,
+  type GitCheckpointDiffResult,
   type GitDiffResult,
+  type GitHistoryEntry,
   type GitRemoteResult,
   type GitRepositoryStatus,
   type GitStatusEntry,
@@ -24,6 +26,11 @@ function statusDetail(entry: GitStatusEntry) {
   return `${changeLabel(entry)}${locations.length ? ` · ${locations.join(' + ')}` : ''}`
 }
 
+function checkpointDate(value: string) {
+  const date = new Date(value)
+  return Number.isNaN(date.getTime()) ? value : date.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+}
+
 export function GitHistoryPanel({
   root,
   manuscriptPath,
@@ -40,18 +47,23 @@ export function GitHistoryPanel({
   const [problem, setProblem] = useState('')
   const [busy, setBusy] = useState('')
   const [diff, setDiff] = useState<GitDiffResult>()
+  const [history, setHistory] = useState<GitHistoryEntry[]>([])
+  const [checkpointDiff, setCheckpointDiff] = useState<GitCheckpointDiffResult>()
+  const [selectedCheckpoint, setSelectedCheckpoint] = useState<GitHistoryEntry>()
   const [diffMode, setDiffMode] = useState<DiffMode>('semantic')
   const [branchName, setBranchName] = useState('')
   const [switchTarget, setSwitchTarget] = useState('')
   const [remote, setRemote] = useState('')
 
-  const semantic = useMemo(() => diff ? summarizeSemanticGitDiff(diff.text) : undefined, [diff])
+  const previewText = checkpointDiff?.text ?? diff?.text
+  const semantic = useMemo(() => previewText ? summarizeSemanticGitDiff(previewText) : undefined, [previewText])
 
   async function refresh() {
     if (!root) {
       setStatus(undefined)
       setBranches(undefined)
       setSelected([])
+      setHistory([])
       return
     }
     setBusy('refresh')
@@ -60,12 +72,17 @@ export function GitHistoryPanel({
       const next = await desktopHost.gitStatus(root)
       setStatus(next)
       if (next.repository) {
-        const nextBranches = await desktopHost.gitBranches(root)
+        const [nextBranches, nextHistory] = await Promise.all([
+          desktopHost.gitBranches(root),
+          desktopHost.gitHistory(root),
+        ])
         setBranches(nextBranches)
+        setHistory(nextHistory)
         setSwitchTarget((current) => current || nextBranches.current || '')
         setRemote((current) => current || nextBranches.remotes[0] || '')
       } else {
         setBranches(undefined)
+        setHistory([])
       }
       setSelected((current) => {
         const available = new Set(next.entries.map((entry) => entry.path))
@@ -130,6 +147,7 @@ export function GitHistoryPanel({
       setMessage('')
       setSelected([])
       setDiff(undefined)
+      setCheckpointDiff(undefined)
       onNotice(`Checkpoint ${result.shortHash} created locally. Nothing was pushed.`)
       await refresh()
     } catch (error) {
@@ -143,6 +161,8 @@ export function GitHistoryPanel({
     setBusy(`diff:${entry.path}`)
     setProblem('')
     setDiffMode(mode)
+    setCheckpointDiff(undefined)
+    setSelectedCheckpoint(undefined)
     try {
       setDiff(await desktopHost.gitDiff({
         root,
@@ -151,6 +171,23 @@ export function GitHistoryPanel({
       }))
     } catch (error) {
       setProblem(normaliseHostFailure(error).message)
+    } finally {
+      setBusy('')
+    }
+  }
+
+  async function openCheckpointDiff(entry: GitHistoryEntry, mode: DiffMode) {
+    if (!root) return
+    setBusy(`checkpoint:${entry.hash}`)
+    setProblem('')
+    setDiffMode(mode)
+    setDiff(undefined)
+    setSelectedCheckpoint(entry)
+    try {
+      setCheckpointDiff(await desktopHost.gitCheckpointDiff({ root, hash: entry.hash }))
+    } catch (error) {
+      setProblem(normaliseHostFailure(error).message)
+      setSelectedCheckpoint(undefined)
     } finally {
       setBusy('')
     }
@@ -266,6 +303,33 @@ export function GitHistoryPanel({
               {diff.truncated && <small className="git-diff-limit">Diff truncated at the safe display limit.</small>}
             </div>
           )}
+
+          {checkpointDiff && selectedCheckpoint && (
+            <div className="git-diff-preview git-checkpoint-diff" aria-live="polite">
+              <div className="git-diff-preview-head"><span><strong>{selectedCheckpoint.message}</strong><small>{selectedCheckpoint.shortHash} · {checkpointDate(selectedCheckpoint.authoredAt)} · read-only checkpoint</small></span><button className="icon-button subtle" onClick={() => { setCheckpointDiff(undefined); setSelectedCheckpoint(undefined) }} aria-label="Close checkpoint preview"><Icon name="close" size={14} /></button></div>
+              {diffMode === 'source' ? <pre>{checkpointDiff.text || 'This checkpoint has no changes inside the open project.'}</pre> : (
+                <div className="semantic-diff">
+                  <div className="semantic-diff-counts"><span className="removed">−{semantic?.removedLines ?? 0}</span><span className="added">+{semantic?.addedLines ?? 0}</span>{Boolean(semantic?.reviewLines) && <span>{semantic?.reviewLines} review metadata</span>}</div>
+                  {semantic?.hunks.length ? semantic.hunks.map((hunk, index) => <div className="semantic-diff-hunk" key={`${hunk.heading}-${index}`}>{hunk.removed.map((line, lineIndex) => <p className="removed" key={`r-${lineIndex}`}><del>{line}</del></p>)}{hunk.added.map((line, lineIndex) => <p className="added" key={`a-${lineIndex}`}><ins>{line}</ins></p>)}</div>) : <p className="semantic-diff-empty">This checkpoint contains only review metadata or has no prose change inside the project.</p>}
+                </div>
+              )}
+              {checkpointDiff.truncated && <small className="git-diff-limit">Diff truncated at the safe display limit.</small>}
+            </div>
+          )}
+
+          <details className="git-history-browser">
+            <summary>Checkpoint history <small>{history.length}</small></summary>
+            <div className="git-history-list">
+              {history.length === 0 && <p>No checkpoints yet. The first named checkpoint will appear here.</p>}
+              {history.map((entry) => (
+                <div className={`git-history-entry ${selectedCheckpoint?.hash === entry.hash ? 'active' : ''}`} key={entry.hash}>
+                  <span><strong>{entry.message}</strong><small>{entry.shortHash} · {entry.author} · {checkpointDate(entry.authoredAt)}</small></span>
+                  <div><button onClick={() => void openCheckpointDiff(entry, 'semantic')} disabled={busy === `checkpoint:${entry.hash}`}>Rendered</button><button onClick={() => void openCheckpointDiff(entry, 'source')} disabled={busy === `checkpoint:${entry.hash}`}>Source</button></div>
+                </div>
+              ))}
+            </div>
+            <small className="git-history-note">The latest 50 project checkpoints are shown. Browsing never changes files or branches.</small>
+          </details>
 
           <div className="git-checkpoint-form">
             <label><span>Checkpoint name</span><input value={message} onChange={(event) => setMessage(event.target.value)} placeholder="e.g. Revise drought results" maxLength={4096} /></label>
