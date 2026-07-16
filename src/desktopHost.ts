@@ -295,6 +295,13 @@ export interface ZoteroSearchResult {
   schemaVersion?: string
 }
 
+export interface ZoteroAttachment {
+  itemKey: string
+  title: string
+  filename?: string
+  contentType?: string
+}
+
 export interface CrossrefSearchResponse {
   works: CrossrefWork[]
 }
@@ -420,6 +427,9 @@ export function createDesktopHost(
     },
     searchZotero(query: string, limit = 25) {
       return invokeBridge<ZoteroSearchResult>('zotero_search', { query, limit })
+    },
+    zoteroItemAttachments(itemKey: string) {
+      return invokeBridge<ZoteroAttachment[]>('zotero_item_attachments', { itemKey })
     },
     async searchCrossref(request: CrossrefRequest, signal?: AbortSignal) {
       if (signal?.aborted) throw abortError()

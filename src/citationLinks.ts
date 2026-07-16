@@ -1,4 +1,4 @@
-export type CitationLinkKind = 'doi' | 'record-url' | 'zotero-item'
+export type CitationLinkKind = 'doi' | 'record-url' | 'zotero-item' | 'zotero-attachment'
 
 export interface CitationLinkRequest {
   kind: CitationLinkKind
@@ -40,5 +40,8 @@ function normalizedZoteroItemKey(value: string) {
 export function citationLinkUrl(request: CitationLinkRequest) {
   if (request.kind === 'doi') return `https://doi.org/${encodeURIComponent(normalizedDoi(request.value))}`
   if (request.kind === 'record-url') return normalizedRecordUrl(request.value)
-  return `zotero://select/library/items/${normalizedZoteroItemKey(request.value)}`
+  const itemKey = normalizedZoteroItemKey(request.value)
+  return request.kind === 'zotero-attachment'
+    ? `zotero://open-pdf/library/items/${itemKey}`
+    : `zotero://select/library/items/${itemKey}`
 }

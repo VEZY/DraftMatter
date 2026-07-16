@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { convertFileSrc, isTauri } from '@tauri-apps/api/core'
 import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, searchCitations } from './bibliography'
-import { desktopHost, normaliseHostFailure, resolveMainDocument, type ProjectExecutionPreferences, type ProjectSnapshot } from './desktopHost'
+import { desktopHost, normaliseHostFailure, resolveMainDocument, type ProjectExecutionPreferences, type ProjectSnapshot, type ZoteroAttachment } from './desktopHost'
 import { parsePortableDocument, parseReviewMarkup } from './sharedEditor'
 import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
@@ -296,10 +296,14 @@ function citationSourceLabel(record: CitationRecord) {
 function CitationRecordInspector({
   record,
   citekey,
+  attachments,
+  attachmentState,
   onOpenLink,
 }: {
   record?: CitationRecord
   citekey: string
+  attachments: ZoteroAttachment[]
+  attachmentState: 'idle' | 'loading' | 'available' | 'unavailable' | 'desktop-only'
   onOpenLink: (request: CitationLinkRequest) => void
 }) {
   if (!record) return <div className="citation-record-missing" role="status">Metadata for @{citekey} is unavailable. The portable citekey remains unchanged.</div>
@@ -317,6 +321,21 @@ function CitationRecordInspector({
           {record.doi && <button onClick={() => onOpenLink({ kind: 'doi', value: record.doi! })}><Icon name="link" size={13} /> Open DOI</button>}
           {record.url && <button onClick={() => onOpenLink({ kind: 'record-url', value: record.url! })}><Icon name="arrowRight" size={13} /> Source page</button>}
           {record.sourceIdentity?.provider === 'zotero' && <button onClick={() => onOpenLink({ kind: 'zotero-item', value: record.sourceIdentity!.itemKey })}><Icon name="book" size={13} /> Show in Zotero</button>}
+        </div>
+      )}
+      {record.sourceIdentity?.provider === 'zotero' && (
+        <div className="citation-attachments" aria-label={`Attachments for ${record.title}`}>
+          <span>Attachments</span>
+          {attachmentState === 'loading' && <small>Checking the local Zotero item…</small>}
+          {attachmentState === 'desktop-only' && <small>Open the Zotero item to inspect its local attachments.</small>}
+          {attachmentState === 'unavailable' && <small>Zotero attachments are unavailable; the cached citation remains readable.</small>}
+          {attachmentState === 'available' && attachments.length === 0 && <small>No child file attachments were found.</small>}
+          {attachments.map((attachment) => (
+            <button key={attachment.itemKey} onClick={() => onOpenLink({ kind: attachment.contentType === 'application/pdf' ? 'zotero-attachment' : 'zotero-item', value: attachment.itemKey })}>
+              <Icon name={attachment.contentType === 'application/pdf' ? 'document' : 'link'} size={13} />
+              <span><strong>{attachment.title}</strong><small>{attachment.filename ?? attachment.contentType ?? 'Zotero attachment'}</small></span>
+            </button>
+          ))}
         </div>
       )}
     </div>
@@ -391,6 +410,8 @@ function App() {
   const [structuredCitationSelection, setStructuredCitationSelection] = useState<{ id: string; items: CitationItem[] } | null>(null)
   const [citationActiveIndex, setCitationActiveIndex] = useState(0)
   const [citationEditKey, setCitationEditKey] = useState('')
+  const [citationAttachments, setCitationAttachments] = useState<ZoteroAttachment[]>([])
+  const [citationAttachmentState, setCitationAttachmentState] = useState<'idle' | 'loading' | 'available' | 'unavailable' | 'desktop-only'>('idle')
   const [citationIntakeText, setCitationIntakeText] = useState('')
   const [citationIntakePreview, setCitationIntakePreview] = useState<CitationIntakePreview | null>(null)
   const [citationIntakeSelected, setCitationIntakeSelected] = useState<string[]>([])
@@ -611,6 +632,7 @@ function App() {
     }
   const activeCitationItem = detailCitationItems.find((item) => item.citekey === citationEditKey) ?? detailCitationItems[0]
   const activeCitationRecord = citations.find((record) => record.citekey === activeCitationItem?.citekey)
+  const activeZoteroItemKey = activeCitationRecord?.sourceIdentity?.provider === 'zotero' ? activeCitationRecord.sourceIdentity.itemKey : undefined
   const activeCitationBadge = citationSourceBadge(activeCitationRecord)
   const currentAuthorInitials = authorInitials(userSettings.author.name)
   const publicationAuthors = useMemo(() => parsePublicationMetadata(manuscriptSource).authors, [manuscriptSource])
@@ -730,6 +752,29 @@ function App() {
     const next = reviewedProjection(draft)
     if (next !== manuscriptSourceRef.current) replaceManuscriptSource(next)
   }, [draft])
+
+  useEffect(() => {
+    let disposed = false
+    setCitationAttachments([])
+    if (!citationOpen || !activeZoteroItemKey) {
+      setCitationAttachmentState('idle')
+      return
+    }
+    if (!desktopHost.available) {
+      setCitationAttachmentState('desktop-only')
+      return
+    }
+    setCitationAttachmentState('loading')
+    void desktopHost.zoteroItemAttachments(activeZoteroItemKey).then((attachments) => {
+      if (disposed) return
+      setCitationAttachments(attachments)
+      setCitationAttachmentState('available')
+    }).catch(() => {
+      if (disposed) return
+      setCitationAttachmentState('unavailable')
+    })
+    return () => { disposed = true }
+  }, [activeZoteroItemKey, citationOpen])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -2656,7 +2701,7 @@ function App() {
         const opened = window.open(citationLinkUrl(request), '_blank', 'noopener,noreferrer')
         if (!opened) throw new Error('The browser blocked the citation link. Allow pop-ups and try again.')
       }
-      setToast(request.kind === 'zotero-item' ? 'Opening the cited item in Zotero' : 'Opening citation source')
+      setToast(request.kind === 'zotero-item' || request.kind === 'zotero-attachment' ? 'Opening the cited item in Zotero' : 'Opening citation source')
     } catch (error) {
       setToast(desktopHost.available ? normaliseHostFailure(error).message : readableError(error))
     }
@@ -3462,7 +3507,7 @@ function App() {
                     )
                   })}
                 </div>
-                {activeCitationItem && <CitationRecordInspector record={activeCitationRecord} citekey={activeCitationItem.citekey} onOpenLink={(request) => void openCitationRecordLink(request)} />}
+                {activeCitationItem && <CitationRecordInspector record={activeCitationRecord} citekey={activeCitationItem.citekey} attachments={citationAttachments} attachmentState={citationAttachmentState} onOpenLink={(request) => void openCitationRecordLink(request)} />}
                 {activeCitationItem && (
                   <div className="citation-modifiers">
                     <label><span>Prefix</span><input value={activeCitationItem.prefix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { prefix: event.target.value })} placeholder="e.g. see" /></label>
@@ -3524,7 +3569,7 @@ function App() {
                       )
                     })}
                   </div>
-                  {activeCitationItem && <CitationRecordInspector record={activeCitationRecord} citekey={activeCitationItem.citekey} onOpenLink={(request) => void openCitationRecordLink(request)} />}
+                  {activeCitationItem && <CitationRecordInspector record={activeCitationRecord} citekey={activeCitationItem.citekey} attachments={citationAttachments} attachmentState={citationAttachmentState} onOpenLink={(request) => void openCitationRecordLink(request)} />}
                   {activeCitationItem && (
                     <div className="citation-modifiers">
                       <label><span>Prefix</span><input value={activeCitationItem.prefix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { prefix: event.target.value })} placeholder="e.g. see" /></label>

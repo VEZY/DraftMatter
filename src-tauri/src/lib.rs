@@ -289,6 +289,15 @@ pub struct ZoteroSearchResult {
     pub schema_version: Option<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ZoteroAttachment {
+    pub item_key: String,
+    pub title: String,
+    pub filename: Option<String>,
+    pub content_type: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CrossrefSearchRequest {
@@ -1457,6 +1466,8 @@ struct RawZoteroData {
     url: Option<String>,
     extra: Option<String>,
     citation_key: Option<String>,
+    filename: Option<String>,
+    content_type: Option<String>,
 }
 
 fn integration_error(message: impl Into<String>) -> HostError {
@@ -1610,6 +1621,15 @@ enum CitationLinkKind {
     Doi,
     RecordUrl,
     ZoteroItem,
+    ZoteroAttachment,
+}
+
+fn valid_zotero_item_key(value: &str) -> bool {
+    !value.is_empty()
+        && value.len() <= 64
+        && value
+            .chars()
+            .all(|character| character.is_ascii_alphanumeric())
 }
 
 fn citation_record_url(value: &str) -> Result<String, HostError> {
@@ -1658,17 +1678,22 @@ fn citation_link_url(kind: CitationLinkKind, value: &str) -> Result<String, Host
         CitationLinkKind::RecordUrl => citation_record_url(value),
         CitationLinkKind::ZoteroItem => {
             let item_key = value.trim();
-            if item_key.is_empty()
-                || item_key.len() > 64
-                || !item_key
-                    .chars()
-                    .all(|character| character.is_ascii_alphanumeric())
-            {
+            if !valid_zotero_item_key(item_key) {
                 return Err(HostError::Integration(
                     "The citation does not contain a valid Zotero item identity.".to_string(),
                 ));
             }
             Ok(format!("zotero://select/library/items/{item_key}"))
+        }
+        CitationLinkKind::ZoteroAttachment => {
+            let item_key = value.trim();
+            if !valid_zotero_item_key(item_key) {
+                return Err(HostError::Integration(
+                    "The citation does not contain a valid Zotero attachment identity."
+                        .to_string(),
+                ));
+            }
+            Ok(format!("zotero://open-pdf/library/items/{item_key}"))
         }
     }
 }
@@ -1767,6 +1792,52 @@ fn zotero_search_at(
         api_version: response.header("Zotero-API-Version"),
         schema_version: response.header("Zotero-Schema-Version"),
     })
+}
+
+fn zotero_item_attachments_impl(item_key: &str) -> Result<Vec<ZoteroAttachment>, HostError> {
+    zotero_item_attachments_at(zotero_address(), item_key)
+}
+
+fn zotero_item_attachments_at(
+    address: SocketAddr,
+    item_key: &str,
+) -> Result<Vec<ZoteroAttachment>, HostError> {
+    let item_key = item_key.trim();
+    if !valid_zotero_item_key(item_key) {
+        return Err(integration_error(
+            "Zotero attachment lookup requires a valid item key.",
+        ));
+    }
+    let path = format!(
+        "/api/users/0/items/{item_key}/children?itemType=attachment&limit=25"
+    );
+    let response = zotero_request_at(address, &path)?;
+    if !(200..300).contains(&response.status) {
+        return Err(integration_error(format!(
+            "Zotero attachment lookup returned HTTP {}.",
+            response.status
+        )));
+    }
+    let raw = serde_json::from_slice::<Vec<RawZoteroItem>>(&response.body).map_err(|error| {
+        integration_error(format!("Zotero returned unreadable attachment data: {error}"))
+    })?;
+    Ok(raw
+        .into_iter()
+        .filter(|item| item.data.item_type == "attachment")
+        .map(|item| ZoteroAttachment {
+            item_key: item.key,
+            title: if item.data.title.trim().is_empty() {
+                item.data
+                    .filename
+                    .clone()
+                    .unwrap_or_else(|| "Zotero attachment".to_string())
+            } else {
+                item.data.title
+            },
+            filename: item.data.filename,
+            content_type: item.data.content_type,
+        })
+        .collect())
 }
 
 fn crossref_error(kind: &str, message: impl Into<String>) -> CrossrefCommandError {
@@ -2245,6 +2316,11 @@ fn zotero_search(query: String, limit: Option<u8>) -> Result<ZoteroSearchResult,
 }
 
 #[tauri::command]
+fn zotero_item_attachments(item_key: String) -> Result<Vec<ZoteroAttachment>, HostError> {
+    zotero_item_attachments_impl(&item_key)
+}
+
+#[tauri::command]
 fn crossref_search(
     request: CrossrefSearchRequest,
 ) -> Result<CrossrefSearchResponse, CrossrefCommandError> {
@@ -2547,6 +2623,7 @@ pub fn run() {
             set_execution_preferences,
             zotero_status,
             zotero_search,
+            zotero_item_attachments,
             crossref_search,
             resolve_doi_csl,
             open_scholar_search,
@@ -2765,6 +2842,10 @@ mod tests {
         assert_eq!(
             citation_link_url(CitationLinkKind::ZoteroItem, "PXW99EKT").unwrap(),
             "zotero://select/library/items/PXW99EKT"
+        );
+        assert_eq!(
+            citation_link_url(CitationLinkKind::ZoteroAttachment, "ATTACH01").unwrap(),
+            "zotero://open-pdf/library/items/ATTACH01"
         );
         assert!(citation_link_url(CitationLinkKind::RecordUrl, "javascript:alert(1)").is_err());
         assert!(citation_link_url(
@@ -3309,6 +3390,28 @@ mod tests {
         assert!(request
             .starts_with("GET /api/users/0/items/top?q=canopy%20water&limit=25 HTTP/1.1\r\n"));
         assert!(!request.contains("/connector/"));
+    }
+
+    #[test]
+    fn lists_bounded_child_attachments_only_on_explicit_item_inspection() {
+        let body = r#"[
+          {"key":"ATTACH01","version":5,"data":{"itemType":"attachment","title":"Accepted manuscript","filename":"paper.pdf","contentType":"application/pdf","creators":[]}},
+          {"key":"NOTE0001","version":2,"data":{"itemType":"note","title":"Reading note","creators":[]}}
+        ]"#;
+        let (address, server) = serve_zotero_once(body, "Zotero-API-Version: 3\r\n");
+        let attachments = zotero_item_attachments_at(address, "PXW99EKT").unwrap();
+        let request = server.join().unwrap();
+
+        assert_eq!(attachments, vec![ZoteroAttachment {
+            item_key: "ATTACH01".into(),
+            title: "Accepted manuscript".into(),
+            filename: Some("paper.pdf".into()),
+            content_type: Some("application/pdf".into()),
+        }]);
+        assert!(request.starts_with(
+            "GET /api/users/0/items/PXW99EKT/children?itemType=attachment&limit=25 HTTP/1.1\r\n"
+        ));
+        assert!(zotero_item_attachments_at(address, "../PXW99EKT").is_err());
     }
 
     #[test]

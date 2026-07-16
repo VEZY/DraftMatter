@@ -1644,6 +1644,46 @@ button:disabled {
 
 .citation-record-links button:hover { background: #ebf1ed; }
 
+.citation-attachments {
+  border-top: 1px solid var(--line);
+  display: grid;
+  gap: 5px;
+  margin: 3px 0 10px;
+  padding-top: 8px;
+}
+
+.citation-attachments > span {
+  color: #66736c;
+  font-size: 7.5px;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.citation-attachments > small {
+  color: #818a85;
+  font-size: 8px;
+  line-height: 1.4;
+}
+
+.citation-attachments > button {
+  align-items: center;
+  background: #f8faf8;
+  border: 1px solid #e0e7e3;
+  border-radius: 5px;
+  color: #52665c;
+  display: flex;
+  gap: 7px;
+  min-height: 34px;
+  padding: 6px 8px;
+  text-align: left;
+}
+
+.citation-attachments > button > span { display: grid; gap: 2px; }
+.citation-attachments > button strong { font-size: 8px; }
+.citation-attachments > button small { color: #87908b; font-size: 7px; }
+.citation-attachments > button:hover { background: #eef4f0; }
+
 .citation-record-missing {
   background: #fbf8f1;
   border: 1px solid #eadfcd;

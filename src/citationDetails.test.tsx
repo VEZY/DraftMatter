@@ -58,6 +58,7 @@ describe('rendered citation metadata inspector', () => {
     expect(inspector.textContent).toContain('10.1093/insilicoplants/diae012')
     expect(inspector.textContent).toContain('Zotero local library · cached for offline use · PXW99EKT')
     expect(inspector.textContent).toContain('Item PXW99EKT · version 17')
+    expect(inspector.textContent).toContain('Open the Zotero item to inspect its local attachments.')
 
     for (const label of ['Open DOI', 'Source page', 'Show in Zotero']) {
       const link = [...inspector.querySelectorAll('button')].find((button) => button.textContent?.includes(label))
@@ -68,5 +69,29 @@ describe('rendered citation metadata inspector', () => {
     expect(window.open).toHaveBeenNthCalledWith(1, 'https://doi.org/10.1093%2Finsilicoplants%2Fdiae012', '_blank', 'noopener,noreferrer')
     expect(window.open).toHaveBeenNthCalledWith(2, 'https://publisher.example/plant-modelling', '_blank', 'noopener,noreferrer')
     expect(window.open).toHaveBeenNthCalledWith(3, 'zotero://select/library/items/PXW99EKT', '_blank', 'noopener,noreferrer')
+  })
+
+  it('loads child attachments only while the Zotero citation is open', async () => {
+    desktopHost.available = true
+    const attachments = vi.spyOn(desktopHost, 'zoteroItemAttachments').mockResolvedValue([{
+      itemKey: 'ATTACH01',
+      title: 'Accepted manuscript',
+      filename: 'paper.pdf',
+      contentType: 'application/pdf',
+    }])
+    const openLink = vi.spyOn(desktopHost, 'openCitationLink').mockResolvedValue()
+    await act(async () => root.render(<App />))
+    expect(attachments).not.toHaveBeenCalled()
+
+    await click(container.querySelector('.citation-chip')!)
+    await act(async () => { await Promise.resolve() })
+
+    expect(attachments).toHaveBeenCalledWith('PXW99EKT')
+    const attachmentRegion = container.querySelector('[aria-label="Attachments for Plant modelling as a reproducible research practice"]')!
+    expect(attachmentRegion.textContent).toContain('Accepted manuscript')
+    expect(attachmentRegion.textContent).toContain('paper.pdf')
+    const openAttachment = [...attachmentRegion.querySelectorAll('button')].find((button) => button.textContent?.includes('Accepted manuscript'))!
+    await click(openAttachment)
+    expect(openLink).toHaveBeenCalledWith('zotero-attachment', 'ATTACH01')
   })
 })

@@ -9,6 +9,8 @@ describe('citation external links', () => {
       .toBe('https://example.org/article?id=42')
     expect(citationLinkUrl({ kind: 'zotero-item', value: 'PXW99EKT' }))
       .toBe('zotero://select/library/items/PXW99EKT')
+    expect(citationLinkUrl({ kind: 'zotero-attachment', value: 'ATTACH01' }))
+      .toBe('zotero://open-pdf/library/items/ATTACH01')
   })
 
   it('rejects script schemes, embedded credentials, malformed DOI values, and unsafe item keys', () => {
