@@ -41,6 +41,8 @@ describe('managed collaboration maintenance', () => {
     const workspaces = new PostgresWorkspaceService({ pool, identity, clock: () => now, idFactory: () => `id-${++id}` })
     await workspaces.createWorkspace('owner', { id: 'forest', name: 'Forest study' })
     await workspaces.createProject('owner', 'forest', { id: 'paper', name: 'Canopy response' })
+    await workspaces.acceptInvitation('reviewer', (await workspaces.createInvitation('owner', 'forest', { role: 'commenter', email: 'reviewer@example.org' })).token)
+    const review = await workspaces.createReviewRequest('owner', 'forest', 'paper', { reviewerId: 'reviewer', message: 'Please review the results.' })
 
     const objects = new MemoryObjectStorage()
     const persistence = new PostgresCollaborationStore({ pool, objects, clock: () => now })
@@ -48,6 +50,8 @@ describe('managed collaboration maintenance', () => {
     document.getText('draftmatter:document').insert(0, 'Canopy response under drought')
     await persistence.appendUpdate({ workspaceId: 'forest', projectId: 'paper' }, Y.encodeStateAsUpdate(document))
     const deleted: string[] = []
+    const delivered: unknown[] = []
+    let rejectDelivery = false
     const maintenance = new CollaborationMaintenanceCoordinator({
       pool,
       persistence,
@@ -55,11 +59,59 @@ describe('managed collaboration maintenance', () => {
       clock: () => now,
       idFactory: () => `cycle-${++id}`,
       onWorkspaceDeleted: (workspaceId) => { deleted.push(workspaceId) },
+      notificationDelivery: { deliver: async (message) => {
+        if (rejectDelivery) throw new Error('Provider response must not be persisted.')
+        delivered.push(message)
+      } },
+      publicAppUrl: 'https://app.example.org',
     })
 
     await maintenance.runOnce()
     expect(await persistence.listBackups({ workspaceId: 'forest', projectId: 'paper' })).toHaveLength(1)
     expect(maintenance.snapshot()).toMatchObject({ backupSuccesses: 1, backupFailures: 0, verificationFailures: 0 })
+    expect(delivered).toEqual([expect.objectContaining({
+      to: 'reviewer@example.org',
+      kind: 'review-requested',
+      actorName: 'owner',
+      workspaceName: 'Forest study',
+      projectName: 'Canopy response',
+      actionUrl: 'https://app.example.org',
+    })])
+    expect(maintenance.snapshot()).toMatchObject({ notificationDeliverySuccesses: 1, notificationDeliveryFailures: 0 })
+    expect((await pool.query('SELECT delivered_at, last_error FROM draftmatter_notification_deliveries')).rows).toEqual([
+      expect.objectContaining({ delivered_at: expect.any(Date), last_error: null }),
+    ])
+
+    await workspaces.decideReviewRequest('reviewer', 'forest', 'paper', review.id, { decision: 'approved' })
+    rejectDelivery = true
+    await maintenance.processNotificationDeliveries()
+    expect(maintenance.snapshot()).toMatchObject({ notificationDeliverySuccesses: 1, notificationDeliveryFailures: 1 })
+    const failed = (await pool.query(
+      'SELECT attempts, next_attempt_at, delivered_at, last_error FROM draftmatter_notification_deliveries WHERE delivered_at IS NULL',
+    )).rows[0] as { attempts: number; next_attempt_at: Date; delivered_at: Date | null; last_error: string }
+    expect(failed).toMatchObject({ attempts: 1, delivered_at: null })
+    expect(failed.next_attempt_at.toISOString()).toBe(new Date(now + 5 * 60_000).toISOString())
+    expect(failed.last_error).not.toContain('Provider response')
+
+    rejectDelivery = false
+    now += 5 * 60_000
+    await maintenance.processNotificationDeliveries()
+    expect(delivered).toContainEqual(expect.objectContaining({ to: 'owner@example.org', kind: 'review-approved' }))
+    expect(maintenance.snapshot()).toMatchObject({ notificationDeliverySuccesses: 2, notificationDeliveryFailures: 1 })
+
+    await workspaces.acceptInvitation('reviewer-two', (await workspaces.createInvitation('owner', 'forest', { role: 'commenter', email: 'reviewer-two@example.org' })).token)
+    await workspaces.createReviewRequest('owner', 'forest', 'paper', { reviewerId: 'reviewer-two', message: 'Review before access changes.' })
+    await workspaces.revokeMember('owner', 'forest', 'reviewer-two')
+    await maintenance.processNotificationDeliveries()
+    expect(delivered).not.toContainEqual(expect.objectContaining({ to: 'reviewer-two@example.org' }))
+    expect(delivered).toContainEqual(expect.objectContaining({ to: 'owner@example.org', kind: 'review-cancelled' }))
+    expect((await pool.query(
+      `SELECT discarded_at, last_error FROM draftmatter_notification_deliveries
+       WHERE discarded_at IS NOT NULL ORDER BY discarded_at LIMIT 1`,
+    )).rows[0] as { discarded_at: Date; last_error: string }).toMatchObject({
+      discarded_at: expect.any(Date),
+      last_error: expect.stringContaining('no longer deliverable'),
+    })
 
     await pool.query(`UPDATE draftmatter_workspace_policies SET retain_latest_backups = 1, backup_max_age_days = 1 WHERE workspace_id = 'forest'`)
     now += 100 * 24 * 60 * 60_000

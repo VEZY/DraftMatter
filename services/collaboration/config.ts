@@ -19,11 +19,17 @@ export interface CollaborationServiceConfig {
     allowInsecureHttp: boolean
   }
   webhookSecret: Uint8Array
+  notificationDelivery?: {
+    webhookUrl: string
+    webhookSecret: string
+    appUrl: string
+  }
   allowedOrigins: string[]
   maxPayloadBytes: number
   tokenRefreshMs: number
   shutdownTimeoutMs: number
   maintenanceIntervalMs: number
+  notificationDeliveryIntervalMs: number
 }
 
 export class CollaborationConfigError extends Error {
@@ -64,20 +70,22 @@ function httpsUrl(value: string, name: string, allowInsecureHttp = false) {
   } catch {
     throw new CollaborationConfigError(`${name} must be an absolute URL.`)
   }
-  if (url.protocol !== 'https:' && url.hostname !== 'localhost' && url.hostname !== '127.0.0.1' && !allowInsecureHttp) {
+  const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && (loopback || allowInsecureHttp))) {
     throw new CollaborationConfigError(`${name} must use HTTPS outside loopback development.`)
   }
+  if (url.username || url.password || url.hash) throw new CollaborationConfigError(`${name} cannot contain credentials or a fragment.`)
   return url.toString().replace(/\/$/, '')
 }
 
-function secret(value: string) {
+function secret(value: string, name = 'DM_WEBHOOK_SECRET') {
   let bytes: Buffer
   try {
     bytes = value.startsWith('base64:') ? Buffer.from(value.slice(7), 'base64') : Buffer.from(value, 'utf8')
   } catch {
-    throw new CollaborationConfigError('DM_WEBHOOK_SECRET is invalid.')
+    throw new CollaborationConfigError(`${name} is invalid.`)
   }
-  if (bytes.byteLength < 32) throw new CollaborationConfigError('DM_WEBHOOK_SECRET must contain at least 32 bytes.')
+  if (bytes.byteLength < 32) throw new CollaborationConfigError(`${name} must contain at least 32 bytes.`)
   return Uint8Array.from(bytes)
 }
 
@@ -106,6 +114,14 @@ export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = 
   if ((accessKeyId && !secretAccessKey) || (!accessKeyId && secretAccessKey)) {
     throw new CollaborationConfigError('DM_OBJECT_ACCESS_KEY and DM_OBJECT_SECRET_KEY must be configured together.')
   }
+  const notificationWebhookUrl = environment.DM_NOTIFICATION_WEBHOOK_URL?.trim()
+  const notificationWebhookSecret = environment.DM_NOTIFICATION_WEBHOOK_SECRET?.trim()
+  const publicAppUrl = environment.DM_PUBLIC_APP_URL?.trim()
+  const notificationParts = [notificationWebhookUrl, notificationWebhookSecret, publicAppUrl].filter(Boolean).length
+  if (notificationParts !== 0 && notificationParts !== 3) {
+    throw new CollaborationConfigError('DM_NOTIFICATION_WEBHOOK_URL, DM_NOTIFICATION_WEBHOOK_SECRET, and DM_PUBLIC_APP_URL must be configured together.')
+  }
+  if (notificationWebhookSecret) secret(notificationWebhookSecret, 'DM_NOTIFICATION_WEBHOOK_SECRET')
 
   return {
     environment: mode,
@@ -131,10 +147,18 @@ export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = 
     },
     oidc: { issuer, clientId, audience: audiences.length === 1 ? audiences[0] : audiences, jwksUri, allowInsecureHttp: allowInsecureOidc },
     webhookSecret: secret(required(environment, 'DM_WEBHOOK_SECRET')),
+    ...(notificationWebhookUrl && notificationWebhookSecret && publicAppUrl ? {
+      notificationDelivery: {
+        webhookUrl: httpsUrl(notificationWebhookUrl, 'DM_NOTIFICATION_WEBHOOK_URL'),
+        webhookSecret: notificationWebhookSecret,
+        appUrl: httpsUrl(publicAppUrl, 'DM_PUBLIC_APP_URL'),
+      },
+    } : {}),
     allowedOrigins,
     maxPayloadBytes: integer(environment, 'DM_MAX_PAYLOAD_BYTES', 1024 * 1024, 16 * 1024, 16 * 1024 * 1024),
     tokenRefreshMs: integer(environment, 'DM_TOKEN_REFRESH_MS', 5 * 60_000, 30_000, 60 * 60_000),
     shutdownTimeoutMs: integer(environment, 'DM_SHUTDOWN_TIMEOUT_MS', 15_000, 1_000, 120_000),
     maintenanceIntervalMs: integer(environment, 'DM_MAINTENANCE_INTERVAL_MS', 24 * 60 * 60_000, 60_000, 7 * 24 * 60 * 60_000),
+    notificationDeliveryIntervalMs: integer(environment, 'DM_NOTIFICATION_INTERVAL_MS', 30_000, 5_000, 5 * 60_000),
   }
 }

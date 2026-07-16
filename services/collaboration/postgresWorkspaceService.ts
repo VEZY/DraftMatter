@@ -346,20 +346,28 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
     client: PoolClient,
     request: { workspaceId: string; projectId: string; userId: string; actorId: string; reviewRequestId: string; kind: WorkspaceNotificationKind },
   ) {
+    const id = safeId(`notification-${this.idFactory()}`, 'Notification ID')
+    const createdAt = iso(this.clock())
     await client.query(
       `INSERT INTO draftmatter_notifications
        (id, workspace_id, project_id, user_id, actor_id, review_request_id, kind, created_at)
        VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
       [
-        safeId(`notification-${this.idFactory()}`, 'Notification ID'),
+        id,
         request.workspaceId,
         request.projectId,
         request.userId,
         request.actorId,
         request.reviewRequestId,
         request.kind,
-        iso(this.clock()),
+        createdAt,
       ],
+    )
+    await client.query(
+      `INSERT INTO draftmatter_notification_deliveries(notification_id, next_attempt_at)
+       SELECT $1, $2::timestamptz FROM draftmatter_users WHERE id = $3 AND email IS NOT NULL
+       ON CONFLICT (notification_id) DO NOTHING`,
+      [id, createdAt, request.userId],
     )
   }
 

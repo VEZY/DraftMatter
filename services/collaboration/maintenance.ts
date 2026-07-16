@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { Pool } from 'pg'
 import { CollaborationStoreError } from './fileStore'
 import type { ObjectStorage } from './objectStorage'
+import type { NotificationEmailDelivery } from './notificationDelivery'
 import { PostgresCollaborationStore } from './postgresStore'
 
 interface MaintenanceOptions {
@@ -12,6 +13,8 @@ interface MaintenanceOptions {
   clock?: () => number
   idFactory?: () => string
   onWorkspaceDeleted?: (workspaceId: string) => void | Promise<void>
+  notificationDelivery?: NotificationEmailDelivery
+  publicAppUrl?: string
 }
 
 interface PolicyRow {
@@ -23,6 +26,21 @@ interface PolicyRow {
   backup_max_age_days: number | string
 }
 
+interface NotificationDeliveryRow {
+  notification_id: string
+  attempts: number | string
+  workspace_id: string
+  project_id: string
+  kind: 'review-requested' | 'review-approved' | 'review-changes-requested' | 'review-cancelled'
+  recipient_email: string | null
+  active_member_id: string | null
+  review_status: 'open' | 'approved' | 'changes-requested' | 'cancelled'
+  actor_name: string | null
+  actor_id: string
+  workspace_name: string
+  project_name: string
+}
+
 export interface MaintenanceMetrics {
   runs: number
   backupSuccesses: number
@@ -31,8 +49,11 @@ export interface MaintenanceMetrics {
   deletionSuccesses: number
   deletionFailures: number
   lifecycleFailures: number
+  notificationDeliverySuccesses: number
+  notificationDeliveryFailures: number
   lastRunAt?: string
   lastSuccessfulBackupAt?: string
+  lastSuccessfulNotificationAt?: string
 }
 
 function iso(time: number) {
@@ -52,6 +73,8 @@ export class CollaborationMaintenanceCoordinator {
   private readonly clock: () => number
   private readonly idFactory: () => string
   private readonly onWorkspaceDeleted?: MaintenanceOptions['onWorkspaceDeleted']
+  private readonly notificationDelivery?: NotificationEmailDelivery
+  private readonly publicAppUrl?: string
   private metrics: MaintenanceMetrics = {
     runs: 0,
     backupSuccesses: 0,
@@ -60,6 +83,8 @@ export class CollaborationMaintenanceCoordinator {
     deletionSuccesses: 0,
     deletionFailures: 0,
     lifecycleFailures: 0,
+    notificationDeliverySuccesses: 0,
+    notificationDeliveryFailures: 0,
   }
   private running?: Promise<MaintenanceMetrics>
 
@@ -71,6 +96,8 @@ export class CollaborationMaintenanceCoordinator {
     this.clock = options.clock ?? Date.now
     this.idFactory = options.idFactory ?? randomUUID
     this.onWorkspaceDeleted = options.onWorkspaceDeleted
+    this.notificationDelivery = options.notificationDelivery
+    this.publicAppUrl = options.publicAppUrl
   }
 
   snapshot() {
@@ -175,6 +202,91 @@ export class CollaborationMaintenanceCoordinator {
     }
   }
 
+  async processNotificationDeliveries() {
+    if (!this.notificationDelivery || !this.publicAppUrl) return
+    const now = this.clock()
+    const dueAt = iso(now)
+    const staleLeaseAt = iso(now - 15 * 60_000)
+    const due = await this.pool.query<NotificationDeliveryRow>(
+      `SELECT d.notification_id, d.attempts, n.workspace_id, n.project_id, n.kind,
+              recipient.email AS recipient_email, actor.display_name AS actor_name,
+              actor.id AS actor_id, w.name AS workspace_name, p.name AS project_name,
+              active_member.user_id AS active_member_id, review.status AS review_status
+       FROM draftmatter_notification_deliveries d
+       JOIN draftmatter_notifications n ON n.id = d.notification_id
+       JOIN draftmatter_users recipient ON recipient.id = n.user_id
+       JOIN draftmatter_users actor ON actor.id = n.actor_id
+       JOIN draftmatter_review_requests review ON review.id = n.review_request_id
+       LEFT JOIN draftmatter_memberships active_member
+         ON active_member.workspace_id = n.workspace_id AND active_member.user_id = n.user_id
+        AND active_member.revoked_at IS NULL
+       JOIN draftmatter_workspaces w ON w.id = n.workspace_id
+       JOIN draftmatter_projects p ON p.workspace_id = n.workspace_id AND p.id = n.project_id
+       WHERE d.delivered_at IS NULL AND d.discarded_at IS NULL
+         AND d.next_attempt_at <= $1 AND (d.leased_at IS NULL OR d.leased_at <= $2)
+         AND w.deleted_at IS NULL AND p.deleted_at IS NULL
+       ORDER BY d.next_attempt_at, d.notification_id LIMIT 100`,
+      [dueAt, staleLeaseAt],
+    )
+    for (const delivery of due.rows) {
+      const statusMatches = (delivery.kind === 'review-requested' && delivery.review_status === 'open')
+        || (delivery.kind === 'review-approved' && delivery.review_status === 'approved')
+        || (delivery.kind === 'review-changes-requested' && delivery.review_status === 'changes-requested')
+        || (delivery.kind === 'review-cancelled' && delivery.review_status === 'cancelled')
+      if (!delivery.recipient_email || !delivery.active_member_id || !statusMatches) {
+        await this.pool.query(
+          `UPDATE draftmatter_notification_deliveries
+           SET discarded_at = $2, leased_at = NULL,
+               last_error = 'Notification is no longer deliverable because its recipient or review state changed.'
+           WHERE notification_id = $1 AND delivered_at IS NULL AND discarded_at IS NULL`,
+          [delivery.notification_id, dueAt],
+        )
+        continue
+      }
+      const claimed = await this.pool.query<{ attempts: number | string }>(
+        `UPDATE draftmatter_notification_deliveries
+         SET leased_at = $2, attempts = attempts + 1
+         WHERE notification_id = $1 AND delivered_at IS NULL AND discarded_at IS NULL
+           AND next_attempt_at <= $2 AND (leased_at IS NULL OR leased_at <= $3)
+         RETURNING attempts`,
+        [delivery.notification_id, dueAt, staleLeaseAt],
+      )
+      if (!claimed.rowCount) continue
+      const attempts = Number(claimed.rows[0].attempts)
+      try {
+        await this.notificationDelivery.deliver({
+          id: delivery.notification_id,
+          to: delivery.recipient_email,
+          kind: delivery.kind,
+          actorName: delivery.actor_name || delivery.actor_id,
+          workspaceName: delivery.workspace_name,
+          projectName: delivery.project_name,
+          actionUrl: this.publicAppUrl,
+        })
+        const deliveredAt = iso(this.clock())
+        await this.pool.query(
+          `UPDATE draftmatter_notification_deliveries
+           SET delivered_at = $2, leased_at = NULL, last_error = NULL
+           WHERE notification_id = $1 AND delivered_at IS NULL`,
+          [delivery.notification_id, deliveredAt],
+        )
+        this.metrics.notificationDeliverySuccesses += 1
+        this.metrics.lastSuccessfulNotificationAt = deliveredAt
+      } catch {
+        const discarded = attempts >= 8
+        const delay = Math.min(24 * 60 * 60_000, 5 * 60_000 * (2 ** Math.max(0, attempts - 1)))
+        await this.pool.query(
+          `UPDATE draftmatter_notification_deliveries
+           SET leased_at = NULL, next_attempt_at = $2, discarded_at = $3,
+               last_error = 'Notification provider delivery failed; retry is bounded and contains no manuscript content.'
+           WHERE notification_id = $1 AND delivered_at IS NULL`,
+          [delivery.notification_id, iso(this.clock() + delay), discarded ? iso(this.clock()) : null],
+        )
+        this.metrics.notificationDeliveryFailures += 1
+      }
+    }
+  }
+
   runOnce() {
     if (this.running) return this.running
     this.running = (async () => {
@@ -182,6 +294,7 @@ export class CollaborationMaintenanceCoordinator {
       this.metrics.lastRunAt = iso(this.clock())
       await this.runBackupCycle()
       await this.runLifecycleCycle()
+      await this.processNotificationDeliveries()
       await this.processDeletionRequests()
       return this.snapshot()
     })().finally(() => { this.running = undefined })

@@ -66,6 +66,19 @@ function fixture() {
     connections: () => 3,
     allowedOrigins: ['https://app.example.test'],
     publicConfig: { oidcIssuer: 'https://identity.example.test', oidcClientId: 'draftmatter-browser' },
+    maintenanceMetrics: () => ({
+      runs: 4,
+      backupSuccesses: 3,
+      backupFailures: 0,
+      verificationFailures: 0,
+      deletionSuccesses: 1,
+      deletionFailures: 0,
+      lifecycleFailures: 0,
+      notificationDeliverySuccesses: 8,
+      notificationDeliveryFailures: 1,
+      lastSuccessfulBackupAt: '2026-07-15T00:00:00.000Z',
+      lastSuccessfulNotificationAt: '2026-07-15T01:00:00.000Z',
+    }),
     maxBodyBytes: 1024,
     backups,
     onProjectRestored,
@@ -90,6 +103,8 @@ describe('collaboration HTTP API', () => {
     const metricBody = await metricResponse.text()
     expect(metricBody).toContain('draftmatter_collaboration_connections 3')
     expect(metricBody).toContain('draftmatter_collaboration_update_bytes_total 42')
+    expect(metricBody).toContain('draftmatter_notification_delivery_successes_total 8')
+    expect(metricBody).toContain('draftmatter_notification_delivery_failures_total 1')
     expect(metricBody).not.toContain('private-tenant')
     expect(metricBody).not.toContain('private-project')
   })

@@ -131,8 +131,14 @@ function metrics(dashboard: CollaborationOperationsDashboard, connections: numbe
     `draftmatter_maintenance_deletion_failures_total ${maintenance.deletionFailures}`,
     '# TYPE draftmatter_maintenance_lifecycle_failures_total counter',
     `draftmatter_maintenance_lifecycle_failures_total ${maintenance.lifecycleFailures}`,
+    '# TYPE draftmatter_notification_delivery_successes_total counter',
+    `draftmatter_notification_delivery_successes_total ${maintenance.notificationDeliverySuccesses}`,
+    '# TYPE draftmatter_notification_delivery_failures_total counter',
+    `draftmatter_notification_delivery_failures_total ${maintenance.notificationDeliveryFailures}`,
     '# TYPE draftmatter_maintenance_last_successful_backup_timestamp_seconds gauge',
     `draftmatter_maintenance_last_successful_backup_timestamp_seconds ${maintenance.lastSuccessfulBackupAt ? Math.floor(Date.parse(maintenance.lastSuccessfulBackupAt) / 1_000) : 0}`,
+    '# TYPE draftmatter_notification_delivery_last_success_timestamp_seconds gauge',
+    `draftmatter_notification_delivery_last_success_timestamp_seconds ${maintenance.lastSuccessfulNotificationAt ? Math.floor(Date.parse(maintenance.lastSuccessfulNotificationAt) / 1_000) : 0}`,
   )
   lines.push('')
   return lines.join('\n')

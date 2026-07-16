@@ -5,6 +5,7 @@ import { createDraftMatterHocuspocusServer } from './hocuspocusServer'
 import { createCollaborationHttpApi, handleNodeHttpRequest } from './httpApi'
 import { runCollaborationMigrations } from './migrations'
 import { CollaborationMaintenanceCoordinator } from './maintenance'
+import { WebhookNotificationEmailDelivery } from './notificationDelivery'
 import { S3ObjectStorage } from './objectStorage'
 import { OidcIdentityVerifier } from './oidcIdentity'
 import { PostgresCollaborationStore } from './postgresStore'
@@ -31,12 +32,19 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
     onMembershipRevoked: () => server?.hocuspocus.closeConnections(),
   })
   const webhooks = new SignedEntitlementWebhookProcessor({ pool, secret: config.webhookSecret })
+  const notificationDelivery = config.notificationDelivery ? new WebhookNotificationEmailDelivery({
+    url: config.notificationDelivery.webhookUrl,
+    secret: config.notificationDelivery.webhookSecret,
+    allowInsecureHttp: config.environment !== 'production',
+  }) : undefined
   const maintenance = new CollaborationMaintenanceCoordinator({
     pool,
     persistence,
     objects,
     objectPrefix: config.objectStorage.prefix,
     onWorkspaceDeleted: () => server?.hocuspocus.closeConnections(),
+    notificationDelivery,
+    publicAppUrl: config.notificationDelivery?.appUrl,
   })
   const readiness = async () => {
     await pool.query('SELECT 1')
@@ -68,6 +76,7 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
 
   let started = false
   let maintenanceTimer: NodeJS.Timeout | undefined
+  let notificationTimer: NodeJS.Timeout | undefined
   return {
     pool,
     objects,
@@ -88,6 +97,17 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
         })
       }, config.maintenanceIntervalMs)
       maintenanceTimer.unref()
+      if (notificationDelivery) {
+        void maintenance.processNotificationDeliveries().catch(() => {
+          process.stderr.write(`${JSON.stringify({ level: 'error', event: 'collaboration.notification_delivery_failed' })}\n`)
+        })
+        notificationTimer = setInterval(() => {
+          void maintenance.processNotificationDeliveries().catch(() => {
+            process.stderr.write(`${JSON.stringify({ level: 'error', event: 'collaboration.notification_delivery_failed' })}\n`)
+          })
+        }, config.notificationDeliveryIntervalMs)
+        notificationTimer.unref()
+      }
       return server.address
     },
     async stop() {
@@ -99,6 +119,8 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
       try {
         if (maintenanceTimer) clearInterval(maintenanceTimer)
         maintenanceTimer = undefined
+        if (notificationTimer) clearInterval(notificationTimer)
+        notificationTimer = undefined
         await Promise.race([
           server.destroy(),
           new Promise<never>((_, reject) => {

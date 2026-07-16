@@ -24,6 +24,7 @@ describe('collaboration service configuration', () => {
     const config = loadCollaborationServiceConfig(environment({ DM_PORT: '4123', DM_ALLOWED_ORIGINS: 'https://app.example.test' }))
     expect(config).toMatchObject({
       port: 4123,
+      notificationDeliveryIntervalMs: 30_000,
       database: { ssl: false, application_name: 'draftmatter-collaboration' },
       objectStorage: { bucket: 'draftmatter', client: { endpoint: 'http://minio:9000', forcePathStyle: true } },
       oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-browser', audience: 'draftmatter-collaboration' },
@@ -44,6 +45,27 @@ describe('collaboration service configuration', () => {
 
   it('never accepts a half-configured object-storage credential pair', () => {
     expect(() => loadCollaborationServiceConfig(environment({ DM_OBJECT_SECRET_KEY: '' }))).toThrow(/configured together/)
+  })
+
+  it('configures notification delivery only as one secure bounded set', () => {
+    const config = loadCollaborationServiceConfig(environment({
+      DM_NOTIFICATION_WEBHOOK_URL: 'https://mail.example.test/draftmatter',
+      DM_NOTIFICATION_WEBHOOK_SECRET: 'a-separate-32-byte-notification-secret',
+      DM_PUBLIC_APP_URL: 'https://app.example.test',
+    }))
+    expect(config.notificationDelivery).toEqual({
+      webhookUrl: 'https://mail.example.test/draftmatter',
+      webhookSecret: 'a-separate-32-byte-notification-secret',
+      appUrl: 'https://app.example.test',
+    })
+    expect(() => loadCollaborationServiceConfig(environment({ DM_NOTIFICATION_WEBHOOK_URL: 'https://mail.example.test' }))).toThrow(/configured together/)
+    expect(() => loadCollaborationServiceConfig(environment({
+      DM_NOTIFICATION_WEBHOOK_URL: 'https://mail.example.test',
+      DM_NOTIFICATION_WEBHOOK_SECRET: 'short',
+      DM_PUBLIC_APP_URL: 'https://app.example.test',
+    }))).toThrow(/32 bytes/)
+    expect(() => loadCollaborationServiceConfig(environment({ DM_OIDC_ISSUER: 'ftp://identity.example.test' }))).toThrow(/HTTPS/)
+    expect(() => loadCollaborationServiceConfig(environment({ DM_NOTIFICATION_INTERVAL_MS: '1000' }))).toThrow(/between 5000 and 300000/)
   })
 
   it('allows an internal HTTP JWKS only outside production', () => {

@@ -5,10 +5,17 @@
 - Page immediately if `/health/live` fails for more than two consecutive probes.
 - Treat `/health/ready` failure as a dependency incident: check PostgreSQL connectivity/TLS and the object bucket before restarting the service.
 - Alert when `draftmatter_maintenance_backup_failures_total`, `draftmatter_collaboration_backup_verification_failures_total`, `draftmatter_collaboration_restore_failures_total`, or `draftmatter_maintenance_deletion_failures_total` increases.
+- Alert when `draftmatter_notification_delivery_failures_total` increases or the provider's pending queue grows without `draftmatter_notification_delivery_successes_total` advancing. Compare the last-success timestamp with ordinary review activity before paging; an idle service legitimately sends no email.
 - Alert when `time() - draftmatter_maintenance_last_successful_backup_timestamp_seconds` exceeds twice `DM_MAINTENANCE_INTERVAL_MS`. A zero timestamp is expected only before the first project backup.
 - Track update/snapshot/backup byte rates and active WebSocket connections as aggregate capacity signals. Do not add workspace, project, user, filename, token, or manuscript labels.
 
-Application logs are structured JSON and intentionally bounded. Never log authorization headers, OIDC claims, invitation tokens, webhook bodies/signatures, raw Yjs updates, snapshot/backup bodies, document names, or object keys. Send reverse-proxy access logs through the same redaction policy.
+Application logs are structured JSON and intentionally bounded. Never log authorization headers, OIDC claims, invitation tokens, notification recipient addresses, delivery-webhook bodies/secrets, entitlement webhook bodies/signatures, raw Yjs updates, snapshot/backup bodies, document names, or object keys. Send reverse-proxy access logs through the same redaction policy.
+
+## Review notification delivery
+
+The service always creates the in-app notification first. When managed email delivery is configured, the same transaction also queues a provider-neutral template request. The delivery webhook must treat `idempotency-key` as stable, reject replay side effects, and render only the supplied review event; it must not fetch manuscript content.
+
+Failed calls retain only a generic bounded error, release their lease, and retry after 5, 10, 20, 40 minutes and then bounded intervals up to one day. After eight attempts the row is discarded from automatic delivery while the in-app notification remains available. Investigate provider credentials, HTTPS reachability, suppression/bounce policy, and recipient consent before manually requeueing. Never paste provider responses or recipient addresses into public logs or metrics.
 
 ## Backup and restore drill
 
