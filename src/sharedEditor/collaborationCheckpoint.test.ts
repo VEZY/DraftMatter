@@ -105,4 +105,18 @@ describe('deterministic collaboration checkpoint', () => {
     left.destroy()
     right.destroy()
   })
+
+  it('fails closed when a merged thread message loses its author reference', () => {
+    const collaboration = CollaborativeDocument.fromPortableSource(identicalReviewSource)
+    collaboration.putThread({
+      id: 'dm-thread-missing-reply-author',
+      anchorId: 'dm-r-identical',
+      authorId: 'dm-a01',
+      status: 'open',
+      messages: [{ content: 'This attribution must remain resolvable.', authorId: 'dm-missing-author' }],
+    })
+
+    expect(() => createCollaborationCheckpoint(collaboration)).toThrowError(expect.objectContaining<Partial<CollaborationCheckpointError>>({ code: 'reference-missing' }))
+    collaboration.destroy()
+  })
 })

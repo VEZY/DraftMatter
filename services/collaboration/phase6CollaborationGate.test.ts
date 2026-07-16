@@ -48,6 +48,13 @@ describe('DM-P6 collaboration beta core gate', () => {
 
     const source = await readFile(new URL('../../src/fixtures/portable/25-review-identical.qmd', import.meta.url), 'utf8')
     const seed = CollaborativeDocument.fromPortableSource(source)
+    seed.putThread({
+      id: 'dm-thread-owner',
+      anchorId: 'dm-r-identical',
+      authorId: 'dm-a01',
+      status: 'open',
+      messages: [{ content: 'Keep the measured effect and retain both reviewers.', authorId: 'dm-a01', timestamp: '2026-07-15T18:00:00.000Z' }],
+    })
     const seedUpdate = seed.encodeUpdate()
     const owner = new CollaborativeDocument()
     const editor = new CollaborativeDocument()
@@ -56,11 +63,12 @@ describe('DM-P6 collaboration beta core gate', () => {
     seed.destroy()
 
     owner.putThread({
-      id: 'dm-thread-owner',
-      anchorId: 'dm-r-identical',
-      authorId: 'dm-a01',
-      status: 'open',
-      messages: [{ content: 'Keep the measured effect and retain both reviewers.', authorId: 'dm-a01', timestamp: '2026-07-15T18:00:00.000Z' }],
+      ...owner.snapshot().threads[0],
+      messages: [...owner.snapshot().threads[0].messages, { content: 'Owner reply made while offline.', authorId: 'dm-a01', timestamp: '2026-07-15T18:01:00.000Z', index: 1 }],
+    })
+    editor.putThread({
+      ...editor.snapshot().threads[0],
+      messages: [...editor.snapshot().threads[0].messages, { content: 'Editor reply made while offline.', authorId: 'dm-a02', timestamp: '2026-07-15T18:01:01.000Z', index: 1 }],
     })
     editor.putProposal({
       id: 'dm-i03',
@@ -95,7 +103,15 @@ describe('DM-P6 collaboration beta core gate', () => {
     expect(reviewDecisionConflicts(owner.snapshot())).toEqual([])
     expect(owner.snapshot()).toEqual(editor.snapshot())
     expect(owner.snapshot().authors.map((author) => author.id)).toEqual(['dm-a01', 'dm-a02'])
-    expect(owner.snapshot().threads[0]).toMatchObject({ id: 'dm-thread-owner', authorId: 'dm-a01' })
+    expect(owner.snapshot().threads[0]).toMatchObject({
+      id: 'dm-thread-owner',
+      authorId: 'dm-a01',
+      messages: [
+        { content: 'Keep the measured effect and retain both reviewers.', authorId: 'dm-a01' },
+        { content: 'Owner reply made while offline.', authorId: 'dm-a01' },
+        { content: 'Editor reply made while offline.', authorId: 'dm-a02' },
+      ],
+    })
     expect(owner.snapshot().proposals.map((proposal) => proposal.id)).toEqual(['dm-i01', 'dm-i02', 'dm-i03'])
 
     const ownerCheckpoint = createCollaborationCheckpoint(owner)
@@ -103,6 +119,8 @@ describe('DM-P6 collaboration beta core gate', () => {
     expect([...ownerCheckpoint.bytes]).toEqual([...editorCheckpoint.bytes])
     expect(ownerCheckpoint.source).toContain('dm-owner-resolution')
     expect(ownerCheckpoint.source).toContain('Keep the measured effect and retain both reviewers.')
+    expect(ownerCheckpoint.source).toContain('Owner reply made while offline.')
+    expect(ownerCheckpoint.source).toContain('Editor reply made while offline.')
 
     const sourceStore = new FileCollaborationStore({ root: await root('draftmatter-p6-source-'), idFactory: () => `store-${++id}` })
     await sourceStore.createSnapshot({ workspaceId: 'forest', projectId: 'paper' }, 'resolved-state', owner.encodeUpdate())

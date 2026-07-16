@@ -12,6 +12,8 @@ const COLLECTION_NAMES = {
   authors: 'draftmatter:authors',
   proposals: 'draftmatter:proposals',
   threads: 'draftmatter:threads',
+  threadMessages: 'draftmatter:thread-messages',
+  threadStatuses: 'draftmatter:thread-statuses',
   decisions: 'draftmatter:decisions',
 } as const
 
@@ -49,6 +51,16 @@ export interface CollaborativeThread {
   status: string
   messages: ReviewThreadMessage[]
   context?: ReviewAnchorContext
+}
+
+interface CollaborativeThreadMessage extends ReviewThreadMessage {
+  id: string
+  threadId: string
+}
+
+interface CollaborativeThreadStatus {
+  id: string
+  status: string
 }
 
 export interface CollaborativeDecision {
@@ -129,7 +141,48 @@ function reconcileText(text: Y.Text, next: string) {
 function reconcileMap<T extends { id: string }>(map: Y.Map<T>, records: T[]) {
   const retained = new Set(records.map((record) => record.id))
   for (const key of map.keys()) if (!retained.has(key)) map.delete(key)
-  for (const record of records) map.set(record.id, portableValue(record))
+  for (const record of records) {
+    const next = portableValue(record)
+    if (JSON.stringify(map.get(record.id)) !== JSON.stringify(next)) map.set(record.id, next)
+  }
+}
+
+function threadMessageId(threadId: string, message: ReviewThreadMessage, fallbackIndex: number) {
+  return JSON.stringify([
+    threadId,
+    message.index ?? fallbackIndex,
+    message.timestamp ?? '',
+    message.authorId ?? '',
+    message.content,
+  ])
+}
+
+function storedThreadMessages(thread: CollaborativeThread) {
+  return thread.messages.map<CollaborativeThreadMessage>((message, index) => ({
+    id: threadMessageId(thread.id, message, index),
+    threadId: thread.id,
+    ...portableValue(message),
+    index: message.index ?? index,
+  }))
+}
+
+function sortedThreadMessages(messages: CollaborativeThreadMessage[]) {
+  return messages.slice().sort((left, right) =>
+    (left.index ?? Number.MAX_SAFE_INTEGER) - (right.index ?? Number.MAX_SAFE_INTEGER)
+    || (left.timestamp ?? '').localeCompare(right.timestamp ?? '')
+    || (left.authorId ?? '').localeCompare(right.authorId ?? '')
+    || left.content.localeCompare(right.content)
+    || left.id.localeCompare(right.id))
+}
+
+function mergedThreadMessages(thread: CollaborativeThread, stored: CollaborativeThreadMessage[]) {
+  const byId = new Map<string, CollaborativeThreadMessage>()
+  thread.messages.forEach((message, index) => {
+    const record = { id: threadMessageId(thread.id, message, index), threadId: thread.id, ...portableValue(message), index: message.index ?? index }
+    byId.set(record.id, record)
+  })
+  stored.forEach((message) => byId.set(message.id, message))
+  return sortedThreadMessages([...byId.values()]).map(({ id: _id, threadId: _threadId, ...message }) => message)
 }
 
 export class CollaborativeDocument {
@@ -141,6 +194,8 @@ export class CollaborativeDocument {
   private readonly authors: Y.Map<CollaborativeAuthor>
   private readonly proposals: Y.Map<CollaborativeProposal>
   private readonly threads: Y.Map<CollaborativeThread>
+  private readonly threadMessages: Y.Map<CollaborativeThreadMessage>
+  private readonly threadStatuses: Y.Map<CollaborativeThreadStatus>
   private readonly decisions: Y.Map<CollaborativeDecision>
 
   constructor(doc = new Y.Doc()) {
@@ -152,6 +207,8 @@ export class CollaborativeDocument {
     this.authors = doc.getMap(COLLECTION_NAMES.authors)
     this.proposals = doc.getMap(COLLECTION_NAMES.proposals)
     this.threads = doc.getMap(COLLECTION_NAMES.threads)
+    this.threadMessages = doc.getMap(COLLECTION_NAMES.threadMessages)
+    this.threadStatuses = doc.getMap(COLLECTION_NAMES.threadStatuses)
     this.decisions = doc.getMap(COLLECTION_NAMES.decisions)
   }
 
@@ -192,11 +249,19 @@ export class CollaborativeDocument {
         anchorId: thread.anchorId,
         authorId: thread.authorId,
         status: thread.status,
+        messages: [],
+        ...(thread.anchorContext ? { context: thread.anchorContext } : {}),
+      }))
+      const threadMessages = review.threads.flatMap((thread) => storedThreadMessages({
+        id: thread.id,
+        anchorId: thread.anchorId,
+        authorId: thread.authorId,
+        status: thread.status,
         messages: thread.messageRecords.length > 0
           ? thread.messageRecords
           : thread.messages.map((content) => ({ content })),
-        ...(thread.anchorContext ? { context: thread.anchorContext } : {}),
       }))
+      const threadStatuses = review.threads.map<CollaborativeThreadStatus>((thread) => ({ id: thread.id, status: thread.status }))
       const decisions = review.decisions.map<CollaborativeDecision>((decision) => ({
         id: decision.id,
         changeId: decision.changeId,
@@ -210,6 +275,8 @@ export class CollaborativeDocument {
       reconcileMap(this.anchors, anchors)
       reconcileMap(this.proposals, proposals)
       reconcileMap(this.threads, threads)
+      reconcileMap(this.threadMessages, threadMessages)
+      reconcileMap(this.threadStatuses, threadStatuses)
       reconcileMap(this.decisions, decisions)
     }, origin)
   }
@@ -249,7 +316,13 @@ export class CollaborativeDocument {
   putThread(thread: CollaborativeThread) {
     safeId(thread.anchorId, 'Anchor ID')
     safeId(thread.authorId, 'Author ID')
-    this.threads.set(safeId(thread.id, 'Thread ID'), portableValue(thread))
+    const threadId = safeId(thread.id, 'Thread ID')
+    const messages = storedThreadMessages(thread)
+    messages.forEach((message) => this.threadMessages.set(message.id, portableValue(message)))
+    const status = { id: threadId, status: thread.status }
+    if (JSON.stringify(this.threadStatuses.get(threadId)) !== JSON.stringify(status)) this.threadStatuses.set(threadId, status)
+    const metadata = { ...thread, messages: [] }
+    if (JSON.stringify(this.threads.get(threadId)) !== JSON.stringify(metadata)) this.threads.set(threadId, portableValue(metadata))
   }
 
   putDecision(decision: CollaborativeDecision) {
@@ -273,12 +346,18 @@ export class CollaborativeDocument {
   }
 
   snapshot(): CollaborationSnapshot {
+    const messages = sortedValues(this.threadMessages)
+    const statuses = new Map(sortedValues(this.threadStatuses).map((status) => [status.id, status.status]))
     return {
       source: this.source,
       anchors: sortedValues(this.anchors),
       authors: sortedValues(this.authors),
       proposals: sortedValues(this.proposals),
-      threads: sortedValues(this.threads),
+      threads: sortedValues(this.threads).map((thread) => ({
+        ...thread,
+        status: statuses.get(thread.id) ?? thread.status,
+        messages: mergedThreadMessages(thread, messages.filter((message) => message.threadId === thread.id)),
+      })),
       decisions: sortedValues(this.decisions),
     }
   }
@@ -313,6 +392,8 @@ export class CollaborativeDocument {
       this.authors,
       this.proposals,
       this.threads,
+      this.threadMessages,
+      this.threadStatuses,
       this.decisions,
     ])
     const handler = (transaction: Y.Transaction) => {

@@ -67,7 +67,7 @@ function threadRecord(thread: CollaborativeThread, context?: ReviewAnchorContext
   const messages = thread.messages.map((message, index) => literalBlock('dm-message', message.content, {
     ...(message.authorId ? { 'data-author': message.authorId } : {}),
     ...(message.timestamp ? { 'data-at': message.timestamp } : {}),
-    'data-index': String(message.index ?? index),
+    'data-index': String(index),
   })).join('')
   return `:::: {#${thread.id} .dm-thread data-anchor="${thread.anchorId}" data-author="${thread.authorId}" data-status="${escapedAttribute(thread.status)}"}\n${contextBlocks(context)}${messages}::::\n`
 }
@@ -145,6 +145,10 @@ function assertReferences(snapshot: CollaborationSnapshot) {
   for (const record of [...snapshot.proposals, ...snapshot.threads]) {
     if (!authors.has(record.authorId)) throw new CollaborationCheckpointError('reference-missing', `${record.id} references missing author ${record.authorId}.`)
     if (!anchors.has(record.anchorId)) throw new CollaborationCheckpointError('reference-missing', `${record.id} references missing anchor ${record.anchorId}.`)
+  }
+  for (const thread of snapshot.threads) {
+    const missing = thread.messages.find((message) => message.authorId && !authors.has(message.authorId))
+    if (missing?.authorId) throw new CollaborationCheckpointError('reference-missing', `${thread.id} contains a message from missing author ${missing.authorId}.`)
   }
   for (const decision of snapshot.decisions) {
     if (!authors.has(decision.authorId)) throw new CollaborationCheckpointError('reference-missing', `${decision.id} references missing author ${decision.authorId}.`)

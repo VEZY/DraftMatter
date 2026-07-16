@@ -1,11 +1,15 @@
 import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import identicalReviewSource from '../fixtures/portable/25-review-identical.qmd?raw'
+import commentThreadSource from '../fixtures/portable/24-comment-thread.qmd?raw'
+import { parseReviewMarkup } from '../reviewMarkup'
+import { appendReviewThreadMessage, ensureReviewAuthor, setReviewThreadStatus } from '../reviewOperations'
 import {
   CollaborativeDocument,
   syncCollaborativeDocuments,
   syncCollaboratorPresence,
 } from './collaboration'
+import { createCollaborationCheckpoint, projectCollaborationPortableSource } from './collaborationCheckpoint'
 
 function peersFrom(source: string) {
   const seed = CollaborativeDocument.fromPortableSource(source)
@@ -77,6 +81,76 @@ describe('Yjs collaboration document', () => {
 
     syncCollaborativeDocuments(left, right)
     expect(left.snapshot()).toEqual(right.snapshot())
+    left.destroy()
+    right.destroy()
+  })
+
+  it('merges concurrent offline replies to the same thread without dropping either message', () => {
+    const seeded = ensureReviewAuthor(parseReviewMarkup(commentThreadSource), { id: 'dm-a02', name: 'Marcus Chen' }).document.source
+    const { left, right } = peersFrom(seeded)
+    const leftReply = appendReviewThreadMessage(parseReviewMarkup(projectCollaborationPortableSource(left)), 'dm-comment-01', {
+      authorId: 'dm-a01',
+      message: 'Alice retained the confidence interval.',
+      timestamp: '2026-07-16T09:00:00.000Z',
+    })
+    const rightReply = appendReviewThreadMessage(parseReviewMarkup(projectCollaborationPortableSource(right)), 'dm-comment-01', {
+      authorId: 'dm-a02',
+      message: 'Marcus checked the reported uncertainty.',
+      timestamp: '2026-07-16T09:00:01.000Z',
+    })
+    left.reconcilePortableSource(leftReply.document.source, 'alice-offline-reply')
+    right.reconcilePortableSource(rightReply.document.source, 'marcus-offline-reply')
+
+    syncCollaborativeDocuments(left, right)
+
+    expect(left.snapshot()).toEqual(right.snapshot())
+    expect(left.snapshot().threads[0].messages).toEqual([
+      { content: 'Please report the confidence interval.', index: 0 },
+      { content: 'Alice retained the confidence interval.', authorId: 'dm-a01', timestamp: '2026-07-16T09:00:00.000Z', index: 1 },
+      { content: 'Marcus checked the reported uncertainty.', authorId: 'dm-a02', timestamp: '2026-07-16T09:00:01.000Z', index: 1 },
+    ])
+    const leftCheckpoint = createCollaborationCheckpoint(left)
+    const rightCheckpoint = createCollaborationCheckpoint(right)
+    expect(leftCheckpoint.source).toBe(rightCheckpoint.source)
+    expect(parseReviewMarkup(leftCheckpoint.source).threads[0].messageRecords).toEqual([
+      { content: 'Please report the confidence interval.', index: 0 },
+      { content: 'Alice retained the confidence interval.', authorId: 'dm-a01', timestamp: '2026-07-16T09:00:00.000Z', index: 1 },
+      { content: 'Marcus checked the reported uncertainty.', authorId: 'dm-a02', timestamp: '2026-07-16T09:00:01.000Z', index: 2 },
+    ])
+    left.destroy()
+    right.destroy()
+  })
+
+  it('preserves an offline reply made concurrently with resolving its thread', () => {
+    const { left, right } = peersFrom(commentThreadSource)
+    const leftReply = appendReviewThreadMessage(parseReviewMarkup(projectCollaborationPortableSource(left)), 'dm-comment-01', {
+      authorId: 'dm-a01',
+      message: 'The interval is now included in the results.',
+      timestamp: '2026-07-16T09:05:00.000Z',
+    })
+    const rightResolution = setReviewThreadStatus(
+      parseReviewMarkup(projectCollaborationPortableSource(right)),
+      'dm-comment-01',
+      'resolved',
+      '2026-07-16T09:05:01.000Z',
+    )
+    left.reconcilePortableSource(leftReply.document.source, 'offline-reply')
+    right.reconcilePortableSource(rightResolution.document.source, 'offline-resolution')
+
+    syncCollaborativeDocuments(left, right)
+
+    expect(left.snapshot()).toEqual(right.snapshot())
+    expect(left.snapshot().threads[0]).toMatchObject({
+      status: 'resolved',
+      messages: [
+        { content: 'Please report the confidence interval.' },
+        { content: 'The interval is now included in the results.', authorId: 'dm-a01' },
+      ],
+    })
+    expect(parseReviewMarkup(createCollaborationCheckpoint(left).source).threads[0]).toMatchObject({
+      status: 'resolved',
+      messages: ['Please report the confidence interval.', 'The interval is now included in the results.'],
+    })
     left.destroy()
     right.destroy()
   })
