@@ -341,12 +341,19 @@ function blockHandleDecorations(
   document: ProseMirrorNode,
   readOnly: boolean,
   onKeyboardMove: (sourceId: string, direction: 'up' | 'down') => void,
+  onDragStart: (sourceId: string) => void,
+  onDragEnd: () => void,
 ) {
   if (readOnly) return []
   return structuredBlockRanges(document).filter((range) => range.headingLevel !== 1).map((range) => Decoration.widget(range.start, () => {
     const handle = globalThis.document.createElement('button')
     const isSection = range.headingLevel !== undefined
-    const label = isSection ? range.node.textContent || 'Untitled section' : range.node.type.name.replaceAll('_', ' ')
+    const nodeKind = range.node.type.name.replaceAll('_', ' ')
+    const preview = [range.node.textContent, range.node.attrs.alt, range.node.attrs.tex, range.node.attrs.code]
+      .find((candidate) => typeof candidate === 'string' && candidate.trim())?.trim()
+    const label = isSection
+      ? range.node.textContent || 'Untitled section'
+      : preview ? `${nodeKind} “${preview.slice(0, 54)}${preview.length > 54 ? '…' : ''}”` : nodeKind
     handle.type = 'button'
     handle.className = `structured-block-drag-handle${isSection ? ' structured-section-drag-handle' : ''}`
     handle.contentEditable = 'false'
@@ -356,14 +363,17 @@ function blockHandleDecorations(
     handle.setAttribute('aria-label', `Move ${isSection ? 'section' : 'block'} ${label}`)
     handle.title = 'Drag to reorder · Alt+Up/Down also moves this item'
     handle.textContent = '⋮⋮'
-    handle.addEventListener('mousedown', (event) => event.preventDefault())
     handle.addEventListener('dragstart', (event) => {
+      onDragStart(range.id)
       event.dataTransfer?.setData('application/x-draftmatter-block', range.id)
       event.dataTransfer?.setData('text/plain', range.id)
       if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
       handle.dataset.dragging = 'true'
     })
-    handle.addEventListener('dragend', () => delete handle.dataset.dragging)
+    handle.addEventListener('dragend', () => {
+      onDragEnd()
+      delete handle.dataset.dragging
+    })
     handle.addEventListener('keydown', (event) => {
       if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return
       event.preventDefault()
@@ -2127,6 +2137,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const onSuggestionCaptureRef = useRef(onSuggestionCapture)
   const pendingSuggestionRef = useRef<{ acceptedSource: string; draftSource: string; timeout: number } | undefined>(undefined)
   const reviewSelectionSignatureRef = useRef('')
+  const draggedBlockIdRef = useRef<string | undefined>(undefined)
   const resolveAssetUrlRef = useRef(resolveAssetUrl)
   const codeCellStatusesRef = useRef(codeCellStatuses)
   const readOnlyRef = useRef(readOnly)
@@ -2536,7 +2547,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         ).find(),
         ...blockHandleDecorations(state.doc, readOnlyRef.current, (sourceId, direction) => {
           moveBlockByKeyboard(viewRef.current ?? view, sourceId, direction)
-        }),
+        }, (sourceId) => { draggedBlockIdRef.current = sourceId }, () => { draggedBlockIdRef.current = undefined }),
       ]),
       handleDOMEvents: {
         click: (_editorView, event) => {
@@ -2558,7 +2569,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         },
         drop: (editorView, event) => {
           const target = event.target instanceof Element ? event.target.closest<HTMLElement>('.structured-block-drag-handle') : null
-          const sourceId = event.dataTransfer?.getData('application/x-draftmatter-block')
+          const sourceId = draggedBlockIdRef.current
+            || event.dataTransfer?.getData('application/x-draftmatter-block')
             || event.dataTransfer?.getData('text/plain')
           const targetId = target?.dataset.blockId
           if (!sourceId || !targetId || readOnlyRef.current) return false
@@ -2566,6 +2578,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           const bounds = target.getBoundingClientRect()
           const placement: StructuredBlockMovePlacement = event.clientY > bounds.top + bounds.height / 2 ? 'after' : 'before'
           moveBlock(editorView, sourceId, targetId, placement)
+          draggedBlockIdRef.current = undefined
           return true
         },
       },
