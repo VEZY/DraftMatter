@@ -14,6 +14,7 @@ import { buildReviewQueue, navigateReviewQueue, type ReviewQueueItem } from './r
 import { placePortableReviewAtQuote, placePortableReviewCandidate, reanchorPortableReviews } from './reviewReanchor'
 import { DEFAULT_USER_SETTINGS, type LocalAuthorIdentity } from './userSettings'
 import { ReviewTimestamp } from './ReviewTimestamp'
+import { reviewProposalText } from './reviewPresentation'
 
 function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'A'
@@ -249,7 +250,7 @@ export function PortableReviewItems({
                 <span className="avatar avatar-blue avatar-small">{initials(item.authorName)}</span>
                 <span className="proposal-author"><strong>{item.authorName}</strong><small><ReviewTimestamp value={change.updatedAt ?? change.createdAt} verb={change.updatedAt ? 'Updated' : 'Created'} fallback={item.kind === 'unplaced-change' ? 'Location needs attention' : item.excerpt} detail={item.kind === 'unplaced-change' ? 'Location needs attention' : item.excerpt} /></small></span>
                 <span className={`status-pill status-${item.status}`}>{statusLabel(item.status)}</span>
-                <span className="proposal-copy"><del>{change.anchorContext?.quote || item.excerpt}</del>{change.proposal !== undefined && <ins>{change.proposal}</ins>}</span>
+                <span className="proposal-copy"><del>{change.anchorContext?.quote || item.excerpt}</del>{change.proposal !== undefined && <ins>{reviewProposalText(change.proposal)}</ins>}</span>
               </button>
               {change.rationale && <div className="proposal-rationale">“{change.rationale}”</div>}
               {active && change.status === 'open' && item.kind !== 'unplaced-change' && (

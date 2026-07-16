@@ -36,12 +36,19 @@ test.describe('DM-P4-05 markup filtering and navigation', () => {
   test('keeps the manuscript marks, author filter, rail selection, and navigation aligned', async ({ page }) => {
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
     const review = page.getByRole('complementary', { name: 'Review feedback' })
-    const marks = manuscript.locator('[data-review-anchor]')
+    const marks = manuscript.locator('.dm-review-change[data-review-anchor]')
 
     await expect(marks).toHaveCount(2)
+    await expect(manuscript.locator('.dm-review-proposal')).toHaveCount(2)
     await review.getByLabel('Review author').selectOption('dm-alice')
     await expect(marks).toHaveCount(1)
+    await expect(manuscript.locator('.dm-review-proposal')).toHaveText('revised alpha phrase')
     await expect(marks.first()).toHaveAttribute('data-review-anchor', 'dm-alpha')
+
+    await review.getByLabel('Markup view').selectOption('simple')
+    await expect(manuscript.locator('.dm-review-proposal')).toHaveCount(0)
+    await expect(marks).toHaveCount(1)
+    await review.getByLabel('Markup view').selectOption('all')
 
     await review.getByLabel('Review author').selectOption('dm-marcus')
     await expect(marks).toHaveCount(1)
@@ -54,6 +61,20 @@ test.describe('DM-P4-05 markup filtering and navigation', () => {
     await expect(marks).toHaveCount(2)
     await review.getByRole('button', { name: 'Next review item' }).click()
     await expect(review.locator('#review-item-dm-change-alpha .proposal-option')).toHaveClass(/selected/)
-    await expect(manuscript.locator('[data-review-anchor="dm-alpha"]')).toHaveClass(/dm-review-active/)
+    await expect(manuscript.locator('.dm-review-change[data-review-anchor="dm-alpha"]')).toHaveClass(/dm-review-active/)
+  })
+})
+
+test.describe('DM-P4-05 modeled review alternatives', () => {
+  test('renders the alternative selected by next and previous navigation', async ({ page }) => {
+    await page.goto('/')
+    const review = page.getByRole('complementary', { name: 'Review feedback' })
+    const reviewedSentence = page.locator('.reviewed-sentence')
+
+    await expect(reviewedSentence.locator('.insertion')).toHaveText('reduced leaf area by 18%')
+    await review.getByRole('button', { name: 'Next review item' }).click()
+    await expect(reviewedSentence.locator('.insertion')).toHaveText('lowered leaf expansion during the treatment period')
+    await review.getByRole('button', { name: 'Previous review item' }).click()
+    await expect(reviewedSentence.locator('.insertion')).toHaveText('reduced leaf area by 18%')
   })
 })

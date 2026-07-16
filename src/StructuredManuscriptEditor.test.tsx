@@ -160,10 +160,11 @@ describe('full structured manuscript editor', () => {
       />,
     ))
 
-    let marks = container.querySelectorAll<HTMLElement>('[data-review-anchor]')
+    let marks = container.querySelectorAll<HTMLElement>('.dm-review-change[data-review-anchor]')
     expect(marks).toHaveLength(1)
     expect(marks[0].dataset.reviewAnchor).toBe(alice.change.anchorId)
     expect(marks[0].classList.contains('dm-review-active')).toBe(true)
+    expect(container.querySelector('.dm-review-proposal')?.textContent).toBe('Revised alpha phrase')
     marks[0].click()
     expect(selectReview).toHaveBeenCalledWith(alice.change.anchorId)
 
@@ -178,11 +179,23 @@ describe('full structured manuscript editor', () => {
       />,
     ))
 
-    marks = container.querySelectorAll<HTMLElement>('[data-review-anchor]')
+    marks = container.querySelectorAll<HTMLElement>('.dm-review-change[data-review-anchor]')
     expect(marks).toHaveLength(1)
     expect(marks[0].dataset.reviewAnchor).toBe(marcus.change.anchorId)
     expect(editorRef.current?.scrollToReviewAnchor(marcus.change.anchorId)).toBe(true)
     expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: 'center' }))
+
+    await act(async () => root.render(
+      <StructuredManuscriptEditor
+        ref={editorRef}
+        source={marcus.document.source}
+        onChange={vi.fn()}
+        reviewAuthorId="dm-marcus"
+        activeReviewAnchorId={marcus.change.anchorId}
+        markupView="simple"
+      />,
+    ))
+    expect(container.querySelectorAll('.dm-review-proposal')).toHaveLength(0)
 
   })
 
@@ -204,12 +217,22 @@ describe('full structured manuscript editor', () => {
     await act(async () => root.render(
       <StructuredManuscriptEditor source={shared.document.source} onChange={vi.fn()} reviewAuthorId="dm-alice" />,
     ))
-    expect(container.querySelectorAll(`[data-review-anchor="${alice.change.anchorId}"]`)).toHaveLength(1)
+    expect(container.querySelectorAll(`.dm-review-change[data-review-anchor="${alice.change.anchorId}"]`)).toHaveLength(1)
 
     await act(async () => root.render(
       <StructuredManuscriptEditor source={shared.document.source} onChange={vi.fn()} reviewAuthorId="dm-marcus" />,
     ))
-    expect(container.querySelectorAll(`[data-review-anchor="${alice.change.anchorId}"]`)).toHaveLength(1)
+    expect(container.querySelectorAll(`.dm-review-change[data-review-anchor="${alice.change.anchorId}"]`)).toHaveLength(1)
+
+    await act(async () => root.render(
+      <StructuredManuscriptEditor
+        source={shared.document.source}
+        onChange={vi.fn()}
+        activeReviewId={shared.change.id}
+        activeReviewAnchorId={alice.change.anchorId}
+      />,
+    ))
+    expect(container.querySelector('.dm-review-proposal')?.textContent).toBe('Marcus proposal')
   })
 
   it('edits one preserved raw block explicitly and cancels later drafts', async () => {

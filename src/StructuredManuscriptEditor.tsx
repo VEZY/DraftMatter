@@ -13,6 +13,7 @@ import { formatCrossReferenceTarget, isCrossReferenceTarget } from './crossRefer
 import { renderEquation } from './equationRenderer'
 import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
+import { reviewProposalText } from './reviewPresentation'
 import { captureReviewSuggestion, type ReviewSuggestionIntent } from './reviewSuggestionCapture'
 import { parseStructuredManuscript, serializeStructuredManuscript, type StructuredManuscriptMetadata } from './structuredManuscript'
 import type { ExecutionFreshnessStatus } from './executionFreshness'
@@ -91,6 +92,7 @@ export interface StructuredManuscriptEditorProps {
   codeCellStatuses?: Record<string, ExecutionFreshnessStatus>
   markupView?: MarkupView
   reviewAuthorId?: string
+  activeReviewId?: string
   activeReviewAnchorId?: string
   readOnly?: boolean
   ariaLabel?: string
@@ -152,17 +154,20 @@ function selectedReviewText(view: EditorView): StructuredReviewSelection | null 
 }
 
 interface ReviewDecorationRecord {
+  id: string
   kind: 'change' | 'thread'
   status: string
   authorId: string
+  changeKind?: string
+  proposal?: string
 }
 
 function reviewDecorationIndex(source: string) {
   const parsed = parseReviewMarkup(source)
   const records = new Map<string, ReviewDecorationRecord[]>()
   for (const record of [
-    ...parsed.changes.map((change) => ({ anchorId: change.anchorId, kind: 'change' as const, status: change.status, authorId: change.authorId })),
-    ...parsed.threads.map((thread) => ({ anchorId: thread.anchorId, kind: 'thread' as const, status: thread.status, authorId: thread.authorId })),
+    ...parsed.changes.map((change) => ({ id: change.id, anchorId: change.anchorId, kind: 'change' as const, status: change.status, authorId: change.authorId, changeKind: change.changeKind, proposal: change.proposal })),
+    ...parsed.threads.map((thread) => ({ id: thread.id, anchorId: thread.anchorId, kind: 'thread' as const, status: thread.status, authorId: thread.authorId })),
   ]) records.set(record.anchorId, [...(records.get(record.anchorId) ?? []), record])
   return records
 }
@@ -172,6 +177,7 @@ function reviewDecorations(
   records: Map<string, ReviewDecorationRecord[]>,
   markupView: MarkupView,
   authorId?: string,
+  activeReviewId?: string,
   activeAnchorId?: string,
 ) {
   if (markupView === 'original' || markupView === 'final') return DecorationSet.empty
@@ -190,10 +196,13 @@ function reviewDecorations(
   for (const [anchorId, anchor] of anchors) {
     const visibleRecords = (records.get(anchorId) ?? []).filter((record) => record.status !== 'deleted' && (!authorId || record.authorId === authorId))
     if (!visibleRecords.length) continue
-    const record = visibleRecords.find((candidate) => candidate.status === 'open' || candidate.status === 'needs-rebase') ?? visibleRecords[0]
+    const record = visibleRecords.find((candidate) => candidate.id === activeReviewId)
+      ?? visibleRecords.find((candidate) => candidate.status === 'open' || candidate.status === 'needs-rebase')
+      ?? visibleRecords[0]
     const classes = [
       `dm-review-${record.kind}`,
       `dm-review-${record.status}`,
+      record.changeKind ? `dm-review-kind-${record.changeKind}` : '',
       markupView === 'simple' ? 'dm-review-simple' : 'dm-review-all',
       anchorId === activeAnchorId ? 'dm-review-active' : '',
     ].filter(Boolean).join(' ')
@@ -209,6 +218,19 @@ function reviewDecorations(
       marker.textContent = record.kind === 'thread' ? '•' : '±'
       return marker
     }, { key: `dm-review-point-${anchorId}-${position}`, side: 1 }))
+    const proposal = record.proposal === undefined ? '' : reviewProposalText(record.proposal)
+    const proposalPosition = anchor.end ?? anchor.points[0]
+    if (markupView === 'all' && record.kind === 'change' && record.changeKind !== 'delete' && proposal && proposalPosition !== undefined) {
+      decorations.push(Decoration.widget(proposalPosition, () => {
+        const marker = globalThis.document.createElement('button')
+        marker.type = 'button'
+        marker.className = `dm-review-proposal dm-review-${record.status}${anchorId === activeAnchorId ? ' dm-review-active' : ''}`
+        marker.dataset.reviewAnchor = anchorId
+        marker.setAttribute('aria-label', `Open ${record.changeKind ?? 'text'} suggestion: ${proposal}`)
+        marker.textContent = proposal
+        return marker
+      }, { key: `dm-review-proposal-${record.id}-${proposalPosition}`, side: 2 }))
+    }
   }
   return DecorationSet.create(document, decorations)
 }
@@ -1927,6 +1949,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   codeCellStatuses,
   markupView = 'all',
   reviewAuthorId,
+  activeReviewId,
   activeReviewAnchorId,
   readOnly = false,
   ariaLabel = 'Rendered manuscript editor',
@@ -1955,6 +1978,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const readOnlyRef = useRef(readOnly)
   const markupViewRef = useRef(markupView)
   const reviewAuthorIdRef = useRef(reviewAuthorId)
+  const activeReviewIdRef = useRef(activeReviewId)
   const activeReviewAnchorIdRef = useRef(activeReviewAnchorId)
   const reviewDecorationRef = useRef(reviewDecorationIndex(source))
   onChangeRef.current = onChange
@@ -1973,6 +1997,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   readOnlyRef.current = readOnly
   markupViewRef.current = markupView
   reviewAuthorIdRef.current = reviewAuthorId
+  activeReviewIdRef.current = activeReviewId
   activeReviewAnchorIdRef.current = activeReviewAnchorId
 
   const emitReviewSelection = (view: EditorView) => {
@@ -2286,6 +2311,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         reviewDecorationRef.current,
         markupViewRef.current,
         reviewAuthorIdRef.current,
+        activeReviewIdRef.current,
         activeReviewAnchorIdRef.current,
       ),
       handleDOMEvents: {
@@ -2413,10 +2439,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   useEffect(() => {
     markupViewRef.current = markupView
     reviewAuthorIdRef.current = reviewAuthorId
+    activeReviewIdRef.current = activeReviewId
     activeReviewAnchorIdRef.current = activeReviewAnchorId
     const view = viewRef.current
     if (view) view.dispatch(view.state.tr.setMeta('dm-decoration-refresh', true))
-  }, [activeReviewAnchorId, markupView, reviewAuthorId])
+  }, [activeReviewAnchorId, activeReviewId, markupView, reviewAuthorId])
 
   useEffect(() => {
     const view = viewRef.current

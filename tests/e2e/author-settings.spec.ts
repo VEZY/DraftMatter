@@ -75,7 +75,7 @@ test.describe('local review identity settings', () => {
     expect(portable).toContain(`data-author="${storedSettings.author.id}"`)
     expect(portable).toMatch(new RegExp(`\\.dm-thread[^\\n]*data-author="${storedSettings.author.id}"`))
     expect(portable).toMatch(new RegExp(`\\.dm-change[^\\n]*data-author="${storedSettings.author.id}"`))
-    await expect(manuscript.getByText('Suggest on this sentence.', { exact: true })).toBeVisible()
+    await expect(manuscript.locator('.dm-review-change').filter({ hasText: 'Suggest on this' })).toBeVisible()
 
     await page.reload()
     await expect(page.locator('.topbar-actions .avatar')).toHaveAttribute('aria-label', 'Zoé Dupont')

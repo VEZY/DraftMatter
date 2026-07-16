@@ -487,7 +487,12 @@ function App() {
     }
   }
 
-  const activeReplacement = draft.activeProposal === 'alice'
+  const reviewProposal = reviewAuthorFilter === 'dm-a01' || activeReviewId === 'dm-c01'
+    ? 'alice'
+    : reviewAuthorFilter === 'dm-a02' || activeReviewId === 'dm-c02'
+      ? 'marcus'
+      : draft.activeProposal
+  const activeReplacement = reviewProposal === 'alice'
     ? 'reduced leaf area by 18%'
     : 'lowered leaf expansion during the treatment period'
   const collisionSafeZoteroRecords = useMemo(
@@ -1076,11 +1081,6 @@ function App() {
   const totalOpenReviewCount = allReviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
   const activeReviewPosition = Math.max(0, reviewQueue.findIndex((item) => item.id === activeReviewId))
   const reviewLocationLabel = reviewQueue.length ? `REVIEW ${activeReviewPosition + 1} OF ${reviewQueue.length}` : 'NO FEEDBACK IN THIS VIEW'
-  const reviewProposal = reviewAuthorFilter === 'dm-a01' || activeReviewId === 'dm-c01'
-    ? 'alice'
-    : reviewAuthorFilter === 'dm-a02' || activeReviewId === 'dm-c02'
-      ? 'marcus'
-      : draft.activeProposal
   const reviewProposalStatus = reviewProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
   const executableCells = extractExecutableCells(executionSource).cells
   const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL) ?? executableCells[0]
@@ -3323,6 +3323,7 @@ function App() {
               codeCellStatuses={Object.fromEntries(executionCellStates.map((state) => [state.cellId, state.status] as const))}
               markupView={markupView}
               reviewAuthorId={reviewAuthorFilter === 'all' ? undefined : reviewAuthorFilter}
+              activeReviewId={activeReviewId}
               activeReviewAnchorId={activeReviewAnchorId}
               readOnly={Boolean(structuredReviewProjection)}
               resolveAssetUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) ?? 'data:,' : path}
