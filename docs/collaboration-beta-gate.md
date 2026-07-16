@@ -10,7 +10,7 @@ The automated DM-P6 core gate exercises one owner and one editor from invitation
 6. The resolved Yjs state is snapshotted, backed up, restored into an empty store, and checkpointed to the same Markdown again.
 7. Editor membership revocation takes effect immediately, audit events retain no invitation secret, project deletion removes restored state, and restore/deletion metrics remain visible.
 
-The separate loopback Hocuspocus integration test certifies the actual authenticated WebSocket reconnect path. Two editors now create distinct attributed alternatives and manuscript edits while disconnected; reconnect retains both authors, relative anchors, proposals, and text edits, produces byte-identical portable checkpoints on both clients, and reopens the persisted service state to the same checkpoint. Because the test binds an ephemeral localhost port, restricted CI sandboxes must grant loopback bind permission; it performs no external network access.
+The separate loopback Hocuspocus integration test certifies the actual authenticated WebSocket reconnect path. Two editors create distinct attributed alternatives and manuscript edits while disconnected, then make incompatible accept/reject decisions during another offline interval. Reconnect retains both authors, relative anchors, proposals, text edits, and immutable decisions; the clients surface and explicitly resolve the decision conflict, produce byte-identical portable checkpoints, and reopen persisted service state to the same checkpoint. A second live path verifies commenter-only thread publication, and a third verifies that only the owner can initialize an empty room with existing portable review history. Because these tests bind an ephemeral localhost port, restricted CI sandboxes must grant loopback bind permission; they perform no external network access.
 
 This gate now extends through the managed PostgreSQL/S3-compatible adapters, OIDC roles and revocation, signed billing entitlements, scheduled verified backups, restore drills, retention/deletion automation, privacy-safe metrics, and a portable service deployment. A paid or broad public launch still requires environment-specific TLS and secret management, operated identity/billing configuration, provider-level database/object backups, alert routing, privacy/data-processing review, external security review, and production load/soak testing.
 
@@ -18,12 +18,16 @@ The product workflow now covers privacy-safe browser guest links, browser PKCE s
 
 ## Current automated evidence
 
-Certification on 2026-07-15 from the locked checkout completed:
+Collaboration-boundary certification on 2026-07-16 from the locked checkout completed:
 
-- `npm test`: 74 files and 316 tests passed;
+- `npm test`: 106 files and 532 tests passed;
 - `npm run build`: collaboration service type-check/bundle and browser type-check/bundle passed;
-- `cargo test --manifest-path src-tauri/Cargo.toml --locked`: 51 host tests passed;
-- `npm run compliance:check`: 566 locked npm/Cargo components verified for `aarch64-apple-darwin`;
+- `npm run test:e2e`: 25 rendered Chromium interaction tests passed;
+- `npm run compliance:check`: 572 locked npm/Cargo components verified for `aarch64-apple-darwin`.
+
+The most recent native-host and deployment certification additionally completed:
+
+- `cargo test --manifest-path src-tauri/Cargo.toml --locked`: 60 host tests passed;
 - `docker compose config --quiet`: the portable local service topology validated;
 - `npm run desktop:build -- --debug --bundles app`: the native macOS application compiled, bundled, and passed strict code-signature verification.
 

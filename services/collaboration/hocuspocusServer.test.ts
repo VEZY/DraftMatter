@@ -16,6 +16,7 @@ import {
   createDraftMatterHocuspocusServer,
   editorUpdateDiagnostic,
   editorUpdateAllowed,
+  ownerUpdateDiagnostic,
   parseCollaborationDocumentName,
 } from './hocuspocusServer'
 
@@ -182,13 +183,86 @@ describe('authenticated Hocuspocus transport', () => {
       authorId: 'owner',
       action: 'accepted',
     }))
+    const unversionedDecision = updateFrom(document, (candidate) => {
+      const proposals = candidate.getMap<Record<string, unknown>>('draftmatter:proposals')
+      proposals.set('dm-change-editor', { ...proposals.get('dm-change-editor'), status: 'accepted' })
+      candidate.getMap('draftmatter:decisions').set('dm-decision-unversioned', {
+        id: 'dm-decision-unversioned',
+        changeId: 'dm-change-editor',
+        authorId: 'editor',
+        action: 'accepted',
+      })
+    })
+    const changedMetadata = updateFrom(document, (candidate) => candidate.getMap('draftmatter:meta').set('schemaVersion', 2))
+    const undeclaredRoot = updateFrom(document, (candidate) => candidate.getMap('draftmatter:shadow').set('payload', 'hidden'))
     const reservedMarkup = updateFrom(document, (candidate) => candidate.getText('draftmatter:document').insert(0, '[]{#dm-forged .dm-anchor data-anchor="dm-forged" data-edge="point"}\n'))
 
     expect(editorUpdateDiagnostic(document, renamedAuthor, 'editor')).toBe('review-record-invalid')
     expect(editorUpdateDiagnostic(document, forgedAuthor, 'editor')).toBe('review-record-invalid')
     expect(editorUpdateDiagnostic(document, rewrittenProposal, 'editor')).toBe('review-record-invalid')
     expect(editorUpdateDiagnostic(document, forgedDecision, 'editor')).toBe('review-record-invalid')
+    expect(editorUpdateDiagnostic(document, unversionedDecision, 'editor')).toBe('review-record-invalid')
+    expect(editorUpdateDiagnostic(document, changedMetadata, 'editor')).toBe('review-record-invalid')
+    expect(editorUpdateDiagnostic(document, undeclaredRoot, 'editor')).toBe('review-record-invalid')
     expect(editorUpdateDiagnostic(document, reservedMarkup, 'editor')).toBe('reserved-review-markup')
+    collaboration.destroy()
+  })
+
+  it('allows one owner import, then enforces the same immutable attribution boundary', () => {
+    const source = '## Results\n\nCanopy response increased.\n'
+    const quote = 'Canopy response'
+    const created = createReviewChange(source, {
+      start: source.indexOf(quote),
+      end: source.indexOf(quote) + quote.length,
+      author: { id: 'legacy-author', name: 'Legacy Collaborator' },
+      kind: 'replace',
+      proposal: 'Canopy response increased by 12%',
+      timestamp: '2026-07-16T10:20:00.000Z',
+      changeId: 'dm-change-imported',
+      anchorId: 'dm-anchor-imported',
+      startMarkerId: 'dm-anchor-imported-start',
+      endMarkerId: 'dm-anchor-imported-end',
+    })
+    const document = new Y.Doc()
+    const bootstrap = portableUpdate(document, created.document.source)
+    expect(ownerUpdateDiagnostic(document, bootstrap, 'owner')).toBeNull()
+    Y.applyUpdate(document, bootstrap)
+
+    const forgedHistory = updateFrom(document, (candidate) => candidate.getMap('draftmatter:authors').set('other-user', {
+      id: 'other-user',
+      name: 'Forged Collaborator',
+    }))
+    const changedMetadata = updateFrom(document, (candidate) => candidate.getMap('draftmatter:meta').set('schemaVersion', 2))
+    expect(ownerUpdateDiagnostic(document, forgedHistory, 'owner')).toBe('review-record-invalid')
+    expect(ownerUpdateDiagnostic(document, changedMetadata, 'owner')).toBe('review-record-invalid')
+    document.destroy()
+  })
+
+  it('rejects decision transactions that rewrite an unrelated proposal status', () => {
+    const source = '## Results\n\nCanopy response increased during drought.\n'
+    const collaboration = CollaborativeDocument.fromPortableSource(source)
+    collaboration.putAuthor({ id: 'editor', name: 'Eli Editor' })
+    const firstStart = source.indexOf('Canopy')
+    const secondStart = source.indexOf('drought')
+    collaboration.putAnchor({ id: 'dm-anchor-first', start: collaboration.relativePosition(firstStart), end: collaboration.relativePosition(firstStart + 6) })
+    collaboration.putAnchor({ id: 'dm-anchor-second', start: collaboration.relativePosition(secondStart), end: collaboration.relativePosition(secondStart + 7) })
+    collaboration.putProposal({ id: 'dm-change-first', anchorId: 'dm-anchor-first', authorId: 'editor', kind: 'replace', status: 'open', proposal: 'Canopy cover' })
+    collaboration.putProposal({ id: 'dm-change-second', anchorId: 'dm-anchor-second', authorId: 'editor', kind: 'replace', status: 'open', proposal: 'water deficit' })
+
+    const unrelatedStatus = updateFrom(collaboration.doc, (candidate) => {
+      const candidateCollaboration = new CollaborativeDocument(candidate)
+      new CollaborativeReviewBinding(candidateCollaboration).decide({
+        changeIds: ['dm-change-first'],
+        action: 'accepted',
+        author: { id: 'editor', name: 'Eli Editor' },
+        timestamp: '2026-07-16T10:21:00.000Z',
+      })
+      const proposals = candidate.getMap<Record<string, unknown>>('draftmatter:proposals')
+      proposals.set('dm-change-second', { ...proposals.get('dm-change-second'), status: 'accepted' })
+      candidateCollaboration.awareness.destroy()
+    })
+
+    expect(editorUpdateDiagnostic(collaboration.doc, unrelatedStatus, 'editor')).toBe('review-record-invalid')
     collaboration.destroy()
   })
 

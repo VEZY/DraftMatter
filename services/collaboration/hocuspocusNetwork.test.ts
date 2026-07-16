@@ -8,6 +8,8 @@ import { AuthenticatedWorkspaceService } from '../../src/collaboration/workspace
 import { createReviewChange, createReviewThread } from '../../src/reviewOperations'
 import { CollaborativeDocument } from '../../src/sharedEditor/collaboration'
 import { createCollaborationCheckpoint } from '../../src/sharedEditor/collaborationCheckpoint'
+import { CollaborativeReviewBinding } from '../../src/sharedEditor/collaborativeReview'
+import { reviewDecisionConflicts } from '../../src/sharedEditor/reviewDecisions'
 import { FileCollaborationStore } from './fileStore'
 import { collaborationDocumentName, createDraftMatterHocuspocusServer } from './hocuspocusServer'
 
@@ -128,13 +130,58 @@ describe('live Hocuspocus collaboration', () => {
       () => JSON.stringify(aliceCollaboration.snapshot()) === JSON.stringify(bobCollaboration.snapshot()),
       () => `Reconnected editors did not converge: ${JSON.stringify({ alice: aliceCollaboration.snapshot(), bob: bobCollaboration.snapshot(), status: bob.connection.configuration.websocketProvider.status, synced: bob.connection.isSynced })}`,
     )
-    const converged = aliceCollaboration.snapshot()
+    let converged = aliceCollaboration.snapshot()
     expect(converged.source).toContain('owner offline')
     expect(converged.source).toContain('editor offline')
     expect(converged.source.match(/Canopy response declined/g)).toHaveLength(1)
     expect(converged.authors.map((author) => author.id)).toEqual(['editor', 'owner'])
     expect(converged.proposals.map((proposal) => proposal.id)).toEqual(['dm-change-editor-live', 'dm-change-owner-live'])
     expect(converged.anchors.map((anchor) => anchor.id)).toEqual(['dm-anchor-editor-live', 'dm-anchor-owner-live'])
+
+    bob.connection.disconnect()
+    await waitFor(
+      () => bob.connection.configuration.websocketProvider.status === WebSocketStatus.Disconnected && !bob.connection.isSynced,
+      'Offline decision editor did not disconnect.',
+    )
+    const aliceReview = new CollaborativeReviewBinding(aliceCollaboration)
+    const bobReview = new CollaborativeReviewBinding(bobCollaboration)
+    aliceReview.decide({
+      changeIds: ['dm-change-owner-live'],
+      action: 'accepted',
+      author: { id: 'owner', name: 'Alice Owner' },
+      timestamp: '2026-07-16T11:02:00.000Z',
+    })
+    bobReview.decide({
+      changeIds: ['dm-change-owner-live'],
+      action: 'rejected',
+      author: { id: 'editor', name: 'Eli Editor' },
+      timestamp: '2026-07-16T11:02:01.000Z',
+    })
+    await bob.connection.configuration.websocketProvider.connect()
+    await waitFor(() => bob.connection.isSynced, 'Offline decision editor did not resynchronize.')
+    await waitFor(
+      () => reviewDecisionConflicts(aliceCollaboration.snapshot()).length === 1
+        && JSON.stringify(aliceCollaboration.snapshot()) === JSON.stringify(bobCollaboration.snapshot()),
+      'Concurrent offline decisions did not converge to an explicit conflict.',
+    )
+    const conflict = reviewDecisionConflicts(aliceCollaboration.snapshot())[0]
+    expect(conflict).toMatchObject({
+      changeId: 'dm-change-owner-live',
+      actions: ['accepted', 'rejected'],
+    })
+    aliceReview.resolveConflict({
+      changeId: conflict.changeId,
+      action: 'accepted',
+      author: { id: 'owner', name: 'Alice Owner' },
+      resolves: conflict.decisionIds,
+      timestamp: '2026-07-16T11:03:00.000Z',
+    })
+    await waitFor(
+      () => reviewDecisionConflicts(bobCollaboration.snapshot()).length === 0
+        && JSON.stringify(aliceCollaboration.snapshot()) === JSON.stringify(bobCollaboration.snapshot()),
+      'Resolved offline decision conflict did not converge.',
+    )
+    converged = aliceCollaboration.snapshot()
     const liveCheckpoint = createCollaborationCheckpoint(aliceCollaboration)
     expect(createCollaborationCheckpoint(bobCollaboration).source).toBe(liveCheckpoint.source)
     expect(liveCheckpoint.source).toContain('Canopy response declined by 18%')
@@ -222,5 +269,63 @@ describe('live Hocuspocus collaboration', () => {
     seed.destroy()
     ownerCollaboration.destroy()
     reviewerCollaboration.destroy()
+  }, 15_000)
+
+  it('lets the owner initialize an empty room with portable history exactly once', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'draftmatter-live-bootstrap-'))
+    roots.push(root)
+    let id = 0
+    const authorization = new AuthenticatedWorkspaceService({
+      secret: Uint8Array.from({ length: 32 }, (_, index) => index + 120),
+      idFactory: () => `bootstrap-${++id}`,
+    })
+    const ownerToken = await authorization.createSessionForVerifiedIdentity({ userId: 'owner', sessionId: 'owner-bootstrap-session' })
+    const editorToken = await authorization.createSessionForVerifiedIdentity({ userId: 'editor', sessionId: 'editor-bootstrap-session' })
+    await authorization.createWorkspace(ownerToken, { id: 'forest', name: 'Forest study' })
+    await authorization.createProject(ownerToken, 'forest', { id: 'paper', name: 'Canopy paper' })
+    await authorization.acceptInvitation(editorToken, (await authorization.createInvitation(ownerToken, 'forest', { role: 'editor' })).token)
+
+    const persistence = new FileCollaborationStore({ root, idFactory: () => `bootstrap-store-${++id}` })
+    const server = createDraftMatterHocuspocusServer({ authorization, persistence, port: 0, debounceMs: 20, maxDebounceMs: 80 })
+    await server.listen()
+    const name = collaborationDocumentName({ workspaceId: 'forest', projectId: 'paper' })
+    const ownerDocument = new Y.Doc()
+    const owner = provider(server.webSocketURL, name, ownerToken, ownerDocument)
+    await owner.synced
+    const ownerCollaboration = new CollaborativeDocument(ownerDocument)
+    expect(ownerCollaboration.source).toBe('')
+
+    const source = '## Results\n\nCanopy response increased.\n'
+    const quote = 'Canopy response'
+    const imported = createReviewChange(source, {
+      start: source.indexOf(quote),
+      end: source.indexOf(quote) + quote.length,
+      author: { id: 'legacy-author', name: 'Legacy Collaborator' },
+      kind: 'replace',
+      proposal: 'Canopy response increased by 12%',
+      timestamp: '2026-07-16T11:30:00.000Z',
+      changeId: 'dm-change-imported-live',
+      anchorId: 'dm-anchor-imported-live',
+      startMarkerId: 'dm-marker-imported-live-start',
+      endMarkerId: 'dm-marker-imported-live-end',
+    })
+    ownerCollaboration.reconcilePortableSource(imported.document.source, 'owner-bootstrap')
+
+    const editorDocument = new Y.Doc()
+    const editor = provider(server.webSocketURL, name, editorToken, editorDocument)
+    await editor.synced
+    const editorCollaboration = new CollaborativeDocument(editorDocument)
+    await waitFor(
+      () => editorCollaboration.snapshot().proposals.some((proposal) => proposal.id === 'dm-change-imported-live'),
+      'Owner bootstrap history did not reach the invited editor.',
+    )
+    expect(editorCollaboration.source).toBe(source)
+    expect(editorCollaboration.snapshot().authors).toEqual([{ id: 'legacy-author', name: 'Legacy Collaborator' }])
+
+    owner.connection.destroy()
+    editor.connection.destroy()
+    await server.destroy()
+    ownerCollaboration.destroy()
+    editorCollaboration.destroy()
   }, 15_000)
 })

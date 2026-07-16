@@ -19,6 +19,7 @@ const ROOTS = {
   meta: 'draftmatter:meta',
   prosemirror: 'draftmatter:prosemirror',
 } as const
+const KNOWN_ROOTS = new Set<string>(Object.values(ROOTS))
 
 export interface CollaborationConnectionContext extends CollaborationProjectScope {
   userId: string
@@ -60,9 +61,8 @@ function canonical(value: unknown): unknown {
 }
 
 function protectedFingerprint(document: Y.Doc) {
-  const knownRoots = new Set<string>(Object.values(ROOTS))
   const unknownRoots = Object.fromEntries([...document.share.entries()]
-    .filter(([name]) => !knownRoots.has(name))
+    .filter(([name]) => !KNOWN_ROOTS.has(name))
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([name, value]) => [name, canonical(value.toJSON())]))
   return JSON.stringify(canonical({
@@ -73,6 +73,19 @@ function protectedFingerprint(document: Y.Doc) {
     prosemirror: document.getXmlFragment(ROOTS.prosemirror).toJSON(),
     unknownRoots,
   }))
+}
+
+function unknownRoots(document: Y.Doc) {
+  return new Map([...document.share.entries()]
+    .filter(([name]) => !KNOWN_ROOTS.has(name))
+    .map(([name, value]) => [name, canonical(value.toJSON())]))
+}
+
+function unknownRootsUnchanged(before: Y.Doc, after: Y.Doc) {
+  const previous = unknownRoots(before)
+  const next = unknownRoots(after)
+  if (previous.size !== next.size) return false
+  return [...previous].every(([name, value]) => next.has(name) && same(value, next.get(name)))
 }
 
 function mapSnapshot(document: Y.Doc, name: string) {
@@ -215,8 +228,14 @@ function validDecision(value: unknown, key: string, userId: string) {
     && typeof decision.action === 'string'
     && ['accepted', 'rejected', 'rebased'].includes(decision.action)
     && (decision.timestamp === undefined || (typeof decision.timestamp === 'string' && decision.timestamp.length <= 100))
-    && (decision.baseRevision === undefined || (typeof decision.baseRevision === 'string' && decision.baseRevision.length <= 16_384))
-    && (decision.resolves === undefined || (Array.isArray(decision.resolves) && decision.resolves.length <= 100 && decision.resolves.every((id) => typeof id === 'string' && SAFE_ID.test(id))))
+    && typeof decision.baseRevision === 'string'
+    && decision.baseRevision.length > 0
+    && decision.baseRevision.length <= 16_384
+    && (decision.resolves === undefined || (Array.isArray(decision.resolves)
+      && decision.resolves.length >= 2
+      && decision.resolves.length <= 100
+      && new Set(decision.resolves).size === decision.resolves.length
+      && decision.resolves.every((id) => typeof id === 'string' && SAFE_ID.test(id))))
     && Object.keys(decision).every((field) => ['id', 'changeId', 'authorId', 'action', 'timestamp', 'baseRevision', 'resolves'].includes(field))
 }
 
@@ -237,7 +256,7 @@ function validExistingThread(before: unknown, after: unknown, userId: string) {
   if (!before || !after || typeof before !== 'object' || typeof after !== 'object' || Array.isArray(before) || Array.isArray(after)) return false
   const previous = before as Record<string, unknown>
   const next = after as Record<string, unknown>
-  for (const field of ['id', 'anchorId', 'authorId']) if (!same(previous[field], next[field])) return false
+  for (const field of ['id', 'anchorId', 'authorId', 'context']) if (!same(previous[field], next[field])) return false
   if (typeof next.status !== 'string' || !THREAD_STATUSES.has(next.status) || !validContext(next.context)) return false
   if (!Array.isArray(previous.messages) || !Array.isArray(next.messages) || next.messages.length < previous.messages.length || next.messages.length > 500) return false
   const previousMessages = previous.messages
@@ -254,6 +273,72 @@ function validThreadStatus(value: unknown, key: string) {
     && typeof status.status === 'string'
     && THREAD_STATUSES.has(status.status)
     && Object.keys(status).every((field) => field === 'id' || field === 'status')
+}
+
+function anchorBounds(document: Y.Doc, value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const anchor = value as Record<string, unknown>
+  try {
+    const startBytes = hexBytes(anchor.start)
+    const endBytes = hexBytes(anchor.end)
+    if (!startBytes || !endBytes) return null
+    const text = document.getText(ROOTS.document)
+    const start = Y.createAbsolutePositionFromRelativePosition(Y.decodeRelativePosition(startBytes), document)
+    const end = Y.createAbsolutePositionFromRelativePosition(Y.decodeRelativePosition(endBytes), document)
+    if (!start || !end || start.type !== text || end.type !== text) return null
+    return { start: start.index, end: end.index }
+  } catch {
+    return null
+  }
+}
+
+function rangesConflict(leftId: string, left: { start: number; end: number }, rightId: string, right: { start: number; end: number }) {
+  if (leftId === rightId || (left.start === right.start && left.end === right.end)) return true
+  const leftPoint = left.start === left.end
+  const rightPoint = right.start === right.end
+  if (leftPoint && rightPoint) return false
+  if (leftPoint) return right.start <= left.start && left.start <= right.end
+  if (rightPoint) return left.start <= right.start && right.start <= left.end
+  return left.end > right.start && right.end > left.start
+}
+
+function relatedProposalIds(
+  document: Y.Doc,
+  proposals: Map<string, unknown>,
+  anchors: Map<string, unknown>,
+  seeds: Set<string>,
+) {
+  const ranges = new Map([...proposals].flatMap(([id, proposal]) => {
+    const anchorId = String((proposal as Record<string, unknown>).anchorId)
+    const range = anchorBounds(document, anchors.get(anchorId))
+    return range ? [[id, { anchorId, ...range }] as const] : []
+  }))
+  const allowed = new Set(seeds)
+  const queue = [...seeds]
+  while (queue.length > 0) {
+    const currentId = queue.shift()!
+    const current = ranges.get(currentId)
+    if (!current) continue
+    for (const [candidateId, candidate] of ranges) {
+      if (allowed.has(candidateId) || !rangesConflict(current.anchorId, current, candidate.anchorId, candidate)) continue
+      allowed.add(candidateId)
+      queue.push(candidateId)
+    }
+  }
+  return allowed
+}
+
+function activeDecisionStatuses(decisions: Map<string, unknown>, changeId: string) {
+  const matching = [...decisions].filter(([, value]) => (value as Record<string, unknown>).changeId === changeId)
+  const resolved = new Set(matching.flatMap(([, value]) => {
+    const ids = (value as Record<string, unknown>).resolves
+    return Array.isArray(ids) ? ids.map(String) : []
+  }))
+  return new Set(matching.flatMap(([id, value]) => {
+    if (resolved.has(id)) return []
+    const action = (value as Record<string, unknown>).action
+    return [action === 'rebased' ? 'needs-rebase' : String(action)]
+  }))
 }
 
 function commenterMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
@@ -320,6 +405,9 @@ function commenterMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
 }
 
 function editorMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
+  if (!same([...mapSnapshot(before, ROOTS.meta)], [...mapSnapshot(after, ROOTS.meta)])) return false
+  if (!unknownRootsUnchanged(before, after)) return false
+
   const beforeAuthors = mapSnapshot(before, ROOTS.authors)
   const afterAuthors = mapSnapshot(after, ROOTS.authors)
   for (const key of new Set([...beforeAuthors.keys(), ...afterAuthors.keys()])) {
@@ -332,17 +420,20 @@ function editorMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
   const beforeDecisions = mapSnapshot(before, ROOTS.decisions)
   const afterDecisions = mapSnapshot(after, ROOTS.decisions)
   let hasNewDecision = false
+  const newDecisionIds = new Set<string>()
   for (const key of new Set([...beforeDecisions.keys(), ...afterDecisions.keys()])) {
     const previous = beforeDecisions.get(key)
     const next = afterDecisions.get(key)
     if (same(previous, next)) continue
     if (previous !== undefined || !validDecision(next, key, userId)) return false
     hasNewDecision = true
+    newDecisionIds.add(key)
   }
 
   const beforeProposals = mapSnapshot(before, ROOTS.proposals)
   const afterProposals = mapSnapshot(after, ROOTS.proposals)
   const newProposalIds = new Set<string>()
+  const changedProposalStatusIds = new Set<string>()
   for (const key of new Set([...beforeProposals.keys(), ...afterProposals.keys()])) {
     const previous = beforeProposals.get(key)
     const next = afterProposals.get(key)
@@ -350,12 +441,29 @@ function editorMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
     if (previous === undefined) {
       if (!validProposal(next, key, userId) || (next as Record<string, unknown>).status !== 'open') return false
       newProposalIds.add(key)
-    } else if (!validExistingProposal(previous, next, hasNewDecision)) return false
+    } else {
+      if (!validExistingProposal(previous, next, hasNewDecision)) return false
+      if (!same((previous as Record<string, unknown>).status, (next as Record<string, unknown>).status)) changedProposalStatusIds.add(key)
+    }
   }
 
-  for (const decision of afterDecisions.values()) {
+  for (const [decisionId, decision] of afterDecisions) {
     const record = decision as Record<string, unknown>
     if (!afterProposals.has(String(record.changeId))) return false
+    if (!newDecisionIds.has(decisionId)) continue
+    if (!afterAuthors.has(userId)) return false
+    const proposal = afterProposals.get(String(record.changeId)) as Record<string, unknown>
+    const expectedStatus = record.action === 'rebased' ? 'needs-rebase' : record.action
+    const activeStatuses = activeDecisionStatuses(afterDecisions, String(record.changeId))
+    if (activeStatuses.size < 2 && proposal.status !== expectedStatus) return false
+    if (activeStatuses.size >= 2 && proposal.status !== 'decision-conflict' && !activeStatuses.has(String(proposal.status))) return false
+    if (Array.isArray(record.resolves)) {
+      const resolved = record.resolves.map((id) => afterDecisions.get(String(id)) as Record<string, unknown> | undefined)
+      if (resolved.some((candidate) => !candidate
+        || candidate.changeId !== record.changeId
+        || Array.isArray(candidate.resolves))) return false
+      if (new Set(resolved.map((candidate) => candidate!.action)).size < 2) return false
+    }
   }
 
   const beforeThreads = mapSnapshot(before, ROOTS.threads)
@@ -392,6 +500,10 @@ function editorMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
     if (same(previous, next)) continue
     if (!validThreadStatus(next, key) || (previous === undefined && !newThreadIds.has(key))) return false
   }
+  for (const [key, thread] of afterThreads) {
+    const status = afterStatuses.get(key) as Record<string, unknown> | undefined
+    if (status && (thread as Record<string, unknown>).status !== status.status) return false
+  }
 
   const beforeAnchors = mapSnapshot(before, ROOTS.anchors)
   const afterAnchors = mapSnapshot(after, ROOTS.anchors)
@@ -414,6 +526,11 @@ function editorMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
     const thread = afterThreads.get(threadId) as Record<string, unknown>
     const embeddedMessages = Array.isArray(thread.messages) ? thread.messages.length : 0
     if (!afterAuthors.has(userId) || !afterAnchors.has(String(thread.anchorId)) || embeddedMessages + (addedMessagesByThread.get(threadId) ?? 0) === 0) return false
+  }
+  if (changedProposalStatusIds.size > 0) {
+    const decisionChangeIds = new Set([...newDecisionIds].map((id) => String((afterDecisions.get(id) as Record<string, unknown>).changeId)))
+    const allowed = relatedProposalIds(after, afterProposals, afterAnchors, decisionChangeIds)
+    if ([...changedProposalStatusIds].some((id) => !allowed.has(id))) return false
   }
   return true
 }
@@ -455,6 +572,34 @@ export function editorUpdateDiagnostic(document: Y.Doc, update: Uint8Array, user
 
 export function editorUpdateAllowed(document: Y.Doc, update: Uint8Array, userId: string) {
   return editorUpdateDiagnostic(document, update, userId) === null
+}
+
+function collaborationDocumentIsEmpty(document: Y.Doc) {
+  return document.getText(ROOTS.document).length === 0
+    && document.getXmlFragment(ROOTS.prosemirror).length === 0
+    && [ROOTS.anchors, ROOTS.authors, ROOTS.proposals, ROOTS.threads, ROOTS.threadMessages, ROOTS.threadStatuses, ROOTS.decisions, ROOTS.meta]
+      .every((name) => document.getMap(name).size === 0)
+    && unknownRoots(document).size === 0
+}
+
+export function ownerUpdateDiagnostic(document: Y.Doc, update: Uint8Array, userId: string): ReturnType<typeof editorUpdateDiagnostic> {
+  if (!collaborationDocumentIsEmpty(document)) return editorUpdateDiagnostic(document, update, userId)
+  const candidate = new Y.Doc()
+  try {
+    Y.applyUpdate(candidate, Y.encodeStateAsUpdate(document))
+    const beforeVector = Y.encodeStateVector(candidate)
+    Y.applyUpdate(candidate, update)
+    if (same([...beforeVector], [...Y.encodeStateVector(candidate)])) return null
+    const review = parseReviewMarkup(candidate.getText(ROOTS.document).toString())
+    if (review.sectionStart !== undefined || review.anchors.length > 0) return 'reserved-review-markup'
+    const meta = mapSnapshot(candidate, ROOTS.meta)
+    if (meta.size !== 1 || meta.get('schemaVersion') !== 1 || unknownRoots(candidate).size > 0) return 'review-record-invalid'
+    return null
+  } catch {
+    return 'update-invalid'
+  } finally {
+    candidate.destroy()
+  }
 }
 
 export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocusOptions) {
@@ -529,9 +674,11 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
       if (context.role === 'commenter' && !commenterUpdateAllowed(document, payload, context.userId)) {
         throw new Error('Commenter updates may only create attributed threads or append attributed replies.')
       }
-      if (context.role === 'editor') {
-        const diagnostic = editorUpdateDiagnostic(document, payload, context.userId)
-        if (diagnostic) throw new Error(`Editor review records must preserve immutable history and verified attribution (${diagnostic}).`)
+      if (context.role === 'editor' || context.role === 'owner') {
+        const diagnostic = context.role === 'owner'
+          ? ownerUpdateDiagnostic(document, payload, context.userId)
+          : editorUpdateDiagnostic(document, payload, context.userId)
+        if (diagnostic) throw new Error(`Collaboration review records must preserve immutable history and verified attribution (${diagnostic}).`)
       }
     },
     async onLoadDocument({ documentName }) {

@@ -18,7 +18,7 @@ The rendered editor binding uses `y-prosemirror` over the named `draftmatter:pro
 
 The underlying transport seam exchanges incremental updates, state vectors, and awareness updates without a service dependency, so reconnect and offline convergence run in deterministic local tests. `HocuspocusCollaborationClient` attaches the authenticated WebSocket provider at the browser boundary and accepts a refreshable, memory-held token provider.
 
-Review decisions are immutable revision-checked records. A decision starts from a Yjs state-vector token; a stale sequential decision is rejected before it is written. If two offline clients decide incompatibly from the same base, both records survive the merge and the derived proposal state becomes `decision-conflict`. Resolving it requires a new decision that names the exact conflicting records and is based on the merged revision. Proposal text or status is never silently chosen by last-writer-wins behavior.
+Review decisions are immutable revision-checked records. A decision starts from a Yjs state-vector token; a stale sequential decision is rejected before it is written. If two offline clients decide incompatibly from the same base, both records survive the merge and the derived proposal state becomes `decision-conflict`. Resolving it requires a new decision that names the exact conflicting records and is based on the merged revision. The authenticated transport verifies decision attribution, revision tokens, conflict-resolution references, and the exact proposal conflict component whose statuses may change, so proposal text or status is never silently chosen by last-writer-wins behavior.
 
 ## Workspace authorization seam
 
@@ -26,7 +26,7 @@ The framework-independent policy model and managed PostgreSQL workspace service 
 
 Browser invitation links carry the one-use secret and collaboration service address only in the URL fragment, so neither value enters the initial HTTP request or referrer. DraftMatter removes that fragment from browser history as soon as it is read. If authentication requires a full-page identity-provider redirect, the invitation is retained in origin-scoped session storage for at most fifteen minutes, consumed once on callback, and removed before it is shown for acceptance. Desktop-only origins fall back to the raw one-use token because they cannot produce a portable browser address.
 
-Every project lookup is scoped by workspace membership before the project identifier is resolved. A missing tenant membership, an unknown workspace, and an unknown project all return the same not-found response, preventing project enumeration across tenants. Both the WebSocket and HTTP adapters call `authorizeProject` for the requested capability before loading collaboration state.
+Every project lookup is scoped by workspace membership before the project identifier is resolved. A missing tenant membership, an unknown workspace, and an unknown project all return the same not-found response, preventing project enumeration across tenants. Both the WebSocket and HTTP adapters call `authorizeProject` for the requested capability before loading collaboration state. Only the owner may initialize an empty room from portable source, which permits a one-time import of existing attribution; after initialization, owner and editor updates both preserve immutable history, accept only their verified author ID for new records, and reject schema or undeclared-root mutations.
 
 ## Owner-controlled portable checkpoints
 
