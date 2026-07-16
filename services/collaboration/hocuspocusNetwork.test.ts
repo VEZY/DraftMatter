@@ -5,6 +5,9 @@ import { HocuspocusProvider, WebSocketStatus } from '@hocuspocus/provider'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import { AuthenticatedWorkspaceService } from '../../src/collaboration/workspaceService'
+import { createReviewChange } from '../../src/reviewOperations'
+import { CollaborativeDocument } from '../../src/sharedEditor/collaboration'
+import { createCollaborationCheckpoint } from '../../src/sharedEditor/collaborationCheckpoint'
 import { FileCollaborationStore } from './fileStore'
 import { collaborationDocumentName, createDraftMatterHocuspocusServer } from './hocuspocusServer'
 
@@ -60,9 +63,11 @@ describe('live Hocuspocus collaboration', () => {
     await authorization.acceptInvitation(editor, invitation.token)
 
     const persistence = new FileCollaborationStore({ root, idFactory: () => `store-${++id}`, compactAfterUpdates: 4 })
-    const seed = new Y.Doc()
-    seed.getText('draftmatter:document').insert(0, 'Canopy response')
-    await persistence.createSnapshot({ workspaceId: 'forest', projectId: 'paper' }, 'seed', Y.encodeStateAsUpdate(seed))
+    const source = '## Results\n\nCanopy response declined during drought.\n'
+    const quote = 'Canopy response declined'
+    const quoteStart = source.indexOf(quote)
+    const seed = CollaborativeDocument.fromPortableSource(source)
+    await persistence.createSnapshot({ workspaceId: 'forest', projectId: 'paper' }, 'seed', seed.encodeUpdate())
     const server = createDraftMatterHocuspocusServer({
       authorization,
       persistence,
@@ -79,25 +84,61 @@ describe('live Hocuspocus collaboration', () => {
     const alice = provider(server.webSocketURL, name, owner, aliceDocument)
     const bob = provider(server.webSocketURL, name, editor, bobDocument)
     await Promise.all([alice.synced, bob.synced])
-    expect(aliceDocument.getText('draftmatter:document').toString()).toBe('Canopy response')
-    expect(bobDocument.getText('draftmatter:document').toString()).toBe('Canopy response')
+    const aliceCollaboration = new CollaborativeDocument(aliceDocument)
+    const bobCollaboration = new CollaborativeDocument(bobDocument)
+    expect(aliceCollaboration.source).toBe(source)
+    expect(bobCollaboration.source).toBe(source)
 
     bob.connection.disconnect()
     await waitFor(
       () => bob.connection.configuration.websocketProvider.status === WebSocketStatus.Disconnected && !bob.connection.isSynced,
       'Offline editor did not disconnect.',
     )
-    aliceDocument.getText('draftmatter:document').insert(0, 'Observed ')
-    bobDocument.getText('draftmatter:document').insert(bobDocument.getText('draftmatter:document').length, ' offline')
+    const aliceAlternative = createReviewChange(source, {
+      start: quoteStart,
+      end: quoteStart + quote.length,
+      author: { id: 'owner', name: 'Alice Owner' },
+      kind: 'replace',
+      proposal: 'Canopy response declined by 18%',
+      timestamp: '2026-07-16T11:00:00.000Z',
+      changeId: 'dm-change-owner-live',
+      anchorId: 'dm-anchor-owner-live',
+      startMarkerId: 'dm-marker-owner-live-start',
+      endMarkerId: 'dm-marker-owner-live-end',
+    })
+    const editorAlternative = createReviewChange(source, {
+      start: quoteStart,
+      end: quoteStart + quote.length,
+      author: { id: 'editor', name: 'Eli Editor' },
+      kind: 'replace',
+      proposal: 'Canopy development slowed during drought',
+      timestamp: '2026-07-16T11:00:01.000Z',
+      changeId: 'dm-change-editor-live',
+      anchorId: 'dm-anchor-editor-live',
+      startMarkerId: 'dm-marker-editor-live-start',
+      endMarkerId: 'dm-marker-editor-live-end',
+    })
+    aliceCollaboration.reconcilePortableSource(aliceAlternative.document.source, 'owner-offline-review')
+    bobCollaboration.reconcilePortableSource(editorAlternative.document.source, 'editor-offline-review')
+    aliceCollaboration.edit(0, 0, '<!-- owner offline -->\n', 'owner-offline-text')
+    bobCollaboration.edit(bobCollaboration.source.length, bobCollaboration.source.length, '\n<!-- editor offline -->\n', 'editor-offline-text')
     await bob.connection.configuration.websocketProvider.connect()
     await waitFor(() => bob.connection.isSynced, 'Offline editor did not resynchronize.')
     await waitFor(
-      () => aliceDocument.getText('draftmatter:document').toString() === bobDocument.getText('draftmatter:document').toString(),
-      () => `Reconnected editors did not converge: ${JSON.stringify({ alice: aliceDocument.getText('draftmatter:document').toString(), bob: bobDocument.getText('draftmatter:document').toString(), status: bob.connection.configuration.websocketProvider.status, synced: bob.connection.isSynced })}`,
+      () => JSON.stringify(aliceCollaboration.snapshot()) === JSON.stringify(bobCollaboration.snapshot()),
+      () => `Reconnected editors did not converge: ${JSON.stringify({ alice: aliceCollaboration.snapshot(), bob: bobCollaboration.snapshot(), status: bob.connection.configuration.websocketProvider.status, synced: bob.connection.isSynced })}`,
     )
-    const converged = aliceDocument.getText('draftmatter:document').toString()
-    expect(converged).toContain('Observed ')
-    expect(converged).toContain(' offline')
+    const converged = aliceCollaboration.snapshot()
+    expect(converged.source).toContain('owner offline')
+    expect(converged.source).toContain('editor offline')
+    expect(converged.source.match(/Canopy response declined/g)).toHaveLength(1)
+    expect(converged.authors.map((author) => author.id)).toEqual(['editor', 'owner'])
+    expect(converged.proposals.map((proposal) => proposal.id)).toEqual(['dm-change-editor-live', 'dm-change-owner-live'])
+    expect(converged.anchors.map((anchor) => anchor.id)).toEqual(['dm-anchor-editor-live', 'dm-anchor-owner-live'])
+    const liveCheckpoint = createCollaborationCheckpoint(aliceCollaboration)
+    expect(createCollaborationCheckpoint(bobCollaboration).source).toBe(liveCheckpoint.source)
+    expect(liveCheckpoint.source).toContain('Canopy response declined by 18%')
+    expect(liveCheckpoint.source).toContain('Canopy development slowed during drought')
 
     alice.connection.destroy()
     bob.connection.destroy()
@@ -106,11 +147,13 @@ describe('live Hocuspocus collaboration', () => {
     const reopened = new Y.Doc()
     if (stored.snapshot) Y.applyUpdate(reopened, stored.snapshot)
     for (const update of stored.updates) Y.applyUpdate(reopened, update)
-    expect(reopened.getText('draftmatter:document').toString()).toBe(converged)
+    const reopenedCollaboration = new CollaborativeDocument(reopened)
+    expect(reopenedCollaboration.snapshot()).toEqual(converged)
+    expect(createCollaborationCheckpoint(reopenedCollaboration).source).toBe(liveCheckpoint.source)
     expect(persistence.dashboard.project('forest:paper')).toMatchObject({ restoreFailureCount: 0 })
     seed.destroy()
-    aliceDocument.destroy()
-    bobDocument.destroy()
-    reopened.destroy()
+    aliceCollaboration.destroy()
+    bobCollaboration.destroy()
+    reopenedCollaboration.destroy()
   }, 15_000)
 })
