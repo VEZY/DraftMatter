@@ -1,6 +1,9 @@
 import { useState } from 'react'
+import { isTauri } from '@tauri-apps/api/core'
 import type { WorkspaceAuditEvent, WorkspaceInvitation, WorkspaceMembership, WorkspaceRole } from './collaboration/workspaceService'
 import { CollaborationServiceClient, type CollaborationRecoveryCheckpoint, type WorkspaceDeletion, type WorkspaceSummary } from './collaboration/serviceClient'
+import { createCollaborationInvitationLink } from './collaboration/invitationLink'
+import { copyPlainText } from './clipboard'
 import { Icon } from './Icon'
 
 export interface CollaborationAccessPanelProps {
@@ -29,6 +32,8 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
   const [email, setEmail] = useState('')
   const [role, setRole] = useState<Exclude<WorkspaceRole, 'owner'>>('editor')
   const [createdToken, setCreatedToken] = useState('')
+  const [createdLink, setCreatedLink] = useState('')
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
 
   const refresh = async () => {
     setBusy('refresh')
@@ -63,16 +68,24 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
     setBusy('invite')
     setProblem('')
     setCreatedToken('')
+    setCreatedLink('')
+    setCopyState('idle')
     try {
       const created = await client.createInvitation(workspace.id, { role, ...(email.trim() ? { email: email.trim() } : {}), expiresInMs: 7 * 24 * 60 * 60_000 })
       setInvitations((current) => [...current.filter((item) => item.id !== created.invitation.id), created.invitation])
       setCreatedToken(created.token)
+      setCreatedLink(isTauri() ? '' : createCollaborationInvitationLink(window.location.href, client.urls.apiUrl, created.token) ?? '')
       setEmail('')
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error))
     } finally {
       setBusy('')
     }
+  }
+
+  const copyInvitation = async () => {
+    const copied = await copyPlainText(createdLink || createdToken)
+    setCopyState(copied ? 'copied' : 'failed')
   }
 
   const revokeInvitation = async (invitationId: string) => {
@@ -153,7 +166,7 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
             <label><span>Role</span><select value={role} onChange={(event) => setRole(event.target.value as Exclude<WorkspaceRole, 'owner'>)}><option value="editor">Editor</option><option value="commenter">Commenter</option><option value="viewer">Viewer</option></select></label>
             <button onClick={() => void invite()} disabled={Boolean(busy)}>{busy === 'invite' ? 'Creating…' : 'Create invitation'}</button>
           </div>
-          {createdToken && <div className="collaboration-invite-token"><span><strong>Invitation created</strong><small>Share this once. DraftMatter does not store the secret after this session.</small></span><input value={createdToken} readOnly aria-label="Invitation token" /><button onClick={() => void navigator.clipboard?.writeText(createdToken)}>Copy</button></div>}
+          {createdToken && <div className="collaboration-invite-token"><span><strong>{createdLink ? 'Browser invitation created' : 'Invitation secret created'}</strong><small>{createdLink ? 'Share this once. Its secret stays after # so it is not sent in web requests.' : 'Share this token once. DraftMatter does not store the secret after this session.'}</small></span><input value={createdLink || createdToken} readOnly aria-label={createdLink ? 'Invitation link' : 'Invitation token'} /><button onClick={() => void copyInvitation()}>{copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy'}</button></div>}
 
           <div className="collaboration-admin-grid">
             <section><span className="collaboration-section-label">Members · {members.length}</span>{members.map((member) => <div className="collaboration-admin-item" key={member.userId}><span><strong>{member.userId === currentUserId ? 'You' : member.userId}</strong><small>{member.role}</small></span>{member.userId !== currentUserId && <button onClick={() => void removeMember(member.userId)} disabled={Boolean(busy)}>Remove</button>}</div>)}</section>

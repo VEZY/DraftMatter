@@ -21,9 +21,39 @@ afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
   sessionStorage.clear()
+  window.history.replaceState({}, '', '/')
 })
 
 describe('collaboration dialog', () => {
+  it('opens browser invitation links without sending their secret in the request URL', async () => {
+    window.history.replaceState({}, '', '/writer#dm-invite=one-use-secret&dm-service=https%3A%2F%2Fcollab.example.test')
+    const onRequestOpen = vi.fn()
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const props = {
+      source: '# Draft',
+      onClose: vi.fn(),
+      onRemoteSource: vi.fn(),
+      onStatus: vi.fn(),
+      onCheckpoint: vi.fn().mockResolvedValue(undefined),
+      checkpointMode: 'download' as const,
+      checkpointTarget: 'paper.qmd',
+      onRequestOpen,
+    }
+    await act(async () => {
+      root.render(<CollaborationDialog open={false} {...props} />)
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    expect(onRequestOpen).toHaveBeenCalledTimes(1)
+    expect(container.textContent).toBe('')
+
+    await act(async () => root.render(<CollaborationDialog open {...props} />))
+    expect(input(container, 'Service URL').value).toBe('https://collab.example.test')
+    expect(container.textContent).toContain('Guest invitation ready')
+    expect(window.location.href).not.toContain('one-use-secret')
+    await act(async () => root.unmount())
+  })
+
   it('seeds unauthenticated collaboration presence from the persisted local author', async () => {
     const container = document.createElement('div')
     const root = createRoot(container)
@@ -197,5 +227,68 @@ describe('collaboration dialog', () => {
     expect(sessionStorage.length).toBe(1)
     expect([...Array(sessionStorage.length)].map((_, index) => sessionStorage.getItem(sessionStorage.key(index)!)).join('')).not.toContain('access_token')
     await act(async () => root.unmount())
+  })
+
+  it('retains a guest invitation through the OIDC redirect and removes the temporary secret', async () => {
+    window.history.replaceState({}, '', '/writer#dm-invite=guest-secret&dm-service=https%3A%2F%2Fcollab.example.test')
+    const request = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-browser' } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        issuer: 'https://identity.example.test',
+        authorization_endpoint: 'https://identity.example.test/authorize',
+        token_endpoint: 'https://identity.example.test/token',
+        code_challenge_methods_supported: ['S256'],
+      }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'short-lived-access-token', expires_in: 300 }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ userId: 'guest-42', displayName: 'Guest Reviewer' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ workspaces: [] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ workspaceId: 'forest', userId: 'guest-42', role: 'commenter', joinedAt: '2026-07-16T00:00:00.000Z' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ workspaces: [{ id: 'forest', name: 'Forest Lab', role: 'commenter', createdAt: '2026-07-15T00:00:00.000Z' }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ projects: [{ id: 'paper', workspaceId: 'forest', name: 'Canopy paper', createdAt: '2026-07-15T00:00:00.000Z' }] }), { status: 200 }))
+    vi.stubGlobal('fetch', request)
+    const navigateToIdentity = vi.fn()
+    const props = {
+      source: '# Draft',
+      onClose: vi.fn(),
+      onRemoteSource: vi.fn(),
+      onStatus: vi.fn(),
+      onCheckpoint: vi.fn().mockResolvedValue(undefined),
+      checkpointMode: 'download' as const,
+      checkpointTarget: 'paper.qmd',
+      navigateToIdentity,
+    }
+    const firstContainer = document.createElement('div')
+    const firstRoot = createRoot(firstContainer)
+    await act(async () => {
+      firstRoot.render(<CollaborationDialog open {...props} />)
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    await act(async () => [...firstContainer.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Sign in securely')!.click())
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 40)) })
+    const authorization = new URL(navigateToIdentity.mock.calls[0][0])
+    expect([...Array(sessionStorage.length)].map((_, index) => sessionStorage.getItem(sessionStorage.key(index)!)).join('')).toContain('guest-secret')
+    await act(async () => firstRoot.unmount())
+
+    window.history.replaceState({}, '', `/writer?code=authorization-code&state=${authorization.searchParams.get('state')}`)
+    const callbackContainer = document.createElement('div')
+    const callbackRoot = createRoot(callbackContainer)
+    await act(async () => {
+      callbackRoot.render(<CollaborationDialog open {...props} />)
+      await new Promise((resolve) => window.setTimeout(resolve, 40))
+    })
+    expect(callbackContainer.textContent).toContain('Guest Reviewer')
+    expect(callbackContainer.querySelector<HTMLInputElement>('[aria-label="Invitation token"]')?.value).toBe('guest-secret')
+    expect([...Array(sessionStorage.length)].map((_, index) => sessionStorage.getItem(sessionStorage.key(index)!)).join('')).not.toContain('guest-secret')
+    expect(window.location.href).not.toContain('guest-secret')
+    await act(async () => {
+      [...callbackContainer.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Accept')!.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    const acceptance = request.mock.calls.find(([input]) => String(input).endsWith('/api/invitations/accept'))
+    expect(acceptance?.[1]).toEqual(expect.objectContaining({ method: 'POST', body: JSON.stringify({ token: 'guest-secret' }) }))
+    expect(callbackContainer.textContent).toContain('Forest Lab · commenter')
+    expect(callbackContainer.textContent).toContain('Canopy paper')
+    expect(callbackContainer.querySelector<HTMLInputElement>('[aria-label="Invitation token"]')?.value).toBe('')
+    await act(async () => callbackRoot.unmount())
   })
 })

@@ -7,6 +7,11 @@ import {
   type CollaborationAccessToken,
   type WorkspaceSummary,
 } from './collaboration/serviceClient'
+import {
+  readCollaborationInvitationLink,
+  storePendingCollaborationInvitation,
+  takePendingCollaborationInvitation,
+} from './collaboration/invitationLink'
 import { completeOidcAuthorization, hasOidcCallback, prepareOidcAuthorization } from './collaboration/oidcBrowser'
 import type { CollaborationSessionProfile, WorkspaceProject } from './collaboration/workspaceService'
 import { Icon } from './Icon'
@@ -144,6 +149,9 @@ export function CollaborationDialog({
     setDetail('')
     try {
       const request = await prepareOidcAuthorization(url, window.location.href, sessionStorage)
+      if (invitationToken.trim()) {
+        storePendingCollaborationInvitation(sessionStorage, { token: invitationToken.trim(), serviceUrl: request.serviceUrl })
+      }
       ;(navigateToIdentity ?? ((nextUrl: string) => window.location.assign(nextUrl)))(request.authorizationUrl)
     } catch (error) {
       setServiceState('idle')
@@ -204,6 +212,8 @@ export function CollaborationDialog({
     try {
       const membership = await serviceClient.acceptInvitation(invitationToken.trim())
       setInvitationToken('')
+      const linkedInvitation = readCollaborationInvitationLink(window.location.href)
+      if (linkedInvitation) window.history.replaceState({}, '', linkedInvitation.cleanUrl)
       const available = await serviceClient.listWorkspaces()
       setWorkspaces(available)
       setWorkspaceId(membership.workspaceId)
@@ -212,6 +222,17 @@ export function CollaborationDialog({
       setDetail(error instanceof Error ? error.message : String(error))
     }
   }
+
+  useEffect(() => {
+    const invitation = readCollaborationInvitationLink(window.location.href)
+    if (!invitation) return
+    setUrl(invitation.serviceUrl)
+    setInvitationToken(invitation.token)
+    window.history.replaceState({}, '', invitation.cleanUrl)
+    onRequestOpen?.()
+  // Invitation fragments are consumed only on initial application entry.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   useEffect(() => {
     const client = clientRef.current
@@ -232,6 +253,7 @@ export function CollaborationDialog({
   useEffect(() => {
     if (!hasOidcCallback(window.location.href) || oidcCallbackStartedRef.current) return
     oidcCallbackStartedRef.current = true
+    const pendingInvitation = takePendingCollaborationInvitation(sessionStorage)
     onRequestOpen?.()
     setServiceState('loading')
     setDetail('Completing secure sign-in…')
@@ -241,6 +263,7 @@ export function CollaborationDialog({
       setUrl(result.serviceUrl)
       setToken('')
       accessTokenRef.current = result.token
+      if (pendingInvitation?.serviceUrl === result.serviceUrl) setInvitationToken(pendingInvitation.token)
       setDetail('')
       await hydrateServiceClient(new CollaborationServiceClient(result.serviceUrl, result.token), '')
     }).catch((error) => {
@@ -345,6 +368,7 @@ export function CollaborationDialog({
         ) : (
           <form onSubmit={(event) => { event.preventDefault(); void connect() }}>
             <div className="collaboration-service-fields"><label><span>Service URL</span><input value={url} onChange={(event) => { setUrl(event.target.value); setServiceClient(null); setServiceState('idle') }} placeholder="https://collab.example.org" inputMode="url" autoCapitalize="none" spellCheck={false} required disabled={serviceState === 'ready'} /><small>Remote services require encrypted HTTPS/WSS transport.</small></label><label><span>Short-lived access token</span><input type="password" value={token} onChange={(event) => { setToken(event.target.value); accessTokenRef.current = event.target.value; setServiceClient(null); setServiceState('idle') }} autoComplete="one-time-code" required={false} disabled={serviceState === 'ready'} /><small>Advanced fallback · held in memory and cleared from this form after connection.</small></label><button type="button" className="collaboration-discover" onClick={() => void discoverWorkspaces()} disabled={!token || serviceState === 'loading'}>{serviceState === 'loading' ? 'Checking account…' : serviceState === 'ready' ? 'Account ready' : 'Use access token'}</button></div>
+            {invitationToken && !serviceClient && <div className="collaboration-invitation-pending"><Icon name="message" size={16} /><span><strong>Guest invitation ready</strong><small>Sign in to verify your identity, then accept the one-use invitation.</small></span></div>}
             {canUseBrowserSignIn && !serviceClient && <div className="collaboration-oidc"><span><Icon name="users" size={16} /><span><strong>Workspace account</strong><small>Authorization Code + PKCE · no password is shared with DraftMatter</small></span></span><button type="button" onClick={() => void signIn()} disabled={serviceState === 'loading' || url === 'https://' || url === 'wss://'}>{serviceState === 'loading' ? 'Opening sign-in…' : 'Sign in securely'}</button></div>}
 
             {serviceClient ? <div className="collaboration-workspace-browser">

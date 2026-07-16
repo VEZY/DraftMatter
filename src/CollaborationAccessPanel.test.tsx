@@ -6,11 +6,15 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CollaborationAccessPanel } from './CollaborationAccessPanel'
 import type { CollaborationServiceClient } from './collaboration/serviceClient'
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  Reflect.deleteProperty(navigator, 'clipboard')
+})
 
 describe('collaboration workspace administration', () => {
   it('loads access and recovery state and creates a one-time invitation', async () => {
     const client = {
+      urls: { apiUrl: 'https://collab.example.test', websocketUrl: 'wss://collab.example.test' },
       listMembers: vi.fn().mockResolvedValue([{ workspaceId: 'forest', userId: 'owner-1', role: 'owner', joinedAt: '2026-07-15T00:00:00.000Z' }]),
       listInvitations: vi.fn().mockResolvedValue([]),
       listAuditEvents: vi.fn().mockResolvedValue([{ id: 'audit-1', workspaceId: 'forest', actorId: 'owner-1', action: 'project.created', targetId: 'paper', at: '2026-07-15T00:00:00.000Z' }]),
@@ -53,7 +57,14 @@ describe('collaboration workspace administration', () => {
       await new Promise((resolve) => window.setTimeout(resolve, 0))
     })
     expect(client.createInvitation).toHaveBeenCalledWith('forest', { role: 'commenter', expiresInMs: 7 * 24 * 60 * 60_000 })
-    expect(container.querySelector<HTMLInputElement>('[aria-label="Invitation token"]')?.value).toBe('one-time-invitation-token')
+    const invitationLink = container.querySelector<HTMLInputElement>('[aria-label="Invitation link"]')?.value
+    expect(invitationLink).toContain('#dm-invite=one-time-invitation-token')
+    expect(invitationLink?.split('#')[0]).not.toContain('one-time-invitation-token')
+    const writeText = vi.fn().mockResolvedValue(undefined)
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Copy')!.click())
+    expect(writeText).toHaveBeenCalledWith(invitationLink)
+    expect(container.textContent).toContain('Copied')
 
     const recoveryName = container.querySelector<HTMLInputElement>('[aria-label="Recovery checkpoint name"]')!
     await act(async () => {

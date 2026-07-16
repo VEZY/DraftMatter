@@ -4282,6 +4282,10 @@ kbd {
 .collaboration-oidc small { color: var(--muted); font-size: 9px; }
 .collaboration-oidc button { min-height: 34px; padding: 0 13px; border: 1px solid var(--sage-dark); border-radius: 7px; background: var(--sage-dark); color: #fff; font-size: 10px; font-weight: 750; }
 .collaboration-oidc button:disabled { opacity: .55; }
+.collaboration-invitation-pending { display: flex; align-items: center; gap: 10px; padding: 10px 13px; border: 1px solid #e1e6e3; border-radius: 8px; background: #fbfcfb; color: #5f796e; }
+.collaboration-invitation-pending > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.collaboration-invitation-pending strong { color: var(--ink); font-size: 10px; }
+.collaboration-invitation-pending small { color: var(--muted); font-size: 9px; line-height: 1.45; }
 .collaboration-workspace-browser { display: flex; flex-direction: column; gap: 13px; padding: 14px; border: 1px solid #dde4e1; border-radius: 10px; background: #fafcfb; }
 .collaboration-account { display: flex; align-items: center; gap: 9px; padding-bottom: 11px; border-bottom: 1px solid #e5e9e7; color: #557467; }
 .collaboration-account > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
