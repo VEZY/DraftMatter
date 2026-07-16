@@ -12,7 +12,7 @@ import { applyDraftCitationTransaction, applyDraftCodeTransaction, applyDraftTex
 import { downloadBlob, downloadText, projectCurrentManuscriptSource, reviewedProjection } from './projections'
 import { sampleCitations } from './sampleCitations'
 import { initialDraft } from './sampleDraft'
-import { readRecoverySnapshots, saveRecoverySnapshot, type RecoverySnapshot } from './storage'
+import { LOCAL_DRAFT_KEY, readLocalDraft, readRecoverySnapshots, saveRecoverySnapshot, type RecoverySnapshot } from './storage'
 import type { CitationItem, CitationRecord, DocumentDiagnostic, DraftState, MarkupView, SuggestionStatus } from './types'
 import { queryZoteroLibrary, type ZoteroVersionStamp } from './zotero'
 import { citationItemsForDraft, normalizeCitationItems, serializeCitationCluster } from './citation'
@@ -53,7 +53,6 @@ import type { CollaborationCheckpoint, CollaborationClientStatus } from './share
 import { motionAwareScrollBehavior } from './accessibility'
 import { normalizeProjectRelativePath, projectFilePath } from './projectPaths'
 
-const STORAGE_KEY = 'draftmatter.prototype.v2'
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
 const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
@@ -213,7 +212,7 @@ function getInitialCitations(): CitationRecord[] {
 
 function getInitialDraft(): DraftState {
   try {
-    const saved = localStorage.getItem(STORAGE_KEY)
+    const saved = readLocalDraft(localStorage)
     if (!saved) return initialDraft
     const parsed = JSON.parse(saved)
     if (parsed.code === LEGACY_SAMPLE_CODE) parsed.code = initialDraft.code
@@ -585,7 +584,7 @@ function App() {
     const timeout = window.setTimeout(() => {
       const next = { ...draft, lastSavedAt: new Date().toISOString() }
       try {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(next))
+        localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify(next))
         localStorage.setItem(STRUCTURED_SOURCE_KEY, manuscriptSourceRef.current)
         localStorage.setItem(STRUCTURED_MODE_KEY, String(structuredMode))
         if (!desktopSession) setSaveState('saved')
@@ -1983,7 +1982,7 @@ function App() {
       return
     }
     if (file.size > 5 * 1024 * 1024) {
-      setToast('This prototype opens manuscripts up to 5 MB')
+      setToast('Manuscripts larger than 5 MB are not opened')
       return
     }
 
@@ -2618,7 +2617,7 @@ function App() {
       return
     }
     if (file.size > 10 * 1024 * 1024) {
-      setToast('This prototype indexes bibliography files up to 10 MB')
+      setToast('Bibliography files larger than 10 MB are not indexed')
       return
     }
     setProjectMenuOpen(false)
@@ -3188,7 +3187,7 @@ function App() {
                     <div className="chart-legend"><span><i className="legend-control" /> Well-watered</span><span><i className="legend-drought" /> Drought</span></div>
                   </div>)}
                   {executionProblem && <div className="execution-inline-problem" role="alert">{executionProblem}</div>}
-                  <figcaption><strong>Figure 1.</strong> Normalized canopy area across twelve weeks. Shaded uncertainty omitted in this prototype. <button><Icon name="link" size={13} /> fig-canopy-result</button></figcaption>
+                  <figcaption><strong>Figure 1.</strong> Normalized canopy area across twelve weeks. Uncertainty is not shown. <button><Icon name="link" size={13} /> fig-canopy-result</button></figcaption>
                 </figure>
                 {executionView
                   ? <RuntimeProvenance view={executionView} />

@@ -5,6 +5,8 @@ const RECOVERY_KEY = 'draftmatter.recovery.v1'
 const MAX_RECOVERIES = 8
 const MAX_RECOVERY_BYTES = 4 * 1024 * 1024
 const RECOVERY_SCHEMA_VERSION = 1
+export const LOCAL_DRAFT_KEY = 'draftmatter.draft.v2'
+export const LEGACY_LOCAL_DRAFT_KEY = 'draftmatter.prototype.v2'
 
 interface RecoveryJournal {
   schemaVersion: typeof RECOVERY_SCHEMA_VERSION
@@ -24,6 +26,11 @@ export interface RecoverySnapshot {
 export interface KeyValueStorage {
   getItem(key: string): string | null
   setItem(key: string, value: string): void
+}
+
+/** Read the current draft key first while preserving drafts saved by pre-release builds. */
+export function readLocalDraft(storage: KeyValueStorage) {
+  return storage.getItem(LOCAL_DRAFT_KEY) ?? storage.getItem(LEGACY_LOCAL_DRAFT_KEY)
 }
 
 function isRecoverySnapshot(value: unknown): value is RecoverySnapshot {

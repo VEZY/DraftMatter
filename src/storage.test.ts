@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { reviewedProjection } from './projections'
 import { initialDraft } from './sampleDraft'
-import { readRecoverySnapshots, saveRecoverySnapshot, type KeyValueStorage } from './storage'
+import { LEGACY_LOCAL_DRAFT_KEY, LOCAL_DRAFT_KEY, readLocalDraft, readRecoverySnapshots, saveRecoverySnapshot, type KeyValueStorage } from './storage'
 
 function memoryStorage(): KeyValueStorage {
   const values = new Map<string, string>()
@@ -18,7 +18,16 @@ function faultingStorage(existing: KeyValueStorage): KeyValueStorage {
   }
 }
 
-describe('recovery journal', () => {
+describe('local storage and recovery journal', () => {
+  it('reopens legacy local drafts until the release key is written', () => {
+    const storage = memoryStorage()
+    storage.setItem(LEGACY_LOCAL_DRAFT_KEY, '{"title":"Legacy draft"}')
+    expect(readLocalDraft(storage)).toBe('{"title":"Legacy draft"}')
+
+    storage.setItem(LOCAL_DRAFT_KEY, '{"title":"Current draft"}')
+    expect(readLocalDraft(storage)).toBe('{"title":"Current draft"}')
+  })
+
   it('deduplicates unchanged snapshots', () => {
     const storage = memoryStorage()
     const source = reviewedProjection(initialDraft)

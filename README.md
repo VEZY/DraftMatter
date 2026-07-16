@@ -1,6 +1,6 @@
 # DraftMatter
 
-DraftMatter is a local-first research writing prototype: a calm rendered manuscript with citations, executable-cell provenance, review suggestions, comments, and portable Markdown/Quarto source.
+DraftMatter is a local-first research writing application: a calm rendered manuscript with citations, executable-cell provenance, review suggestions, comments, and portable Markdown/Quarto source.
 
 ## Run locally
 
