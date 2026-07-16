@@ -56,7 +56,7 @@ import type { CollaborationCheckpoint, CollaborationClientStatus, CollaborativeE
 import { motionAwareScrollBehavior } from './accessibility'
 import { normalizeProjectRelativePath, projectFilePath } from './projectPaths'
 import { authorInitials, readUserSettings, renameLocalAuthor, saveUserSettings } from './userSettings'
-import { parsePublicationMetadata, updatePublicationAuthors } from './publicationMetadata'
+import { parsePublicationMetadata, updatePublicationAuthorDetails, type PublicationAuthor } from './publicationMetadata'
 import { copyPlainText } from './clipboard'
 import { countWords, measurePortableManuscript } from './manuscriptMetrics'
 import { ReviewTimestamp } from './ReviewTimestamp'
@@ -86,13 +86,17 @@ interface CommandPaletteEntry {
 interface PublicationAuthorDraft {
   id: string
   name: string
+  orcid: string
+  affiliations: string[]
   sourceIndex?: number
 }
 
-function publicationAuthorDraft(name = '', sourceIndex?: number): PublicationAuthorDraft {
+function publicationAuthorDraft(author: Partial<PublicationAuthor> = {}, sourceIndex?: number): PublicationAuthorDraft {
   return {
     id: globalThis.crypto?.randomUUID?.() ?? `publication-author-${Date.now()}-${Math.random().toString(16).slice(2)}`,
-    name,
+    name: author.name ?? '',
+    orcid: author.orcid ?? '',
+    affiliations: author.affiliations ?? [],
     sourceIndex,
   }
 }
@@ -653,7 +657,8 @@ function App() {
   const activeZoteroItemKey = activeCitationRecord?.sourceIdentity?.provider === 'zotero' ? activeCitationRecord.sourceIdentity.itemKey : undefined
   const activeCitationBadge = citationSourceBadge(activeCitationRecord)
   const currentAuthorInitials = authorInitials(activeReviewAuthor.name)
-  const publicationAuthors = useMemo(() => parsePublicationMetadata(manuscriptSource).authors, [manuscriptSource])
+  const publicationMetadata = useMemo(() => parsePublicationMetadata(manuscriptSource), [manuscriptSource])
+  const publicationAuthors = publicationMetadata.authors
 
   const openSettings = () => {
     setSettingsName(userSettings.author.name)
@@ -677,8 +682,8 @@ function App() {
 
   const openPublicationAuthors = () => {
     if (!canEditManuscript) return
-    setPublicationAuthorNames(publicationAuthors.length
-      ? publicationAuthors.map((name, sourceIndex) => publicationAuthorDraft(name, sourceIndex))
+    setPublicationAuthorNames(publicationMetadata.authorDetails.length
+      ? publicationMetadata.authorDetails.map((author, sourceIndex) => publicationAuthorDraft(author, sourceIndex))
       : [publicationAuthorDraft()])
     setPublicationAuthorsProblem('')
     setPublicationAuthorsOpen(true)
@@ -686,6 +691,16 @@ function App() {
 
   const updatePublicationAuthorName = (index: number, name: string) => {
     setPublicationAuthorNames((current) => current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, name } : candidate))
+  }
+
+  const updatePublicationAuthorOrcid = (index: number, orcid: string) => {
+    setPublicationAuthorNames((current) => current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, orcid } : candidate))
+  }
+
+  const updatePublicationAuthorAffiliations = (index: number, affiliations: string) => {
+    setPublicationAuthorNames((current) => current.map((candidate, candidateIndex) => candidateIndex === index
+      ? { ...candidate, affiliations: affiliations.split(/\r\n|\r|\n/).map((value) => value.trim()).filter(Boolean) }
+      : candidate))
   }
 
   const removePublicationAuthor = (index: number) => {
@@ -697,14 +712,14 @@ function App() {
     if (!canEditManuscript) return
     try {
       const populated = publicationAuthorNames.filter((author) => author.name.trim())
-      const names = populated.map((author) => author.name.trim())
-      const nextSource = updatePublicationAuthors(manuscriptSource, names, populated.map((author) => author.sourceIndex))
+      const details = populated.map((author) => ({ name: author.name.trim(), orcid: author.orcid.trim() || undefined, affiliations: author.affiliations }))
+      const nextSource = updatePublicationAuthorDetails(manuscriptSource, details, populated.map((author) => author.sourceIndex))
       if (!structuredMode) setStructuredMode(true)
       updateStructuredManuscript(nextSource)
       setPublicationAuthorsOpen(false)
       setPublicationAuthorsProblem('')
-      setToast(names.length
-        ? `Manuscript authors updated · ${names.length} portable name${names.length === 1 ? '' : 's'}`
+      setToast(details.length
+        ? `Manuscript authors updated · ${details.length} portable profile${details.length === 1 ? '' : 's'}`
         : 'Manuscript authors removed from publication metadata')
     } catch (error) {
       setPublicationAuthorsProblem(error instanceof Error ? error.message : String(error))
@@ -3465,7 +3480,7 @@ function App() {
                     </button>
                   ))}
                   <button className="subtle" onClick={() => void requestExecution({ kind: 'clean-all' })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && executableCells.some((cell) => !executionEnvironmentAvailable(cell)))}><Icon name="history" size={13} /> Clean run</button>
-                  <button className="subtle" onClick={() => void discoverExecutionEnvironments(true)} disabled={!desktopSession}><Icon name="more" size={14} /> Environments</button>
+                  <button className="subtle" onClick={() => void discoverExecutionEnvironments(true)} disabled={!desktopSession} aria-label="Execution environments and options"><Icon name="more" size={14} /> Environments</button>
                 </div>
                 {!desktopSession && <p className="execution-browser-note">Execution controls are disabled in the browser. Open this manuscript as a desktop project to run local code.</p>}
                 <div className="execution-cell-list">
@@ -3903,15 +3918,18 @@ function App() {
               <div className="publication-author-list">
                 {publicationAuthorNames.map((author, index) => (
                   <div className="publication-author-row" key={author.id}>
-                    <Avatar initials={authorInitials(author.name)} tone={index % 2 ? 'blue' : 'sage'} small label={author.name.trim() || `Author ${index + 1}`} />
-                    <label><span>Author {index + 1}</span><input autoFocus={index === 0} value={author.name} onChange={(event) => updatePublicationAuthorName(index, event.target.value)} maxLength={240} autoComplete="name" aria-label={`Author ${index + 1} name`} /></label>
-                    <button type="button" className="publication-author-remove" onClick={() => removePublicationAuthor(index)} aria-label={`Remove author ${index + 1}`}><Icon name="x" size={14} /></button>
+                    <div className="publication-author-card-head"><Avatar initials={authorInitials(author.name)} tone={index % 2 ? 'blue' : 'sage'} small label={author.name.trim() || `Author ${index + 1}`} /><strong>Author {index + 1}</strong><button type="button" className="publication-author-remove" onClick={() => removePublicationAuthor(index)} aria-label={`Remove author ${index + 1}`}><Icon name="x" size={14} /></button></div>
+                    <div className="publication-author-fields">
+                      <label><span>Full name</span><input autoFocus={index === 0} value={author.name} onChange={(event) => updatePublicationAuthorName(index, event.target.value)} maxLength={240} autoComplete="name" aria-label={`Author ${index + 1} name`} /></label>
+                      <label><span>ORCID</span><input value={author.orcid} onChange={(event) => updatePublicationAuthorOrcid(index, event.target.value)} placeholder="0000-0000-0000-0000" inputMode="text" autoComplete="off" spellCheck={false} aria-label={`Author ${index + 1} ORCID`} /></label>
+                      <label className="publication-author-affiliations"><span>Affiliations</span><textarea value={author.affiliations.join('\n')} onChange={(event) => updatePublicationAuthorAffiliations(index, event.target.value)} rows={Math.max(2, author.affiliations.length)} placeholder={'One affiliation per line'} aria-label={`Author ${index + 1} affiliations`} /></label>
+                    </div>
                   </div>
                 ))}
               </div>
               <button type="button" className="publication-author-add" onClick={() => setPublicationAuthorNames((current) => [...current, publicationAuthorDraft()])} disabled={publicationAuthorNames.length >= 100}><Icon name="plus" size={14} /> Add another author</button>
               {publicationAuthorsProblem && <div className="user-settings-problem" role="alert">{publicationAuthorsProblem}</div>}
-              <p>Affiliations, ORCID identifiers, bibliography settings, and other unsupported YAML stay unchanged. Complex structured names can still be edited through the source inspector.</p>
+              <p>Names, ORCID identifiers, and affiliations travel in portable YAML. Unrelated author metadata remains unchanged; complex structured names can still be edited through the source inspector.</p>
             </div>
             <div className="execution-dialog-actions"><button type="button" onClick={() => setPublicationAuthorsOpen(false)}>Cancel</button><button className="primary-button" type="submit">Save authors</button></div>
             </form>

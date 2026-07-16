@@ -1,7 +1,14 @@
 export interface PublicationMetadata {
   title?: string
   authors: string[]
+  authorDetails: PublicationAuthor[]
   body: string
+}
+
+export interface PublicationAuthor {
+  name: string
+  orcid?: string
+  affiliations: string[]
 }
 
 interface SourceLine {
@@ -118,6 +125,56 @@ function inlineAuthors(value: string) {
   return inlineAuthorValues(trimmed.slice(1, -1))
 }
 
+function normalizedOrcidValue(value: string) {
+  return value.trim().replace(/^https?:\/\/(?:www\.)?orcid\.org\//i, '').toUpperCase()
+}
+
+export function normalizePublicationOrcid(value: string) {
+  const normalized = normalizedOrcidValue(value)
+  if (!normalized) return undefined
+  if (!/^\d{4}-\d{4}-\d{4}-\d{3}[\dX]$/.test(normalized)) throw new Error('ORCID identifiers use the form 0000-0000-0000-0000.')
+  const digits = normalized.replaceAll('-', '')
+  let total = 0
+  for (const digit of digits.slice(0, 15)) total = (total + Number(digit)) * 2
+  const remainder = (12 - (total % 11)) % 11
+  const checksum = remainder === 10 ? 'X' : String(remainder)
+  if (digits.at(-1) !== checksum) throw new Error('The ORCID check digit is invalid.')
+  return normalized
+}
+
+function authorDetailsFromBlock(lines: SourceLine[], start: number, end: number, itemIndent: number, name: string): PublicationAuthor {
+  let orcid: string | undefined
+  const affiliations: string[] = []
+  const directIndent = itemIndent + 2
+  for (let index = start + 1; index < end; index += 1) {
+    const line = lines[index]
+    const field = line.content.match(new RegExp(`^\\s{${directIndent}}(orcid|affiliations?|affiliation)[ \\t]*:[ \\t]*(.*)$`, 'i'))
+    if (!field) continue
+    const key = field[1].toLowerCase()
+    const value = splitYamlComment(field[2]).content.trim()
+    if (key === 'orcid') {
+      const candidate = scalar(value)
+      orcid = candidate ? normalizedOrcidValue(candidate) : undefined
+      continue
+    }
+    if (value) {
+      const values = value.startsWith('[') && value.endsWith(']') ? inlineAuthorValues(value.slice(1, -1)) : [scalar(value)]
+      affiliations.push(...values.filter(Boolean))
+      continue
+    }
+    for (let nested = index + 1; nested < end; nested += 1) {
+      const item = lines[nested].content.match(new RegExp(`^\\s{${directIndent + 2},}-[ \\t]+(.+?)\\s*$`))
+      if (!item) {
+        if (lines[nested].content.trim() && lines[nested].content.search(/\S/) <= directIndent) break
+        continue
+      }
+      const affiliation = scalar(splitYamlComment(item[1]).content)
+      if (affiliation) affiliations.push(affiliation)
+    }
+  }
+  return { name, ...(orcid ? { orcid } : {}), affiliations }
+}
+
 function topLevelKey(line: SourceLine) {
   return /^[a-zA-Z_][\w-]*[ \t]*:/.test(line.content)
 }
@@ -155,21 +212,25 @@ function updateAuthorItemName(raw: string, name: string) {
 
 export function parsePublicationMetadata(source: string): PublicationMetadata {
   const frontmatter = publicationFrontmatter(source)
-  if (!frontmatter) return { body: source, authors: [] }
+  if (!frontmatter) return { body: source, authors: [], authorDetails: [] }
   const lines = frontmatter.lines.slice(1, frontmatter.closingIndex)
   const title = lines
     .find((line) => /^title[ \t]*:/.test(line.content))
     ?.content.replace(/^title[ \t]*:[ \t]*/, '')
   const authorIndex = lines.findIndex((line) => /^author[ \t]*:/.test(line.content))
   const authors: string[] = []
+  const authorDetails: PublicationAuthor[] = []
 
   if (authorIndex >= 0) {
     const inline = lines[authorIndex].content.replace(/^author[ \t]*:[ \t]*/, '')
     if (inline.trim()) {
       authors.push(...inlineAuthors(inline))
+      authorDetails.push(...authors.map((name) => ({ name, affiliations: [] })))
     } else {
       let authorIndent: number | undefined
-      for (const line of lines.slice(authorIndex + 1)) {
+      const authorLines = lines.slice(authorIndex + 1)
+      for (let index = 0; index < authorLines.length; index += 1) {
+        const line = authorLines[index]
         if (topLevelKey(line)) break
         const item = line.content.match(/^(\s*)-\s*(?:name[ \t]*:[ \t]*)?(.+?)\s*$/)
         if (!item) continue
@@ -177,7 +238,12 @@ export function parsePublicationMetadata(source: string): PublicationMetadata {
         if (authorIndent === undefined) authorIndent = indent
         if (indent === authorIndent) {
           const author = scalar(splitYamlComment(item[2]).content)
-          if (author) authors.push(author)
+          if (author) {
+            const next = authorLines.findIndex((candidate, candidateIndex) => candidateIndex > index && (topLevelKey(candidate) || new RegExp(`^\\s{${indent}}-[ \\t]+`).test(candidate.content)))
+            const end = next < 0 ? authorLines.length : next
+            authors.push(author)
+            authorDetails.push(authorDetailsFromBlock(authorLines, index, end, indent, author))
+          }
         }
       }
     }
@@ -187,7 +253,95 @@ export function parsePublicationMetadata(source: string): PublicationMetadata {
     body: source.slice(frontmatter.lines[frontmatter.closingIndex].end),
     title: title === undefined ? undefined : scalar(splitYamlComment(title).content),
     authors,
+    authorDetails,
   }
+}
+
+function normalizedPublicationAuthors(authors: PublicationAuthor[]) {
+  if (authors.length > 100) throw new Error('A manuscript can contain at most 100 authors.')
+  return authors.flatMap((author) => {
+    const name = author.name.trim()
+    if (!name) return []
+    if (/\r|\n/.test(name) || name.length > 240) throw new Error('Author names must stay on one line and cannot exceed 240 characters.')
+    const affiliations = author.affiliations.map((value) => value.trim()).filter(Boolean)
+    if (affiliations.some((value) => /\r|\n/.test(value) || value.length > 300)) throw new Error('Each affiliation must stay on one line and cannot exceed 300 characters.')
+    return [{ name, orcid: normalizePublicationOrcid(author.orcid ?? ''), affiliations }]
+  })
+}
+
+function canonicalAuthorBlock(authors: PublicationAuthor[], ending: string) {
+  const items = authors.map((author) => {
+    const orcid = author.orcid ? `    orcid: ${quotedYaml(author.orcid)}${ending}` : ''
+    const affiliations = author.affiliations.length
+      ? `    affiliations:${ending}${author.affiliations.map((value) => `      - ${quotedYaml(value)}${ending}`).join('')}`
+      : ''
+    return `  - name: ${quotedYaml(author.name)}${ending}${orcid}${affiliations}`
+  }).join('')
+  return `author:${ending}${items}`
+}
+
+function enrichAuthorItem(raw: string, author: PublicationAuthor, ending: string) {
+  const lines = sourceLines(raw)
+  const first = lines[0]
+  const match = first?.content.match(/^(\s*)-[ \t]+(?:(?:name)[ \t]*:[ \t]*)?(.*)$/)
+  if (!first || !match) throw new Error('This manuscript uses author metadata that must be edited in the source inspector.')
+  const itemIndent = match[1].length
+  const directIndent = itemIndent + 2
+  const value = splitYamlComment(match[2])
+  const firstLine = `${match[1]}- name: ${quotedYaml(author.name)}${value.suffix}${first.ending || ending}`
+  const kept: string[] = []
+  let skipping = false
+  for (const line of lines.slice(1)) {
+    const indentation = line.content.search(/\S/)
+    const directField = indentation === directIndent && /^\s*(?:orcid|affiliations?|affiliation)[ \t]*:/i.test(line.content)
+    if (directField) {
+      skipping = true
+      continue
+    }
+    if (skipping && line.content.trim() && indentation <= directIndent) skipping = false
+    if (!skipping) kept.push(line.raw)
+  }
+  const metadata = `${author.orcid ? `${' '.repeat(directIndent)}orcid: ${quotedYaml(author.orcid)}${ending}` : ''}${author.affiliations.length ? `${' '.repeat(directIndent)}affiliations:${ending}${author.affiliations.map((affiliation) => `${' '.repeat(directIndent + 2)}- ${quotedYaml(affiliation)}${ending}`).join('')}` : ''}`
+  return `${firstLine}${metadata}${kept.join('')}`
+}
+
+export function updatePublicationAuthorDetails(
+  source: string,
+  authors: PublicationAuthor[],
+  sourceIndexes?: Array<number | undefined>,
+) {
+  const normalized = normalizedPublicationAuthors(authors)
+  const previous = parsePublicationMetadata(source).authorDetails
+  const rich = [...normalized, ...previous].some((author) => Boolean(author.orcid || author.affiliations.length))
+  const renamed = updatePublicationAuthors(source, normalized.map((author) => author.name), sourceIndexes)
+  if (!rich || !normalized.length) return renamed
+  const frontmatter = publicationFrontmatter(renamed)
+  if (!frontmatter) return renamed
+  const lines = frontmatter.lines.slice(1, frontmatter.closingIndex)
+  const authorOffset = lines.findIndex((line) => /^author[ \t]*:/.test(line.content))
+  if (authorOffset < 0) return renamed
+  const authorLineIndex = authorOffset + 1
+  const authorLine = frontmatter.lines[authorLineIndex]
+  const fieldEndIndex = frontmatter.lines.findIndex((line, index) => index > authorLineIndex && index < frontmatter.closingIndex && topLevelKey(line))
+  const fieldEnd = frontmatter.lines[fieldEndIndex < 0 ? frontmatter.closingIndex : fieldEndIndex].start
+  const inline = splitYamlComment(authorLine.content.replace(/^author[ \t]*:[ \t]*/, '')).content.trim()
+  if (inline) {
+    const suffix = splitYamlComment(authorLine.content.replace(/^author[ \t]*:[ \t]*/, '')).suffix
+    const replacement = `${canonicalAuthorBlock(normalized, frontmatter.ending).replace(/^author:/, `author:${suffix}`)}`
+    return `${renamed.slice(0, authorLine.start)}${replacement}${renamed.slice(fieldEnd)}`
+  }
+  const fieldLines = frontmatter.lines.slice(authorLineIndex + 1, fieldEndIndex < 0 ? frontmatter.closingIndex : fieldEndIndex)
+  const candidates = fieldLines.flatMap((line) => {
+    const match = line.content.match(/^(\s*)-[ \t]+(?:(?:name)[ \t]*:[ \t]*)?(.*)$/)
+    return match ? [{ line, indent: match[1].length }] : []
+  })
+  const itemIndent = candidates.length ? Math.min(...candidates.map((candidate) => candidate.indent)) : 2
+  const starts = candidates.filter((candidate) => candidate.indent === itemIndent)
+  const preambleEnd = starts[0]?.line.start ?? fieldEnd
+  const preamble = renamed.slice(authorLine.end, preambleEnd)
+  const blocks = starts.map((item, index) => renamed.slice(item.line.start, starts[index + 1]?.line.start ?? fieldEnd))
+  const enriched = normalized.map((author, index) => enrichAuthorItem(blocks[index] ?? `  - name: ${quotedYaml(author.name)}${frontmatter.ending}`, author, frontmatter.ending)).join('')
+  return `${renamed.slice(0, authorLine.start)}${authorLine.raw}${preamble}${enriched}${renamed.slice(fieldEnd)}`
 }
 
 /**

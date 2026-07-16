@@ -3208,7 +3208,7 @@ button:disabled {
 }
 
 .execution-environment-dialog { width: min(620px, calc(100vw - 36px)); }
-.publication-authors-dialog { width: min(580px, calc(100vw - 36px)); }
+.publication-authors-dialog { width: min(680px, calc(100vw - 36px)); }
 
 .execution-dialog-head {
   align-items: flex-start;
@@ -3258,28 +3258,34 @@ button:disabled {
 .user-settings-problem { background: #fff6f3; border: 1px solid #ecd8cf; border-radius: 5px; color: #805344; font-size: 8px; padding: 8px 9px; }
 
 .publication-authors-body { display: grid; gap: 12px; padding: 16px 18px 18px; }
-.publication-author-list { display: grid; gap: 7px; max-height: min(360px, 48vh); overflow: auto; padding: 1px; }
+.publication-author-list { display: grid; gap: 9px; max-height: min(480px, 58vh); overflow: auto; padding: 1px; }
 .publication-author-row {
-  align-items: center;
   background: white;
   border: 1px solid var(--line);
   border-radius: 7px;
   display: grid;
-  gap: 9px;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  padding: 8px 9px;
+  gap: 10px;
+  padding: 10px 11px 11px;
 }
-.publication-author-row > label { color: #707b75; display: grid; font: 650 7px/1.25 Inter, ui-sans-serif, sans-serif; gap: 4px; }
-.publication-author-row input {
-  background: transparent;
-  border: 0;
+.publication-author-card-head { align-items: center; display: flex; gap: 8px; }
+.publication-author-card-head > strong { color: #53615a; flex: 1; font: 700 9px/1.3 Inter, ui-sans-serif, sans-serif; }
+.publication-author-fields { display: grid; gap: 9px; grid-template-columns: minmax(0, 1.35fr) minmax(0, 1fr); }
+.publication-author-fields label { color: #707b75; display: grid; font: 650 7.5px/1.25 Inter, ui-sans-serif, sans-serif; gap: 4px; }
+.publication-author-fields input,
+.publication-author-fields textarea {
+  background: #fbfcfb;
+  border: 1px solid #dce3df;
+  border-radius: 5px;
   color: #3f4c46;
   font: 10px/1.35 Inter, ui-sans-serif, sans-serif;
   min-width: 0;
-  outline: 0;
-  padding: 1px 0;
+  padding: 7px 8px;
   width: 100%;
 }
+.publication-author-fields textarea { min-height: 52px; resize: vertical; }
+.publication-author-fields input:focus,
+.publication-author-fields textarea:focus { border-color: #8ea497; outline: 3px solid rgba(76, 111, 94, 0.08); }
+.publication-author-affiliations { grid-column: 1 / -1; }
 .publication-author-row:focus-within { border-color: #aabbb1; box-shadow: 0 0 0 3px rgba(76, 111, 94, 0.08); }
 .publication-author-remove { align-items: center; background: transparent; border-radius: 4px; color: #9aa39f; display: flex; height: 26px; justify-content: center; width: 26px; }
 .publication-author-remove:hover { background: #f6f1ef; color: #906b5e; }

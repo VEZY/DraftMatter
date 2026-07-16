@@ -65,7 +65,7 @@ describe('accessibility baseline', () => {
 
   it('labels the manuscript author editor and closes it from the keyboard', async () => {
     await act(async () => root.render(<App />))
-    await act(async () => container.querySelector<HTMLButtonElement>('.authors button')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('.publication-authors-trigger')!.click())
 
     const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="publication-authors-title"]')
     expect(dialog).not.toBeNull()

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { parsePublicationMetadata, removeDuplicateLeadingTitle, updatePublicationAuthors } from './publicationMetadata'
+import { normalizePublicationOrcid, parsePublicationMetadata, removeDuplicateLeadingTitle, updatePublicationAuthorDetails, updatePublicationAuthors } from './publicationMetadata'
 
 describe('publication metadata', () => {
   it('reads scalar and mapped author lists without absorbing unrelated YAML arrays', () => {
@@ -19,7 +19,58 @@ bibliography:
 
     expect(parsed.title).toBe('Portable canopy study')
     expect(parsed.authors).toEqual(['Ada Researcher', 'Lin Reviewer'])
+    expect(parsed.authorDetails).toEqual([
+      { name: 'Ada Researcher', affiliations: ['Field Institute'] },
+      { name: 'Lin Reviewer', affiliations: [] },
+    ])
     expect(parsed.body).toContain('# Portable canopy study')
+  })
+
+  it('reads, validates, and updates portable ORCID and affiliation metadata', () => {
+    const source = `---
+author:
+  - name: "Ada Researcher"
+    orcid: https://orcid.org/0000-0001-2345-6789
+    affiliations:
+      - Field Institute
+      - "Open Methods Lab"
+    corresponding: true
+  - "Lin Reviewer"
+bibliography: references.bib
+---
+
+# Study
+`
+
+    expect(parsePublicationMetadata(source).authorDetails).toEqual([
+      { name: 'Ada Researcher', orcid: '0000-0001-2345-6789', affiliations: ['Field Institute', 'Open Methods Lab'] },
+      { name: 'Lin Reviewer', affiliations: [] },
+    ])
+    const updated = updatePublicationAuthorDetails(source, [
+      { name: 'Ada Field', orcid: '0000-0001-2345-6789', affiliations: ['Field Institute', 'Climate Centre'] },
+      { name: 'Lin Reviewer', orcid: '0000-0002-1825-0097', affiliations: ['Open Methods Lab'] },
+    ], [0, 1])
+
+    expect(parsePublicationMetadata(updated).authorDetails).toEqual([
+      { name: 'Ada Field', orcid: '0000-0001-2345-6789', affiliations: ['Field Institute', 'Climate Centre'] },
+      { name: 'Lin Reviewer', orcid: '0000-0002-1825-0097', affiliations: ['Open Methods Lab'] },
+    ])
+    expect(updated).toContain('    corresponding: true\n')
+    expect(updated).toContain('bibliography: references.bib\n')
+    expect(normalizePublicationOrcid('https://orcid.org/0000-0002-1825-0097')).toBe('0000-0002-1825-0097')
+    expect(() => normalizePublicationOrcid('0000-0002-1825-0098')).toThrow(/check digit/)
+  })
+
+  it('promotes inline authors to mapped YAML when rich metadata is added', () => {
+    const source = '---\nauthor: [Ada, Lin] # editorial order\nformat: html\n---\n'
+    const updated = updatePublicationAuthorDetails(source, [
+      { name: 'Ada', orcid: '0000-0001-2345-6789', affiliations: ['Field Institute'] },
+      { name: 'Lin', affiliations: [] },
+    ])
+
+    expect(updated).toContain('author: # editorial order\n  - name: "Ada"\n    orcid: "0000-0001-2345-6789"\n    affiliations:\n      - "Field Institute"\n')
+    expect(updated).toContain('  - name: "Lin"\n')
+    expect(updated).toContain('format: html\n')
   })
 
   it('supports inline authors and removes only a matching leading manuscript title', () => {
