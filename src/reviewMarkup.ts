@@ -19,6 +19,8 @@ interface ReviewRecordBase {
   raw: string
   attributes: Record<string, string>
   classes: string[]
+  createdAt?: string
+  updatedAt?: string
 }
 
 export interface ReviewAuthor extends ReviewRecordBase {
@@ -296,7 +298,16 @@ export function parseReviewMarkup(source: string): ReviewMarkupDocument {
       const raw = source.slice(start, end)
       const body = source.slice(lines[index].end, lines[endIndex].start)
       const literals = literalBlocks(body)
-      const base = { id, start, end, raw, attributes: parsedAttributes.attributes, classes: parsedAttributes.classes }
+      const base = {
+        id,
+        start,
+        end,
+        raw,
+        attributes: parsedAttributes.attributes,
+        classes: parsedAttributes.classes,
+        ...(parsedAttributes.attributes['data-created'] ? { createdAt: parsedAttributes.attributes['data-created'] } : {}),
+        ...(parsedAttributes.attributes['data-updated'] ? { updatedAt: parsedAttributes.attributes['data-updated'] } : {}),
+      }
 
       if (parsedAttributes.classes.includes('dm-author')) {
         authors.push({ ...base, kind: 'author', name: parsedAttributes.attributes['data-name'] ?? id })

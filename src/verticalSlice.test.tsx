@@ -60,8 +60,8 @@ describe('rendered Phase 0 vertical slice', () => {
     expect(renderedSlice).toMatchInlineSnapshot(`
       {
         "alternatives": [
-          "AMAlice MartinPortable suggestionOpendid not substantially alter leaf expansionreduced leaf area by 18%",
-          "MCMarcus ChenPortable suggestionOpendid not substantially alter leaf expansionlowered leaf expansion during the treatment period",
+          "AMAlice Martin15 Jul 2026 · 09:00 UTCOpendid not substantially alter leaf expansionreduced leaf area by 18%",
+          "MCMarcus Chen15 Jul 2026 · 09:04 UTCOpendid not substantially alter leaf expansionlowered leaf expansion during the treatment period",
         ],
         "citation": "(Vezy et al., 2024)",
         "codeCell": "PyCanopy response over timeCurrent",

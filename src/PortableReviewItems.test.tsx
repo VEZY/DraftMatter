@@ -121,6 +121,24 @@ describe('portable review panel items', () => {
     expect(parseReviewMarkup(identicalSource).changes).toHaveLength(2)
   })
 
+  it('renders source-backed creation times as semantic UTC values', async () => {
+    const manuscript = '## Results\n\nA portable timestamp belongs here.\n'
+    const created = createReviewThread(manuscript, {
+      start: manuscript.indexOf('portable timestamp'),
+      end: manuscript.indexOf('portable timestamp') + 'portable timestamp'.length,
+      author: { id: 'dm-author', name: 'Alice Martin' },
+      message: 'Keep the recorded time portable.',
+      timestamp: '2026-07-15T12:04:00-04:00',
+    }).document.source
+
+    await act(async () => root.render(<PortableReviewItems source={created} onApply={() => undefined} />))
+
+    const timestamp = container.querySelector('time')
+    expect(timestamp?.getAttribute('datetime')).toBe('2026-07-15T16:04:00.000Z')
+    expect(text(timestamp)).toBe('15 Jul 2026 · 16:04 UTC')
+    expect(text(timestamp?.parentElement ?? null)).toContain('Open')
+  })
+
   it('surfaces ambiguous locations and applies the chosen placement without changing the thread payload', async () => {
     const manuscript = '## Results\n\nA target phrase here. A target phrase here.\n'
     const sourceWithReview = createReviewThread(manuscript, {

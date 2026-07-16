@@ -57,6 +57,7 @@ import { parsePublicationMetadata, updatePublicationAuthors } from './publicatio
 import { insertPortableSection } from './manuscriptOutline'
 import { copyPlainText } from './clipboard'
 import { countWords, measurePortableManuscript } from './manuscriptMetrics'
+import { ReviewTimestamp } from './ReviewTimestamp'
 
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
 const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
@@ -1065,9 +1066,10 @@ function App() {
     return projectPortableReviewSource(manuscriptSource, { view: markupView })
   }, [manuscriptSource, markupView, structuredMode])
   const structuredEditorSource = structuredReviewProjection?.ok ? structuredReviewProjection.source : manuscriptSource
-  const demoReviewAvailable = reviewDocument.changes.some((change) => change.id === 'dm-c01')
-    && reviewDocument.changes.some((change) => change.id === 'dm-c02')
-    && reviewDocument.threads.some((thread) => thread.id === 'dm-comment-01')
+  const demoAliceChange = reviewDocument.changes.find((change) => change.id === 'dm-c01')
+  const demoMarcusChange = reviewDocument.changes.find((change) => change.id === 'dm-c02')
+  const demoCommentThread = reviewDocument.threads.find((thread) => thread.id === 'dm-comment-01')
+  const demoReviewAvailable = Boolean(demoAliceChange && demoMarcusChange && demoCommentThread)
   const demoCommentAvailable = demoReviewAvailable && !draft.commentDeleted
   const openReviewCount = reviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
   const totalOpenReviewCount = allReviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
@@ -3535,7 +3537,7 @@ function App() {
                 {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a01') &&
                 <button id="review-item-dm-c01" className={`proposal-option ${reviewProposal === 'alice' && activeReviewId !== 'dm-comment-01' ? 'selected' : ''}`} onClick={() => { setActiveReviewId('dm-c01'); updateDraft({ activeProposal: 'alice' }) }}>
                   <Avatar initials="AM" tone="blue" small />
-                  <span className="proposal-author"><strong>Alice Martin</strong><small>Portable suggestion</small></span>
+                  <span className="proposal-author"><strong>Alice Martin</strong><small><ReviewTimestamp value={demoAliceChange?.createdAt} fallback="Portable suggestion" /></small></span>
                   <StatusPill status={draft.aliceStatus} />
                   <span className="proposal-copy"><del>did not substantially alter leaf expansion</del><ins>reduced leaf area by 18%</ins></span>
                 </button>}
@@ -3543,7 +3545,7 @@ function App() {
                 {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
                 <button id="review-item-dm-c02" className={`proposal-option ${reviewProposal === 'marcus' && activeReviewId !== 'dm-comment-01' ? 'selected' : ''}`} onClick={() => { setActiveReviewId('dm-c02'); updateDraft({ activeProposal: 'marcus' }) }}>
                   <Avatar initials="MC" tone="clay" small />
-                  <span className="proposal-author"><strong>Marcus Chen</strong><small>Portable suggestion</small></span>
+                  <span className="proposal-author"><strong>Marcus Chen</strong><small><ReviewTimestamp value={demoMarcusChange?.createdAt} fallback="Portable suggestion" /></small></span>
                   <StatusPill status={draft.marcusStatus} />
                   <span className="proposal-copy"><del>did not substantially alter leaf expansion</del><ins>lowered leaf expansion during the treatment period</ins></span>
                 </button>}
@@ -3561,7 +3563,7 @@ function App() {
 
               {demoCommentAvailable && (reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
               <div id="review-item-dm-comment-01" className={`comment-card ${activeReviewId === 'dm-comment-01' ? 'active' : ''} ${draft.commentResolved ? 'resolved' : ''}`} onClick={() => setActiveReviewId('dm-comment-01')}>
-                <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small>Portable comment</small></span></div>
+                <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small><ReviewTimestamp value={demoCommentThread?.createdAt} fallback="Portable comment" /></small></span></div>
                 <div className="comment-quote">“increased modestly”</div>
                 <p>Can we quantify this increase in the main text? The estimate is already in the supplement.</p>
                 {draft.commentReplies.map((message, index) => <div className="reply-message" key={`${message}-${index}`}><Avatar initials={currentAuthorInitials} tone="sage" small label={userSettings.author.name} /><p><strong>You</strong>{message}</p></div>)}

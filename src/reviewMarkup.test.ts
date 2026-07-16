@@ -23,8 +23,8 @@ statistically significant
 Clarify the statistical claim.
 ~~~
 ::::
-:::: {#dm-thread .dm-thread data-anchor="dm-comment" data-author="dm-author" data-status="open"}
-~~~{.dm-message}
+:::: {#dm-thread .dm-thread data-anchor="dm-comment" data-author="dm-author" data-status="open" data-created="2026-07-15T08:10:00Z" data-updated="2026-07-15T08:20:00Z"}
+~~~{.dm-message data-at="2026-07-15T08:10:00Z"}
 Can we quantify this?
 ~~~
 ~~~{.dm-message data-author="dm-author"}
@@ -81,13 +81,20 @@ describe('DraftMatter Review Markup', () => {
       id: 'dm-change',
       anchorId: 'dm-range',
       authorId: 'dm-author',
+      createdAt: '2026-07-15T08:00:00Z',
       proposal: 'statistically significant',
       rationale: 'Clarify the statistical claim.',
     })])
     expect(parsed.threads).toEqual([expect.objectContaining({
       id: 'dm-thread',
       anchorId: 'dm-comment',
+      createdAt: '2026-07-15T08:10:00Z',
+      updatedAt: '2026-07-15T08:20:00Z',
       messages: ['Can we quantify this?', 'Yes, I will add the interval.'],
+      messageRecords: [
+        expect.objectContaining({ content: 'Can we quantify this?', timestamp: '2026-07-15T08:10:00Z' }),
+        expect.objectContaining({ content: 'Yes, I will add the interval.' }),
+      ],
     })])
     expect(parsed.decisions).toEqual([expect.objectContaining({
       id: 'dm-decision',

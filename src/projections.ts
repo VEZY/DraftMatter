@@ -143,7 +143,7 @@ ${state.resultsLead} The drought treatment []{#dm-m01 .dm-anchor data-anchor="dm
 ${state.conclusion}${preservedAfter(state, 'conclusion')}
 
 ${REVIEW_START}
-:::: {#dm-c01 .dm-change data-anchor="dm-r01" data-kind="replace" data-author="dm-a01" data-status="${state.aliceStatus}"}
+:::: {#dm-c01 .dm-change data-anchor="dm-r01" data-kind="replace" data-author="dm-a01" data-status="${state.aliceStatus}" data-created="2026-07-15T09:00:00.000Z"}
 ~~~{.dm-proposal}
 reduced leaf area by 18%
 ~~~
@@ -151,7 +151,7 @@ reduced leaf area by 18%
 State the measured effect directly.
 ~~~
 ::::
-:::: {#dm-c02 .dm-change data-anchor="dm-r01" data-kind="replace" data-author="dm-a02" data-status="${state.marcusStatus}"}
+:::: {#dm-c02 .dm-change data-anchor="dm-r01" data-kind="replace" data-author="dm-a02" data-status="${state.marcusStatus}" data-created="2026-07-15T09:04:00.000Z"}
 ~~~{.dm-proposal}
 lowered leaf expansion during the treatment period
 ~~~
@@ -159,15 +159,15 @@ lowered leaf expansion during the treatment period
 Keep the interpretation conservative.
 ~~~
 ::::
-:::: {#dm-comment-01 .dm-thread data-anchor="dm-comment-01" data-author="dm-a02" data-status="${state.commentDeleted ? 'deleted' : state.commentResolved ? 'resolved' : 'open'}"}
-~~~{.dm-message}
+:::: {#dm-comment-01 .dm-thread data-anchor="dm-comment-01" data-author="dm-a02" data-status="${state.commentDeleted ? 'deleted' : state.commentResolved ? 'resolved' : 'open'}" data-created="2026-07-15T09:08:00.000Z"}
+~~~{.dm-message data-author="dm-a02" data-at="2026-07-15T09:08:00.000Z" data-index="0"}
 Can we quantify this increase in the main text?
 ~~~
 ${replyBlocks}
 ::::
-:::: {#dm-a01 .dm-author data-name="Alice Martin"}
+:::: {#dm-a01 .dm-author data-name="Alice Martin" data-created="2026-07-15T09:00:00.000Z"}
 ::::
-:::: {#dm-a02 .dm-author data-name="Marcus Chen"}
+:::: {#dm-a02 .dm-author data-name="Marcus Chen" data-created="2026-07-15T09:04:00.000Z"}
 ::::
 ${REVIEW_END}
 `

@@ -93,7 +93,7 @@ describe('portable draft source envelope', () => {
     const parsed = parsePortableDocument(removed, initialDraft)
     const saved = reviewedProjection({ ...parsed.draft, title: 'Revised after review cleanup' })
 
-    expect(saved).toContain('{#dm-comment-01 .dm-thread data-anchor="dm-comment-01" data-author="dm-a02" data-status="deleted"}')
+    expect(saved).toMatch(/\{#dm-comment-01 \.dm-thread data-anchor="dm-comment-01" data-author="dm-a02" data-status="deleted"(?: [^}]*)?\}/)
     expect(parsePortableDocument(saved, initialDraft).draft.commentDeleted).toBe(true)
   })
 })

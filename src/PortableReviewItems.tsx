@@ -13,6 +13,7 @@ import {
 import { buildReviewQueue, navigateReviewQueue, type ReviewQueueItem } from './reviewQueue'
 import { placePortableReviewAtQuote, placePortableReviewCandidate, reanchorPortableReviews } from './reviewReanchor'
 import { DEFAULT_USER_SETTINGS, type LocalAuthorIdentity } from './userSettings'
+import { ReviewTimestamp } from './ReviewTimestamp'
 
 function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'A'
@@ -239,7 +240,7 @@ export function PortableReviewItems({
               <div className="conflict-heading"><Icon name="branch" size={16} /><span>{item.conflictId ? 'Overlapping suggestion' : item.kind === 'unplaced-change' ? 'Unplaced suggestion' : 'Suggestion'}</span><small>{item.anchorId}</small></div>
               <button className={`proposal-option ${active ? 'selected' : ''}`} onClick={() => setActiveId(item.id)}>
                 <span className="avatar avatar-blue avatar-small">{initials(item.authorName)}</span>
-                <span className="proposal-author"><strong>{item.authorName}</strong><small>{item.kind === 'unplaced-change' ? 'Location needs attention' : item.excerpt}</small></span>
+                <span className="proposal-author"><strong>{item.authorName}</strong><small><ReviewTimestamp value={change.createdAt} fallback={item.kind === 'unplaced-change' ? 'Location needs attention' : item.excerpt} detail={item.kind === 'unplaced-change' ? 'Location needs attention' : item.excerpt} /></small></span>
                 <span className={`status-pill status-${item.status}`}>{statusLabel(item.status)}</span>
                 <span className="proposal-copy"><del>{change.anchorContext?.quote || item.excerpt}</del>{change.proposal !== undefined && <ins>{change.proposal}</ins>}</span>
               </button>
@@ -276,7 +277,7 @@ export function PortableReviewItems({
         const recovery = recoveryByAnchor.get(item.anchorId)
         return (
           <div className={`comment-card portable-review-card ${active ? 'active' : ''} ${thread.status === 'resolved' ? 'resolved' : ''}`} id={`review-item-${item.id}`} key={item.id} onClick={() => setActiveId(item.id)}>
-            <div className="comment-author"><span className="avatar avatar-clay avatar-small">{initials(item.authorName)}</span><span><strong>{item.authorName}</strong><small>{item.kind === 'unplaced-thread' ? 'Location needs attention' : statusLabel(thread.status)}</small></span></div>
+            <div className="comment-author"><span className="avatar avatar-clay avatar-small">{initials(item.authorName)}</span><span><strong>{item.authorName}</strong><small><ReviewTimestamp value={thread.createdAt} fallback={item.kind === 'unplaced-thread' ? 'Location needs attention' : statusLabel(thread.status)} detail={item.kind === 'unplaced-thread' ? 'Location needs attention' : statusLabel(thread.status)} /></small></span></div>
             <div className="comment-quote">“{thread.anchorContext?.quote || item.excerpt}”</div>
             {thread.messageRecords.map((message, index) => index === 0
               ? <p key={`${item.id}-${index}`}>{message.content}</p>
