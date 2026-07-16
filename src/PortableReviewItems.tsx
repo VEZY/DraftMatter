@@ -12,8 +12,7 @@ import {
 } from './reviewOperations'
 import { buildReviewQueue, navigateReviewQueue, type ReviewQueueItem } from './reviewQueue'
 import { placePortableReviewAtQuote, placePortableReviewCandidate, reanchorPortableReviews } from './reviewReanchor'
-
-const localAuthor = { id: 'dm-local-author', name: 'Remi Vezy' }
+import { DEFAULT_USER_SETTINGS, type LocalAuthorIdentity } from './userSettings'
 
 function initials(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]?.toUpperCase()).join('') || 'A'
@@ -41,6 +40,7 @@ export function PortableReviewItems({
   authorId,
   activeId: controlledActiveId,
   navigationItems,
+  localAuthor = DEFAULT_USER_SETTINGS.author,
   onActiveIdChange,
   selectedTarget,
   onApply,
@@ -50,6 +50,7 @@ export function PortableReviewItems({
   authorId?: string
   activeId?: string
   navigationItems?: ReviewQueueItem[]
+  localAuthor?: LocalAuthorIdentity
   onActiveIdChange?: (id: string | undefined) => void
   selectedTarget?: { quote: string; occurrence: number } | null
   onApply: (source: string, message: string) => void

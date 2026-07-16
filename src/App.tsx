@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { convertFileSrc, isTauri } from '@tauri-apps/api/core'
 import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, searchCitations } from './bibliography'
 import { desktopHost, normaliseHostFailure, resolveMainDocument, type ProjectExecutionPreferences, type ProjectSnapshot } from './desktopHost'
@@ -52,6 +52,7 @@ import { CollaborationDialog } from './CollaborationDialog'
 import type { CollaborationCheckpoint, CollaborationClientStatus } from './sharedEditor'
 import { motionAwareScrollBehavior } from './accessibility'
 import { normalizeProjectRelativePath, projectFilePath } from './projectPaths'
+import { authorInitials, readUserSettings, renameLocalAuthor, saveUserSettings } from './userSettings'
 
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
 const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
@@ -250,8 +251,8 @@ function readableError(error: unknown) {
   return String(error)
 }
 
-function Avatar({ initials, tone = 'sage', small = false }: { initials: string; tone?: 'sage' | 'blue' | 'clay'; small?: boolean }) {
-  return <span className={`avatar avatar-${tone} ${small ? 'avatar-small' : ''}`}>{initials}</span>
+function Avatar({ initials, tone = 'sage', small = false, label }: { initials: string; tone?: 'sage' | 'blue' | 'clay'; small?: boolean; label?: string }) {
+  return <span className={`avatar avatar-${tone} ${small ? 'avatar-small' : ''}`} aria-label={label} title={label}>{initials}</span>
 }
 
 function CitationChip({ onClick, label }: { onClick: () => void; label: string }) {
@@ -302,6 +303,7 @@ function CitationFormattingControls({
 function App() {
   const initialProjectMeta = useMemo(getInitialProjectMeta, [])
   const initialDraftState = useMemo(getInitialDraftState, [])
+  const [userSettings, setUserSettings] = useState(() => readUserSettings(localStorage))
   const {
     draft,
     update: updateDraftHistory,
@@ -343,6 +345,9 @@ function App() {
   const [saveProblem, setSaveProblem] = useState('')
   const [toast, setToast] = useState('')
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsName, setSettingsName] = useState(userSettings.author.name)
+  const [settingsProblem, setSettingsProblem] = useState('')
   const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [collaborationOpen, setCollaborationOpen] = useState(false)
   const [collaborationStatus, setCollaborationStatus] = useState<CollaborationClientStatus>('disconnected')
@@ -518,6 +523,28 @@ function App() {
   const activeCitationItem = detailCitationItems.find((item) => item.citekey === citationEditKey) ?? detailCitationItems[0]
   const activeCitationRecord = citations.find((record) => record.citekey === activeCitationItem?.citekey)
   const activeCitationBadge = citationSourceBadge(activeCitationRecord)
+  const currentAuthorInitials = authorInitials(userSettings.author.name)
+
+  const openSettings = () => {
+    setSettingsName(userSettings.author.name)
+    setSettingsProblem('')
+    setSettingsOpen(true)
+  }
+
+  const commitSettings = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    try {
+      const next = renameLocalAuthor(userSettings, settingsName)
+      saveUserSettings(localStorage, next)
+      setUserSettings(next)
+      setSettingsOpen(false)
+      setSettingsProblem('')
+      setToast(next === userSettings ? 'Review identity unchanged' : 'Review identity updated · earlier attribution preserved')
+    } catch (error) {
+      setSettingsProblem(error instanceof Error ? error.message : String(error))
+    }
+  }
+
   const replaceDesktopSession = (next: DesktopSession | null) => {
     desktopSessionRef.current = next
     setDesktopSession(next)
@@ -2860,7 +2887,7 @@ function App() {
               </div>
             )}
           </div>
-          <Avatar initials="RV" />
+          <Avatar initials={currentAuthorInitials} label={userSettings.author.name} />
           <button className="icon-button mobile-panel-button" aria-label="Toggle review panel" onClick={() => setRightPanelOpen((open) => !open)}>
             <Icon name="panelRight" />
           </button>
@@ -2892,7 +2919,7 @@ function App() {
             <button className={activeNav === 'sources' ? 'active' : ''} onClick={() => { setActiveNav('sources'); openCitationPicker() }} data-label="Sources" aria-label="Sources" aria-current={activeNav === 'sources' ? 'page' : undefined}><Icon name="book" /></button>
             <button className={activeNav === 'history' ? 'active' : ''} onClick={() => setActiveNav('history')} data-label="History" aria-label="History" aria-current={activeNav === 'history' ? 'page' : undefined}><Icon name="history" /></button>
           </div>
-          <button data-label="Settings" aria-label="Settings"><Icon name="settings" /></button>
+          <button data-label="Settings" aria-label="Settings" onClick={openSettings} aria-haspopup="dialog" aria-expanded={settingsOpen}><Icon name="settings" /></button>
         </nav>
 
         {leftPanelOpen && (activeNav === 'history' ? (
@@ -3032,7 +3059,7 @@ function App() {
               onReviewAnchorSelect={() => showReviewPanel()}
               onCommandRequest={() => setCommandOpen(true)}
               suggestionMode={suggestionMode && markupView !== 'original' && markupView !== 'final'}
-              suggestionAuthor={{ id: 'dm-local-author', name: 'Remi Vezy' }}
+              suggestionAuthor={userSettings.author}
               onSuggestionCapture={(message) => setToast(message)}
               citationLabels={structuredCitationLabels}
               codeCellStatuses={Object.fromEntries(executionCellStates.map((state) => [state.cellId, state.status] as const))}
@@ -3333,7 +3360,7 @@ function App() {
                 <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small>5 minutes ago</small></span><button className="icon-button subtle" aria-label="Comment options"><Icon name="more" /></button></div>
                 <div className="comment-quote">“increased modestly”</div>
                 <p>Can we quantify this increase in the main text? The estimate is already in the supplement.</p>
-                {draft.commentReplies.map((message, index) => <div className="reply-message" key={`${message}-${index}`}><Avatar initials="RV" tone="sage" small /><p><strong>You</strong>{message}</p></div>)}
+                {draft.commentReplies.map((message, index) => <div className="reply-message" key={`${message}-${index}`}><Avatar initials={currentAuthorInitials} tone="sage" small label={userSettings.author.name} /><p><strong>You</strong>{message}</p></div>)}
                 {!draft.commentResolved && (
                   <div className="reply-box"><input value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addReply() }} placeholder="Reply…" aria-label="Reply to comment" /><button onClick={addReply} disabled={!reply.trim()} aria-label="Send reply"><Icon name="arrowRight" size={15} /></button></div>
                 )}
@@ -3347,6 +3374,7 @@ function App() {
                 authorId={reviewAuthorFilter === 'all' ? undefined : reviewAuthorFilter}
                 activeId={activeReviewId}
                 navigationItems={reviewQueue}
+                localAuthor={userSettings.author}
                 onActiveIdChange={setActiveReviewId}
                 selectedTarget={structuredMode ? structuredReviewSelection : null}
                 onApply={applyPortableReviewSource}
@@ -3355,6 +3383,25 @@ function App() {
           </aside>
         )}
       </div>
+
+      {settingsOpen && (
+        <div className="modal-backdrop execution-dialog-backdrop" onMouseDown={() => setSettingsOpen(false)}>
+          <form className="user-settings-dialog" onMouseDown={(event) => event.stopPropagation()} onSubmit={commitSettings} role="dialog" aria-modal="true" aria-labelledby="user-settings-title">
+            <div className="execution-dialog-head">
+              <span className="execution-shield"><Icon name="users" size={19} /></span>
+              <div><span className="eyebrow">Local profile</span><h2 id="user-settings-title">Review identity</h2><p>This name appears on new comments, suggestions, decisions, and local collaboration presence.</p></div>
+              <button className="icon-button" type="button" onClick={() => setSettingsOpen(false)} aria-label="Close settings"><Icon name="close" /></button>
+            </div>
+            <div className="user-settings-body">
+              <label><span>Display name</span><input autoFocus value={settingsName} onChange={(event) => setSettingsName(event.target.value)} maxLength={240} autoComplete="name" /></label>
+              <div className="user-settings-identity"><Avatar initials={authorInitials(settingsName)} label={settingsName.trim() || 'Review author'} /><span><strong>Current portable author ID</strong><code>{userSettings.author.id}</code></span></div>
+              <p>Changing the name creates a new portable author identity. Existing comments and decisions keep their original attribution.</p>
+              {settingsProblem && <div className="user-settings-problem" role="alert">{settingsProblem}</div>}
+            </div>
+            <div className="execution-dialog-actions"><button type="button" onClick={() => setSettingsOpen(false)}>Cancel</button><button className="primary-button" type="submit" disabled={!settingsName.trim()}>Save identity</button></div>
+          </form>
+        </div>
+      )}
 
       {executionTrustOpen && (
         <div className="modal-backdrop execution-dialog-backdrop" onMouseDown={() => { if (!executionTrustBusy) setExecutionTrustOpen(false) }}>
@@ -3460,6 +3507,7 @@ function App() {
         checkpointMode={desktopSession ? 'working-tree' : 'download'}
         checkpointTarget={desktopSession?.path ?? filename}
         canUseBrowserSignIn={!desktopHost.available}
+        localAuthor={userSettings.author}
       />
 
       {pendingProject && (

@@ -24,6 +24,26 @@ afterEach(() => {
 })
 
 describe('collaboration dialog', () => {
+  it('seeds unauthenticated collaboration presence from the persisted local author', async () => {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<CollaborationDialog
+      open
+      source="# Draft"
+      localAuthor={{ id: 'dm-author-12345678', name: 'Zoé Dupont' }}
+      onClose={vi.fn()}
+      onRemoteSource={vi.fn()}
+      onStatus={vi.fn()}
+      onCheckpoint={vi.fn().mockResolvedValue(undefined)}
+      checkpointMode="download"
+      checkpointTarget="paper.qmd"
+    />))
+
+    expect(input(container, 'Your name').value).toBe('Zoé Dupont')
+    expect(input(container, 'Author ID').value).toBe('dm-author-12345678')
+    await act(async () => root.unmount())
+  })
+
   it('connects without persisting its token and keeps the session alive when closed', async () => {
     const publishPortableSource = vi.fn().mockReturnValue('# Draft\n\nShared revision')
     const destroy = vi.fn()

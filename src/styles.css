@@ -2728,7 +2728,8 @@ button:disabled {
 }
 
 .execution-trust-dialog,
-.execution-environment-dialog {
+.execution-environment-dialog,
+.user-settings-dialog {
   background: #fbfcfb;
   border: 1px solid rgba(52, 65, 59, 0.14);
   border-radius: 11px;
@@ -2766,6 +2767,25 @@ button:disabled {
 .execution-trust-body { padding: 18px; }
 .execution-trust-body > p { color: #505d57; font: 10px/1.6 Inter, ui-sans-serif, sans-serif; margin: 0; }
 .execution-trust-body .execution-trust-note { color: #838d88; font-size: 9px; margin-top: 13px; }
+
+.user-settings-body { display: grid; gap: 14px; padding: 18px; }
+.user-settings-body > label { color: #66716c; display: grid; font-size: 9px; gap: 6px; }
+.user-settings-body > label span { font-weight: 650; }
+.user-settings-body > label input {
+  background: white;
+  border: 1px solid var(--line-strong);
+  border-radius: 5px;
+  color: #3f4c46;
+  font: 11px/1.4 Inter, ui-sans-serif, sans-serif;
+  min-height: 36px;
+  padding: 0 10px;
+}
+.user-settings-identity { align-items: center; background: #f5f8f6; border: 1px solid var(--line); border-radius: 7px; display: flex; gap: 10px; padding: 10px; }
+.user-settings-identity > span { display: grid; gap: 3px; min-width: 0; }
+.user-settings-identity strong { color: #5b6862; font-size: 8px; }
+.user-settings-identity code { color: #78847e; font: 8px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; overflow: hidden; text-overflow: ellipsis; }
+.user-settings-body > p { color: #7c8781; font: 8px/1.55 Inter, ui-sans-serif, sans-serif; margin: 0; }
+.user-settings-problem { background: #fff6f3; border: 1px solid #ecd8cf; border-radius: 5px; color: #805344; font-size: 8px; padding: 8px 9px; }
 
 .execution-project-root {
   align-items: center;

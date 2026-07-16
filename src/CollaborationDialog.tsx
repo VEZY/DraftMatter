@@ -15,6 +15,7 @@ import {
   type CollaborationCheckpoint,
   type CollaborationClientStatus,
 } from './sharedEditor'
+import { DEFAULT_USER_SETTINGS, type LocalAuthorIdentity } from './userSettings'
 
 export interface CollaborationDialogProps {
   open: boolean
@@ -30,6 +31,7 @@ export interface CollaborationDialogProps {
   canUseBrowserSignIn?: boolean
   onRequestOpen?: () => void
   navigateToIdentity?: (url: string) => void
+  localAuthor?: LocalAuthorIdentity
 }
 
 function portableId(value: string, fallback: string) {
@@ -51,13 +53,14 @@ export function CollaborationDialog({
   canUseBrowserSignIn = true,
   onRequestOpen,
   navigateToIdentity,
+  localAuthor = DEFAULT_USER_SETTINGS.author,
 }: CollaborationDialogProps) {
   const [url, setUrl] = useState('https://')
   const [workspaceId, setWorkspaceId] = useState('')
   const [projectId, setProjectId] = useState('')
   const [token, setToken] = useState('')
-  const [userId, setUserId] = useState('dm-a01')
-  const [name, setName] = useState('Remi Vezy')
+  const [userId, setUserId] = useState(localAuthor.id)
+  const [name, setName] = useState(localAuthor.name)
   const [status, setStatus] = useState<CollaborationClientStatus>('disconnected')
   const [detail, setDetail] = useState('')
   const [collaborators, setCollaborators] = useState<ActiveCollaborator[]>([])
@@ -78,6 +81,12 @@ export function CollaborationDialog({
   const accessTokenRef = useRef<CollaborationAccessToken | null>(null)
   const oidcCallbackStartedRef = useRef(false)
   const checkpointedSourceRef = useRef(source)
+
+  useEffect(() => {
+    if (profile || status !== 'disconnected') return
+    setUserId(localAuthor.id)
+    setName(localAuthor.name)
+  }, [localAuthor.id, localAuthor.name, profile, status])
 
   const updateCheckpointState = (next: boolean) => {
     setUncheckpointed(next)
