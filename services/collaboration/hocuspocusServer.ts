@@ -12,6 +12,8 @@ const ROOTS = {
   authors: 'draftmatter:authors',
   proposals: 'draftmatter:proposals',
   threads: 'draftmatter:threads',
+  threadMessages: 'draftmatter:thread-messages',
+  threadStatuses: 'draftmatter:thread-statuses',
   decisions: 'draftmatter:decisions',
   meta: 'draftmatter:meta',
   prosemirror: 'draftmatter:prosemirror',
@@ -58,10 +60,12 @@ function canonical(value: unknown): unknown {
 
 function protectedFingerprint(document: Y.Doc) {
   const knownRoots = new Set<string>(Object.values(ROOTS))
-  const unknownRoots = [...document.share.keys()].filter((name) => !knownRoots.has(name)).sort()
+  const unknownRoots = Object.fromEntries([...document.share.entries()]
+    .filter(([name]) => !knownRoots.has(name))
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([name, value]) => [name, canonical(value.toJSON())]))
   return JSON.stringify(canonical({
     document: document.getText(ROOTS.document).toString(),
-    anchors: document.getMap(ROOTS.anchors).toJSON(),
     proposals: document.getMap(ROOTS.proposals).toJSON(),
     decisions: document.getMap(ROOTS.decisions).toJSON(),
     meta: document.getMap(ROOTS.meta).toJSON(),
@@ -95,8 +99,21 @@ function validMessage(value: unknown, userId: string) {
     && typeof message.content === 'string'
     && message.content.length > 0
     && message.content.length <= 20_000
-    && (message.timestamp === undefined || typeof message.timestamp === 'string')
-    && (message.index === undefined || Number.isSafeInteger(message.index))
+    && (message.timestamp === undefined || (typeof message.timestamp === 'string' && message.timestamp.length <= 100))
+    && (message.index === undefined || (Number.isSafeInteger(message.index) && Number(message.index) >= 0))
+}
+
+function validContext(value: unknown) {
+  if (value === undefined) return true
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const context = value as Record<string, unknown>
+  return Object.keys(context).every((key) => key === 'quote' || key === 'prefix' || key === 'suffix')
+    && typeof context.quote === 'string'
+    && typeof context.prefix === 'string'
+    && typeof context.suffix === 'string'
+    && context.quote.length <= 20_000
+    && context.prefix.length <= 1_024
+    && context.suffix.length <= 1_024
 }
 
 function validNewThread(value: unknown, key: string, userId: string) {
@@ -107,10 +124,11 @@ function validNewThread(value: unknown, key: string, userId: string) {
     && typeof thread.anchorId === 'string'
     && SAFE_ID.test(thread.anchorId)
     && thread.status === 'open'
+    && validContext(thread.context)
     && Array.isArray(thread.messages)
-    && thread.messages.length > 0
     && thread.messages.length <= 500
     && thread.messages.every((message) => validMessage(message, userId))
+    && Object.keys(thread).every((field) => ['id', 'anchorId', 'authorId', 'status', 'messages', 'context'].includes(field))
 }
 
 function validThreadReply(before: unknown, after: unknown, userId: string) {
@@ -127,6 +145,44 @@ function validThreadReply(before: unknown, after: unknown, userId: string) {
   return newMessages.slice(oldMessages.length).every((message) => validMessage(message, userId))
 }
 
+function hexBytes(value: unknown) {
+  if (typeof value !== 'string' || value.length === 0 || value.length > 8_192 || value.length % 2 !== 0 || !/^[a-f0-9]+$/i.test(value)) return null
+  return Uint8Array.from(value.match(/.{2}/g) ?? [], (byte) => Number.parseInt(byte, 16))
+}
+
+function validNewAnchor(document: Y.Doc, value: unknown, key: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !SAFE_ID.test(key)) return false
+  const anchor = value as Record<string, unknown>
+  if (anchor.id !== key || !validContext(anchor.context) || !Object.keys(anchor).every((field) => ['id', 'start', 'end', 'context'].includes(field))) return false
+  try {
+    const startBytes = hexBytes(anchor.start)
+    const endBytes = hexBytes(anchor.end)
+    if (!startBytes || !endBytes) return false
+    const text = document.getText(ROOTS.document)
+    const start = Y.createAbsolutePositionFromRelativePosition(Y.decodeRelativePosition(startBytes), document)
+    const end = Y.createAbsolutePositionFromRelativePosition(Y.decodeRelativePosition(endBytes), document)
+    return Boolean(start && end && start.type === text && end.type === text && start.index <= end.index && end.index <= text.length)
+  } catch {
+    return false
+  }
+}
+
+function validStoredMessage(value: unknown, key: string, userId: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || key.length > 50_000) return false
+  const message = value as Record<string, unknown>
+  return message.id === key
+    && typeof message.threadId === 'string'
+    && SAFE_ID.test(message.threadId)
+    && validMessage(message, userId)
+    && Object.keys(message).every((field) => ['id', 'threadId', 'content', 'authorId', 'timestamp', 'index'].includes(field))
+}
+
+function validNewThreadStatus(value: unknown, key: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const status = value as Record<string, unknown>
+  return status.id === key && status.status === 'open' && Object.keys(status).every((field) => field === 'id' || field === 'status')
+}
+
 function commenterMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
   const beforeAuthors = mapSnapshot(before, ROOTS.authors)
   const afterAuthors = mapSnapshot(after, ROOTS.authors)
@@ -138,12 +194,54 @@ function commenterMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
 
   const beforeThreads = mapSnapshot(before, ROOTS.threads)
   const afterThreads = mapSnapshot(after, ROOTS.threads)
+  const newThreadIds = new Set<string>()
   const threadKeys = new Set([...beforeThreads.keys(), ...afterThreads.keys()])
   for (const key of threadKeys) {
     const previous = beforeThreads.get(key)
     const next = afterThreads.get(key)
     if (same(previous, next)) continue
-    if (previous === undefined ? !validNewThread(next, key, userId) : !validThreadReply(previous, next, userId)) return false
+    if (previous === undefined) {
+      if (!validNewThread(next, key, userId)) return false
+      newThreadIds.add(key)
+    } else if (!validThreadReply(previous, next, userId)) return false
+  }
+
+  const beforeMessages = mapSnapshot(before, ROOTS.threadMessages)
+  const afterMessages = mapSnapshot(after, ROOTS.threadMessages)
+  const addedMessagesByThread = new Map<string, number>()
+  for (const key of new Set([...beforeMessages.keys(), ...afterMessages.keys()])) {
+    const previous = beforeMessages.get(key)
+    const next = afterMessages.get(key)
+    if (same(previous, next)) continue
+    if (previous !== undefined || !validStoredMessage(next, key, userId)) return false
+    const threadId = String((next as Record<string, unknown>).threadId)
+    if (!afterThreads.has(threadId)) return false
+    addedMessagesByThread.set(threadId, (addedMessagesByThread.get(threadId) ?? 0) + 1)
+  }
+
+  const beforeStatuses = mapSnapshot(before, ROOTS.threadStatuses)
+  const afterStatuses = mapSnapshot(after, ROOTS.threadStatuses)
+  for (const key of new Set([...beforeStatuses.keys(), ...afterStatuses.keys()])) {
+    const previous = beforeStatuses.get(key)
+    const next = afterStatuses.get(key)
+    if (same(previous, next)) continue
+    if (previous !== undefined || !newThreadIds.has(key) || !validNewThreadStatus(next, key)) return false
+  }
+
+  const beforeAnchors = mapSnapshot(before, ROOTS.anchors)
+  const afterAnchors = mapSnapshot(after, ROOTS.anchors)
+  const newThreadAnchorIds = new Set([...newThreadIds].map((threadId) => String((afterThreads.get(threadId) as Record<string, unknown>).anchorId)))
+  for (const key of new Set([...beforeAnchors.keys(), ...afterAnchors.keys()])) {
+    const previous = beforeAnchors.get(key)
+    const next = afterAnchors.get(key)
+    if (same(previous, next)) continue
+    if (previous !== undefined || !newThreadAnchorIds.has(key) || !validNewAnchor(after, next, key)) return false
+  }
+
+  for (const threadId of newThreadIds) {
+    const thread = afterThreads.get(threadId) as Record<string, unknown>
+    const embeddedMessages = Array.isArray(thread.messages) ? thread.messages.length : 0
+    if (!afterAuthors.has(userId) || !afterAnchors.has(String(thread.anchorId)) || embeddedMessages + (addedMessagesByThread.get(threadId) ?? 0) === 0) return false
   }
   return true
 }

@@ -4,6 +4,9 @@ import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import { AuthenticatedWorkspaceService } from '../../src/collaboration/workspaceService'
+import { parseReviewMarkup } from '../../src/reviewMarkup'
+import { appendReviewThreadMessage, createReviewThread } from '../../src/reviewOperations'
+import { CollaborativeDocument } from '../../src/sharedEditor/collaboration'
 import { FileCollaborationStore } from './fileStore'
 import {
   collaborationDocumentName,
@@ -44,6 +47,14 @@ function updateFrom(document: Y.Doc, mutate: (candidate: Y.Doc) => void) {
   return update
 }
 
+function portableUpdate(document: Y.Doc, source: string) {
+  return updateFrom(document, (candidate) => {
+    const collaboration = new CollaborativeDocument(candidate)
+    collaboration.reconcilePortableSource(source, 'commenter-portable-update')
+    collaboration.awareness.destroy()
+  })
+}
+
 describe('authenticated Hocuspocus transport', () => {
   it('uses a strict tenant-scoped document name', () => {
     expect(collaborationDocumentName({ workspaceId: 'forest', projectId: 'paper' })).toBe('forest:paper')
@@ -52,28 +63,70 @@ describe('authenticated Hocuspocus transport', () => {
     expect(() => parseCollaborationDocumentName('forest:../paper')).toThrow(/not found/)
   })
 
-  it('permits attributed commenter threads but rejects manuscript and review-decision edits', () => {
-    const document = new Y.Doc()
-    document.getText('draftmatter:document').insert(0, 'Canopy response')
-    document.getMap('draftmatter:authors').set('commenter', { id: 'commenter', name: 'Casey Reviewer' })
-
-    const threadUpdate = updateFrom(document, (candidate) => {
-      candidate.getMap('draftmatter:threads').set('dm-thread-casey', {
-        id: 'dm-thread-casey',
-        anchorId: 'dm-anchor-canopy',
-        authorId: 'commenter',
-        status: 'open',
-        messages: [{ content: 'Please add the confidence interval.', authorId: 'commenter' }],
-      })
+  it('permits attributed commenter threads and replies but rejects protected or forged review edits', () => {
+    const source = '## Results\n\nCanopy response increased.\n'
+    const collaboration = CollaborativeDocument.fromPortableSource(source)
+    const document = collaboration.doc
+    const quote = 'Canopy response'
+    const start = source.indexOf(quote)
+    const created = createReviewThread(source, {
+      start,
+      end: start + quote.length,
+      author: { id: 'commenter', name: 'Casey Reviewer' },
+      message: 'Please add the confidence interval.',
+      timestamp: '2026-07-16T10:00:00.000Z',
+      threadId: 'dm-thread-casey',
+      anchorId: 'dm-anchor-casey',
+      startMarkerId: 'dm-anchor-casey-start',
+      endMarkerId: 'dm-anchor-casey-end',
     })
-    const textUpdate = updateFrom(document, (candidate) => candidate.getText('draftmatter:document').insert(0, 'Changed '))
-    const decisionUpdate = updateFrom(document, (candidate) => candidate.getMap('draftmatter:decisions').set('dm-decision', { action: 'accepted' }))
-
+    const threadUpdate = portableUpdate(document, created.document.source)
+    const threadCandidate = new Y.Doc()
+    Y.applyUpdate(threadCandidate, Y.encodeStateAsUpdate(document))
+    Y.applyUpdate(threadCandidate, threadUpdate)
+    expect(threadCandidate.getText('draftmatter:document').toString()).toBe(document.getText('draftmatter:document').toString())
+    threadCandidate.destroy()
     expect(commenterUpdateDiagnostic(document, threadUpdate, 'commenter')).toBeNull()
     expect(commenterUpdateAllowed(document, threadUpdate, 'commenter')).toBe(true)
-    expect(commenterUpdateAllowed(document, textUpdate, 'commenter')).toBe(false)
-    expect(commenterUpdateAllowed(document, decisionUpdate, 'commenter')).toBe(false)
-    document.destroy()
+    Y.applyUpdate(document, threadUpdate)
+
+    const replied = appendReviewThreadMessage(parseReviewMarkup(created.document.source), 'dm-thread-casey', {
+      authorId: 'commenter',
+      message: 'The interval can go after the estimate.',
+      timestamp: '2026-07-16T10:01:00.000Z',
+    })
+    const replyUpdate = portableUpdate(document, replied.document.source)
+    expect(commenterUpdateDiagnostic(document, replyUpdate, 'commenter')).toBeNull()
+    Y.applyUpdate(document, replyUpdate)
+
+    const messageMap = document.getMap<Record<string, unknown>>('draftmatter:thread-messages')
+    const existingMessageId = [...messageMap.keys()][0]
+    const textUpdate = updateFrom(document, (candidate) => candidate.getText('draftmatter:document').insert(0, 'Changed '))
+    const decisionUpdate = updateFrom(document, (candidate) => candidate.getMap('draftmatter:decisions').set('dm-decision', { action: 'accepted' }))
+    const forgedAuthor = updateFrom(document, (candidate) => candidate.getMap('draftmatter:thread-messages').set('forged-message', {
+      id: 'forged-message',
+      threadId: 'dm-thread-casey',
+      authorId: 'owner',
+      content: 'This must not be attributed to the owner.',
+      index: 2,
+    }))
+    const rewrittenMessage = updateFrom(document, (candidate) => {
+      const messages = candidate.getMap<Record<string, unknown>>('draftmatter:thread-messages')
+      messages.set(existingMessageId, { ...messages.get(existingMessageId), content: 'Rewritten after publication.' })
+    })
+    const resolvedThread = updateFrom(document, (candidate) => candidate.getMap('draftmatter:thread-statuses').set('dm-thread-casey', { id: 'dm-thread-casey', status: 'resolved' }))
+    const rogueAnchor = updateFrom(document, (candidate) => {
+      const anchors = candidate.getMap<Record<string, unknown>>('draftmatter:anchors')
+      anchors.set('dm-anchor-rogue', { ...anchors.get('dm-anchor-casey'), id: 'dm-anchor-rogue' })
+    })
+
+    expect(commenterUpdateDiagnostic(document, textUpdate, 'commenter')).toBe('protected-state-changed')
+    expect(commenterUpdateDiagnostic(document, decisionUpdate, 'commenter')).toBe('protected-state-changed')
+    expect(commenterUpdateDiagnostic(document, forgedAuthor, 'commenter')).toBe('comment-record-invalid')
+    expect(commenterUpdateDiagnostic(document, rewrittenMessage, 'commenter')).toBe('comment-record-invalid')
+    expect(commenterUpdateDiagnostic(document, resolvedThread, 'commenter')).toBe('comment-record-invalid')
+    expect(commenterUpdateDiagnostic(document, rogueAnchor, 'commenter')).toBe('comment-record-invalid')
+    collaboration.destroy()
   })
 
   it('loads persisted state and stores authenticated server changes through narrow hooks', async () => {

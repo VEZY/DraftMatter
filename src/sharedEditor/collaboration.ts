@@ -119,9 +119,17 @@ function sortedValues<T extends { id: string }>(map: Y.Map<T>) {
 }
 
 function portableManuscriptView(source: string, review: ReviewMarkupDocument) {
+  const reviewStart = (() => {
+    if (review.sectionStart === undefined) return undefined
+    const prefix = source.slice(0, review.sectionStart)
+    const trailing = prefix.match(/(?:\r\n|\r|\n)[\t \r\n]*$/)?.[0]
+    if (!trailing) return review.sectionStart
+    const endingLength = trailing.startsWith('\r\n') ? 2 : 1
+    return review.sectionStart - trailing.length + endingLength
+  })()
   const removals = [
     ...review.anchors.map((anchor) => ({ start: anchor.start, end: anchor.end })),
-    ...(review.sectionStart === undefined ? [] : [{ start: review.sectionStart, end: review.sectionEnd ?? source.length }]),
+    ...(reviewStart === undefined ? [] : [{ start: reviewStart, end: review.sectionEnd ?? source.length }]),
   ].sort((left, right) => left.start - right.start || left.end - right.end)
   const merged: { start: number; end: number }[] = []
   for (const removal of removals) {
