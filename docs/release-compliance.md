@@ -2,7 +2,7 @@
 
 ## Supported local targets
 
-The portability workflow type-checks, tests, and packages these Tauri targets from locked dependencies:
+The portability workflow type-checks, tests, and packages debug bundles for these Tauri targets from locked dependencies. The tag-driven `desktop-release.yml` workflow produces production release bundles:
 
 - Windows x64 (`x86_64-pc-windows-msvc`)
 - Linux x64 (`x86_64-unknown-linux-gnu`)
@@ -34,13 +34,16 @@ The allowlist is an engineering gate, not legal advice. Adding an identifier req
 
 ## Signing and notarization gate
 
-Development macOS bundles are ad-hoc signed (`signingIdentity: "-"`) so local builds are testable. They are not public-release artifacts. Before publishing a release:
+Development macOS bundles are ad-hoc signed (`signingIdentity: "-"`) so local builds are testable. They are not public-release artifacts. Manual release-workflow runs are similarly labelled unsigned release candidates and never create a GitHub release. A `v<package-version>` tag creates only a draft release and requires:
 
-1. configure Apple Developer ID signing and notarization credentials in the protected release environment;
-2. verify the `.app` with `codesign --verify --deep --strict` and Gatekeeper after notarization/stapling;
-3. sign Windows installers with the organization’s protected Authenticode certificate and verify them with `signtool verify /pa` on the Windows runner;
-4. publish checksums, the platform SBOM, and third-party notices beside every installer;
-5. retain the exact source revision and locked dependency files used by the build.
+1. protected `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID` secrets for Developer ID signing and notarization;
+2. protected `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD`, and `WINDOWS_CERTIFICATE_THUMBPRINT` secrets for Authenticode signing;
+3. successful `codesign --verify --deep --strict`, Gatekeeper assessment, and notarization-ticket validation on both macOS architectures;
+4. successful `signtool verify /pa /all` for every Windows MSI/NSIS bundle;
+5. generated SHA-256 checksums, target-specific CycloneDX SBOMs, and third-party notices attached to the draft release;
+6. manual review of the draft before publication, retaining the exact source revision and locked dependency files used by the build.
+
+`npm run release:verify` prevents a tag from drifting from `package.json`, `package-lock.json`, `Cargo.toml`, or `tauri.conf.json`. Missing signing secrets fail before platform builds begin. A failed signature, notarization, test, compliance, or checksum job leaves at most an unpublished draft and cannot silently publish an unsigned installer.
 
 Unsigned or unnotarized desktop artifacts must be labelled development builds and must not be promoted as a release. Signing credentials never belong in the repository or application logs.
 

@@ -10,3 +10,4 @@ playwright-report/
 *.tsbuildinfo
 vite.config.js
 vite.config.d.ts
+src-tauri/tauri.release.conf.json

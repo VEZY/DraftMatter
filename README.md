@@ -22,6 +22,7 @@ npm run test:e2e
 npm run build
 cargo test --manifest-path src-tauri/Cargo.toml
 npm run compliance:check
+npm run release:verify
 ```
 
 The local MVP supports opening and creating `.md`/`.qmd` projects; deterministic, portable comments and suggestions; BibTeX/CSL JSON/RIS/EndNote citation intake; Crossref and local Zotero acquisition; explicit trusted execution with retained outputs; recovery history; native clean Markdown/HTML/print-PDF/DOCX exports; optional inert Pandoc/Quarto exports; rendered/source Git diffs; selected local checkpoints; and guarded branches and remotes.
@@ -37,3 +38,5 @@ Useful implementation notes:
 - [Product and architecture brief](./draftmatter-app-design.md)
 
 The collaboration path includes a tested browser-safe editor/reviewer, offline-capable Yjs state, OIDC and tenant-scoped PostgreSQL authorization, authenticated Hocuspocus transport, S3-compatible immutable snapshots, durable entitlements, and a portable self-hosted service image. Browser builds intentionally have no filesystem, process, execution, Git, or external-renderer capability. See [the collaboration boundary](docs/collaboration-boundary.md).
+
+Production desktop installers are built from version tags as signed/notarized draft releases for Windows x64, Linux x64, and both macOS architectures. Manual workflow runs produce unsigned release candidates only; see [the release gate](docs/release-compliance.md).

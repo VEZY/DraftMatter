@@ -47,7 +47,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v6
         with:
-          node-version: lts/*
+          node-version: 22.23.1
           cache: npm
 
       - name: Set up Rust
@@ -76,7 +76,7 @@ jobs:
         run: npm test
 
       - name: Test native project host
-        run: cargo test --manifest-path src-tauri/Cargo.toml
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
 
       - name: Build platform application
         uses: tauri-apps/tauri-action@v1

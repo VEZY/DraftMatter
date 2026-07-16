@@ -13,10 +13,11 @@
     "check:service": "tsc -p services/collaboration/tsconfig.json --noEmit",
     "compliance:generate": "node scripts/generate-compliance.mjs",
     "compliance:check": "node scripts/generate-compliance.mjs --verify",
+    "release:verify": "node scripts/verify-release.mjs",
     "test": "vitest run src services",
     "test:e2e": "playwright test",
     "test:e2e:update": "playwright test --update-snapshots",
-    "test:release": "npm run check && npm test && npm run test:e2e && npm run build && npm run compliance:check",
+    "test:release": "npm run release:verify && npm run check && npm test && npm run test:e2e && npm run build && npm run compliance:check",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build"

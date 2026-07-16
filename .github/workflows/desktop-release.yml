@@ -1,0 +1,235 @@
+name: Desktop release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*.*.*'
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.1
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Install Linux desktop dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Install the pinned Chromium runtime
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify release version identity
+        run: npm run release:verify
+
+      - name: Run browser, service, build, and compliance gates
+        run: npm run test:release
+
+      - name: Run native host tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+  signing-policy:
+    runs-on: ubuntu-22.04
+    env:
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+      WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+    steps:
+      - name: Require signing and notarization credentials for version tags
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "Manual build: unsigned release-candidate policy applies."
+            exit 0
+          fi
+          missing=0
+          for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD WINDOWS_CERTIFICATE_THUMBPRINT; do
+            if [[ -z "${!name}" ]]; then
+              echo "::error::Required protected release secret $name is not configured."
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+  build:
+    needs: [verify, signing-policy]
+    name: ${{ matrix.label }}
+    runs-on: ${{ matrix.platform }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux x64 release
+            platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            args: --target x86_64-unknown-linux-gnu --bundles deb,appimage
+          - label: Windows x64 release
+            platform: windows-latest
+            target: x86_64-pc-windows-msvc
+            args: --target x86_64-pc-windows-msvc --bundles nsis,msi
+          - label: macOS Apple Silicon release
+            platform: macos-latest
+            target: aarch64-apple-darwin
+            args: --target aarch64-apple-darwin --bundles app,dmg
+          - label: macOS Intel release
+            platform: macos-latest
+            target: x86_64-apple-darwin
+            args: --target x86_64-apple-darwin --bundles app,dmg
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Install Linux desktop dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22.23.1
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+          key: release-${{ matrix.target }}
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Verify release version identity
+        run: npm run release:verify
+
+      - name: Generate platform compliance inventory
+        run: npm run compliance:generate
+
+      - name: Prepare release configuration
+        run: node -e "require('node:fs').writeFileSync('src-tauri/tauri.release.conf.json', '{}')"
+
+      - name: Import Windows Authenticode certificate
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'windows-latest'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+        run: |
+          $certificatePath = Join-Path $env:RUNNER_TEMP 'draftmatter-release.pfx'
+          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
+          $config = @{ bundle = @{ windows = @{ certificateThumbprint = $env:WINDOWS_CERTIFICATE_THUMBPRINT; digestAlgorithm = 'sha256'; timestampUrl = 'http://timestamp.digicert.com' } } }
+          $config | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 'src-tauri/tauri.release.conf.json'
+
+      - name: Build unsigned release candidate bundles
+        if: github.event_name == 'workflow_dispatch'
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: draftmatter-candidate-[platform]-[arch]-[bundle]
+
+      - name: Build signed release bundles into a draft release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ matrix.platform == 'macos-latest' && secrets.APPLE_CERTIFICATE || '' }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ matrix.platform == 'macos-latest' && secrets.APPLE_CERTIFICATE_PASSWORD || '' }}
+          APPLE_SIGNING_IDENTITY: ${{ matrix.platform == 'macos-latest' && secrets.APPLE_SIGNING_IDENTITY || '' }}
+          APPLE_ID: ${{ matrix.platform == 'macos-latest' && secrets.APPLE_ID || '' }}
+          APPLE_PASSWORD: ${{ matrix.platform == 'macos-latest' && secrets.APPLE_PASSWORD || '' }}
+          APPLE_TEAM_ID: ${{ matrix.platform == 'macos-latest' && secrets.APPLE_TEAM_ID || '' }}
+        with:
+          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
+          tagName: ${{ github.ref_name }}
+          releaseName: DraftMatter ${{ github.ref_name }}
+          releaseDraft: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generateReleaseNotes: true
+          releaseAssetNamePattern: DraftMatter_[version]_[platform]_[arch]_[bundle].[ext]
+          uploadWorkflowArtifacts: true
+          workflowArtifactNamePattern: draftmatter-[platform]-[arch]-[bundle]
+
+      - name: Verify macOS Developer ID signature and notarization
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'macos-latest'
+        shell: bash
+        run: |
+          bundle_root="src-tauri/target/${{ matrix.target }}/release/bundle"
+          app="$(find "$bundle_root" -type d -name '*.app' -print -quit)"
+          dmg="$(find "$bundle_root" -type f -name '*.dmg' -print -quit)"
+          test -n "$app" && test -n "$dmg"
+          codesign --verify --deep --strict --verbose=2 "$app"
+          spctl --assess --type execute --verbose=2 "$app"
+          xcrun stapler validate "$dmg"
+
+      - name: Verify Windows Authenticode signatures
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: |
+          $bundles = Get-ChildItem "src-tauri/target/${{ matrix.target }}/release/bundle" -Recurse -File | Where-Object { $_.Extension -in '.exe', '.msi' }
+          if (-not $bundles) { throw 'No Windows installer bundles were produced.' }
+          foreach ($bundle in $bundles) { & signtool verify /pa /all /v $bundle.FullName; if ($LASTEXITCODE -ne 0) { throw "Signature verification failed for $($bundle.FullName)" } }
+
+      - name: Upload platform compliance inventory
+        uses: actions/upload-artifact@v6
+        with:
+          name: draftmatter-${{ matrix.target }}-compliance
+          path: |
+            compliance/THIRD_PARTY_NOTICES.md
+            compliance/sbom.cdx.json
+
+  release-metadata:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          path: release-assets
+
+      - name: Prepare checksums and uniquely named compliance assets
+        shell: bash
+        run: |
+          mkdir release-metadata
+          while IFS= read -r file; do
+            artifact="$(basename "$(dirname "$(dirname "$file")")")"
+            cp "$file" "release-metadata/${artifact}-$(basename "$file")"
+          done < <(find release-assets -type f \( -name 'THIRD_PARTY_NOTICES.md' -o -name 'sbom.cdx.json' \) | sort)
+          (cd release-assets && find . -type f -print0 | sort -z | xargs -0 sha256sum) > release-metadata/SHA256SUMS
+
+      - name: Attach verified release metadata
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: gh release upload "$GITHUB_REF_NAME" release-metadata/* --clobber
