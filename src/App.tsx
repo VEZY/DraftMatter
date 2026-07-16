@@ -1061,6 +1061,7 @@ function App() {
   const reviewQueue = useMemo(() => reviewAuthorFilter === 'all'
     ? allReviewQueue
     : allReviewQueue.filter((item) => item.authorId === reviewAuthorFilter), [allReviewQueue, reviewAuthorFilter])
+  const activeReviewAnchorId = allReviewQueue.find((item) => item.id === activeReviewId)?.anchorId
   const structuredReviewProjection = useMemo(() => {
     if (!structuredMode || (markupView !== 'original' && markupView !== 'final')) return null
     return projectPortableReviewSource(manuscriptSource, { view: markupView })
@@ -2138,6 +2139,22 @@ function App() {
   const showReviewPanel = () => {
     setActiveNav('review')
     setRightPanelOpen(true)
+  }
+
+  const selectReviewItem = (id: string | undefined) => {
+    setActiveReviewId(id)
+    const anchorId = allReviewQueue.find((item) => item.id === id)?.anchorId
+    if (!anchorId || markupView === 'original' || markupView === 'final') return
+    requestAnimationFrame(() => structuredEditorRef.current?.scrollToReviewAnchor(anchorId))
+  }
+
+  const selectReviewAnchor = (anchorId: string) => {
+    showReviewPanel()
+    const candidates = reviewQueue.filter((item) => item.anchorId === anchorId)
+    const item = candidates.find((candidate) => candidate.id === activeReviewId) ?? candidates[0]
+    if (!item) return
+    setActiveReviewId(item.id)
+    requestAnimationFrame(() => globalThis.document.getElementById(`review-item-${item.id}`)?.scrollIntoView({ block: 'nearest' }))
   }
 
   const openPortableFile = async (file: File) => {
@@ -3297,7 +3314,7 @@ function App() {
               onInspectRaw={openSourceInspector}
               onCitationSelect={openStructuredCitationDetails}
               onReviewSelectionChange={setStructuredReviewSelection}
-              onReviewAnchorSelect={() => showReviewPanel()}
+              onReviewAnchorSelect={selectReviewAnchor}
               onCommandRequest={() => setCommandOpen(true)}
               suggestionMode={suggestionMode && markupView !== 'original' && markupView !== 'final'}
               suggestionAuthor={userSettings.author}
@@ -3305,6 +3322,8 @@ function App() {
               citationLabels={structuredCitationLabels}
               codeCellStatuses={Object.fromEntries(executionCellStates.map((state) => [state.cellId, state.status] as const))}
               markupView={markupView}
+              reviewAuthorId={reviewAuthorFilter === 'all' ? undefined : reviewAuthorFilter}
+              activeReviewAnchorId={activeReviewAnchorId}
               readOnly={Boolean(structuredReviewProjection)}
               resolveAssetUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) ?? 'data:,' : path}
             />
@@ -3567,7 +3586,7 @@ function App() {
                 <div className="conflict-heading"><Icon name="branch" size={16} /><span>{reviewAuthorFilter === 'all' ? '2 overlapping alternatives' : 'Filtered alternative'}</span><small>{reviewAuthorFilter === 'all' ? 'Compare one at a time' : 'Author filter active'}</small></div>
 
                 {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a01') &&
-                <button id="review-item-dm-c01" className={`proposal-option ${reviewProposal === 'alice' && activeReviewId !== 'dm-comment-01' ? 'selected' : ''}`} onClick={() => { setActiveReviewId('dm-c01'); updateDraft({ activeProposal: 'alice' }) }}>
+                <button id="review-item-dm-c01" className={`proposal-option ${reviewProposal === 'alice' && activeReviewId !== 'dm-comment-01' ? 'selected' : ''}`} onClick={() => { selectReviewItem('dm-c01'); updateDraft({ activeProposal: 'alice' }) }}>
                   <Avatar initials="AM" tone="blue" small />
                   <span className="proposal-author"><strong>Alice Martin</strong><small><ReviewTimestamp value={demoAliceChange?.updatedAt ?? demoAliceChange?.createdAt} verb={demoAliceChange?.updatedAt ? 'Updated' : 'Created'} fallback="Portable suggestion" /></small></span>
                   <StatusPill status={draft.aliceStatus} />
@@ -3575,7 +3594,7 @@ function App() {
                 </button>}
 
                 {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
-                <button id="review-item-dm-c02" className={`proposal-option ${reviewProposal === 'marcus' && activeReviewId !== 'dm-comment-01' ? 'selected' : ''}`} onClick={() => { setActiveReviewId('dm-c02'); updateDraft({ activeProposal: 'marcus' }) }}>
+                <button id="review-item-dm-c02" className={`proposal-option ${reviewProposal === 'marcus' && activeReviewId !== 'dm-comment-01' ? 'selected' : ''}`} onClick={() => { selectReviewItem('dm-c02'); updateDraft({ activeProposal: 'marcus' }) }}>
                   <Avatar initials="MC" tone="clay" small />
                   <span className="proposal-author"><strong>Marcus Chen</strong><small><ReviewTimestamp value={demoMarcusChange?.updatedAt ?? demoMarcusChange?.createdAt} verb={demoMarcusChange?.updatedAt ? 'Updated' : 'Created'} fallback="Portable suggestion" /></small></span>
                   <StatusPill status={draft.marcusStatus} />
@@ -3594,7 +3613,7 @@ function App() {
               </div>
 
               {demoCommentAvailable && (reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
-              <div id="review-item-dm-comment-01" className={`comment-card ${activeReviewId === 'dm-comment-01' ? 'active' : ''} ${draft.commentResolved ? 'resolved' : ''}`} onClick={() => setActiveReviewId('dm-comment-01')}>
+              <div id="review-item-dm-comment-01" className={`comment-card ${activeReviewId === 'dm-comment-01' ? 'active' : ''} ${draft.commentResolved ? 'resolved' : ''}`} onClick={() => selectReviewItem('dm-comment-01')}>
                 <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small><ReviewTimestamp value={demoCommentThread?.updatedAt ?? demoCommentThread?.createdAt} verb={demoCommentThread?.updatedAt ? 'Updated' : 'Created'} fallback="Portable comment" /></small></span></div>
                 <div className="comment-quote">“increased modestly”</div>
                 <p>Can we quantify this increase in the main text? The estimate is already in the supplement.</p>
@@ -3620,6 +3639,10 @@ function App() {
                 navigationItems={reviewQueue}
                 localAuthor={userSettings.author}
                 onActiveIdChange={setActiveReviewId}
+                onNavigateToItem={(item) => {
+                  if (markupView === 'original' || markupView === 'final') return
+                  requestAnimationFrame(() => structuredEditorRef.current?.scrollToReviewAnchor(item.anchorId))
+                }}
                 selectedTarget={structuredMode ? structuredReviewSelection : null}
                 onApply={applyPortableReviewSource}
               />

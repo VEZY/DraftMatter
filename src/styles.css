@@ -4290,6 +4290,8 @@ img.ProseMirror-separator { border: 0 !important; display: inline !important; he
 .dm-review-needs-rebase { background: rgba(202, 143, 73, .16); border-bottom-color: rgba(168, 105, 42, .62); }
 .dm-review-resolved, .dm-review-accepted, .dm-review-rejected { opacity: .72; }
 .dm-review-simple { background: transparent; border-bottom-style: dotted; }
+.dm-review-active { background: rgba(91, 145, 112, .22); box-shadow: 0 2px 0 rgba(69, 119, 88, .28); }
+.dm-review-thread.dm-review-active { background: rgba(230, 194, 83, .28); box-shadow: 0 2px 0 rgba(178, 139, 34, .3); }
 .dm-review-point { align-items: center; background: #f8efd4; border: 1px solid #dec985; border-radius: 50%; color: #78622e; cursor: pointer; display: inline-flex; font: 700 9px/1 Inter, ui-sans-serif, sans-serif; height: 15px; justify-content: center; margin: 0 2px; padding: 0; vertical-align: text-top; width: 15px; }
 .dm-review-point.dm-review-change { background: #e5f0e8; border-color: #9ab5a3; color: #456c53; }
 .dm-review-point:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }

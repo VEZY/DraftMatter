@@ -43,6 +43,7 @@ export function PortableReviewItems({
   navigationItems,
   localAuthor = DEFAULT_USER_SETTINGS.author,
   onActiveIdChange,
+  onNavigateToItem,
   selectedTarget,
   onApply,
 }: {
@@ -53,6 +54,7 @@ export function PortableReviewItems({
   navigationItems?: ReviewQueueItem[]
   localAuthor?: LocalAuthorIdentity
   onActiveIdChange?: (id: string | undefined) => void
+  onNavigateToItem?: (item: ReviewQueueItem) => void
   selectedTarget?: { quote: string; occurrence: number } | null
   onApply: (source: string, message: string) => void
 }) {
@@ -70,6 +72,11 @@ export function PortableReviewItems({
     else setInternalActiveId(id)
   }, [onActiveIdChange])
   const navigableQueue = navigationItems ?? queue
+  const activate = (id: string) => {
+    setActiveId(id)
+    const item = navigableQueue.find((candidate) => candidate.id === id)
+    if (item) onNavigateToItem?.(item)
+  }
   const [reply, setReply] = useState('')
   const [problem, setProblem] = useState('')
   const [compose, setCompose] = useState<'comment' | 'suggestion' | null>(null)
@@ -220,7 +227,7 @@ export function PortableReviewItems({
 
   const navigate = (direction: 'next' | 'previous') => {
     const next = navigateReviewQueue(navigableQueue, activeId, direction)
-    setActiveId(next?.id)
+    if (next) activate(next.id)
     const target = next ? globalThis.document.getElementById(`review-item-${next.id}`) : null
     if (typeof target?.scrollIntoView === 'function') target.scrollIntoView({ block: 'nearest' })
   }
@@ -238,7 +245,7 @@ export function PortableReviewItems({
           return (
             <div className={`conflict-card portable-review-card ${active ? 'active' : ''}`} id={`review-item-${item.id}`} key={item.id}>
               <div className="conflict-heading"><Icon name="branch" size={16} /><span>{item.conflictId ? 'Overlapping suggestion' : item.kind === 'unplaced-change' ? 'Unplaced suggestion' : 'Suggestion'}</span><small>{item.anchorId}</small></div>
-              <button className={`proposal-option ${active ? 'selected' : ''}`} onClick={() => setActiveId(item.id)}>
+              <button className={`proposal-option ${active ? 'selected' : ''}`} onClick={() => activate(item.id)}>
                 <span className="avatar avatar-blue avatar-small">{initials(item.authorName)}</span>
                 <span className="proposal-author"><strong>{item.authorName}</strong><small><ReviewTimestamp value={change.updatedAt ?? change.createdAt} verb={change.updatedAt ? 'Updated' : 'Created'} fallback={item.kind === 'unplaced-change' ? 'Location needs attention' : item.excerpt} detail={item.kind === 'unplaced-change' ? 'Location needs attention' : item.excerpt} /></small></span>
                 <span className={`status-pill status-${item.status}`}>{statusLabel(item.status)}</span>
@@ -276,7 +283,7 @@ export function PortableReviewItems({
         const thread = document.threads.find((candidate) => candidate.id === item.id)!
         const recovery = recoveryByAnchor.get(item.anchorId)
         return (
-          <div className={`comment-card portable-review-card ${active ? 'active' : ''} ${thread.status === 'resolved' ? 'resolved' : ''}`} id={`review-item-${item.id}`} key={item.id} onClick={() => setActiveId(item.id)}>
+          <div className={`comment-card portable-review-card ${active ? 'active' : ''} ${thread.status === 'resolved' ? 'resolved' : ''}`} id={`review-item-${item.id}`} key={item.id} onClick={() => activate(item.id)}>
             <div className="comment-author"><span className="avatar avatar-clay avatar-small">{initials(item.authorName)}</span><span><strong>{item.authorName}</strong><small><ReviewTimestamp value={thread.updatedAt ?? thread.createdAt} verb={thread.updatedAt ? 'Updated' : 'Created'} fallback={item.kind === 'unplaced-thread' ? 'Location needs attention' : statusLabel(thread.status)} detail={item.kind === 'unplaced-thread' ? 'Location needs attention' : statusLabel(thread.status)} /></small></span></div>
             <div className="comment-quote">“{thread.anchorContext?.quote || item.excerpt}”</div>
             {thread.messageRecords.map((message, index) => index === 0

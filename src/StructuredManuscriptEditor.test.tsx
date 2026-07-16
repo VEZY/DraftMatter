@@ -6,6 +6,7 @@ import { EditorState } from 'prosemirror-state'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StructuredManuscriptEditor, shouldRequestStructuredCommands, type StructuredManuscriptEditorHandle } from './StructuredManuscriptEditor'
 import { manuscriptSchema } from './manuscriptSchema'
+import { createReviewAlternative, createReviewChange } from './reviewOperations'
 
 const source = `---
 title: Generic
@@ -62,6 +63,9 @@ describe('full structured manuscript editor', () => {
 
   beforeEach(() => {
     ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    if (typeof HTMLElement.prototype.scrollIntoView !== 'function') {
+      Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: () => undefined })
+    }
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
@@ -69,6 +73,7 @@ describe('full structured manuscript editor', () => {
 
   afterEach(async () => {
     await act(async () => root.unmount())
+    vi.restoreAllMocks()
     container.remove()
   })
 
@@ -121,6 +126,90 @@ describe('full structured manuscript editor', () => {
     expect(inspect).toHaveBeenCalledOnce()
     expect(selectReview).toHaveBeenCalledWith('dm-comment')
     expect(asset).toHaveBeenCalledWith('figures/growth.svg')
+  })
+
+  it('filters manuscript review marks by author and highlights the active navigable anchor', async () => {
+    const base = '# Review marks\n\nAlpha phrase stays here.\n\nBeta phrase stays here.\n'
+    const alice = createReviewChange(base, {
+      start: base.indexOf('Alpha phrase'),
+      end: base.indexOf('Alpha phrase') + 'Alpha phrase'.length,
+      author: { id: 'dm-alice', name: 'Alice Martin' },
+      kind: 'replace',
+      proposal: 'Revised alpha phrase',
+    })
+    const betaStart = alice.document.source.indexOf('Beta phrase')
+    const marcus = createReviewChange(alice.document.source, {
+      start: betaStart,
+      end: betaStart + 'Beta phrase'.length,
+      author: { id: 'dm-marcus', name: 'Marcus Chen' },
+      kind: 'replace',
+      proposal: 'Revised beta phrase',
+    })
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    const selectReview = vi.fn()
+    const scrollIntoView = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
+
+    await act(async () => root.render(
+      <StructuredManuscriptEditor
+        ref={editorRef}
+        source={marcus.document.source}
+        onChange={vi.fn()}
+        onReviewAnchorSelect={selectReview}
+        reviewAuthorId="dm-alice"
+        activeReviewAnchorId={alice.change.anchorId}
+      />,
+    ))
+
+    let marks = container.querySelectorAll<HTMLElement>('[data-review-anchor]')
+    expect(marks).toHaveLength(1)
+    expect(marks[0].dataset.reviewAnchor).toBe(alice.change.anchorId)
+    expect(marks[0].classList.contains('dm-review-active')).toBe(true)
+    marks[0].click()
+    expect(selectReview).toHaveBeenCalledWith(alice.change.anchorId)
+
+    await act(async () => root.render(
+      <StructuredManuscriptEditor
+        ref={editorRef}
+        source={marcus.document.source}
+        onChange={vi.fn()}
+        onReviewAnchorSelect={selectReview}
+        reviewAuthorId="dm-marcus"
+        activeReviewAnchorId={marcus.change.anchorId}
+      />,
+    ))
+
+    marks = container.querySelectorAll<HTMLElement>('[data-review-anchor]')
+    expect(marks).toHaveLength(1)
+    expect(marks[0].dataset.reviewAnchor).toBe(marcus.change.anchorId)
+    expect(editorRef.current?.scrollToReviewAnchor(marcus.change.anchorId)).toBe(true)
+    expect(scrollIntoView).toHaveBeenCalledWith(expect.objectContaining({ block: 'center' }))
+
+  })
+
+  it('keeps shared alternative anchors visible for every filtered author', async () => {
+    const base = '# Shared anchor\n\nOne phrase has alternatives.\n'
+    const alice = createReviewChange(base, {
+      start: base.indexOf('One phrase'),
+      end: base.indexOf('One phrase') + 'One phrase'.length,
+      author: { id: 'dm-alice', name: 'Alice Martin' },
+      kind: 'replace',
+      proposal: 'Alice proposal',
+    })
+    const shared = createReviewAlternative(alice.document, {
+      changeId: alice.change.id,
+      author: { id: 'dm-marcus', name: 'Marcus Chen' },
+      proposal: 'Marcus proposal',
+    })
+
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={shared.document.source} onChange={vi.fn()} reviewAuthorId="dm-alice" />,
+    ))
+    expect(container.querySelectorAll(`[data-review-anchor="${alice.change.anchorId}"]`)).toHaveLength(1)
+
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={shared.document.source} onChange={vi.fn()} reviewAuthorId="dm-marcus" />,
+    ))
+    expect(container.querySelectorAll(`[data-review-anchor="${alice.change.anchorId}"]`)).toHaveLength(1)
   })
 
   it('edits one preserved raw block explicitly and cancels later drafts', async () => {

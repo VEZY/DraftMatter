@@ -69,6 +69,7 @@ export interface StructuredManuscriptEditorHandle {
   insertTable: (rows?: number, columns?: number, caption?: string, label?: string) => boolean
   insertFigure: (source: string, alt: string, caption?: string, label?: string) => boolean
   scrollToNode: (id: string) => boolean
+  scrollToReviewAnchor: (anchorId: string) => boolean
   source: () => string
 }
 
@@ -89,6 +90,8 @@ export interface StructuredManuscriptEditorProps {
   citationLabels?: Record<string, string>
   codeCellStatuses?: Record<string, ExecutionFreshnessStatus>
   markupView?: MarkupView
+  reviewAuthorId?: string
+  activeReviewAnchorId?: string
   readOnly?: boolean
   ariaLabel?: string
   className?: string
@@ -151,17 +154,26 @@ function selectedReviewText(view: EditorView): StructuredReviewSelection | null 
 interface ReviewDecorationRecord {
   kind: 'change' | 'thread'
   status: string
+  authorId: string
 }
 
 function reviewDecorationIndex(source: string) {
   const parsed = parseReviewMarkup(source)
-  return new Map<string, ReviewDecorationRecord>([
-    ...parsed.changes.map((change) => [change.anchorId, { kind: 'change' as const, status: change.status }] as const),
-    ...parsed.threads.map((thread) => [thread.anchorId, { kind: 'thread' as const, status: thread.status }] as const),
-  ])
+  const records = new Map<string, ReviewDecorationRecord[]>()
+  for (const record of [
+    ...parsed.changes.map((change) => ({ anchorId: change.anchorId, kind: 'change' as const, status: change.status, authorId: change.authorId })),
+    ...parsed.threads.map((thread) => ({ anchorId: thread.anchorId, kind: 'thread' as const, status: thread.status, authorId: thread.authorId })),
+  ]) records.set(record.anchorId, [...(records.get(record.anchorId) ?? []), record])
+  return records
 }
 
-function reviewDecorations(document: ProseMirrorNode, records: Map<string, ReviewDecorationRecord>, markupView: MarkupView) {
+function reviewDecorations(
+  document: ProseMirrorNode,
+  records: Map<string, ReviewDecorationRecord[]>,
+  markupView: MarkupView,
+  authorId?: string,
+  activeAnchorId?: string,
+) {
   if (markupView === 'original' || markupView === 'final') return DecorationSet.empty
   const anchors = new Map<string, { start?: number; end?: number; points: number[] }>()
   document.descendants((node, position) => {
@@ -176,9 +188,15 @@ function reviewDecorations(document: ProseMirrorNode, records: Map<string, Revie
   })
   const decorations: Decoration[] = []
   for (const [anchorId, anchor] of anchors) {
-    const record = records.get(anchorId)
-    if (!record || record.status === 'deleted') continue
-    const classes = [`dm-review-${record.kind}`, `dm-review-${record.status}`, markupView === 'simple' ? 'dm-review-simple' : 'dm-review-all'].join(' ')
+    const visibleRecords = (records.get(anchorId) ?? []).filter((record) => record.status !== 'deleted' && (!authorId || record.authorId === authorId))
+    if (!visibleRecords.length) continue
+    const record = visibleRecords.find((candidate) => candidate.status === 'open' || candidate.status === 'needs-rebase') ?? visibleRecords[0]
+    const classes = [
+      `dm-review-${record.kind}`,
+      `dm-review-${record.status}`,
+      markupView === 'simple' ? 'dm-review-simple' : 'dm-review-all',
+      anchorId === activeAnchorId ? 'dm-review-active' : '',
+    ].filter(Boolean).join(' ')
     if (anchor.start !== undefined && anchor.end !== undefined && anchor.start < anchor.end) {
       decorations.push(Decoration.inline(anchor.start, anchor.end, { class: classes, 'data-review-anchor': anchorId }))
     }
@@ -1908,6 +1926,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   citationLabels,
   codeCellStatuses,
   markupView = 'all',
+  reviewAuthorId,
+  activeReviewAnchorId,
   readOnly = false,
   ariaLabel = 'Rendered manuscript editor',
   className = '',
@@ -1934,6 +1954,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const codeCellStatusesRef = useRef(codeCellStatuses)
   const readOnlyRef = useRef(readOnly)
   const markupViewRef = useRef(markupView)
+  const reviewAuthorIdRef = useRef(reviewAuthorId)
+  const activeReviewAnchorIdRef = useRef(activeReviewAnchorId)
   const reviewDecorationRef = useRef(reviewDecorationIndex(source))
   onChangeRef.current = onChange
   onDiagnosticsRef.current = onDiagnostics
@@ -1950,6 +1972,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   codeCellStatusesRef.current = codeCellStatuses
   readOnlyRef.current = readOnly
   markupViewRef.current = markupView
+  reviewAuthorIdRef.current = reviewAuthorId
+  activeReviewAnchorIdRef.current = activeReviewAnchorId
 
   const emitReviewSelection = (view: EditorView) => {
     const selection = selectedReviewText(view)
@@ -2228,6 +2252,13 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       element.scrollIntoView({ behavior: motionAwareScrollBehavior(), block: 'center' })
       return true
     },
+    scrollToReviewAnchor: (anchorId) => {
+      const element = [...(hostRef.current?.querySelectorAll<HTMLElement>('[data-review-anchor]') ?? [])]
+        .find((candidate) => candidate.dataset.reviewAnchor === anchorId)
+      if (!element || typeof element.scrollIntoView !== 'function') return false
+      element.scrollIntoView({ behavior: motionAwareScrollBehavior(), block: 'center' })
+      return true
+    },
     source: () => {
       const view = viewRef.current
       return view && metadataRef.current ? serializeStructuredManuscript(view.state.doc, metadataRef.current) : sourceRef.current
@@ -2250,7 +2281,13 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         spellcheck: 'true',
         class: 'structured-editor-content',
       },
-      decorations: (state) => reviewDecorations(state.doc, reviewDecorationRef.current, markupViewRef.current),
+      decorations: (state) => reviewDecorations(
+        state.doc,
+        reviewDecorationRef.current,
+        markupViewRef.current,
+        reviewAuthorIdRef.current,
+        activeReviewAnchorIdRef.current,
+      ),
       handleDOMEvents: {
         click: (_editorView, event) => {
           if (event.target instanceof Element && event.target.closest('.structured-link-edit')) return true
@@ -2375,9 +2412,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
 
   useEffect(() => {
     markupViewRef.current = markupView
+    reviewAuthorIdRef.current = reviewAuthorId
+    activeReviewAnchorIdRef.current = activeReviewAnchorId
     const view = viewRef.current
     if (view) view.dispatch(view.state.tr.setMeta('dm-decoration-refresh', true))
-  }, [markupView])
+  }, [activeReviewAnchorId, markupView, reviewAuthorId])
 
   useEffect(() => {
     const view = viewRef.current
