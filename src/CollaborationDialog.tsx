@@ -3,7 +3,6 @@ import { CollaborationAccessPanel } from './CollaborationAccessPanel'
 import { CollaborationReviewPanel } from './CollaborationReviewPanel'
 import {
   CollaborationServiceClient,
-  normalizeCollaborationServiceUrl,
   type CollaborationAccessToken,
   type WorkspaceSummary,
 } from './collaboration/serviceClient'
@@ -13,7 +12,7 @@ import {
   takePendingCollaborationInvitation,
 } from './collaboration/invitationLink'
 import { completeOidcAuthorization, hasOidcCallback, prepareOidcAuthorization } from './collaboration/oidcBrowser'
-import type { CollaborationSessionProfile, WorkspaceProject } from './collaboration/workspaceService'
+import type { CollaborationSessionProfile, WorkspaceProject, WorkspaceRole } from './collaboration/workspaceService'
 import { Icon } from './Icon'
 import {
   HocuspocusCollaborationClient,
@@ -30,6 +29,7 @@ export interface CollaborationDialogProps {
   onRemoteSource: (source: string) => void
   onStatus: (status: CollaborationClientStatus) => void
   onSessionStateChange?: (active: boolean) => void
+  onRoleChange?: (role: WorkspaceRole | null) => void
   onCheckpoint: (checkpoint: CollaborationCheckpoint) => Promise<void>
   onCheckpointStateChange?: (uncheckpointed: boolean) => void
   checkpointMode: 'working-tree' | 'download'
@@ -52,6 +52,7 @@ export function CollaborationDialog({
   onRemoteSource,
   onStatus,
   onSessionStateChange,
+  onRoleChange,
   onCheckpoint,
   onCheckpointStateChange,
   checkpointMode,
@@ -68,6 +69,7 @@ export function CollaborationDialog({
   const [userId, setUserId] = useState(localAuthor.id)
   const [name, setName] = useState(localAuthor.name)
   const [status, setStatus] = useState<CollaborationClientStatus>('disconnected')
+  const [activeRole, setActiveRole] = useState<WorkspaceRole | null>(null)
   const [detail, setDetail] = useState('')
   const [collaborators, setCollaborators] = useState<ActiveCollaborator[]>([])
   const [uncheckpointed, setUncheckpointed] = useState(false)
@@ -247,6 +249,7 @@ export function CollaborationDialog({
   useEffect(() => () => {
     clientRef.current?.destroy()
     onSessionStateChange?.(false)
+    onRoleChange?.(null)
     onCheckpointStateChange?.(false)
   }, [])
 
@@ -279,7 +282,20 @@ export function CollaborationDialog({
     try {
       const accessToken = accessTokenRef.current
       if (!accessToken) throw new Error('A short-lived collaboration token is required.')
-      const urls = serviceClient?.urls ?? normalizeCollaborationServiceUrl(url)
+      const apiClient = serviceClient ?? new CollaborationServiceClient(url, accessToken)
+      const urls = apiClient.urls
+      let availableProjects = projects
+      let role = availableProjects.find((project) => project.id === projectId)?.role
+        ?? workspaces.find((workspace) => workspace.id === workspaceId)?.role
+      if (!role) {
+        availableProjects = await apiClient.listProjects(workspaceId)
+        setProjects(availableProjects)
+        role = availableProjects.find((project) => project.id === projectId)?.role
+      }
+      if (!role) throw new Error('The collaboration service did not return an effective role for this manuscript.')
+      setActiveRole(role)
+      onRoleChange?.(role)
+      let connectionEstablished = false
       const client = await HocuspocusCollaborationClient.connect({
         url: urls.websocketUrl,
         workspaceId,
@@ -287,18 +303,35 @@ export function CollaborationDialog({
         token: accessToken,
         bootstrapSource: source,
         presence: { userId, name, color: '#617f73' },
-        onStatus: updateStatus,
+        onStatus: (next, message) => {
+          updateStatus(next, message)
+          if (next !== 'connected' || !connectionEstablished) return
+          void apiClient.listProjects(workspaceId).then((nextProjects) => {
+            setProjects(nextProjects)
+            const nextRole = nextProjects.find((project) => project.id === projectId)?.role
+            if (!nextRole) throw new Error('Your access to this manuscript is no longer available.')
+            setActiveRole(nextRole)
+            onRoleChange?.(nextRole)
+          }).catch((error) => {
+            setActiveRole(null)
+            onRoleChange?.(null)
+            setDetail(error instanceof Error ? error.message : String(error))
+          })
+        },
         onPortableSource: (nextSource) => {
           updateCheckpointState(nextSource !== checkpointedSourceRef.current)
           onRemoteSource(nextSource)
         },
         onCollaborators: setCollaborators,
       })
+      connectionEstablished = true
       clientRef.current = client
-      if (!serviceClient) setServiceClient(new CollaborationServiceClient(url, accessToken))
+      if (!serviceClient) setServiceClient(apiClient)
       setToken('')
       updateStatus('connected')
     } catch (error) {
+      setActiveRole(null)
+      onRoleChange?.(null)
       onSessionStateChange?.(false)
       updateStatus('error', error instanceof Error ? error.message : String(error))
     }
@@ -309,6 +342,8 @@ export function CollaborationDialog({
     clientRef.current?.destroy()
     clientRef.current = null
     setCollaborators([])
+    setActiveRole(null)
+    onRoleChange?.(null)
     checkpointedSourceRef.current = source
     onSessionStateChange?.(false)
     updateCheckpointState(false)
@@ -317,7 +352,7 @@ export function CollaborationDialog({
 
   const checkpoint = async () => {
     const client = clientRef.current
-    if (!client || checkpointing) return
+    if (!client || checkpointing || activeRole !== 'owner') return
     setCheckpointing(true)
     setDetail('')
     try {
@@ -336,7 +371,8 @@ export function CollaborationDialog({
   const connected = status === 'connected' && Boolean(clientRef.current)
   const activeWorkspace = workspaces.find((workspace) => workspace.id === workspaceId)
   const activeProject = projects.find((project) => project.id === projectId)
-  const activeProjectWorkspace = activeWorkspace ? { ...activeWorkspace, role: activeProject?.role ?? activeWorkspace.role } : undefined
+  const activeProjectWorkspace = activeWorkspace ? { ...activeWorkspace, role: activeRole ?? activeProject?.role ?? activeWorkspace.role } : undefined
+  const canCheckpoint = activeRole === 'owner'
 
   return (
     <div className="modal-backdrop collaboration-backdrop" onMouseDown={onClose}>
@@ -348,12 +384,12 @@ export function CollaborationDialog({
 
         {connected ? (
           <div className="collaboration-connected">
-            <div className="collaboration-room"><span className="collaboration-live-dot" /><span><strong>{workspaceId} / {projectId}</strong><small>{uncheckpointed ? 'Live changes are waiting for an owner checkpoint' : 'Live state matches the latest owner checkpoint'}</small></span></div>
+            <div className="collaboration-room"><span className="collaboration-live-dot" /><span><strong>{workspaceId} / {projectId}</strong><small>{activeRole ? `${activeRole[0].toUpperCase()}${activeRole.slice(1)} access · ` : ''}{uncheckpointed ? 'Live changes are waiting for an owner checkpoint' : 'Live state matches the latest owner checkpoint'}</small></span></div>
             <section aria-label="People in this manuscript">
               <span className="collaboration-section-label">Here now · {collaborators.length}</span>
               <div className="collaboration-people">
                 {collaborators.map((collaborator) => (
-                  <div key={`${collaborator.userId}:${collaborator.clientId}`}><i style={{ background: collaborator.color ?? '#617f73' }}>{collaborator.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2)}</i><span><strong>{collaborator.name}</strong><small>{collaborator.userId === userId ? 'You · editing' : 'Online'}</small></span></div>
+                  <div key={`${collaborator.userId}:${collaborator.clientId}`}><i style={{ background: collaborator.color ?? '#617f73' }}>{collaborator.name.split(/\s+/).map((part) => part[0]).join('').slice(0, 2)}</i><span><strong>{collaborator.name}</strong><small>{collaborator.userId === userId ? `You · ${activeRole ?? 'online'}` : 'Online'}</small></span></div>
                 ))}
               </div>
             </section>
@@ -361,11 +397,11 @@ export function CollaborationDialog({
             {serviceClient && activeProjectWorkspace && profile && <CollaborationReviewPanel client={serviceClient} workspace={activeProjectWorkspace} projectId={projectId} currentUserId={profile.userId} />}
             {serviceClient && activeWorkspace?.role === 'owner' && profile && <CollaborationAccessPanel client={serviceClient} workspace={activeWorkspace} projectId={projectId} currentUserId={profile.userId} />}
             <div className={`collaboration-checkpoint ${uncheckpointed ? 'pending' : ''}`}>
-              <span><strong>{checkpointMode === 'working-tree' ? 'Owner-controlled working tree' : 'Portable owner copy'}</strong><small>{checkpointMode === 'working-tree' ? `Write deterministic review state to ${checkpointTarget}. Git remains a separate explicit action.` : `Download deterministic review state as ${checkpointTarget}.`}</small></span>
-              <button onClick={() => void checkpoint()} disabled={!uncheckpointed || checkpointing}>{checkpointing ? 'Checkpointing…' : uncheckpointed ? (checkpointMode === 'working-tree' ? 'Checkpoint to project' : 'Download checkpoint') : 'Checkpoint current'}</button>
+              <span><strong>{checkpointMode === 'working-tree' ? 'Owner-controlled working tree' : 'Portable owner copy'}</strong><small>{canCheckpoint ? (checkpointMode === 'working-tree' ? `Write deterministic review state to ${checkpointTarget}. Git remains a separate explicit action.` : `Download deterministic review state as ${checkpointTarget}.`) : 'Only this manuscript’s owner can materialize the live state as a portable checkpoint.'}</small></span>
+              <button onClick={() => void checkpoint()} disabled={!canCheckpoint || !uncheckpointed || checkpointing}>{checkpointing ? 'Checkpointing…' : !canCheckpoint ? 'Owner checkpoint only' : uncheckpointed ? (checkpointMode === 'working-tree' ? 'Checkpoint to project' : 'Download checkpoint') : 'Checkpoint current'}</button>
             </div>
             {detail && <div className="collaboration-error" role="alert">{detail}</div>}
-            <footer><button className="secondary" onClick={disconnect}>Leave session</button><button onClick={onClose}>Continue writing</button></footer>
+            <footer><button className="secondary" onClick={disconnect}>Leave session</button><button onClick={onClose}>{activeRole === 'viewer' ? 'Continue reading' : activeRole === 'commenter' ? 'Continue reviewing' : 'Continue writing'}</button></footer>
           </div>
         ) : (
           <form onSubmit={(event) => { event.preventDefault(); void connect() }}>

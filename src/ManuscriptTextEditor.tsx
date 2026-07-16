@@ -28,12 +28,14 @@ export function ManuscriptTextEditor({
   as = 'p',
   className = '',
   ariaLabel,
+  readOnly = false,
 }: {
   value: string
   onChange: (value: string) => void
   as?: 'p' | 'h1'
   className?: string
   ariaLabel: string
+  readOnly?: boolean
 }) {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
@@ -44,10 +46,12 @@ export function ManuscriptTextEditor({
     if (!hostRef.current) return
     const view = new EditorView(hostRef.current, {
       state: editorState(value, as === 'h1'),
+      editable: () => !readOnly,
       attributes: {
         role: 'textbox',
         'aria-label': ariaLabel,
         'aria-multiline': 'true',
+        'aria-readonly': readOnly ? 'true' : 'false',
         spellcheck: 'true',
       },
       dispatchTransaction(transaction) {
@@ -61,12 +65,12 @@ export function ManuscriptTextEditor({
       viewRef.current = null
       view.destroy()
     }
-  }, [ariaLabel, as])
+  }, [ariaLabel, as, readOnly])
 
   useEffect(() => {
     const view = viewRef.current
     if (view && view.state.doc.textContent.trim() !== value) view.updateState(editorState(value, as === 'h1'))
   }, [as, value])
 
-  return <div ref={hostRef} className={`structured-editable editable ${className}`} />
+  return <div ref={hostRef} className={`structured-editable editable ${className}`} data-read-only={readOnly ? 'true' : 'false'} />
 }

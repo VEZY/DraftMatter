@@ -18,17 +18,33 @@ vi.mock('./CollaborationDialog', () => ({
     onRemoteSource: (source: string) => void
     onStatus: (status: 'connected') => void
     onSessionStateChange: (active: boolean) => void
+    onRoleChange: (role: 'owner' | 'editor' | 'commenter' | 'viewer' | null) => void
     onCheckpointStateChange: (pending: boolean) => void
     onCheckpoint: (value: typeof checkpoint) => Promise<void>
   }) => props.open ? createElement('div', { 'data-testid': 'collaboration-test-controls' },
     createElement('button', {
       onClick: () => {
         props.onSessionStateChange(true)
+        props.onRoleChange('owner')
         props.onStatus('connected')
         props.onRemoteSource(sharedSource)
         props.onCheckpointStateChange(true)
       },
     }, 'Apply live revision'),
+    createElement('button', {
+      onClick: () => {
+        props.onSessionStateChange(true)
+        props.onRoleChange('commenter')
+        props.onStatus('connected')
+      },
+    }, 'Join as commenter'),
+    createElement('button', {
+      onClick: () => {
+        props.onSessionStateChange(true)
+        props.onRoleChange('viewer')
+        props.onStatus('connected')
+      },
+    }, 'Join as viewer'),
     createElement('button', {
       onClick: () => void props.onCheckpoint(checkpoint).then(() => props.onCheckpointStateChange(false)),
     }, 'Checkpoint live revision'),
@@ -104,5 +120,25 @@ describe('owner-controlled collaboration checkpoint', () => {
       expectedHash: 'document-old',
     })
     expect(container.textContent).toContain('Saved to project')
+  })
+
+  it('enforces commenter and viewer capabilities across the rendered editor and review rail', async () => {
+    await act(async () => container.querySelector<HTMLButtonElement>('.collaboration-toggle')!.click())
+    const controls = container.querySelector<HTMLElement>('[data-testid="collaboration-test-controls"]')!
+    await act(async () => [...controls.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Join as commenter')!.click())
+
+    expect(container.querySelector('.structured-manuscript-editor')?.getAttribute('data-read-only')).toBe('true')
+    expect(container.querySelector<HTMLButtonElement>('.suggestion-mode-control')?.disabled).toBe(true)
+    expect(container.querySelector('.suggestion-mode-control')?.textContent).toContain('Comment-only')
+    expect(container.querySelector<HTMLButtonElement>('.format-toolbar [aria-label="Bold"]')?.disabled).toBe(true)
+    expect(container.textContent).toContain('New comment')
+    expect(container.textContent).not.toContain('Suggest edit')
+    expect(container.querySelector('.review-actions')).toBeNull()
+
+    await act(async () => [...controls.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Join as viewer')!.click())
+    expect(container.querySelector('.suggestion-mode-control')?.textContent).toContain('Read-only')
+    expect(container.textContent).not.toContain('New comment')
+    expect(container.textContent).not.toContain('Suggest edit')
+    expect(container.querySelector('.reply-box')).toBeNull()
   })
 })

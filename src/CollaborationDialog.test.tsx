@@ -75,6 +75,9 @@ describe('collaboration dialog', () => {
   })
 
   it('connects without persisting its token and keeps the session alive when closed', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      projects: [{ id: 'paper', workspaceId: 'forest', name: 'Shared paper', role: 'owner', createdAt: '2026-07-15T00:00:00.000Z' }],
+    }), { status: 200 })))
     const publishPortableSource = vi.fn().mockReturnValue('# Draft\n\nShared revision')
     const destroy = vi.fn()
     const createCheckpoint = vi.fn().mockReturnValue({
@@ -141,11 +144,52 @@ describe('collaboration dialog', () => {
     expect(onSessionStateChange).toHaveBeenLastCalledWith(false)
   })
 
+  it('reports an effective commenter role and keeps owner checkpoints unavailable', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      projects: [{ id: 'paper', workspaceId: 'forest', name: 'Shared paper', role: 'commenter', createdAt: '2026-07-15T00:00:00.000Z' }],
+    }), { status: 200 })))
+    const createCheckpoint = vi.fn()
+    vi.spyOn(HocuspocusCollaborationClient, 'connect').mockResolvedValue({
+      publishPortableSource: vi.fn(() => '# Draft'),
+      createCheckpoint,
+      destroy: vi.fn(),
+    } as unknown as HocuspocusCollaborationClient)
+    const onRoleChange = vi.fn()
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<CollaborationDialog
+      open
+      source="# Draft"
+      onClose={vi.fn()}
+      onRemoteSource={vi.fn()}
+      onStatus={vi.fn()}
+      onRoleChange={onRoleChange}
+      onCheckpoint={vi.fn().mockResolvedValue(undefined)}
+      checkpointMode="download"
+      checkpointTarget="paper.qmd"
+    />))
+    change(input(container, 'Service URL'), 'https://collab.example.org')
+    change(input(container, 'Workspace ID'), 'forest')
+    change(input(container, 'Project ID'), 'paper')
+    change(input(container, 'Short-lived access token'), 'commenter-token')
+    await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+
+    expect(onRoleChange).toHaveBeenCalledWith('commenter')
+    expect(container.textContent).toContain('Commenter access')
+    expect(container.textContent).toContain('Continue reviewing')
+    const checkpointButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find((candidate) => candidate.textContent === 'Owner checkpoint only')!
+    expect(checkpointButton.disabled).toBe(true)
+    await act(async () => checkpointButton.click())
+    expect(createCheckpoint).not.toHaveBeenCalled()
+    await act(async () => root.unmount())
+    expect(onRoleChange).toHaveBeenLastCalledWith(null)
+  })
+
   it('discovers the authenticated identity and permitted projects before joining', async () => {
     const request = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ userId: 'account-42', displayName: 'Dr Researcher' }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ workspaces: [{ id: 'forest', name: 'Forest Lab', role: 'owner', createdAt: '2026-07-15T00:00:00.000Z' }] }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ projects: [{ id: 'paper', workspaceId: 'forest', name: 'Canopy paper', createdAt: '2026-07-15T00:00:00.000Z' }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ projects: [{ id: 'paper', workspaceId: 'forest', name: 'Canopy paper', role: 'owner', createdAt: '2026-07-15T00:00:00.000Z' }] }), { status: 200 }))
     vi.stubGlobal('fetch', request)
     const connect = vi.spyOn(HocuspocusCollaborationClient, 'connect').mockImplementation(async (options) => {
       options.onStatus?.('connected')
@@ -157,12 +201,14 @@ describe('collaboration dialog', () => {
     })
     const container = document.createElement('div')
     const root = createRoot(container)
+    const onRoleChange = vi.fn()
     await act(async () => root.render(<CollaborationDialog
       open
       source="# Draft"
       onClose={vi.fn()}
       onRemoteSource={vi.fn()}
       onStatus={vi.fn()}
+      onRoleChange={onRoleChange}
       onCheckpoint={vi.fn().mockResolvedValue(undefined)}
       checkpointMode="working-tree"
       checkpointTarget="paper.qmd"
@@ -189,7 +235,9 @@ describe('collaboration dialog', () => {
       presence: expect.objectContaining({ userId: 'account-42', name: 'Dr Researcher' }),
     }))
     expect(container.textContent).toContain('Workspace access & recovery')
+    expect(onRoleChange).toHaveBeenCalledWith('owner')
     await act(async () => root.unmount())
+    expect(onRoleChange).toHaveBeenLastCalledWith(null)
   })
 
   it('starts browser account sign-in with S256 PKCE and no password handoff', async () => {

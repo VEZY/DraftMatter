@@ -60,6 +60,7 @@ import { copyPlainText } from './clipboard'
 import { countWords, measurePortableManuscript } from './manuscriptMetrics'
 import { ReviewTimestamp } from './ReviewTimestamp'
 import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
+import { workspaceRoleCapabilities, type WorkspaceRole } from './collaboration/workspaceService'
 
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
 const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
@@ -365,17 +366,19 @@ function CitationFormattingControls({
   onStyleChange,
   onLocaleChange,
   compact = false,
+  disabled = false,
 }: {
   style: CitationStyleId
   locale: CitationLocale
   onStyleChange: (style: CitationStyleId) => void
   onLocaleChange: (locale: CitationLocale) => void
   compact?: boolean
+  disabled?: boolean
 }) {
   return (
     <div className={`citation-format-controls ${compact ? 'compact' : ''}`}>
-      <label><span>Style</span><select aria-label="Citation style" value={style} onChange={(event) => onStyleChange(event.target.value as CitationStyleId)}>{citationStyleOptions.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}</select></label>
-      <label><span>Locale</span><select aria-label="Citation locale" value={locale} onChange={(event) => onLocaleChange(event.target.value as CitationLocale)}>{citationLocaleOptions.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}</select></label>
+      <label><span>Style</span><select aria-label="Citation style" value={style} onChange={(event) => onStyleChange(event.target.value as CitationStyleId)} disabled={disabled}>{citationStyleOptions.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}</select></label>
+      <label><span>Locale</span><select aria-label="Citation locale" value={locale} onChange={(event) => onLocaleChange(event.target.value as CitationLocale)} disabled={disabled}>{citationLocaleOptions.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}</select></label>
     </div>
   )
 }
@@ -439,6 +442,8 @@ function App() {
   const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [collaborationOpen, setCollaborationOpen] = useState(false)
   const [collaborationStatus, setCollaborationStatus] = useState<CollaborationClientStatus>('disconnected')
+  const [collaborationSessionActive, setCollaborationSessionActive] = useState(false)
+  const [collaborationRole, setCollaborationRole] = useState<WorkspaceRole | null>(null)
   const [collaborationUncheckpointed, setCollaborationUncheckpointed] = useState(false)
   const [filename, setFilename] = useState(initialProjectMeta.filename)
   const [projectName, setProjectName] = useState(initialProjectMeta.projectName)
@@ -533,6 +538,11 @@ function App() {
   const executionActiveLanguageRef = useRef<ExecutionLanguage | undefined>(undefined)
   const executionActiveProviderRef = useRef<ExecutionProviderKind | undefined>(undefined)
   const crossrefSessionRef = useRef<CrossrefSearchSession | null>(null)
+  const activeCollaborationCapabilities = collaborationRole ? workspaceRoleCapabilities(collaborationRole) : null
+  const canEditManuscript = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.edit)
+  const canCommentReview = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.comment)
+  const canSuggestReview = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.suggest)
+  const canDecideReview = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.decide)
   draftRef.current = draft
   if (!crossrefSessionRef.current) {
     crossrefSessionRef.current = new CrossrefSearchSession({
@@ -660,6 +670,7 @@ function App() {
   }
 
   const openPublicationAuthors = () => {
+    if (!canEditManuscript) return
     setPublicationAuthorNames(publicationAuthors.length
       ? publicationAuthors.map((name, sourceIndex) => publicationAuthorDraft(name, sourceIndex))
       : [publicationAuthorDraft()])
@@ -677,6 +688,7 @@ function App() {
 
   const commitPublicationAuthors = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
+    if (!canEditManuscript) return
     try {
       const populated = publicationAuthorNames.filter((author) => author.name.trim())
       const names = populated.map((author) => author.name.trim())
@@ -726,23 +738,24 @@ function App() {
   }
 
   const updateManuscriptText = (field: ManuscriptTextField, value: string) => {
+    if (!canEditManuscript) return
     updateDraft(applyDraftTextTransaction(draft, field, value))
   }
 
   const undoDraft = () => {
-    if (!canUndo) return
+    if (!canEditManuscript || !canUndo) return
     markDraftChanged()
     undoDraftHistory()
   }
 
   const redoDraft = () => {
-    if (!canRedo) return
+    if (!canEditManuscript || !canRedo) return
     markDraftChanged()
     redoDraftHistory()
   }
 
   const updateStructuredManuscript = (next: string) => {
-    if (next === manuscriptSourceRef.current) return
+    if (!canEditManuscript || next === manuscriptSourceRef.current) return
     replaceManuscriptSource(next)
     const parsed = parsePortableDocument(next, draft)
     markDraftChanged()
@@ -1317,6 +1330,7 @@ function App() {
   }
 
   const startSourceEditing = () => {
+    if (!canEditManuscript) return
     setSourceTab('reviewed')
     setSourceBuffer(manuscriptSource)
     setSourceEditing(true)
@@ -1328,6 +1342,7 @@ function App() {
   }
 
   const applySourceEditing = () => {
+    if (!canEditManuscript) return
     const parsed = parsePortableDocument(sourceBuffer, initialDraft)
     replaceManuscriptSource(sourceBuffer)
     markDraftChanged()
@@ -1357,6 +1372,17 @@ function App() {
 
   const updateCollaborationSessionState = (active: boolean) => {
     collaborationSessionActiveRef.current = active
+    setCollaborationSessionActive(active)
+    if (!active) setCollaborationRole(null)
+  }
+
+  const updateCollaborationRole = (role: WorkspaceRole | null) => {
+    setCollaborationRole(role)
+    if (role && !workspaceRoleCapabilities(role).suggest) {
+      setSuggestionMode(false)
+      setSourceEditing(false)
+      setPublicationAuthorsOpen(false)
+    }
   }
 
   const checkpointCollaboration = async (checkpoint: CollaborationCheckpoint) => {
@@ -1457,6 +1483,10 @@ function App() {
   }
 
   const runStructuredCommand = (command: (editor: StructuredManuscriptEditorHandle) => boolean, label: string) => {
+    if (!canEditManuscript) {
+      setToast('Your collaboration role has read-only manuscript access')
+      return
+    }
     const editor = structuredEditorRef.current
     if (!structuredMode || !editor) {
       setToast(`${label} is available in the full portable manuscript editor`)
@@ -1535,6 +1565,7 @@ function App() {
   }
 
   const addStructuredSection = () => {
+    if (!canEditManuscript) return
     const title = window.prompt('Section heading')?.trim()
     if (!title) return
     const requestedLevel = Number(window.prompt('Heading level (1–6)', '2'))
@@ -2114,6 +2145,7 @@ function App() {
   }
 
   const acceptProposal = (proposal = draft.activeProposal) => {
+    if (!canDecideReview) return
     const timestamp = new Date().toISOString()
     if (proposal === 'alice') {
       updateDraft({
@@ -2140,6 +2172,7 @@ function App() {
   }
 
   const rejectProposal = (proposal = draft.activeProposal) => {
+    if (!canDecideReview) return
     const timestamp = new Date().toISOString()
     if (proposal === 'alice') updateDraft({ aliceStatus: 'rejected', activeProposal: 'marcus', reviewUpdatedAt: { ...draft.reviewUpdatedAt, alice: timestamp } })
     else updateDraft({ marcusStatus: 'rejected', activeProposal: 'alice', reviewUpdatedAt: { ...draft.reviewUpdatedAt, marcus: timestamp } })
@@ -2147,7 +2180,7 @@ function App() {
   }
 
   const addReply = () => {
-    if (!reply.trim()) return
+    if (!canCommentReview || !reply.trim()) return
     const timestamp = new Date().toISOString()
     updateDraft({
       commentReplies: [...draft.commentReplies, reply.trim()],
@@ -2159,12 +2192,14 @@ function App() {
   }
 
   const removeDemoComment = () => {
+    if (!canDecideReview) return
     updateDraft({ commentDeleted: true, commentResolved: false, reviewUpdatedAt: { ...draft.reviewUpdatedAt, comment: new Date().toISOString() } })
     setActiveReviewId(reviewQueue.find((item) => item.id !== 'dm-comment-01')?.id)
     setToast('Comment thread removed from the active queue')
   }
 
   const toggleDemoComment = () => {
+    if (!canDecideReview) return
     updateDraft({
       commentResolved: !draft.commentResolved,
       commentDeleted: false,
@@ -2768,6 +2803,10 @@ function App() {
   }
 
   const confirmCitationPicker = async () => {
+    if (!canEditManuscript) {
+      setToast('Your collaboration role cannot change manuscript citations')
+      return
+    }
     if (!citationPickerItems.length || citationAcquisitionState === 'saving') {
       setToast('Select at least one source for the citation')
       return
@@ -2924,6 +2963,7 @@ function App() {
   }
 
   const updateCitationItem = (citekey: string, patch: Partial<CitationItem>) => {
+    if (!canEditManuscript) return
     const items = detailCitationItems.map((item) => item.citekey === citekey ? { ...item, ...patch } : item)
     if (structuredMode && structuredCitationSelection) {
       const rendered = formatCitationCluster(citations, items)
@@ -2936,6 +2976,7 @@ function App() {
   }
 
   const removeCitationItem = (citekey: string) => {
+    if (!canEditManuscript) return
     const items = detailCitationItems.filter((item) => item.citekey !== citekey)
     if (!items.length) {
       setToast('A citation cluster needs at least one source')
@@ -2970,6 +3011,7 @@ function App() {
   }
 
   const updateCitationPreferences = (style: CitationStyleId, locale: CitationLocale) => {
+    if (!canEditManuscript) return
     setCitationStyle(style)
     setCitationLocale(locale)
     const root = desktopSessionRef.current?.root
@@ -3004,6 +3046,7 @@ function App() {
       keywords: 'reference source cite bibliography zotero crossref',
       icon: <span className="command-icon">@</span>,
       shortcut: '⌘ ⇧ C',
+      disabled: !canEditManuscript,
       action: () => { setCommandOpen(false); openCitationPicker() },
     },
     {
@@ -3012,6 +3055,7 @@ function App() {
       description: 'Attach a note to selected text',
       keywords: 'review feedback thread note',
       icon: <span className="command-icon"><Icon name="message" size={17} /></span>,
+      disabled: !canCommentReview,
       action: () => { setCommandOpen(false); showReviewPanel() },
     },
     {
@@ -3020,6 +3064,7 @@ function App() {
       description: 'Edit portable publication names in frontmatter',
       keywords: 'author coauthor metadata yaml publication byline',
       icon: <span className="command-icon"><Icon name="users" size={17} /></span>,
+      disabled: !canEditManuscript,
       action: () => { setCommandOpen(false); openPublicationAuthors() },
     },
     {
@@ -3028,6 +3073,7 @@ function App() {
       description: 'Insert a heading and update the outline',
       keywords: 'heading h2 structure outline',
       icon: <span className="command-icon">H2</span>,
+      disabled: !canEditManuscript,
       action: () => { setCommandOpen(false); addStructuredSection() },
     },
     {
@@ -3036,6 +3082,7 @@ function App() {
       description: 'Rendered TeX kept as portable Markdown math',
       keywords: 'math latex tex formula',
       icon: <span className="command-icon">∑</span>,
+      disabled: !canEditManuscript,
       action: () => { setCommandOpen(false); insertStructuredEquation() },
     },
     {
@@ -3044,6 +3091,7 @@ function App() {
       description: 'Add an optional portable equation label',
       keywords: 'math latex tex formula block',
       icon: <span className="command-icon">∫</span>,
+      disabled: !canEditManuscript,
       action: () => { setCommandOpen(false); insertStructuredEquation(true) },
     },
     {
@@ -3052,6 +3100,7 @@ function App() {
       description: 'Link a figure, table, equation, or section',
       keywords: 'xref link target figure table equation section',
       icon: <span className="command-icon">§</span>,
+      disabled: !canEditManuscript,
       action: () => { setCommandOpen(false); insertStructuredCrossReference() },
     },
     {
@@ -3060,6 +3109,7 @@ function App() {
       description: 'Add a reference here and its definition below',
       keywords: 'note reference definition',
       icon: <span className="command-icon">¹</span>,
+      disabled: !canEditManuscript,
       action: () => { setCommandOpen(false); insertStructuredFootnote() },
     },
     {
@@ -3068,6 +3118,7 @@ function App() {
       description: 'Create an editable table with an optional caption',
       keywords: 'rows columns data grid caption',
       icon: <span className="command-icon"><Icon name="table" size={17} /></span>,
+      disabled: !canEditManuscript,
       action: () => { setCommandOpen(false); insertStructuredTable() },
     },
     {
@@ -3076,6 +3127,7 @@ function App() {
       description: 'Use a project-relative image with alt text',
       keywords: 'image picture graphic caption',
       icon: <span className="command-icon"><Icon name="image" size={17} /></span>,
+      disabled: !canEditManuscript,
       action: () => { setCommandOpen(false); insertStructuredFigure() },
     },
     {
@@ -3084,6 +3136,7 @@ function App() {
       description: 'Choose Python, R, or Julia explicitly',
       keywords: 'execute python r julia source',
       icon: <span className="command-icon"><Icon name="code" size={17} /></span>,
+      disabled: !canEditManuscript,
       action: () => { setCommandOpen(false); insertStructuredCodeCell() },
     },
     {
@@ -3198,7 +3251,7 @@ function App() {
         <div className="topbar-actions">
           <button className={`collaboration-toggle ${collaborationStatus}`} onClick={() => setCollaborationOpen(true)} aria-label="Open online collaboration">
             <Icon name="users" size={16} />
-            <span>{collaborationStatus === 'connected' ? 'Live' : 'Collaborate'}</span>
+            <span>{collaborationStatus === 'connected' ? `Live${collaborationRole ? ` · ${collaborationRole[0].toUpperCase()}${collaborationRole.slice(1)}` : ''}` : 'Collaborate'}</span>
             <i />
           </button>
           <button className="icon-button command-button" onClick={() => setCommandOpen(true)} aria-label="Open command menu">
@@ -3326,7 +3379,7 @@ function App() {
                     <span>{item.title}</span><small>H{item.level}</small>
                   </button>
                 )) : <p className="outline-empty">{structuredOutline.length ? 'No headings match these outline filters.' : 'Add a heading to build the outline.'}</p>}
-                <button className="add-section" onClick={() => { setOutlineOptionsOpen(false); addStructuredSection() }}><Icon name="plus" size={15} /> Add section</button>
+                <button className="add-section" onClick={() => { setOutlineOptionsOpen(false); addStructuredSection() }} disabled={!canEditManuscript}><Icon name="plus" size={15} /> Add section</button>
               </> : <>
                 {visibleLegacyOutline.length ? visibleLegacyOutline.map((item) => (
                   <button
@@ -3337,7 +3390,7 @@ function App() {
                     <span>{item.title}</span>{item.detail && <small>{item.detail}</small>}
                   </button>
                 )) : <p className="outline-empty">No headings match these outline filters.</p>}
-                <button className="add-section" onClick={() => { setOutlineOptionsOpen(false); addStructuredSection() }}><Icon name="plus" size={15} /> Add section</button>
+                <button className="add-section" onClick={() => { setOutlineOptionsOpen(false); addStructuredSection() }} disabled={!canEditManuscript}><Icon name="plus" size={15} /> Add section</button>
               </>}
             </div>
 
@@ -3365,6 +3418,7 @@ function App() {
                 aria-label="Block style"
                 value=""
                 onChange={(event) => applyBlockStyle(event.target.value)}
+                disabled={!canEditManuscript}
               >
                 <option value="" disabled>Text style</option>
                 <option value="paragraph">Body text</option>
@@ -3385,18 +3439,18 @@ function App() {
               <Icon name="chevronDown" size={13} />
             </label>
             <span className="toolbar-divider" />
-            <button aria-label="Bold" onClick={() => runStructuredCommand((editor) => editor.toggleBold(), 'Bold')}><strong>B</strong></button>
-            <button aria-label="Italic" onClick={() => runStructuredCommand((editor) => editor.toggleItalic(), 'Italic')}><em>I</em></button>
-            <button aria-label="Add link" onClick={addStructuredLink}><Icon name="link" size={16} /></button>
+            <button aria-label="Bold" onClick={() => runStructuredCommand((editor) => editor.toggleBold(), 'Bold')} disabled={!canEditManuscript}><strong>B</strong></button>
+            <button aria-label="Italic" onClick={() => runStructuredCommand((editor) => editor.toggleItalic(), 'Italic')} disabled={!canEditManuscript}><em>I</em></button>
+            <button aria-label="Add link" onClick={addStructuredLink} disabled={!canEditManuscript}><Icon name="link" size={16} /></button>
             <span className="toolbar-divider" />
-            <button aria-label="Block quote" onClick={() => runStructuredCommand((editor) => editor.wrapBlockquote(), 'Block quote')}><Icon name="quote" size={17} /></button>
-            <button aria-label="Insert image" onClick={insertStructuredFigure}><Icon name="image" size={17} /></button>
-            <button aria-label="Insert table" onClick={() => runStructuredCommand((editor) => editor.insertTable(), 'Insert table')}><Icon name="table" size={17} /></button>
-            <button aria-label="Insert equation" onClick={() => insertStructuredEquation()}><span className="toolbar-symbol">∑</span></button>
-            <button aria-label="Insert code cell" onClick={insertStructuredCodeCell}><Icon name="code" size={17} /></button>
+            <button aria-label="Block quote" onClick={() => runStructuredCommand((editor) => editor.wrapBlockquote(), 'Block quote')} disabled={!canEditManuscript}><Icon name="quote" size={17} /></button>
+            <button aria-label="Insert image" onClick={insertStructuredFigure} disabled={!canEditManuscript}><Icon name="image" size={17} /></button>
+            <button aria-label="Insert table" onClick={() => runStructuredCommand((editor) => editor.insertTable(), 'Insert table')} disabled={!canEditManuscript}><Icon name="table" size={17} /></button>
+            <button aria-label="Insert equation" onClick={() => insertStructuredEquation()} disabled={!canEditManuscript}><span className="toolbar-symbol">∑</span></button>
+            <button aria-label="Insert code cell" onClick={insertStructuredCodeCell} disabled={!canEditManuscript}><Icon name="code" size={17} /></button>
             <span className="toolbar-divider" />
-            <button aria-label="Undo" onClick={() => structuredMode ? structuredEditorRef.current?.undo() : undoDraft()} disabled={!structuredMode && !canUndo}><Icon name="undo" size={16} /></button>
-            <button aria-label="Redo" onClick={() => structuredMode ? structuredEditorRef.current?.redo() : redoDraft()} disabled={!structuredMode && !canRedo}><Icon name="redo" size={16} /></button>
+            <button aria-label="Undo" onClick={() => structuredMode ? structuredEditorRef.current?.undo() : undoDraft()} disabled={!canEditManuscript || (!structuredMode && !canUndo)}><Icon name="undo" size={16} /></button>
+            <button aria-label="Redo" onClick={() => structuredMode ? structuredEditorRef.current?.redo() : redoDraft()} disabled={!canEditManuscript || (!structuredMode && !canRedo)}><Icon name="redo" size={16} /></button>
           </div>
 
           {structuredMode ? (
@@ -3406,6 +3460,7 @@ function App() {
               <button
                 className="publication-authors-trigger"
                 onClick={openPublicationAuthors}
+                disabled={!canEditManuscript}
                 aria-label={`Manage manuscript authors${publicationAuthors.length ? `, ${publicationAuthors.length} listed` : ''}`}
                 title={publicationAuthors.length ? publicationAuthors.join(' · ') : 'Add portable publication authors'}
               >
@@ -3414,7 +3469,7 @@ function App() {
               </button>
             </div>
             {!structuredOutline.some((item) => item.level === 1) && (
-              <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" />
+              <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" readOnly={!canEditManuscript} />
             )}
             {primaryCell && (
               <section className="structured-execution-workspace" aria-label="Executable cells">
@@ -3479,7 +3534,7 @@ function App() {
               onReviewSelectionChange={setStructuredReviewSelection}
               onReviewAnchorSelect={selectReviewAnchor}
               onCommandRequest={() => setCommandOpen(true)}
-              suggestionMode={suggestionMode && markupView !== 'original' && markupView !== 'final'}
+              suggestionMode={canSuggestReview && suggestionMode && markupView !== 'original' && markupView !== 'final'}
               suggestionAuthor={userSettings.author}
               onSuggestionCapture={(message) => setToast(message)}
               citationLabels={structuredCitationLabels}
@@ -3488,7 +3543,7 @@ function App() {
               reviewAuthorId={reviewAuthorFilter === 'all' ? undefined : reviewAuthorFilter}
               activeReviewId={activeReviewId}
               activeReviewAnchorId={activeReviewAnchorId}
-              readOnly={Boolean(structuredReviewProjection)}
+              readOnly={Boolean(structuredReviewProjection) || !canEditManuscript}
               resolveAssetUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) ?? 'data:,' : path}
             />
             {citationOpen && structuredCitationSelection && (
@@ -3504,7 +3559,7 @@ function App() {
                     return (
                       <div className={item.citekey === activeCitationItem?.citekey ? 'active' : ''} key={item.citekey}>
                         <button onClick={() => setCitationEditKey(item.citekey)}><strong>{record?.title ?? item.citekey}</strong><small>@{item.citekey}{record?.availability === 'cached' ? ' · cached copy' : ''}</small></button>
-                        <button onClick={() => removeCitationItem(item.citekey)} aria-label={`Remove ${item.citekey} from citation`}><Icon name="close" size={13} /></button>
+                        <button onClick={() => removeCitationItem(item.citekey)} aria-label={`Remove ${item.citekey} from citation`} disabled={!canEditManuscript}><Icon name="close" size={13} /></button>
                       </div>
                     )
                   })}
@@ -3512,21 +3567,21 @@ function App() {
                 {activeCitationItem && <CitationRecordInspector record={activeCitationRecord} citekey={activeCitationItem.citekey} attachments={citationAttachments} attachmentState={citationAttachmentState} onOpenLink={(request) => void openCitationRecordLink(request)} />}
                 {activeCitationItem && (
                   <div className="citation-modifiers">
-                    <label><span>Prefix</span><input value={activeCitationItem.prefix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { prefix: event.target.value })} placeholder="e.g. see" /></label>
-                    <label><span>Locator</span><input value={activeCitationItem.locator ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { locator: event.target.value })} placeholder="e.g. p. 18" /></label>
-                    <label className="citation-suffix"><span>Suffix</span><input value={activeCitationItem.suffix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { suffix: event.target.value })} placeholder="e.g. emphasis added" /></label>
-                    <label className="citation-suppress"><input type="checkbox" checked={activeCitationItem.suppressAuthor ?? false} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { suppressAuthor: event.target.checked })} /><span>Suppress author</span></label>
+                    <label><span>Prefix</span><input value={activeCitationItem.prefix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { prefix: event.target.value })} placeholder="e.g. see" readOnly={!canEditManuscript} /></label>
+                    <label><span>Locator</span><input value={activeCitationItem.locator ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { locator: event.target.value })} placeholder="e.g. p. 18" readOnly={!canEditManuscript} /></label>
+                    <label className="citation-suffix"><span>Suffix</span><input value={activeCitationItem.suffix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { suffix: event.target.value })} placeholder="e.g. emphasis added" readOnly={!canEditManuscript} /></label>
+                    <label className="citation-suppress"><input type="checkbox" checked={activeCitationItem.suppressAuthor ?? false} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { suppressAuthor: event.target.checked })} disabled={!canEditManuscript} /><span>Suppress author</span></label>
                   </div>
                 )}
-                <CitationFormattingControls style={citationStyle} locale={citationLocale} onStyleChange={changeCitationStyle} onLocaleChange={changeCitationLocale} compact />
-                <div className="citation-actions"><button onClick={() => setCitationOpen(false)}>Done</button><button onClick={() => openCitationPicker('edit')}>Add or remove sources</button></div>
+                <CitationFormattingControls style={citationStyle} locale={citationLocale} onStyleChange={changeCitationStyle} onLocaleChange={changeCitationLocale} compact disabled={!canEditManuscript} />
+                <div className="citation-actions"><button onClick={() => setCitationOpen(false)}>Done</button><button onClick={() => openCitationPicker('edit')} disabled={!canEditManuscript}>Add or remove sources</button></div>
               </div>
             )}
             {renderedBibliography.length > 0 && (
               <section id="references" className="bibliography-section" aria-labelledby="references-heading">
                 <div className="bibliography-heading">
                   <div><span className="eyebrow">Live CSL bibliography</span><h2 id="references-heading">References</h2></div>
-                  <CitationFormattingControls style={citationStyle} locale={citationLocale} onStyleChange={changeCitationStyle} onLocaleChange={changeCitationLocale} />
+                  <CitationFormattingControls style={citationStyle} locale={citationLocale} onStyleChange={changeCitationStyle} onLocaleChange={changeCitationLocale} disabled={!canEditManuscript} />
                 </div>
                 <div className="bibliography-entries">{renderedBibliography.map((entry) => <p key={entry.id} data-citekey={entry.id}>{entry.value}</p>)}</div>
               </section>
@@ -3536,20 +3591,20 @@ function App() {
           ) : (
           <article className="manuscript" aria-label="Editable manuscript">
             <div className="paper-meta">PORTABLE RESEARCH MANUSCRIPT · MARKDOWN / QUARTO</div>
-            <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" />
+            <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" readOnly={!canEditManuscript} />
             <div className="authors" aria-label="Publication authors">
               {publicationAuthors.map((author, index) => <span key={`${author}-${index}`}><Avatar initials={authorInitials(author)} tone={index % 2 ? 'blue' : 'sage'} small label={author} /> {author}</span>)}
-              <button onClick={openPublicationAuthors}><Icon name={publicationAuthors.length ? 'users' : 'plus'} size={13} /> {publicationAuthors.length ? 'Manage authors' : 'Add author'}</button>
+              <button onClick={openPublicationAuthors} disabled={!canEditManuscript}><Icon name={publicationAuthors.length ? 'users' : 'plus'} size={13} /> {publicationAuthors.length ? 'Manage authors' : 'Add author'}</button>
             </div>
 
             <section id="abstract" className="abstract-block">
               <h2>Abstract</h2>
-              <ManuscriptTextEditor value={draft.abstract} onChange={(abstract) => updateManuscriptText('abstract', abstract)} ariaLabel="Abstract" />
+              <ManuscriptTextEditor value={draft.abstract} onChange={(abstract) => updateManuscriptText('abstract', abstract)} ariaLabel="Abstract" readOnly={!canEditManuscript} />
             </section>
 
             <section id="introduction">
               <h2><span>1</span> Introduction</h2>
-              <p className="editable" contentEditable suppressContentEditableWarning spellCheck onBlur={(event) => updateManuscriptText('introduction', event.currentTarget.innerText.replace(/\s*\(Vezy.*$/, '').trim())}>
+              <p className="editable" role="textbox" aria-label="Introduction" aria-multiline="true" contentEditable={canEditManuscript} aria-readonly={!canEditManuscript} suppressContentEditableWarning spellCheck onBlur={(event) => { if (canEditManuscript) updateManuscriptText('introduction', event.currentTarget.innerText.replace(/\s*\(Vezy.*$/, '').trim()) }}>
                 {draft.introduction}{' '}
                 <CitationChip onClick={openCitationDetails} label={citationLabel} />
               </p>
@@ -3566,7 +3621,7 @@ function App() {
                       return (
                         <div className={item.citekey === activeCitationItem?.citekey ? 'active' : ''} key={item.citekey}>
                           <button onClick={() => setCitationEditKey(item.citekey)}><strong>{record?.title ?? item.citekey}</strong><small>@{item.citekey}{record?.availability === 'cached' ? ' · cached copy' : ''}</small></button>
-                          <button onClick={() => removeCitationItem(item.citekey)} aria-label={`Remove ${item.citekey} from citation`}><Icon name="close" size={13} /></button>
+                          <button onClick={() => removeCitationItem(item.citekey)} aria-label={`Remove ${item.citekey} from citation`} disabled={!canEditManuscript}><Icon name="close" size={13} /></button>
                         </div>
                       )
                     })}
@@ -3574,14 +3629,14 @@ function App() {
                   {activeCitationItem && <CitationRecordInspector record={activeCitationRecord} citekey={activeCitationItem.citekey} attachments={citationAttachments} attachmentState={citationAttachmentState} onOpenLink={(request) => void openCitationRecordLink(request)} />}
                   {activeCitationItem && (
                     <div className="citation-modifiers">
-                      <label><span>Prefix</span><input value={activeCitationItem.prefix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { prefix: event.target.value })} placeholder="e.g. see" /></label>
-                      <label><span>Locator</span><input value={activeCitationItem.locator ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { locator: event.target.value })} placeholder="e.g. p. 18" /></label>
-                      <label className="citation-suffix"><span>Suffix</span><input value={activeCitationItem.suffix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { suffix: event.target.value })} placeholder="e.g. emphasis added" /></label>
-                      <label className="citation-suppress"><input type="checkbox" checked={activeCitationItem.suppressAuthor ?? false} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { suppressAuthor: event.target.checked })} /><span>Suppress author</span></label>
+                      <label><span>Prefix</span><input value={activeCitationItem.prefix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { prefix: event.target.value })} placeholder="e.g. see" readOnly={!canEditManuscript} /></label>
+                      <label><span>Locator</span><input value={activeCitationItem.locator ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { locator: event.target.value })} placeholder="e.g. p. 18" readOnly={!canEditManuscript} /></label>
+                      <label className="citation-suffix"><span>Suffix</span><input value={activeCitationItem.suffix ?? ''} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { suffix: event.target.value })} placeholder="e.g. emphasis added" readOnly={!canEditManuscript} /></label>
+                      <label className="citation-suppress"><input type="checkbox" checked={activeCitationItem.suppressAuthor ?? false} onChange={(event) => updateCitationItem(activeCitationItem.citekey, { suppressAuthor: event.target.checked })} disabled={!canEditManuscript} /><span>Suppress author</span></label>
                     </div>
                   )}
-                  <CitationFormattingControls style={citationStyle} locale={citationLocale} onStyleChange={changeCitationStyle} onLocaleChange={changeCitationLocale} compact />
-                  <div className="citation-actions"><button onClick={() => setCitationOpen(false)}>Done</button><button onClick={() => openCitationPicker('edit')}>Add or remove sources</button></div>
+                  <CitationFormattingControls style={citationStyle} locale={citationLocale} onStyleChange={changeCitationStyle} onLocaleChange={changeCitationLocale} compact disabled={!canEditManuscript} />
+                  <div className="citation-actions"><button onClick={() => setCitationOpen(false)}>Done</button><button onClick={() => openCitationPicker('edit')} disabled={!canEditManuscript}>Add or remove sources</button></div>
                 </div>
               )}
               <p>
@@ -3591,7 +3646,7 @@ function App() {
 
             <section id="methods">
               <h2><span>2</span> Methods</h2>
-              <ManuscriptTextEditor value={draft.methods} onChange={(methods) => updateManuscriptText('methods', methods)} ariaLabel="Methods" />
+              <ManuscriptTextEditor value={draft.methods} onChange={(methods) => updateManuscriptText('methods', methods)} ariaLabel="Methods" readOnly={!canEditManuscript} />
 
               <div className={`code-cell ${draft.cellStatus}`} id="code-cell">
                 <div className="code-cell-header">
@@ -3609,6 +3664,7 @@ function App() {
                     aria-label="Python code"
                     value={draft.code}
                     onChange={(event) => updateDraft(applyDraftCodeTransaction(draft, event.target.value))}
+                    readOnly={!canEditManuscript}
                     spellCheck={false}
                   />
                 </div>
@@ -3647,7 +3703,7 @@ function App() {
 
             <section id="results">
               <h2><span>3</span> Results</h2>
-              <ManuscriptTextEditor value={draft.resultsLead} onChange={(resultsLead) => updateManuscriptText('resultsLead', resultsLead)} ariaLabel="Results lead" />
+              <ManuscriptTextEditor value={draft.resultsLead} onChange={(resultsLead) => updateManuscriptText('resultsLead', resultsLead)} ariaLabel="Results lead" readOnly={!canEditManuscript} />
               <p className={`reviewed-sentence markup-${markupView}`}>
                 The drought treatment{' '}
                 {markupView === 'original' ? (
@@ -3672,13 +3728,13 @@ function App() {
 
             <section id="conclusion">
               <h2><span>4</span> Conclusion</h2>
-              <ManuscriptTextEditor value={draft.conclusion} onChange={(conclusion) => updateManuscriptText('conclusion', conclusion)} ariaLabel="Conclusion" />
+              <ManuscriptTextEditor value={draft.conclusion} onChange={(conclusion) => updateManuscriptText('conclusion', conclusion)} ariaLabel="Conclusion" readOnly={!canEditManuscript} />
             </section>
 
             <section id="references" className="bibliography-section" aria-labelledby="references-heading">
               <div className="bibliography-heading">
                 <div><span className="eyebrow">Live CSL bibliography</span><h2 id="references-heading">References</h2></div>
-                <CitationFormattingControls style={citationStyle} locale={citationLocale} onStyleChange={changeCitationStyle} onLocaleChange={changeCitationLocale} />
+                <CitationFormattingControls style={citationStyle} locale={citationLocale} onStyleChange={changeCitationStyle} onLocaleChange={changeCitationLocale} disabled={!canEditManuscript} />
               </div>
               <div className="bibliography-status" aria-live="polite">
                 <i className={cslState} />
@@ -3728,10 +3784,10 @@ function App() {
                 setSuggestionMode((active) => !active)
                 if (!rightPanelOpen) setRightPanelOpen(true)
               }}
-              disabled={!structuredMode || markupView === 'original' || markupView === 'final'}
+              disabled={!canSuggestReview || !structuredMode || markupView === 'original' || markupView === 'final'}
             >
               <Icon name="spark" size={15} />
-              <span><strong>{suggestionMode ? 'Suggesting' : 'Editing'}</strong><small>{suggestionMode ? 'Typing creates portable proposals' : structuredMode ? 'Changes apply directly' : 'Open a portable manuscript to suggest'}</small></span>
+              <span><strong>{canSuggestReview ? (suggestionMode ? 'Suggesting' : 'Editing') : collaborationRole === 'commenter' ? 'Comment-only' : 'Read-only'}</strong><small>{canSuggestReview ? (suggestionMode ? 'Typing creates portable proposals' : structuredMode ? 'Changes apply directly' : 'Open a portable manuscript to suggest') : collaborationRole === 'commenter' ? 'Add comments without changing the manuscript' : 'This role can inspect the manuscript and review history'}</small></span>
               <span className="suggestion-mode-switch" aria-hidden="true"><i /></span>
             </button>
 
@@ -3771,11 +3827,11 @@ function App() {
                   “{reviewProposal === 'alice' ? 'State the measured effect directly.' : 'Keep the interpretation conservative until the model comparison is final.'}”
                 </div>
 
-                {reviewProposalStatus === 'open' ? (
+                {reviewProposalStatus === 'open' && canDecideReview ? (
                   <div className="review-actions"><button className="accept" onClick={() => acceptProposal(reviewProposal)}><Icon name="check" size={15} /> Accept</button><button className="reject" onClick={() => rejectProposal(reviewProposal)}><Icon name="x" size={15} /> Reject</button></div>
-                ) : (
+                ) : reviewProposalStatus !== 'open' ? (
                   <div className="decision-note"><Icon name={reviewProposalStatus === 'accepted' ? 'check' : reviewProposalStatus === 'rejected' ? 'x' : 'branch'} size={15} /> This proposal is {reviewProposalStatus === 'needs-rebase' ? 'preserved and needs rebase' : reviewProposalStatus}.</div>
-                )}
+                ) : null}
               </div>
 
               {demoCommentAvailable && (reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
@@ -3787,13 +3843,13 @@ function App() {
                   const author = draft.commentReplyAuthors?.[index] ?? { id: 'dm-a01', name: 'Alice Martin' }
                   return <div className="reply-message" key={`${message}-${index}`}><Avatar initials={authorInitials(author.name)} tone="sage" small label={author.name} /><p><strong>{author.id === userSettings.author.id ? 'You' : author.name}</strong>{message}</p></div>
                 })}
-                {!draft.commentResolved && (
+                {canCommentReview && !draft.commentResolved && (
                   <div className="reply-box"><input value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addReply() }} placeholder="Reply…" aria-label="Reply to comment" /><button onClick={addReply} disabled={!reply.trim()} aria-label="Send reply"><Icon name="arrowRight" size={15} /></button></div>
                 )}
-                <div className="portable-thread-actions">
+                {canDecideReview && <div className="portable-thread-actions">
                   <button className="resolve-button" onClick={toggleDemoComment}><Icon name="check" size={14} /> {draft.commentResolved ? 'Reopen thread' : 'Resolve thread'}</button>
                   <button className="portable-delete-thread" onClick={(event) => { event.stopPropagation(); removeDemoComment() }}><Icon name="x" size={13} /> Remove</button>
-                </div>
+                </div>}
               </div>}
               </>}
 
@@ -3811,6 +3867,9 @@ function App() {
                 }}
                 selectedTarget={structuredMode ? structuredReviewSelection : null}
                 onApply={applyPortableReviewSource}
+                canComment={canCommentReview}
+                canSuggest={canSuggestReview}
+                canDecide={canDecideReview}
               />
             </AlignedReviewRail>
           </aside>
@@ -3963,6 +4022,7 @@ function App() {
         onRemoteSource={applyCollaborativeSource}
         onStatus={updateCollaborationStatus}
         onSessionStateChange={updateCollaborationSessionState}
+        onRoleChange={updateCollaborationRole}
         onRequestOpen={() => setCollaborationOpen(true)}
         onCheckpoint={checkpointCollaboration}
         onCheckpointStateChange={setCollaborationUncheckpointed}
@@ -4164,7 +4224,7 @@ function App() {
             <div className="picker-footer">
               <span><kbd>↑</kbd><kbd>↓</kbd> Navigate</span><span><kbd>↵</kbd> Select</span><span><kbd>⌘</kbd><kbd>↵</kbd> Confirm</span>
               <button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={12} /> Import</button>
-              <button className="confirm-citation" onClick={() => void confirmCitationPicker()} disabled={!citationPickerItems.length || citationAcquisitionState === 'saving'}>{citationAcquisitionState === 'saving' ? 'Saving portable citation…' : `Insert selected · ${citationPickerItems.length}`}</button>
+              <button className="confirm-citation" onClick={() => void confirmCitationPicker()} disabled={!canEditManuscript || !citationPickerItems.length || citationAcquisitionState === 'saving'}>{citationAcquisitionState === 'saving' ? 'Saving portable citation…' : canEditManuscript ? `Insert selected · ${citationPickerItems.length}` : 'Read-only citation browser'}</button>
             </div>
           </div>
         </div>
@@ -4202,7 +4262,7 @@ function App() {
             <div className={`projection-note${sourceBlocked ? ' blocked' : ''}`} role={sourceBlocked ? 'alert' : undefined}>
               <Icon name={sourceBlocked || sourceTab === 'reviewed' ? 'branch' : 'check'} size={16} />
               <span>{sourceEditing ? 'Editing is explicit and reversible. Unsupported blocks remain portable.' : sourceBlocked ? sourceDiagnostics[0]?.message : sourceTab === 'reviewed' ? 'Portable source includes stable anchors and review records.' : 'Clean projection contains no DraftMatter review structures.'}</span>
-              {sourceTab === 'reviewed' && !sourceEditing && <button onClick={startSourceEditing}><Icon name="code" size={13} /> Edit source</button>}
+              {sourceTab === 'reviewed' && !sourceEditing && canEditManuscript && <button onClick={startSourceEditing}><Icon name="code" size={13} /> Edit source</button>}
             </div>
             {sourceEditing ? (
               <textarea className="source-editor" value={sourceBuffer} onChange={(event) => setSourceBuffer(event.target.value)} spellCheck={false} aria-label="Reviewed portable source" />
@@ -4276,7 +4336,7 @@ function App() {
       {toast && <div className="toast" role="status"><Icon name="check" size={16} /> {toast}</div>}
 
       {!citationSearchOpen && !commandOpen && (
-        <button className="quick-cite" onClick={() => openCitationPicker()} aria-label="Insert citation"><span>@</span> Cite</button>
+        <button className="quick-cite" onClick={() => openCitationPicker()} aria-label="Insert citation" disabled={!canEditManuscript}><span>@</span> Cite</button>
       )}
     </div>
   )

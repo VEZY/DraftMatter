@@ -165,6 +165,29 @@ export function roleAllows(role: WorkspaceRole, capability: ProjectCapability) {
   return CAPABILITIES[role].has(capability)
 }
 
+export interface WorkspaceRoleCapabilities {
+  read: boolean
+  edit: boolean
+  comment: boolean
+  suggest: boolean
+  decide: boolean
+  manageMembers: boolean
+  checkpoint: boolean
+}
+
+export function workspaceRoleCapabilities(role: WorkspaceRole): WorkspaceRoleCapabilities {
+  const edit = roleAllows(role, 'edit')
+  return {
+    read: roleAllows(role, 'read'),
+    edit,
+    comment: roleAllows(role, 'comment'),
+    suggest: edit,
+    decide: edit,
+    manageMembers: roleAllows(role, 'manage-members'),
+    checkpoint: roleAllows(role, 'checkpoint'),
+  }
+}
+
 export class WorkspaceAccessError extends Error {
   constructor(
     readonly code: 'unauthenticated' | 'not-found' | 'forbidden' | 'rate-limited' | 'invalid-request' | 'invitation-unavailable',

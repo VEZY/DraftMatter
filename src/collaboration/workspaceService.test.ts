@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { AuthenticatedWorkspaceService, WorkspaceAccessError } from './workspaceService'
+import { AuthenticatedWorkspaceService, WorkspaceAccessError, workspaceRoleCapabilities } from './workspaceService'
 
 function fixture(rateLimits?: ConstructorParameters<typeof AuthenticatedWorkspaceService>[0]['rateLimits']) {
   let now = Date.parse('2026-07-15T16:00:00.000Z')
@@ -18,6 +18,13 @@ async function session(service: AuthenticatedWorkspaceService, userId: string) {
 }
 
 describe('authenticated collaboration workspace service', () => {
+  it('projects the server role policy into stable editor capabilities', () => {
+    expect(workspaceRoleCapabilities('owner')).toMatchObject({ edit: true, comment: true, suggest: true, decide: true, manageMembers: true, checkpoint: true })
+    expect(workspaceRoleCapabilities('editor')).toMatchObject({ edit: true, comment: true, suggest: true, decide: true, manageMembers: false, checkpoint: false })
+    expect(workspaceRoleCapabilities('commenter')).toMatchObject({ edit: false, comment: true, suggest: false, decide: false, manageMembers: false, checkpoint: false })
+    expect(workspaceRoleCapabilities('viewer')).toMatchObject({ edit: false, comment: false, suggest: false, decide: false, manageMembers: false, checkpoint: false })
+  })
+
   it('rejects tampered and expired short-lived session tokens', async () => {
     const { service, advance } = fixture()
     const alice = await session(service, 'alice')

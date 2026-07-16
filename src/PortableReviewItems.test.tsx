@@ -2,7 +2,7 @@
 
 import { act, useState } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import identicalSource from './fixtures/portable/25-review-identical.qmd?raw'
 import { PortableReviewItems } from './PortableReviewItems'
 import { parseReviewMarkup } from './reviewMarkup'
@@ -312,5 +312,57 @@ describe('portable review panel items', () => {
     })
     expect(latestSource).toMatch(/canopy area\[\]\{#dm-[^}]+data-edge="point"[^}]*\} weekly/)
     expect(notices.at(-1)).toBe('Portable comment created')
+  })
+
+  it('gives commenters comment and reply controls without manuscript or decision actions', async () => {
+    const quote = 'leaf area declined'
+    const withThread = createReviewThread(identicalSource, {
+      start: identicalSource.indexOf(quote),
+      end: identicalSource.indexOf(quote) + quote.length,
+      author: { id: 'dm-reviewer', name: 'Guest Reviewer' },
+      message: 'Could this claim include uncertainty?',
+    }).document.source
+    await act(async () => root.render(
+      <PortableReviewItems
+        source={withThread}
+        canComment
+        canSuggest={false}
+        canDecide={false}
+        onApply={(next) => { latestSource = next }}
+      />,
+    ))
+
+    expect(container.querySelector('.portable-review-bulk')).toBeNull()
+    expect(container.textContent).toContain('New comment')
+    expect(container.textContent).not.toContain('Suggest edit')
+    expect(container.textContent).not.toContain('Accept selected')
+    await click(container.querySelector('.comment-card')!)
+    expect(container.querySelector('.reply-box')).not.toBeNull()
+    expect(container.querySelector('.portable-thread-actions')).toBeNull()
+    await input(container.querySelector('.reply-box input')!, 'I can add that as a comment, but not edit the claim.')
+    await click(button(container.querySelector('.reply-box')!, ''))
+
+    expect(parseReviewMarkup(latestSource).threads[0].messages.at(-1)).toBe('I can add that as a comment, but not edit the claim.')
+  })
+
+  it('renders a viewer-safe review rail with navigation only', async () => {
+    const apply = vi.fn()
+    await act(async () => root.render(
+      <PortableReviewItems
+        source={identicalSource}
+        canComment={false}
+        canSuggest={false}
+        canDecide={false}
+        onApply={apply}
+      />,
+    ))
+
+    expect(container.querySelectorAll('.proposal-option')).toHaveLength(2)
+    expect(container.querySelector('.portable-review-bulk')).toBeNull()
+    expect(container.querySelector('.review-actions')).toBeNull()
+    expect(container.querySelector('.portable-review-composer')).toBeNull()
+    expect(container.textContent).not.toContain('New comment')
+    expect(container.textContent).not.toContain('Suggest edit')
+    expect(apply).not.toHaveBeenCalled()
   })
 })

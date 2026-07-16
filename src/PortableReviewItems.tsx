@@ -48,6 +48,9 @@ export function PortableReviewItems({
   onNavigateToItem,
   selectedTarget,
   onApply,
+  canComment = true,
+  canSuggest = true,
+  canDecide = true,
 }: {
   source: string
   excludeIds?: string[]
@@ -59,6 +62,9 @@ export function PortableReviewItems({
   onNavigateToItem?: (item: ReviewQueueItem) => void
   selectedTarget?: { quote: string; occurrence: number } | null
   onApply: (source: string, message: string) => void
+  canComment?: boolean
+  canSuggest?: boolean
+  canDecide?: boolean
 }) {
   const document = useMemo(() => parseReviewMarkup(source), [source])
   const reanchorResult = useMemo(() => reanchorPortableReviews(source), [source])
@@ -99,13 +105,23 @@ export function PortableReviewItems({
   const autoRecoveredSourceRef = useRef<string | undefined>(undefined)
 
   useEffect(() => {
-    if (reanchorResult.recovered === 0 || reanchorResult.source === source || autoRecoveredSourceRef.current === reanchorResult.source) return
+    if (!canDecide || reanchorResult.recovered === 0 || reanchorResult.source === source || autoRecoveredSourceRef.current === reanchorResult.source) return
     autoRecoveredSourceRef.current = reanchorResult.source
     onApply(
       reanchorResult.source,
       `${reanchorResult.recovered} review location${reanchorResult.recovered === 1 ? '' : 's'} recovered${reanchorResult.unresolved ? ` · ${reanchorResult.unresolved} still need manual placement` : ''}`,
     )
-  }, [onApply, reanchorResult, source])
+  }, [canDecide, onApply, reanchorResult, source])
+
+  useEffect(() => {
+    if ((compose === 'comment' && !canComment) || (compose === 'suggestion' && !canSuggest)) setCompose(null)
+    if (!canComment) setReply('')
+    if (!canDecide) {
+      setSelectedChangeIds([])
+      setPlacementAnchorId(undefined)
+      setRebaseChangeId(undefined)
+    }
+  }, [canComment, canDecide, canSuggest, compose])
 
   useEffect(() => {
     if (!navigableQueue.some((item) => item.id === activeId)) setActiveId(navigableQueue[0]?.id)
@@ -132,6 +148,7 @@ export function PortableReviewItems({
   const fail = (error: unknown) => setProblem(error instanceof Error ? error.message : String(error))
 
   const decide = (changeId: string, action: 'accepted' | 'rejected') => {
+    if (!canDecide) return
     try {
       const withAuthor = ensureReviewAuthor(document, localAuthor).document
       const result = decideReviewChange(withAuthor, { changeId, action, authorId: localAuthor.id })
@@ -144,12 +161,14 @@ export function PortableReviewItems({
   }
 
   const toggleBatchSelection = (changeId: string) => {
+    if (!canDecide) return
     setSelectedChangeIds((current) => current.includes(changeId)
       ? current.filter((id) => id !== changeId)
       : [...current, changeId])
   }
 
   const decideBatch = (action: 'accepted' | 'rejected') => {
+    if (!canDecide) return
     try {
       const withAuthor = ensureReviewAuthor(document, localAuthor).document
       const result = decideReviewChanges(withAuthor, {
@@ -168,7 +187,7 @@ export function PortableReviewItems({
   }
 
   const sendReply = (threadId: string) => {
-    if (!reply.trim()) return
+    if (!canComment || !reply.trim()) return
     try {
       const withAuthor = ensureReviewAuthor(document, localAuthor).document
       const result = appendReviewThreadMessage(withAuthor, threadId, { authorId: localAuthor.id, message: reply.trim() })
@@ -179,6 +198,7 @@ export function PortableReviewItems({
   }
 
   const changeThreadStatus = (threadId: string, status: 'open' | 'resolved' | 'deleted') => {
+    if (!canDecide) return
     try {
       const result = setReviewThreadStatus(document, threadId, status)
       apply(result.document.source, status === 'open' ? 'Comment thread reopened' : status === 'resolved' ? 'Comment thread resolved' : 'Comment thread removed from the active queue')
@@ -188,6 +208,7 @@ export function PortableReviewItems({
   }
 
   const rebase = (changeId: string) => {
+    if (!canDecide) return
     const change = document.changes.find((candidate) => candidate.id === changeId)
     if (!change) return
     if (!rebaseQuote.trim() || (change.changeKind !== 'delete' && !rebaseProposal.trim())) {
@@ -212,6 +233,7 @@ export function PortableReviewItems({
   }
 
   const create = () => {
+    if ((compose === 'comment' && !canComment) || (compose === 'suggestion' && !canSuggest) || !compose) return
     const selected = quote.trim()
     if (!selected || !body.trim()) {
       setProblem('Enter an exact manuscript quote and a comment or replacement.')
@@ -242,6 +264,7 @@ export function PortableReviewItems({
   }
 
   const placeCandidate = (anchorId: string, start: number, end: number) => {
+    if (!canDecide) return
     try {
       const result = placePortableReviewCandidate(source, anchorId, { start, end }, new Date().toISOString())
       setPlacementAnchorId(undefined)
@@ -253,6 +276,7 @@ export function PortableReviewItems({
   }
 
   const placeAtQuote = (anchorId: string) => {
+    if (!canDecide) return
     try {
       const result = placePortableReviewAtQuote(source, anchorId, placementQuote, undefined, new Date().toISOString())
       setPlacementAnchorId(undefined)
@@ -279,7 +303,7 @@ export function PortableReviewItems({
   return (
     <>
       {problem && <div className="portable-review-problem" role="alert">{problem}</div>}
-      {batchableChangeIds.length > 0 && (
+      {canDecide && batchableChangeIds.length > 0 && (
         <div className="portable-review-bulk" role="group" aria-label="Batch suggestion decisions">
           <span><strong>Batch decisions</strong><small>{filteredAuthorName ? `${filteredAuthorName}'s visible suggestions` : 'Visible open suggestions'}</small></span>
           <button onClick={() => setSelectedChangeIds(allVisibleSelected ? [] : batchableChangeIds)}>{allVisibleSelected ? 'Clear selection' : `Select all ${batchableChangeIds.length}`}</button>
@@ -294,7 +318,7 @@ export function PortableReviewItems({
           const recovery = recoveryByAnchor.get(item.anchorId)
           return (
             <div className={`conflict-card portable-review-card ${active ? 'active' : ''} ${selectedChangeIds.includes(item.id) ? 'batch-selected' : ''}`} id={`review-item-${item.id}`} data-review-balloon={item.id} data-review-balloon-anchor={item.anchorId} key={item.id}>
-              <div className="conflict-heading"><Icon name="branch" size={16} /><span>{item.conflictId ? 'Overlapping suggestion' : item.kind === 'unplaced-change' ? 'Unplaced suggestion' : 'Suggestion'}</span>{batchableChangeIds.includes(item.id) && <label className="review-batch-toggle" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedChangeIds.includes(item.id)} onChange={() => toggleBatchSelection(item.id)} aria-label={`Select suggestion by ${item.authorName}`} /><span>Select</span></label>}<small>{item.anchorId}</small></div>
+              <div className="conflict-heading"><Icon name="branch" size={16} /><span>{item.conflictId ? 'Overlapping suggestion' : item.kind === 'unplaced-change' ? 'Unplaced suggestion' : 'Suggestion'}</span>{canDecide && batchableChangeIds.includes(item.id) && <label className="review-batch-toggle" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedChangeIds.includes(item.id)} onChange={() => toggleBatchSelection(item.id)} aria-label={`Select suggestion by ${item.authorName}`} /><span>Select</span></label>}<small>{item.anchorId}</small></div>
               <button className={`proposal-option ${active ? 'selected' : ''}`} onClick={() => activate(item.id)}>
                 <span className="avatar avatar-blue avatar-small">{initials(item.authorName)}</span>
                 <span className="proposal-author"><strong>{item.authorName}</strong><small><ReviewTimestamp value={change.updatedAt ?? change.createdAt} verb={change.updatedAt ? 'Updated' : 'Created'} fallback={item.kind === 'unplaced-change' ? 'Location needs attention' : item.excerpt} detail={item.kind === 'unplaced-change' ? 'Location needs attention' : item.excerpt} /></small></span>
@@ -302,10 +326,10 @@ export function PortableReviewItems({
                 <span className="proposal-copy"><del>{change.anchorContext?.quote || item.excerpt}</del>{change.proposal !== undefined && <ins>{reviewProposalText(change.proposal)}</ins>}</span>
               </button>
               {change.rationale && <div className="proposal-rationale">“{change.rationale}”</div>}
-              {active && change.status === 'open' && item.kind !== 'unplaced-change' && (
+              {canDecide && active && change.status === 'open' && item.kind !== 'unplaced-change' && (
                 <div className="review-actions"><button className="accept" onClick={() => decide(item.id, 'accepted')}><Icon name="check" size={15} /> Accept</button><button className="reject" onClick={() => decide(item.id, 'rejected')}><Icon name="x" size={15} /> Reject</button></div>
               )}
-              {active && change.status === 'needs-rebase' && (
+              {canDecide && active && change.status === 'needs-rebase' && (
                 <>
                   <div className="review-actions"><button className="accept" onClick={() => { setRebaseChangeId(item.id); setRebaseQuote(selectedTarget?.quote ?? ''); setRebaseProposal(change.proposal ?? '') }}><Icon name="branch" size={15} /> Rebase suggestion</button><button className="reject" onClick={() => decide(item.id, 'rejected')}><Icon name="x" size={15} /> Reject alternative</button></div>
                   {rebaseChangeId === item.id && (
@@ -318,7 +342,7 @@ export function PortableReviewItems({
                   )}
                 </>
               )}
-              {active && item.kind === 'unplaced-change' && recovery && (
+              {canDecide && active && item.kind === 'unplaced-change' && recovery && (
                 <div className="unplaced-review-placement">
                   <p>{recovery.reason}</p>
                   {recovery.candidates.map((match, index) => <div className="unplaced-review-candidate" key={`${match.start}-${match.end}`}><span>{match.excerpt}</span><button onClick={() => placeCandidate(item.anchorId, match.start, match.end)}>Place here {index + 1}</button></div>)}
@@ -339,11 +363,11 @@ export function PortableReviewItems({
             {thread.messageRecords.map((message, index) => index === 0
               ? <p key={`${item.id}-${index}`}>{message.content}</p>
               : <div className="reply-message" key={`${item.id}-${index}`}><span className="avatar avatar-sage avatar-small">{initials(authors.get(message.authorId ?? '') ?? message.authorId ?? 'A')}</span><p><strong>{authors.get(message.authorId ?? '') ?? message.authorId ?? 'Author'}</strong>{message.content}</p></div>)}
-            {active && thread.status === 'open' && item.kind !== 'unplaced-thread' && (
+            {canComment && active && thread.status === 'open' && item.kind !== 'unplaced-thread' && (
               <div className="reply-box"><input value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') sendReply(item.id) }} placeholder="Reply…" aria-label={`Reply to ${item.authorName}`} /><button onClick={() => sendReply(item.id)} disabled={!reply.trim()} aria-label="Send reply"><Icon name="arrowRight" size={15} /></button></div>
             )}
-            {active && item.kind !== 'unplaced-thread' && <div className="portable-thread-actions"><button className="resolve-button" onClick={() => changeThreadStatus(item.id, thread.status === 'resolved' ? 'open' : 'resolved')}><Icon name="check" size={14} /> {thread.status === 'resolved' ? 'Reopen thread' : 'Resolve thread'}</button><button className="portable-delete-thread" onClick={() => changeThreadStatus(item.id, 'deleted')}><Icon name="x" size={13} /> Remove</button></div>}
-            {active && item.kind === 'unplaced-thread' && recovery && (
+            {canDecide && active && item.kind !== 'unplaced-thread' && <div className="portable-thread-actions"><button className="resolve-button" onClick={() => changeThreadStatus(item.id, thread.status === 'resolved' ? 'open' : 'resolved')}><Icon name="check" size={14} /> {thread.status === 'resolved' ? 'Reopen thread' : 'Resolve thread'}</button><button className="portable-delete-thread" onClick={() => changeThreadStatus(item.id, 'deleted')}><Icon name="x" size={13} /> Remove</button></div>}
+            {canDecide && active && item.kind === 'unplaced-thread' && recovery && (
               <div className="unplaced-review-placement">
                 <p>{recovery.reason}</p>
                 {recovery.candidates.map((match, index) => <div className="unplaced-review-candidate" key={`${match.start}-${match.end}`}><span>{match.excerpt}</span><button onClick={() => placeCandidate(item.anchorId, match.start, match.end)}>Place here {index + 1}</button></div>)}
@@ -367,8 +391,8 @@ export function PortableReviewItems({
       )}
 
       <div className="review-panel-footer portable-review-footer">
-        <button onClick={() => { setCompose('comment'); setCommentAnchorMode('range'); setProblem(''); setQuote(selectedTarget?.quote ?? ''); setSelectedOccurrence(selectedTarget?.occurrence) }}><Icon name="message" size={15} /> New comment</button>
-        <button onClick={() => { setCompose('suggestion'); setProblem(''); setQuote(selectedTarget?.quote ?? ''); setSelectedOccurrence(selectedTarget?.occurrence) }}><Icon name="spark" size={15} /> Suggest edit</button>
+        {canComment && <button onClick={() => { setCompose('comment'); setCommentAnchorMode('range'); setProblem(''); setQuote(selectedTarget?.quote ?? ''); setSelectedOccurrence(selectedTarget?.occurrence) }}><Icon name="message" size={15} /> New comment</button>}
+        {canSuggest && <button onClick={() => { setCompose('suggestion'); setProblem(''); setQuote(selectedTarget?.quote ?? ''); setSelectedOccurrence(selectedTarget?.occurrence) }}><Icon name="spark" size={15} /> Suggest edit</button>}
         <span>{navigableQueue.length ? `${Math.max(1, activePosition + 1)} of ${navigableQueue.length}` : 'No review items'}</span>
         <button onClick={() => navigate('previous')} disabled={navigableQueue.length < 2} aria-label="Previous review item">↑</button>
         <button onClick={() => navigate('next')} disabled={navigableQueue.length < 2} aria-label="Next review item">↓</button>
