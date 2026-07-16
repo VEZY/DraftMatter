@@ -200,7 +200,6 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
         index += 1
       }
       if (index < lines.length) index += 1
-      parts.push(paragraph(`${fence[2] || 'text'} source · not executed during export`, 'Caption'))
       parts.push(paragraph(code.join('\n'), 'CodeBlock'))
       continue
     }

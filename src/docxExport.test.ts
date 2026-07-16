@@ -29,6 +29,12 @@ $$ {#eq-fit .unnumbered}
 print("inert")
 \`\`\`
 
+<!-- dm-output:start cell="fit" run="sha256:test" -->
+\`\`\`text
+retained model output
+\`\`\`
+<!-- dm-output:end -->
+
 [^methods]: Calibration details were checked against field measurements.
 `
 
@@ -71,8 +77,9 @@ describe('native DOCX export', () => {
     expect(readable).toContain('<w:jc w:val="right"/>')
     expect(readable).toContain('Table: Treatment summary.')
     expect(readable).not.toContain('{#tbl-summary')
-    expect(readable).toContain('not executed during export')
     expect(readable).toContain('print(&quot;inert&quot;)')
+    expect(readable).toContain('retained model output')
+    expect(readable).not.toContain('source · not executed during export')
     expect(readable).not.toMatch(/\.dm-anchor|\.draftmatter-reviews|<w:(?:ins|del)\b/)
     expect(first.diagnostics).toEqual([expect.objectContaining({ code: 'figure-reference', level: 'warning' })])
   })

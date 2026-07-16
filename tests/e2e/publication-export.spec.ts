@@ -32,6 +32,12 @@ $$ {#eq-fit .unnumbered}
 print("must remain inert")
 \`\`\`
 
+<!-- dm-output:start cell="fit" run="sha256:test" -->
+\`\`\`text
+retained model output
+\`\`\`
+<!-- dm-output:end -->
+
 [^methods]: Canopy area was checked against independent field measurements.
 `
 
@@ -39,6 +45,13 @@ test.describe('DM-P5-01/02 native publication exports', () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(({ portableSource, citations }) => {
       Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined })
+      Object.defineProperty(window, 'print', {
+        configurable: true,
+        value: () => {
+          const printState = window as Window & { __draftmatterPrintRequests?: number }
+          printState.__draftmatterPrintRequests = (printState.__draftmatterPrintRequests ?? 0) + 1
+        },
+      })
       localStorage.setItem('draftmatter.structured-source.v1', portableSource)
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
       localStorage.setItem('draftmatter.citations.v1', JSON.stringify(citations))
@@ -95,7 +108,10 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(html).toContain('<th style="text-align:right">Final area</th>')
     expect(html).not.toContain('{#tbl-summary')
     expect(html).toContain('role="math"')
+    expect(html).toContain('<pre class="source-code"><code class="language-python">')
     expect(html).toContain('print(&quot;must remain inert&quot;)')
+    expect(html).toContain('<pre class="execution-output"><samp>retained model output</samp></pre>')
+    expect(html).not.toContain('source · not executed during export')
     expect(html).not.toContain('Drought acclimation reshapes canopy development')
     expect(html).not.toMatch(/<script|\.dm-anchor|\.draftmatter-reviews/)
 
@@ -119,11 +135,16 @@ test.describe('DM-P5-01/02 native publication exports', () => {
 
     await page.getByRole('button', { name: 'Export' }).click()
     await page.getByRole('button', { name: /Print \/ PDF/ }).click()
-    const printFrame = page.locator('iframe[title="DraftMatter print preview"]')
-    await expect(printFrame).toHaveCount(1)
-    await expect(page.getByText('Clean print view opened · choose Save as PDF')).toBeVisible()
-    expect(await printFrame.getAttribute('srcdoc')).toContain('<title>Independent canopy synthesis</title>')
-    expect(await printFrame.getAttribute('srcdoc')).not.toMatch(/\.dm-anchor|\.draftmatter-reviews/)
+    const printRoot = page.locator('[data-draftmatter-print-root]')
+    await expect(printRoot).toHaveCount(1)
+    await expect(printRoot).toBeHidden()
+    await expect(page.getByText('System print dialog opened · choose Save as PDF')).toBeVisible()
+    expect(await page.evaluate(() => (window as Window & { __draftmatterPrintRequests?: number }).__draftmatterPrintRequests)).toBe(1)
+    expect(await printRoot.innerHTML()).toContain('<h1>Independent canopy synthesis</h1>')
+    expect(await printRoot.innerHTML()).not.toMatch(/\.dm-anchor|\.draftmatter-reviews/)
+    await expect(page.locator('iframe[title="DraftMatter print preview"]')).toHaveCount(0)
+    await page.evaluate(() => window.dispatchEvent(new Event('afterprint')))
+    await expect(printRoot).toHaveCount(0)
 
     await page.getByRole('button', { name: 'Export' }).click()
     await page.getByRole('button', { name: /Clean DOCX/ }).click()
@@ -166,6 +187,9 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(readableDocx).toContain('<w:jc w:val="right"/>')
     expect(readableDocx).not.toContain('{#tbl-summary')
     expect(readableDocx).not.toContain('{#eq-fit')
+    expect(readableDocx).toContain('print(&quot;must remain inert&quot;)')
+    expect(readableDocx).toContain('retained model output')
+    expect(readableDocx).not.toContain('source · not executed during export')
     expect(readableDocx).toContain('word/document.xml')
     expect(readableDocx).not.toContain('Drought acclimation reshapes canopy development')
     expect(readableDocx).not.toMatch(/\.dm-anchor|\.draftmatter-reviews|<w:(?:ins|del)\b/)

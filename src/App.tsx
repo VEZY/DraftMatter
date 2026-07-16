@@ -2356,7 +2356,7 @@ function App() {
       else printNativeHtml(html)
       if (kind === 'pdf') {
         setExportOpen(false)
-        setToast('Clean print view opened · choose Save as PDF, its folder, and file name')
+        setToast('System print dialog opened · choose Save as PDF, its folder, and file name')
       }
     } catch (error) {
       setExportOpen(false)

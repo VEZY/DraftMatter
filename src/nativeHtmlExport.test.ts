@@ -30,6 +30,12 @@ $$ {#eq-fit .unnumbered}
 print("must remain inert")
 \`\`\`
 
+<!-- dm-output:start cell="fit" run="sha256:test" -->
+\`\`\`text
+retained model output
+\`\`\`
+<!-- dm-output:end -->
+
 [^methods]: Calibration details were checked with **manual review**.
 `
 
@@ -59,8 +65,11 @@ describe('native HTML export', () => {
     expect(html).toContain('<table id="tbl-summary"><caption>Treatment <strong>summary</strong>.</caption>')
     expect(html).toContain('<th style="text-align:right">Leaf area</th>')
     expect(html).not.toContain('{#tbl-summary')
-    expect(html).toContain('not executed during export')
+    expect(html).toContain('<pre class="source-code"><code class="language-python">')
     expect(html).toContain('print(&quot;must remain inert&quot;)')
+    expect(html).toContain('<pre class="execution-output"><samp>retained model output</samp></pre>')
+    expect(html).not.toContain('source · not executed during export')
+    expect(html).not.toContain('<figcaption>python source')
     expect(html).not.toMatch(/<script|\.dm-anchor|\.draftmatter-reviews/)
   })
 
