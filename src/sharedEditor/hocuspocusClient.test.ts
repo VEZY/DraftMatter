@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import identicalReviewSource from '../fixtures/portable/25-review-identical.qmd?raw'
 import { CollaborativeDocument } from './collaboration'
 import { projectCollaborationPortableSource } from './collaborationCheckpoint'
-import { validateCollaborationServiceUrl } from './hocuspocusClient'
+import { bootstrapCollaborationSource, validateCollaborationServiceUrl } from './hocuspocusClient'
 
 describe('browser collaboration client boundary', () => {
   it('requires encrypted remote WebSockets and permits loopback development', () => {
@@ -29,5 +29,16 @@ describe('browser collaboration client boundary', () => {
     expect(projected).toContain('leaf expansion slowed')
     stop()
     collaboration.destroy()
+  })
+
+  it('allows only an owner-authorized client to initialize an empty shared manuscript', () => {
+    const empty = new CollaborativeDocument()
+    expect(() => bootstrapCollaborationSource(empty, '# Shared draft\n', false)).toThrow(/initialized by its owner/)
+    expect(empty.source).toBe('')
+    expect(bootstrapCollaborationSource(empty, '# Shared draft\n', true)).toBe(true)
+    expect(empty.source).toBe('# Shared draft\n')
+    expect(bootstrapCollaborationSource(empty, '# Replaced draft\n', false)).toBe(false)
+    expect(empty.source).toBe('# Shared draft\n')
+    empty.destroy()
   })
 })

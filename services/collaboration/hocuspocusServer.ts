@@ -2,6 +2,7 @@ import { Server, type ServerConfiguration } from '@hocuspocus/server'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import * as Y from 'yjs'
 import type { ProjectAuthorizationService, WorkspaceRole } from '../../src/collaboration/workspaceService'
+import { parseReviewMarkup } from '../../src/reviewMarkup'
 import { CollaborationStoreError, type CollaborationProjectScope } from './fileStore'
 import type { CollaborationPersistence } from './persistence'
 
@@ -183,6 +184,78 @@ function validNewThreadStatus(value: unknown, key: string) {
   return status.id === key && status.status === 'open' && Object.keys(status).every((field) => field === 'id' || field === 'status')
 }
 
+const PROPOSAL_STATUSES = new Set(['open', 'accepted', 'rejected', 'needs-rebase', 'applied', 'rebased', 'decision-conflict'])
+const THREAD_STATUSES = new Set(['open', 'resolved', 'deleted'])
+
+function validProposal(value: unknown, key: string, userId: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !SAFE_ID.test(key)) return false
+  const proposal = value as Record<string, unknown>
+  return proposal.id === key
+    && proposal.authorId === userId
+    && typeof proposal.anchorId === 'string'
+    && SAFE_ID.test(proposal.anchorId)
+    && typeof proposal.kind === 'string'
+    && proposal.kind.length > 0
+    && proposal.kind.length <= 64
+    && typeof proposal.status === 'string'
+    && PROPOSAL_STATUSES.has(proposal.status)
+    && (proposal.proposal === undefined || (typeof proposal.proposal === 'string' && proposal.proposal.length <= 200_000))
+    && (proposal.rationale === undefined || (typeof proposal.rationale === 'string' && proposal.rationale.length <= 20_000))
+    && (proposal.baseRevision === undefined || (typeof proposal.baseRevision === 'string' && proposal.baseRevision.length <= 16_384))
+    && Object.keys(proposal).every((field) => ['id', 'anchorId', 'authorId', 'kind', 'status', 'proposal', 'rationale', 'baseRevision'].includes(field))
+}
+
+function validDecision(value: unknown, key: string, userId: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || !SAFE_ID.test(key)) return false
+  const decision = value as Record<string, unknown>
+  return decision.id === key
+    && decision.authorId === userId
+    && typeof decision.changeId === 'string'
+    && SAFE_ID.test(decision.changeId)
+    && typeof decision.action === 'string'
+    && ['accepted', 'rejected', 'rebased'].includes(decision.action)
+    && (decision.timestamp === undefined || (typeof decision.timestamp === 'string' && decision.timestamp.length <= 100))
+    && (decision.baseRevision === undefined || (typeof decision.baseRevision === 'string' && decision.baseRevision.length <= 16_384))
+    && (decision.resolves === undefined || (Array.isArray(decision.resolves) && decision.resolves.length <= 100 && decision.resolves.every((id) => typeof id === 'string' && SAFE_ID.test(id))))
+    && Object.keys(decision).every((field) => ['id', 'changeId', 'authorId', 'action', 'timestamp', 'baseRevision', 'resolves'].includes(field))
+}
+
+function validExistingProposal(before: unknown, after: unknown, hasNewDecision: boolean) {
+  if (!before || !after || typeof before !== 'object' || typeof after !== 'object' || Array.isArray(before) || Array.isArray(after)) return false
+  const previous = before as Record<string, unknown>
+  const next = after as Record<string, unknown>
+  for (const field of ['id', 'anchorId', 'authorId', 'kind', 'proposal', 'rationale', 'baseRevision']) {
+    if (!same(previous[field], next[field])) return false
+  }
+  return typeof next.status === 'string'
+    && PROPOSAL_STATUSES.has(next.status)
+    && (same(previous.status, next.status) || hasNewDecision)
+    && Object.keys(next).every((field) => ['id', 'anchorId', 'authorId', 'kind', 'status', 'proposal', 'rationale', 'baseRevision'].includes(field))
+}
+
+function validExistingThread(before: unknown, after: unknown, userId: string) {
+  if (!before || !after || typeof before !== 'object' || typeof after !== 'object' || Array.isArray(before) || Array.isArray(after)) return false
+  const previous = before as Record<string, unknown>
+  const next = after as Record<string, unknown>
+  for (const field of ['id', 'anchorId', 'authorId']) if (!same(previous[field], next[field])) return false
+  if (typeof next.status !== 'string' || !THREAD_STATUSES.has(next.status) || !validContext(next.context)) return false
+  if (!Array.isArray(previous.messages) || !Array.isArray(next.messages) || next.messages.length < previous.messages.length || next.messages.length > 500) return false
+  const previousMessages = previous.messages
+  const nextMessages = next.messages
+  if (!previousMessages.every((message, index) => same(message, nextMessages[index]))) return false
+  return nextMessages.slice(previousMessages.length).every((message) => validMessage(message, userId))
+    && Object.keys(next).every((field) => ['id', 'anchorId', 'authorId', 'status', 'messages', 'context'].includes(field))
+}
+
+function validThreadStatus(value: unknown, key: string) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const status = value as Record<string, unknown>
+  return status.id === key
+    && typeof status.status === 'string'
+    && THREAD_STATUSES.has(status.status)
+    && Object.keys(status).every((field) => field === 'id' || field === 'status')
+}
+
 function commenterMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
   const beforeAuthors = mapSnapshot(before, ROOTS.authors)
   const afterAuthors = mapSnapshot(after, ROOTS.authors)
@@ -246,6 +319,105 @@ function commenterMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
   return true
 }
 
+function editorMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
+  const beforeAuthors = mapSnapshot(before, ROOTS.authors)
+  const afterAuthors = mapSnapshot(after, ROOTS.authors)
+  for (const key of new Set([...beforeAuthors.keys(), ...afterAuthors.keys()])) {
+    const previous = beforeAuthors.get(key)
+    const next = afterAuthors.get(key)
+    if (same(previous, next)) continue
+    if (previous !== undefined || key !== userId || !validSelfAuthor(next, userId)) return false
+  }
+
+  const beforeDecisions = mapSnapshot(before, ROOTS.decisions)
+  const afterDecisions = mapSnapshot(after, ROOTS.decisions)
+  let hasNewDecision = false
+  for (const key of new Set([...beforeDecisions.keys(), ...afterDecisions.keys()])) {
+    const previous = beforeDecisions.get(key)
+    const next = afterDecisions.get(key)
+    if (same(previous, next)) continue
+    if (previous !== undefined || !validDecision(next, key, userId)) return false
+    hasNewDecision = true
+  }
+
+  const beforeProposals = mapSnapshot(before, ROOTS.proposals)
+  const afterProposals = mapSnapshot(after, ROOTS.proposals)
+  const newProposalIds = new Set<string>()
+  for (const key of new Set([...beforeProposals.keys(), ...afterProposals.keys()])) {
+    const previous = beforeProposals.get(key)
+    const next = afterProposals.get(key)
+    if (same(previous, next)) continue
+    if (previous === undefined) {
+      if (!validProposal(next, key, userId) || (next as Record<string, unknown>).status !== 'open') return false
+      newProposalIds.add(key)
+    } else if (!validExistingProposal(previous, next, hasNewDecision)) return false
+  }
+
+  for (const decision of afterDecisions.values()) {
+    const record = decision as Record<string, unknown>
+    if (!afterProposals.has(String(record.changeId))) return false
+  }
+
+  const beforeThreads = mapSnapshot(before, ROOTS.threads)
+  const afterThreads = mapSnapshot(after, ROOTS.threads)
+  const newThreadIds = new Set<string>()
+  for (const key of new Set([...beforeThreads.keys(), ...afterThreads.keys()])) {
+    const previous = beforeThreads.get(key)
+    const next = afterThreads.get(key)
+    if (same(previous, next)) continue
+    if (previous === undefined) {
+      if (!validNewThread(next, key, userId)) return false
+      newThreadIds.add(key)
+    } else if (!validExistingThread(previous, next, userId)) return false
+  }
+
+  const beforeMessages = mapSnapshot(before, ROOTS.threadMessages)
+  const afterMessages = mapSnapshot(after, ROOTS.threadMessages)
+  const addedMessagesByThread = new Map<string, number>()
+  for (const key of new Set([...beforeMessages.keys(), ...afterMessages.keys()])) {
+    const previous = beforeMessages.get(key)
+    const next = afterMessages.get(key)
+    if (same(previous, next)) continue
+    if (previous !== undefined || !validStoredMessage(next, key, userId)) return false
+    const threadId = String((next as Record<string, unknown>).threadId)
+    if (!afterThreads.has(threadId)) return false
+    addedMessagesByThread.set(threadId, (addedMessagesByThread.get(threadId) ?? 0) + 1)
+  }
+
+  const beforeStatuses = mapSnapshot(before, ROOTS.threadStatuses)
+  const afterStatuses = mapSnapshot(after, ROOTS.threadStatuses)
+  for (const key of new Set([...beforeStatuses.keys(), ...afterStatuses.keys()])) {
+    const previous = beforeStatuses.get(key)
+    const next = afterStatuses.get(key)
+    if (same(previous, next)) continue
+    if (!validThreadStatus(next, key) || (previous === undefined && !newThreadIds.has(key))) return false
+  }
+
+  const beforeAnchors = mapSnapshot(before, ROOTS.anchors)
+  const afterAnchors = mapSnapshot(after, ROOTS.anchors)
+  const newAnchorReferences = new Set([
+    ...[...newProposalIds].map((id) => String((afterProposals.get(id) as Record<string, unknown>).anchorId)),
+    ...[...newThreadIds].map((id) => String((afterThreads.get(id) as Record<string, unknown>).anchorId)),
+  ])
+  for (const key of new Set([...beforeAnchors.keys(), ...afterAnchors.keys()])) {
+    const previous = beforeAnchors.get(key)
+    const next = afterAnchors.get(key)
+    if (same(previous, next)) continue
+    if (next === undefined || (previous === undefined && !newAnchorReferences.has(key)) || !validNewAnchor(after, next, key)) return false
+  }
+
+  for (const proposalId of newProposalIds) {
+    const proposal = afterProposals.get(proposalId) as Record<string, unknown>
+    if (!afterAuthors.has(userId) || !afterAnchors.has(String(proposal.anchorId))) return false
+  }
+  for (const threadId of newThreadIds) {
+    const thread = afterThreads.get(threadId) as Record<string, unknown>
+    const embeddedMessages = Array.isArray(thread.messages) ? thread.messages.length : 0
+    if (!afterAuthors.has(userId) || !afterAnchors.has(String(thread.anchorId)) || embeddedMessages + (addedMessagesByThread.get(threadId) ?? 0) === 0) return false
+  }
+  return true
+}
+
 export function commenterUpdateDiagnostic(document: Y.Doc, update: Uint8Array, userId: string): 'update-invalid' | 'protected-state-changed' | 'comment-record-invalid' | null {
   const candidate = new Y.Doc()
   try {
@@ -263,6 +435,26 @@ export function commenterUpdateDiagnostic(document: Y.Doc, update: Uint8Array, u
 
 export function commenterUpdateAllowed(document: Y.Doc, update: Uint8Array, userId: string) {
   return commenterUpdateDiagnostic(document, update, userId) === null
+}
+
+export function editorUpdateDiagnostic(document: Y.Doc, update: Uint8Array, userId: string): 'update-invalid' | 'reserved-review-markup' | 'review-record-invalid' | null {
+  const candidate = new Y.Doc()
+  try {
+    Y.applyUpdate(candidate, Y.encodeStateAsUpdate(document))
+    Y.applyUpdate(candidate, update)
+    const review = parseReviewMarkup(candidate.getText(ROOTS.document).toString())
+    if (review.sectionStart !== undefined || review.anchors.length > 0) return 'reserved-review-markup'
+    if (!editorMapsAllowed(document, candidate, userId)) return 'review-record-invalid'
+    return null
+  } catch {
+    return 'update-invalid'
+  } finally {
+    candidate.destroy()
+  }
+}
+
+export function editorUpdateAllowed(document: Y.Doc, update: Uint8Array, userId: string) {
+  return editorUpdateDiagnostic(document, update, userId) === null
 }
 
 export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocusOptions) {
@@ -317,7 +509,7 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
       connection.readOnly = connectionConfig.readOnly
       return context
     },
-    async beforeHandleMessage({ context, document, update, connection }) {
+    async beforeHandleMessage({ context, connection }) {
       if (options.authorization.reauthorizeProject) {
         try {
           await options.authorization.reauthorizeProject(
@@ -331,8 +523,15 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
           throw error
         }
       }
-      if (context.role === 'commenter' && !commenterUpdateAllowed(document, update, context.userId)) {
+    },
+    async beforeSync({ context, document, type, payload }) {
+      if (type !== 1 && type !== 2) return
+      if (context.role === 'commenter' && !commenterUpdateAllowed(document, payload, context.userId)) {
         throw new Error('Commenter updates may only create attributed threads or append attributed replies.')
+      }
+      if (context.role === 'editor') {
+        const diagnostic = editorUpdateDiagnostic(document, payload, context.userId)
+        if (diagnostic) throw new Error(`Editor review records must preserve immutable history and verified attribution (${diagnostic}).`)
       }
     },
     async onLoadDocument({ documentName }) {

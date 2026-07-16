@@ -5,14 +5,17 @@ import { afterEach, describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import { AuthenticatedWorkspaceService } from '../../src/collaboration/workspaceService'
 import { parseReviewMarkup } from '../../src/reviewMarkup'
-import { appendReviewThreadMessage, createReviewThread } from '../../src/reviewOperations'
+import { appendReviewThreadMessage, createReviewChange, createReviewThread } from '../../src/reviewOperations'
 import { CollaborativeDocument } from '../../src/sharedEditor/collaboration'
+import { CollaborativeReviewBinding } from '../../src/sharedEditor/collaborativeReview'
 import { FileCollaborationStore } from './fileStore'
 import {
   collaborationDocumentName,
   commenterUpdateDiagnostic,
   commenterUpdateAllowed,
   createDraftMatterHocuspocusServer,
+  editorUpdateDiagnostic,
+  editorUpdateAllowed,
   parseCollaborationDocumentName,
 } from './hocuspocusServer'
 
@@ -126,6 +129,66 @@ describe('authenticated Hocuspocus transport', () => {
     expect(commenterUpdateDiagnostic(document, rewrittenMessage, 'commenter')).toBe('comment-record-invalid')
     expect(commenterUpdateDiagnostic(document, resolvedThread, 'commenter')).toBe('comment-record-invalid')
     expect(commenterUpdateDiagnostic(document, rogueAnchor, 'commenter')).toBe('comment-record-invalid')
+    collaboration.destroy()
+  })
+
+  it('permits editor manuscript and self-authored review updates but rejects attribution spoofing and audit rewrites', () => {
+    const source = '## Results\n\nCanopy response increased.\n'
+    const collaboration = CollaborativeDocument.fromPortableSource(source)
+    const document = collaboration.doc
+    const quote = 'Canopy response'
+    const start = source.indexOf(quote)
+    const created = createReviewChange(source, {
+      start,
+      end: start + quote.length,
+      author: { id: 'editor', name: 'Eli Editor' },
+      kind: 'replace',
+      proposal: 'Canopy response increased by 12%',
+      timestamp: '2026-07-16T10:10:00.000Z',
+      changeId: 'dm-change-editor',
+      anchorId: 'dm-anchor-editor',
+      startMarkerId: 'dm-anchor-editor-start',
+      endMarkerId: 'dm-anchor-editor-end',
+    })
+    const proposalUpdate = portableUpdate(document, created.document.source)
+    expect(editorUpdateDiagnostic(document, proposalUpdate, 'editor')).toBeNull()
+    expect(editorUpdateAllowed(document, proposalUpdate, 'editor')).toBe(true)
+    Y.applyUpdate(document, proposalUpdate)
+
+    const textUpdate = updateFrom(document, (candidate) => candidate.getText('draftmatter:document').insert(0, 'Observed '))
+    expect(editorUpdateDiagnostic(document, textUpdate, 'editor')).toBeNull()
+
+    const decisionUpdate = updateFrom(document, (candidate) => {
+      const candidateCollaboration = new CollaborativeDocument(candidate)
+      new CollaborativeReviewBinding(candidateCollaboration).decide({
+        changeIds: ['dm-change-editor'],
+        action: 'accepted',
+        author: { id: 'editor', name: 'Eli Editor' },
+        timestamp: '2026-07-16T10:11:00.000Z',
+      })
+      candidateCollaboration.awareness.destroy()
+    })
+    expect(editorUpdateDiagnostic(document, decisionUpdate, 'editor')).toBeNull()
+
+    const renamedAuthor = updateFrom(document, (candidate) => candidate.getMap('draftmatter:authors').set('editor', { id: 'editor', name: 'Impersonated Editor' }))
+    const forgedAuthor = updateFrom(document, (candidate) => candidate.getMap('draftmatter:authors').set('owner', { id: 'owner', name: 'Project Owner' }))
+    const rewrittenProposal = updateFrom(document, (candidate) => {
+      const proposals = candidate.getMap<Record<string, unknown>>('draftmatter:proposals')
+      proposals.set('dm-change-editor', { ...proposals.get('dm-change-editor'), proposal: 'Silently rewritten wording' })
+    })
+    const forgedDecision = updateFrom(document, (candidate) => candidate.getMap('draftmatter:decisions').set('dm-decision-forged', {
+      id: 'dm-decision-forged',
+      changeId: 'dm-change-editor',
+      authorId: 'owner',
+      action: 'accepted',
+    }))
+    const reservedMarkup = updateFrom(document, (candidate) => candidate.getText('draftmatter:document').insert(0, '[]{#dm-forged .dm-anchor data-anchor="dm-forged" data-edge="point"}\n'))
+
+    expect(editorUpdateDiagnostic(document, renamedAuthor, 'editor')).toBe('review-record-invalid')
+    expect(editorUpdateDiagnostic(document, forgedAuthor, 'editor')).toBe('review-record-invalid')
+    expect(editorUpdateDiagnostic(document, rewrittenProposal, 'editor')).toBe('review-record-invalid')
+    expect(editorUpdateDiagnostic(document, forgedDecision, 'editor')).toBe('review-record-invalid')
+    expect(editorUpdateDiagnostic(document, reservedMarkup, 'editor')).toBe('reserved-review-markup')
     collaboration.destroy()
   })
 

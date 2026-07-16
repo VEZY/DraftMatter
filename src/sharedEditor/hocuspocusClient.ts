@@ -23,6 +23,7 @@ export interface CollaborationClientOptions {
   projectId: string
   token: string | (() => string | Promise<string>)
   bootstrapSource: string
+  canBootstrap?: boolean
   presence: CollaboratorPresence
   timeoutMs?: number
   onStatus?: (status: CollaborationClientStatus, detail?: string) => void
@@ -52,6 +53,13 @@ export function validateCollaborationServiceUrl(value: string) {
 function documentName(workspaceId: string, projectId: string) {
   if (!SAFE_ID.test(workspaceId) || !SAFE_ID.test(projectId)) throw new Error('Workspace and project IDs must use safe portable identifiers.')
   return `${workspaceId}:${projectId}`
+}
+
+export function bootstrapCollaborationSource(collaboration: CollaborativeDocument, source: string, canBootstrap = true) {
+  if (collaboration.source || collaboration.snapshot().authors.length > 0) return false
+  if (!canBootstrap) throw new Error('The manuscript has not been initialized by its owner yet.')
+  collaboration.reconcilePortableSource(source, 'collaboration-bootstrap')
+  return true
 }
 
 export class HocuspocusCollaborationClient {
@@ -126,9 +134,7 @@ export class HocuspocusCollaborationClient {
     try {
       await synced
       window.clearTimeout(timeout)
-      if (!collaboration.source && collaboration.snapshot().authors.length === 0) {
-        collaboration.reconcilePortableSource(options.bootstrapSource, 'collaboration-bootstrap')
-      }
+      bootstrapCollaborationSource(collaboration, options.bootstrapSource, options.canBootstrap !== false)
       const source = projectCollaborationPortableSource(collaboration)
       client.lastPortableSource = source
       options.onPortableSource?.(source)

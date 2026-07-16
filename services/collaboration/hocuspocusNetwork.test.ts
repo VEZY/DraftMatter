@@ -5,7 +5,7 @@ import { HocuspocusProvider, WebSocketStatus } from '@hocuspocus/provider'
 import { afterEach, describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import { AuthenticatedWorkspaceService } from '../../src/collaboration/workspaceService'
-import { createReviewChange } from '../../src/reviewOperations'
+import { createReviewChange, createReviewThread } from '../../src/reviewOperations'
 import { CollaborativeDocument } from '../../src/sharedEditor/collaboration'
 import { createCollaborationCheckpoint } from '../../src/sharedEditor/collaborationCheckpoint'
 import { FileCollaborationStore } from './fileStore'
@@ -155,5 +155,72 @@ describe('live Hocuspocus collaboration', () => {
     aliceCollaboration.destroy()
     bobCollaboration.destroy()
     reopenedCollaboration.destroy()
+  }, 15_000)
+
+  it('accepts a verified commenter thread through the decoded sync authorization boundary', async () => {
+    const root = await mkdtemp(join(tmpdir(), 'draftmatter-live-commenter-'))
+    roots.push(root)
+    let id = 0
+    const authorization = new AuthenticatedWorkspaceService({
+      secret: Uint8Array.from({ length: 32 }, (_, index) => index + 80),
+      idFactory: () => `comment-${++id}`,
+    })
+    const ownerToken = await authorization.createSessionForVerifiedIdentity({ userId: 'owner', sessionId: 'owner-comment-session' })
+    const reviewerToken = await authorization.createSessionForVerifiedIdentity({ userId: 'reviewer', sessionId: 'reviewer-comment-session' })
+    await authorization.createWorkspace(ownerToken, { id: 'forest', name: 'Forest study' })
+    await authorization.createProject(ownerToken, 'forest', { id: 'paper', name: 'Canopy paper' })
+    const invitation = await authorization.createInvitation(ownerToken, 'forest', { role: 'commenter' })
+    await authorization.acceptInvitation(reviewerToken, invitation.token)
+
+    const source = '## Results\n\nCanopy response declined during drought.\n'
+    const seed = CollaborativeDocument.fromPortableSource(source)
+    const persistence = new FileCollaborationStore({ root, idFactory: () => `comment-store-${++id}` })
+    await persistence.createSnapshot({ workspaceId: 'forest', projectId: 'paper' }, 'seed', seed.encodeUpdate())
+    const server = createDraftMatterHocuspocusServer({ authorization, persistence, port: 0, debounceMs: 20, maxDebounceMs: 80 })
+    await server.listen()
+
+    const name = collaborationDocumentName({ workspaceId: 'forest', projectId: 'paper' })
+    const ownerDocument = new Y.Doc()
+    const reviewerDocument = new Y.Doc()
+    const owner = provider(server.webSocketURL, name, ownerToken, ownerDocument)
+    const reviewer = provider(server.webSocketURL, name, reviewerToken, reviewerDocument)
+    await Promise.all([owner.synced, reviewer.synced])
+    const ownerCollaboration = new CollaborativeDocument(ownerDocument)
+    const reviewerCollaboration = new CollaborativeDocument(reviewerDocument)
+    const quote = 'Canopy response'
+    const start = source.indexOf(quote)
+    const thread = createReviewThread(source, {
+      start,
+      end: start + quote.length,
+      author: { id: 'reviewer', name: 'Riley Reviewer' },
+      message: 'Please report the confidence interval.',
+      timestamp: '2026-07-16T11:15:00.000Z',
+      threadId: 'dm-thread-reviewer-live',
+      anchorId: 'dm-anchor-reviewer-live',
+      startMarkerId: 'dm-marker-reviewer-live-start',
+      endMarkerId: 'dm-marker-reviewer-live-end',
+    })
+    reviewerCollaboration.reconcilePortableSource(thread.document.source, 'reviewer-live-thread')
+
+    await waitFor(
+      () => ownerCollaboration.snapshot().threads.some((candidate) => candidate.id === 'dm-thread-reviewer-live'),
+      'Verified commenter thread did not synchronize.',
+    )
+    expect(ownerCollaboration.source).toBe(source)
+    expect(ownerCollaboration.snapshot().threads).toEqual([
+      expect.objectContaining({
+        id: 'dm-thread-reviewer-live',
+        authorId: 'reviewer',
+        messages: [expect.objectContaining({ content: 'Please report the confidence interval.', authorId: 'reviewer' })],
+      }),
+    ])
+    expect(createCollaborationCheckpoint(ownerCollaboration).source).toContain('data-author="reviewer"')
+
+    owner.connection.destroy()
+    reviewer.connection.destroy()
+    await server.destroy()
+    seed.destroy()
+    ownerCollaboration.destroy()
+    reviewerCollaboration.destroy()
   }, 15_000)
 })

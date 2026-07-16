@@ -126,6 +126,7 @@ describe('collaboration dialog', () => {
       projectId: 'paper',
       token: 'secret-token',
       bootstrapSource: '# Draft',
+      canBootstrap: true,
     }))
     expect(container.textContent).toContain('Working together')
     expect(container.textContent).toContain('Remi Vezy')
@@ -154,7 +155,7 @@ describe('collaboration dialog', () => {
       projects: [{ id: 'paper', workspaceId: 'forest', name: 'Shared paper', role: 'commenter', createdAt: '2026-07-15T00:00:00.000Z' }],
     }), { status: 200 })))
     const createCheckpoint = vi.fn()
-    vi.spyOn(HocuspocusCollaborationClient, 'connect').mockResolvedValue({
+    const connect = vi.spyOn(HocuspocusCollaborationClient, 'connect').mockResolvedValue({
       publishPortableSource: vi.fn(() => '# Draft'),
       createCheckpoint,
       destroy: vi.fn(),
@@ -180,6 +181,7 @@ describe('collaboration dialog', () => {
     await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
 
     expect(onRoleChange).toHaveBeenCalledWith('commenter')
+    expect(connect).toHaveBeenCalledWith(expect.objectContaining({ canBootstrap: false }))
     expect(container.textContent).toContain('Commenter access')
     expect(container.textContent).toContain('Continue reviewing')
     const checkpointButton = [...container.querySelectorAll<HTMLButtonElement>('button')].find((candidate) => candidate.textContent === 'Owner checkpoint only')!
@@ -237,6 +239,7 @@ describe('collaboration dialog', () => {
       workspaceId: 'forest',
       projectId: 'paper',
       token: 'identity-token',
+      canBootstrap: true,
       presence: expect.objectContaining({ userId: 'account-42', name: 'Dr Researcher' }),
     }))
     expect(container.textContent).toContain('Workspace access & recovery')
