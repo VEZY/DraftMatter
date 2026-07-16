@@ -20,8 +20,9 @@ The product workflow now covers privacy-safe browser guest links, browser PKCE s
 
 Collaboration-boundary certification on 2026-07-16 from the locked checkout completed:
 
-- `npm test`: 106 files and 533 tests passed;
-- `npm run build`: collaboration service type-check/bundle and browser type-check/bundle passed;
+- `npm test`: 109 files and 545 tests passed, including the live authenticated Hocuspocus gate and 90-page rendered-editor budget;
+- `npm run build`: collaboration service, standalone dependency-free CLI, and browser type-check/bundles passed;
+- `npm run test:cli`: the packaged projector passed conflict-failure, atomic-output, and stdin/stdout process checks;
 - `npm run test:e2e`: 25 rendered Chromium interaction tests passed;
 - `npm run compliance:check`: 572 locked npm/Cargo components verified for `aarch64-apple-darwin`.
 

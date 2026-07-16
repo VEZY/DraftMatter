@@ -11,6 +11,8 @@ The portability workflow type-checks, tests, and packages debug bundles for thes
 
 The web application remains a browser-safe fallback on all three operating-system families. It does not receive desktop host commands.
 
+The same portability matrix builds and process-tests the dependency-free Node.js 20+ clean-export CLI. Tagged releases attach one platform-neutral `draftmatter-<version>.tgz` archive alongside the signed desktop installers and verified release metadata.
+
 ## Reproducible release checks
 
 Run from a clean checkout:
@@ -21,6 +23,7 @@ npm run check
 npm test
 npm run test:e2e
 npm run build
+npm run test:cli
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 npm run compliance:check
 npm run compliance:generate
