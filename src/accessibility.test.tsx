@@ -62,4 +62,17 @@ describe('accessibility baseline', () => {
     })
     expect(container.querySelector('[role="status"]')?.textContent).toContain('No matching commands')
   })
+
+  it('labels the manuscript author editor and closes it from the keyboard', async () => {
+    await act(async () => root.render(<App />))
+    await act(async () => container.querySelector<HTMLButtonElement>('.authors button')!.click())
+
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="publication-authors-title"]')
+    expect(dialog).not.toBeNull()
+    const result = await axe.run(dialog!, { rules: { 'color-contrast': { enabled: false } } })
+    expect(result.violations).toEqual([])
+
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })))
+    expect(container.querySelector('[aria-labelledby="publication-authors-title"]')).toBeNull()
+  })
 })

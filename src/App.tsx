@@ -53,6 +53,7 @@ import type { CollaborationCheckpoint, CollaborationClientStatus } from './share
 import { motionAwareScrollBehavior } from './accessibility'
 import { normalizeProjectRelativePath, projectFilePath } from './projectPaths'
 import { authorInitials, readUserSettings, renameLocalAuthor, saveUserSettings } from './userSettings'
+import { parsePublicationMetadata, updatePublicationAuthors } from './publicationMetadata'
 
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
 const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
@@ -72,6 +73,20 @@ interface CommandPaletteEntry {
   shortcut?: string
   disabled?: boolean
   action: () => void
+}
+
+interface PublicationAuthorDraft {
+  id: string
+  name: string
+  sourceIndex?: number
+}
+
+function publicationAuthorDraft(name = '', sourceIndex?: number): PublicationAuthorDraft {
+  return {
+    id: globalThis.crypto?.randomUUID?.() ?? `publication-author-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+    name,
+    sourceIndex,
+  }
 }
 
 const directExecutionProvider = createDirectExecutionProvider(createDesktopDirectExecutionTransport(desktopHost))
@@ -252,7 +267,7 @@ function readableError(error: unknown) {
 }
 
 function Avatar({ initials, tone = 'sage', small = false, label }: { initials: string; tone?: 'sage' | 'blue' | 'clay'; small?: boolean; label?: string }) {
-  return <span className={`avatar avatar-${tone} ${small ? 'avatar-small' : ''}`} aria-label={label} title={label}>{initials}</span>
+  return <span className={`avatar avatar-${tone} ${small ? 'avatar-small' : ''}`} role={label ? 'img' : undefined} aria-label={label} title={label}>{initials}</span>
 }
 
 function CitationChip({ onClick, label }: { onClick: () => void; label: string }) {
@@ -348,6 +363,9 @@ function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsName, setSettingsName] = useState(userSettings.author.name)
   const [settingsProblem, setSettingsProblem] = useState('')
+  const [publicationAuthorsOpen, setPublicationAuthorsOpen] = useState(false)
+  const [publicationAuthorNames, setPublicationAuthorNames] = useState<PublicationAuthorDraft[]>(() => [publicationAuthorDraft()])
+  const [publicationAuthorsProblem, setPublicationAuthorsProblem] = useState('')
   const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [collaborationOpen, setCollaborationOpen] = useState(false)
   const [collaborationStatus, setCollaborationStatus] = useState<CollaborationClientStatus>('disconnected')
@@ -524,6 +542,7 @@ function App() {
   const activeCitationRecord = citations.find((record) => record.citekey === activeCitationItem?.citekey)
   const activeCitationBadge = citationSourceBadge(activeCitationRecord)
   const currentAuthorInitials = authorInitials(userSettings.author.name)
+  const publicationAuthors = useMemo(() => parsePublicationMetadata(manuscriptSource).authors, [manuscriptSource])
 
   const openSettings = () => {
     setSettingsName(userSettings.author.name)
@@ -542,6 +561,40 @@ function App() {
       setToast(next === userSettings ? 'Review identity unchanged' : 'Review identity updated · earlier attribution preserved')
     } catch (error) {
       setSettingsProblem(error instanceof Error ? error.message : String(error))
+    }
+  }
+
+  const openPublicationAuthors = () => {
+    setPublicationAuthorNames(publicationAuthors.length
+      ? publicationAuthors.map((name, sourceIndex) => publicationAuthorDraft(name, sourceIndex))
+      : [publicationAuthorDraft()])
+    setPublicationAuthorsProblem('')
+    setPublicationAuthorsOpen(true)
+  }
+
+  const updatePublicationAuthorName = (index: number, name: string) => {
+    setPublicationAuthorNames((current) => current.map((candidate, candidateIndex) => candidateIndex === index ? { ...candidate, name } : candidate))
+  }
+
+  const removePublicationAuthor = (index: number) => {
+    setPublicationAuthorNames((current) => current.length === 1 ? [publicationAuthorDraft()] : current.filter((_candidate, candidateIndex) => candidateIndex !== index))
+  }
+
+  const commitPublicationAuthors = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    try {
+      const populated = publicationAuthorNames.filter((author) => author.name.trim())
+      const names = populated.map((author) => author.name.trim())
+      const nextSource = updatePublicationAuthors(manuscriptSource, names, populated.map((author) => author.sourceIndex))
+      if (!structuredMode) setStructuredMode(true)
+      updateStructuredManuscript(nextSource)
+      setPublicationAuthorsOpen(false)
+      setPublicationAuthorsProblem('')
+      setToast(names.length
+        ? `Manuscript authors updated · ${names.length} portable name${names.length === 1 ? '' : 's'}`
+        : 'Manuscript authors removed from publication metadata')
+    } catch (error) {
+      setPublicationAuthorsProblem(error instanceof Error ? error.message : String(error))
     }
   }
 
@@ -959,6 +1012,7 @@ function App() {
         setCreateProjectOpen(false)
         setPendingProject(null)
         setEnvironmentOpen(false)
+        setPublicationAuthorsOpen(false)
         if (!executionTrustBusy) setExecutionTrustOpen(false)
         setSourceOpen(false)
         setSourceEditing(false)
@@ -2715,6 +2769,14 @@ function App() {
       action: () => { setCommandOpen(false); showReviewPanel() },
     },
     {
+      id: 'authors',
+      label: 'Manage manuscript authors',
+      description: 'Edit portable publication names in frontmatter',
+      keywords: 'author coauthor metadata yaml publication byline',
+      icon: <span className="command-icon"><Icon name="users" size={17} /></span>,
+      action: () => { setCommandOpen(false); openPublicationAuthors() },
+    },
+    {
       id: 'section',
       label: 'Add section',
       description: 'Insert a heading and update the outline',
@@ -3032,7 +3094,18 @@ function App() {
 
           {structuredMode ? (
           <article className="manuscript structured-manuscript" aria-label="Editable manuscript">
-            <div className="paper-meta">PORTABLE RESEARCH MANUSCRIPT · MARKDOWN / QUARTO</div>
+            <div className="paper-meta-row">
+              <div className="paper-meta">PORTABLE RESEARCH MANUSCRIPT · MARKDOWN / QUARTO</div>
+              <button
+                className="publication-authors-trigger"
+                onClick={openPublicationAuthors}
+                aria-label={`Manage manuscript authors${publicationAuthors.length ? `, ${publicationAuthors.length} listed` : ''}`}
+                title={publicationAuthors.length ? publicationAuthors.join(' · ') : 'Add portable publication authors'}
+              >
+                <Icon name="users" size={13} />
+                {publicationAuthors.length ? `${publicationAuthors.length} author${publicationAuthors.length === 1 ? '' : 's'}` : 'Add authors'}
+              </button>
+            </div>
             {!structuredOutline.some((item) => item.level === 1) && (
               <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" />
             )}
@@ -3156,7 +3229,7 @@ function App() {
             <div className="authors">
               <span><Avatar initials="RV" tone="sage" small /> Remi Vezy<sup>1</sup></span>
               <span><Avatar initials="AM" tone="blue" small /> Alice Martin<sup>2</sup></span>
-              <button><Icon name="plus" size={13} /> Add author</button>
+              <button onClick={openPublicationAuthors}><Icon name="plus" size={13} /> Add author</button>
             </div>
             <div className="affiliations"><sup>1</sup> CIRAD, UMR AMAP, Montpellier, France · <sup>2</sup> Wageningen University, Netherlands</div>
 
@@ -3441,6 +3514,35 @@ function App() {
             </div>
             <div className="execution-dialog-actions"><button type="button" onClick={() => setSettingsOpen(false)}>Cancel</button><button className="primary-button" type="submit" disabled={!settingsName.trim()}>Save identity</button></div>
           </form>
+        </div>
+      )}
+
+      {publicationAuthorsOpen && (
+        <div className="modal-backdrop execution-dialog-backdrop" onMouseDown={() => setPublicationAuthorsOpen(false)}>
+          <div className="publication-authors-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="publication-authors-title">
+            <form onSubmit={commitPublicationAuthors}>
+            <div className="execution-dialog-head">
+              <span className="execution-shield"><Icon name="users" size={19} /></span>
+              <div><span className="eyebrow">Publication metadata</span><h2 id="publication-authors-title">Manuscript authors</h2><p>These names travel with the Markdown or Quarto file and appear in clean HTML, PDF, and DOCX exports.</p></div>
+              <button className="icon-button" type="button" onClick={() => setPublicationAuthorsOpen(false)} aria-label="Close manuscript authors"><Icon name="close" /></button>
+            </div>
+            <div className="publication-authors-body">
+              <div className="publication-author-list">
+                {publicationAuthorNames.map((author, index) => (
+                  <div className="publication-author-row" key={author.id}>
+                    <Avatar initials={authorInitials(author.name)} tone={index % 2 ? 'blue' : 'sage'} small label={author.name.trim() || `Author ${index + 1}`} />
+                    <label><span>Author {index + 1}</span><input autoFocus={index === 0} value={author.name} onChange={(event) => updatePublicationAuthorName(index, event.target.value)} maxLength={240} autoComplete="name" aria-label={`Author ${index + 1} name`} /></label>
+                    <button type="button" className="publication-author-remove" onClick={() => removePublicationAuthor(index)} aria-label={`Remove author ${index + 1}`}><Icon name="x" size={14} /></button>
+                  </div>
+                ))}
+              </div>
+              <button type="button" className="publication-author-add" onClick={() => setPublicationAuthorNames((current) => [...current, publicationAuthorDraft()])} disabled={publicationAuthorNames.length >= 100}><Icon name="plus" size={14} /> Add another author</button>
+              {publicationAuthorsProblem && <div className="user-settings-problem" role="alert">{publicationAuthorsProblem}</div>}
+              <p>Affiliations, ORCID identifiers, bibliography settings, and other unsupported YAML stay unchanged. Complex structured names can still be edited through the source inspector.</p>
+            </div>
+            <div className="execution-dialog-actions"><button type="button" onClick={() => setPublicationAuthorsOpen(false)}>Cancel</button><button className="primary-button" type="submit">Save authors</button></div>
+            </form>
+          </div>
         </div>
       )}
 
