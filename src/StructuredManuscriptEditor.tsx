@@ -139,6 +139,7 @@ export interface StructuredManuscriptEditorProps {
   onInspectRaw?: (nodeId: string) => void
   onCitationSelect?: (id: string, items: CitationItem[]) => void
   onReviewSelectionChange?: (selection: StructuredReviewSelection | null) => void
+  onReviewContextMenu?: (selection: StructuredReviewSelection, point: { x: number; y: number }) => void
   onReviewAnchorSelect?: (anchorId: string) => void
   onCommandRequest?: () => void
   suggestionMode?: boolean
@@ -209,6 +210,29 @@ function selectedReviewText(view: EditorView): StructuredReviewSelection | null 
     offset = prefix.indexOf(quote, offset + Math.max(1, quote.length))
   }
   return { quote, occurrence }
+}
+
+function semanticReviewTarget(view: EditorView, event: MouseEvent): StructuredReviewSelection | null {
+  const selected = selectedReviewText(view)
+  if (selected) return selected
+  const element = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-dm-id]') : null
+  const id = element?.dataset.dmId
+  if (!id) return null
+  let quote = ''
+  view.state.doc.descendants((node) => {
+    if (String(node.attrs.id ?? '') !== id) return true
+    quote = [
+      node.attrs.captionMarkdown,
+      node.attrs.alt,
+      node.attrs.tex,
+      node.attrs.contentMarkdown,
+      node.attrs.code,
+      node.textContent,
+      node.attrs.src,
+    ].find((candidate) => typeof candidate === 'string' && candidate.trim())?.trim() ?? ''
+    return false
+  })
+  return quote ? { quote, occurrence: 0 } : null
 }
 
 interface ReviewDecorationRecord {
@@ -2066,6 +2090,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   onInspectRaw,
   onCitationSelect,
   onReviewSelectionChange,
+  onReviewContextMenu,
   onReviewAnchorSelect,
   onCommandRequest,
   suggestionMode = false,
@@ -2094,6 +2119,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const onInspectRawRef = useRef(onInspectRaw)
   const onCitationSelectRef = useRef(onCitationSelect)
   const onReviewSelectionRef = useRef(onReviewSelectionChange)
+  const onReviewContextMenuRef = useRef(onReviewContextMenu)
   const onReviewAnchorSelectRef = useRef(onReviewAnchorSelect)
   const onCommandRequestRef = useRef(onCommandRequest)
   const suggestionModeRef = useRef(suggestionMode)
@@ -2116,6 +2142,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   onInspectRawRef.current = onInspectRaw
   onCitationSelectRef.current = onCitationSelect
   onReviewSelectionRef.current = onReviewSelectionChange
+  onReviewContextMenuRef.current = onReviewContextMenu
   onReviewAnchorSelectRef.current = onReviewAnchorSelect
   onCommandRequestRef.current = onCommandRequest
   suggestionModeRef.current = suggestionMode
@@ -2483,11 +2510,12 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
 
   useEffect(() => {
     if (!hostRef.current) return
+    const host = hostRef.current
     const parsed = parseStructuredManuscript(sourceRef.current)
     metadataRef.current = metadataForEditor(parsed)
     onDiagnosticsRef.current?.(parsed.diagnostics)
     onOutlineRef.current?.(outlineFor(parsed.document))
-    const view = new EditorView(hostRef.current, {
+    const view = new EditorView(host, {
       state: editorState(parsed.document, collaboration),
       editable: () => !readOnlyRef.current,
       attributes: {
@@ -2577,6 +2605,15 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         ),
       },
     })
+    const openReviewContextMenu = (event: MouseEvent) => {
+      const target = semanticReviewTarget(view, event)
+      if (!target || !onReviewContextMenuRef.current) return
+      event.preventDefault()
+      event.stopPropagation()
+      onReviewSelectionRef.current?.(target)
+      onReviewContextMenuRef.current(target, { x: event.clientX, y: event.clientY })
+    }
+    host.addEventListener('contextmenu', openReviewContextMenu, true)
     view.setProps({
       dispatchTransaction(transaction) {
         const stepTypes = transaction.steps.map((step) => step.toJSON().stepType)
@@ -2632,6 +2669,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       if (pendingSuggestionRef.current) window.clearTimeout(pendingSuggestionRef.current.timeout)
       pendingSuggestionRef.current = undefined
       document.querySelectorAll('.structured-heading-dialog-backdrop, .structured-link-dialog-backdrop').forEach((dialog) => dialog.remove())
+      host.removeEventListener('contextmenu', openReviewContextMenu, true)
       viewRef.current = null
       view.destroy()
     }

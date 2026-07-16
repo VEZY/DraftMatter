@@ -31,8 +31,8 @@ test.describe('DM-P4-02 rendered suggestion transactions', () => {
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     }, source)
     await page.goto('/')
-    await page.getByRole('button', { name: /Editing/ }).click()
-    await expect(page.getByRole('button', { name: /Suggesting/ })).toHaveAttribute('aria-pressed', 'true')
+    await page.getByRole('button', { name: 'Turn on track changes' }).click()
+    await expect(page.getByRole('button', { name: 'Turn off track changes' })).toHaveAttribute('aria-pressed', 'true')
   })
 
   test('groups typing, paste, deletion, and insertion without changing accepted prose', async ({ page }) => {

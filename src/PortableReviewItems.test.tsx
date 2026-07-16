@@ -329,6 +329,23 @@ describe('portable review panel items', () => {
     expect(notices.at(-1)).toBe('Portable comment created')
   })
 
+  it('opens and pre-fills the comment composer from a manuscript context-menu request', async () => {
+    const selectedTarget = { quote: 'leaf area declined', occurrence: 0 }
+    await act(async () => root.render(
+      <PortableReviewItems
+        source={identicalSource}
+        selectedTarget={selectedTarget}
+        openCommentRequest={1}
+        onApply={() => undefined}
+      />,
+    ))
+
+    const composer = container.querySelector<HTMLElement>('[aria-label="New comment"]')!
+    expect(composer).not.toBeNull()
+    expect(composer.querySelector<HTMLInputElement>('input')?.value).toBe(selectedTarget.quote)
+    expect(composer.querySelector('textarea')).toBe(document.activeElement)
+  })
+
   it('creates a recoverable point comment after nearby selected text and offers either side', async () => {
     const pointSource = '# Point comment\n\nMeasure canopy area weekly.\n'
     await act(async () => root.render(

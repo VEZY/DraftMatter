@@ -55,6 +55,7 @@ export function PortableReviewItems({
   onActiveIdChange,
   onNavigateToItem,
   selectedTarget,
+  openCommentRequest = 0,
   collaborativeReview,
   onApply,
   canComment = true,
@@ -70,6 +71,7 @@ export function PortableReviewItems({
   onActiveIdChange?: (id: string | undefined) => void
   onNavigateToItem?: (item: ReviewQueueItem) => void
   selectedTarget?: { quote: string; occurrence: number } | null
+  openCommentRequest?: number
   collaborativeReview?: CollaborativeReviewBinding | null
   onApply: (source: string, message: string) => void
   canComment?: boolean
@@ -155,7 +157,18 @@ export function PortableReviewItems({
 
   useEffect(() => {
     if (compose && typeof composerRef.current?.scrollIntoView === 'function') composerRef.current.scrollIntoView({ block: 'nearest' })
-  }, [compose])
+    if (compose === 'comment' && openCommentRequest) composerRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()
+  }, [compose, openCommentRequest])
+
+  useEffect(() => {
+    if (!openCommentRequest || !canComment || !selectedTarget?.quote) return
+    setCompose('comment')
+    setCommentAnchorMode('range')
+    setProblem('')
+    setQuote(selectedTarget.quote)
+    setSelectedOccurrence(selectedTarget.occurrence)
+    setBody('')
+  }, [canComment, openCommentRequest, selectedTarget])
 
   const authors = new Map(document.authors.map((author) => [author.id, author.name]))
   const apply = (nextSource: string, message: string) => {

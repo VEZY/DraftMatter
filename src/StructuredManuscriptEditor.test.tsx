@@ -131,10 +131,11 @@ describe('full structured manuscript editor', () => {
   it('renders semantic content while hiding Markdown, review storage, and unsupported raw payloads', async () => {
     const inspect = vi.fn()
     const selectReview = vi.fn()
+    const openReviewMenu = vi.fn()
     const asset = vi.fn((path: string) => `asset://${path}`)
 
     await act(async () => root.render(
-      <StructuredManuscriptEditor source={source} onChange={vi.fn()} onInspectRaw={inspect} onReviewAnchorSelect={selectReview} resolveAssetUrl={asset} />,
+      <StructuredManuscriptEditor source={source} onChange={vi.fn()} onInspectRaw={inspect} onReviewAnchorSelect={selectReview} onReviewContextMenu={openReviewMenu} resolveAssetUrl={asset} />,
     ))
 
     const editor = container.querySelector('[role="textbox"][aria-label="Rendered manuscript editor"]')
@@ -174,8 +175,10 @@ describe('full structured manuscript editor', () => {
     expect(raw.querySelector<HTMLTextAreaElement>('.structured-raw-editor')?.value).toContain('Opaque raw payload.')
     await act(async () => raw.querySelector<HTMLButtonElement>('.structured-raw-actions > button')?.click())
     await act(async () => (container.querySelector('.dm-review-point') as HTMLButtonElement).click())
+    await act(async () => container.querySelector('img')?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 24, clientY: 36 })))
     expect(inspect).toHaveBeenCalledOnce()
     expect(selectReview).toHaveBeenCalledWith('dm-comment')
+    expect(openReviewMenu).toHaveBeenCalledWith({ quote: 'Growth', occurrence: 0 }, { x: 24, y: 36 })
     expect(asset).toHaveBeenCalledWith('figures/growth.svg')
   })
 

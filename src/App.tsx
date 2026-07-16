@@ -497,6 +497,8 @@ function App() {
   const [structuredMode, setStructuredMode] = useState(true)
   const [structuredOutline, setStructuredOutline] = useState<StructuredOutlineItem[]>([])
   const [structuredReviewSelection, setStructuredReviewSelection] = useState<StructuredReviewSelection | null>(null)
+  const [reviewContextMenu, setReviewContextMenu] = useState<{ selection: StructuredReviewSelection; x: number; y: number }>()
+  const [openCommentRequest, setOpenCommentRequest] = useState(0)
   const [externalExportSource, setExternalExportSource] = useState<string>()
   const [executionResult, setExecutionResult] = useState<NormalizedExecutionResult>()
   const [executionResults, setExecutionResults] = useState<Record<string, NormalizedExecutionResult>>({})
@@ -1264,6 +1266,21 @@ function App() {
       setReviewAuthorFilter('all')
     }
   }, [reviewAuthorFilter, reviewDocument.authors])
+
+  useEffect(() => {
+    if (!reviewContextMenu) return
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent && event.key !== 'Escape') return
+      if (event instanceof MouseEvent && event.target instanceof Element && event.target.closest('.editor-review-context-menu')) return
+      setReviewContextMenu(undefined)
+    }
+    globalThis.document.addEventListener('mousedown', close)
+    globalThis.document.addEventListener('keydown', close)
+    return () => {
+      globalThis.document.removeEventListener('mousedown', close)
+      globalThis.document.removeEventListener('keydown', close)
+    }
+  }, [reviewContextMenu])
 
   useEffect(() => {
     const trackerRoot = desktopSession?.root ?? `browser:${filename}`
@@ -2327,6 +2344,31 @@ function App() {
   const showReviewPanel = () => {
     setActiveNav('review')
     setRightPanelOpen(true)
+  }
+
+  const toggleTrackChanges = () => {
+    if (!canSuggestReview || !structuredMode) return
+    const enabled = !suggestionMode
+    setSuggestionMode(enabled)
+    if (enabled) {
+      if (markupView === 'original' || markupView === 'final') setMarkupView('all')
+      showReviewPanel()
+      setToast('Track changes on · additions and deletions will be proposed for review')
+    } else setToast('Track changes off · edits apply directly')
+  }
+
+  const openReviewContextMenu = (selection: StructuredReviewSelection, point: { x: number; y: number }) => {
+    setStructuredReviewSelection(selection)
+    setReviewContextMenu({ selection, ...point })
+  }
+
+  const addCommentFromContextMenu = () => {
+    if (!reviewContextMenu) return
+    setStructuredReviewSelection(reviewContextMenu.selection)
+    setReviewContextMenu(undefined)
+    showReviewPanel()
+    if (markupView === 'original' || markupView === 'final') setMarkupView('all')
+    setOpenCommentRequest((request) => request + 1)
   }
 
   const selectReviewItem = (id: string | undefined) => {
@@ -3448,6 +3490,15 @@ function App() {
             <button aria-label="Insert equation" onClick={() => openInsertBlock('equation-inline')} disabled={!canEditManuscript}><span className="toolbar-symbol">∑</span></button>
             <button aria-label="Insert code cell" onClick={() => openInsertBlock('code-cell')} disabled={!canEditManuscript}><Icon name="code" size={17} /></button>
             <span className="toolbar-divider" />
+            <button
+              className={`toolbar-track-changes ${suggestionMode ? 'active' : ''}`}
+              aria-label={suggestionMode ? 'Turn off track changes' : 'Turn on track changes'}
+              aria-pressed={suggestionMode}
+              onClick={toggleTrackChanges}
+              disabled={!canSuggestReview || !structuredMode}
+              title="Record additions, deletions, formatting, and moved blocks as reviewable changes"
+            ><Icon name="spark" size={15} /><span>Track changes</span></button>
+            <span className="toolbar-divider" />
             <button aria-label="Undo" onClick={() => structuredMode ? structuredEditorRef.current?.undo() : undoDraft()} disabled={!canEditManuscript || (!structuredMode && !canUndo)}><Icon name="undo" size={16} /></button>
             <button aria-label="Redo" onClick={() => structuredMode ? structuredEditorRef.current?.redo() : redoDraft()} disabled={!canEditManuscript || (!structuredMode && !canRedo)}><Icon name="redo" size={16} /></button>
           </div>
@@ -3531,6 +3582,7 @@ function App() {
               onInspectRaw={openSourceInspector}
               onCitationSelect={openStructuredCitationDetails}
               onReviewSelectionChange={setStructuredReviewSelection}
+              onReviewContextMenu={canCommentReview ? openReviewContextMenu : undefined}
               onReviewAnchorSelect={selectReviewAnchor}
               onCommandRequest={() => setCommandOpen(true)}
               suggestionMode={canSuggestReview && suggestionMode && markupView !== 'original' && markupView !== 'final'}
@@ -3780,14 +3832,11 @@ function App() {
               type="button"
               className={`suggestion-mode-control ${suggestionMode ? 'active' : ''}`}
               aria-pressed={suggestionMode}
-              onClick={() => {
-                setSuggestionMode((active) => !active)
-                if (!rightPanelOpen) setRightPanelOpen(true)
-              }}
-              disabled={!canSuggestReview || !structuredMode || markupView === 'original' || markupView === 'final'}
+              onClick={toggleTrackChanges}
+              disabled={!canSuggestReview || !structuredMode}
             >
               <Icon name="spark" size={15} />
-              <span><strong>{canSuggestReview ? (suggestionMode ? 'Suggesting' : 'Editing') : collaborationRole === 'commenter' ? 'Comment-only' : 'Read-only'}</strong><small>{canSuggestReview ? (suggestionMode ? 'Typing creates portable proposals' : structuredMode ? 'Changes apply directly' : 'Open a portable manuscript to suggest') : collaborationRole === 'commenter' ? 'Add comments without changing the manuscript' : 'This role can inspect the manuscript and review history'}</small></span>
+              <span><strong>{canSuggestReview ? `Track changes ${suggestionMode ? 'on' : 'off'}` : collaborationRole === 'commenter' ? 'Comment-only' : 'Read-only'}</strong><small>{canSuggestReview ? (suggestionMode ? 'Insertions and deletions appear inline until accepted or rejected' : structuredMode ? 'Edits apply directly to the manuscript' : 'Open a portable manuscript to track changes') : collaborationRole === 'commenter' ? 'Add comments without changing the manuscript' : 'This role can inspect the manuscript and review history'}</small></span>
               <span className="suggestion-mode-switch" aria-hidden="true"><i /></span>
             </button>
 
@@ -3866,6 +3915,7 @@ function App() {
                   requestAnimationFrame(() => structuredEditorRef.current?.scrollToReviewAnchor(item.anchorId))
                 }}
                 selectedTarget={structuredMode ? structuredReviewSelection : null}
+                openCommentRequest={openCommentRequest}
                 collaborativeReview={collaborativeEditorBinding?.review}
                 onApply={applyPortableReviewSource}
                 canComment={canCommentReview}
@@ -3876,6 +3926,24 @@ function App() {
           </aside>
         )}
       </div>
+
+      {reviewContextMenu && (
+        <div
+          className="editor-review-context-menu"
+          role="menu"
+          aria-label="Review selection"
+          style={{
+            left: Math.min(reviewContextMenu.x, Math.max(12, globalThis.innerWidth - 190)),
+            top: Math.min(reviewContextMenu.y, Math.max(12, globalThis.innerHeight - 70)),
+          }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button type="button" role="menuitem" onClick={addCommentFromContextMenu}>
+            <Icon name="message" size={15} />
+            <span><strong>Add comment</strong><small>Attach to “{reviewContextMenu.selection.quote.slice(0, 44)}{reviewContextMenu.selection.quote.length > 44 ? '…' : ''}”</small></span>
+          </button>
+        </div>
+      )}
 
       {insertBlockKind && (
         <InsertBlockDialog
