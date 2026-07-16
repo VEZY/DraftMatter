@@ -1,4 +1,4 @@
-import type { Node as ProseMirrorNode, Schema } from 'prosemirror-model'
+import { Fragment, type Node as ProseMirrorNode, type Schema } from 'prosemirror-model'
 import { keymap } from 'prosemirror-keymap'
 import { EditorState, type Plugin } from 'prosemirror-state'
 import {
@@ -24,7 +24,7 @@ export interface CollaborativeEditorUser {
 export interface CollaborativeEditorBinding {
   document: Y.Doc
   awareness: Awareness
-  publishPortableSource?: (source: string) => void
+  publishPortableSource?: (source: string) => string | void
   review?: CollaborativeReviewBinding
 }
 
@@ -56,6 +56,15 @@ export function collaborativeProseMirrorPlugins(fragment: Y.XmlFragment, awarene
   ]
 }
 
+export function withoutCollaborativeReviewAnchors(document: ProseMirrorNode): ProseMirrorNode {
+  if (document.isLeaf) return document
+  const children: ProseMirrorNode[] = []
+  document.forEach((child) => {
+    if (child.type.name !== 'review_anchor') children.push(withoutCollaborativeReviewAnchors(child))
+  })
+  return document.copy(Fragment.fromArray(children))
+}
+
 export function createCollaborativeProseMirrorState(options: {
   document: Y.Doc
   schema: Schema
@@ -65,7 +74,7 @@ export function createCollaborativeProseMirrorState(options: {
   const fragment = options.document.getXmlFragment(COLLABORATIVE_PROSEMIRROR_ROOT)
   if (fragment.length === 0 && options.initialDocument) {
     options.document.transact(() => {
-      prosemirrorToYXmlFragment(options.initialDocument!, fragment)
+      prosemirrorToYXmlFragment(withoutCollaborativeReviewAnchors(options.initialDocument!), fragment)
     }, 'prosemirror-initial-document')
   }
   return {
@@ -83,7 +92,7 @@ export function reconcileCollaborativeProseMirrorDocument(
 ) {
   const fragment = binding.document.getXmlFragment(COLLABORATIVE_PROSEMIRROR_ROOT)
   binding.document.transact(() => {
-    prosemirrorToYXmlFragment(document, fragment)
+    prosemirrorToYXmlFragment(withoutCollaborativeReviewAnchors(document), fragment)
   }, 'draftmatter-portable-source-to-prosemirror')
   return fragment
 }

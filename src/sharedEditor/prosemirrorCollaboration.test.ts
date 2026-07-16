@@ -1,11 +1,16 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from 'vitest'
 import { EditorView } from 'prosemirror-view'
+import { yXmlFragmentToProseMirrorRootNode } from 'y-prosemirror'
 import { Awareness } from 'y-protocols/awareness'
 import * as Y from 'yjs'
 import { manuscriptSchema } from '../manuscriptSchema'
+import { createReviewChange } from '../reviewOperations'
+import { parseStructuredManuscript } from '../structuredManuscript'
 import {
+  COLLABORATIVE_PROSEMIRROR_ROOT,
   createCollaborativeProseMirrorState,
+  reconcileCollaborativeProseMirrorDocument,
   setCollaborativeEditorPresence,
 } from './prosemirrorCollaboration'
 
@@ -69,5 +74,64 @@ describe('Yjs ProseMirror collaboration binding', () => {
     expect(awareness.getLocalState()?.user).toBeNull()
     awareness.destroy()
     document.destroy()
+  })
+
+  it('merges offline review anchors without duplicating their accepted paragraph', () => {
+    const source = '## Results\n\nLeaf area declined during drought.\n'
+    const quote = 'Leaf area declined'
+    const start = source.indexOf(quote)
+    const alternative = (authorId: string, name: string, suffix: string) => createReviewChange(source, {
+      start,
+      end: start + quote.length,
+      author: { id: authorId, name },
+      kind: 'replace',
+      proposal: `${quote} ${suffix}`,
+      changeId: `dm-change-${suffix}`,
+      anchorId: `dm-anchor-${suffix}`,
+      startMarkerId: `dm-${suffix}-start`,
+      endMarkerId: `dm-${suffix}-end`,
+    }).document.source
+
+    const seed = new Y.Doc()
+    createCollaborativeProseMirrorState({
+      document: seed,
+      schema: manuscriptSchema,
+      initialDocument: parseStructuredManuscript(source).document,
+    })
+    const seedUpdate = Y.encodeStateAsUpdate(seed)
+    const left = new Y.Doc()
+    const right = new Y.Doc()
+    Y.applyUpdate(left, seedUpdate)
+    Y.applyUpdate(right, seedUpdate)
+    const leftAwareness = new Awareness(left)
+    const rightAwareness = new Awareness(right)
+    reconcileCollaborativeProseMirrorDocument(
+      { document: left, awareness: leftAwareness },
+      parseStructuredManuscript(alternative('dm-author-alice', 'Alice Martin', 'alice')).document,
+    )
+    reconcileCollaborativeProseMirrorDocument(
+      { document: right, awareness: rightAwareness },
+      parseStructuredManuscript(alternative('dm-author-marcus', 'Marcus Chen', 'marcus')).document,
+    )
+
+    const leftUpdate = Y.encodeStateAsUpdate(left, Y.encodeStateVector(right))
+    const rightUpdate = Y.encodeStateAsUpdate(right, Y.encodeStateVector(left))
+    Y.applyUpdate(left, rightUpdate)
+    Y.applyUpdate(right, leftUpdate)
+
+    const leftDocument = yXmlFragmentToProseMirrorRootNode(left.getXmlFragment(COLLABORATIVE_PROSEMIRROR_ROOT), manuscriptSchema)
+    const rightDocument = yXmlFragmentToProseMirrorRootNode(right.getXmlFragment(COLLABORATIVE_PROSEMIRROR_ROOT), manuscriptSchema)
+    expect(leftDocument.eq(rightDocument)).toBe(true)
+    expect(leftDocument.textContent.match(/Leaf area declined/g)).toHaveLength(1)
+    const anchors: string[] = []
+    leftDocument.descendants((node) => {
+      if (node.type.name === 'review_anchor') anchors.push(String(node.attrs.anchorId))
+    })
+    expect(anchors).toEqual([])
+    leftAwareness.destroy()
+    rightAwareness.destroy()
+    left.destroy()
+    right.destroy()
+    seed.destroy()
   })
 })

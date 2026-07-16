@@ -5,7 +5,7 @@ import {
   encodeAwarenessUpdate,
   removeAwarenessStates,
 } from 'y-protocols/awareness'
-import { parseReviewMarkup, type ReviewAnchorContext, type ReviewThreadMessage } from '../reviewMarkup'
+import { parseReviewMarkup, type ReviewAnchorContext, type ReviewMarkupDocument, type ReviewThreadMessage } from '../reviewMarkup'
 
 const COLLECTION_NAMES = {
   anchors: 'draftmatter:anchors',
@@ -118,10 +118,39 @@ function sortedValues<T extends { id: string }>(map: Y.Map<T>) {
   return [...map.values()].map(portableValue).sort((left, right) => left.id.localeCompare(right.id))
 }
 
-function withoutReviewSection(source: string) {
-  const review = parseReviewMarkup(source)
-  if (review.sectionStart === undefined) return source
-  return `${source.slice(0, review.sectionStart)}${source.slice(review.sectionEnd ?? source.length)}`
+function portableManuscriptView(source: string, review: ReviewMarkupDocument) {
+  const removals = [
+    ...review.anchors.map((anchor) => ({ start: anchor.start, end: anchor.end })),
+    ...(review.sectionStart === undefined ? [] : [{ start: review.sectionStart, end: review.sectionEnd ?? source.length }]),
+  ].sort((left, right) => left.start - right.start || left.end - right.end)
+  const merged: { start: number; end: number }[] = []
+  for (const removal of removals) {
+    const previous = merged.at(-1)
+    if (previous && removal.start <= previous.end) previous.end = Math.max(previous.end, removal.end)
+    else merged.push({ ...removal })
+  }
+  let clean = ''
+  let cursor = 0
+  for (const removal of merged) {
+    clean += source.slice(cursor, removal.start)
+    cursor = removal.end
+  }
+  clean += source.slice(cursor)
+  return {
+    source: clean,
+    offset(original: number) {
+      let removed = 0
+      for (const removal of merged) {
+        if (original >= removal.end) {
+          removed += removal.end - removal.start
+          continue
+        }
+        if (original > removal.start) return removal.start - removed
+        break
+      }
+      return original - removed
+    },
+  }
 }
 
 function reconcileText(text: Y.Text, next: string) {
@@ -220,20 +249,26 @@ export class CollaborativeDocument {
 
   reconcilePortableSource(source: string, origin: unknown = 'portable-reconcile') {
     const review = parseReviewMarkup(source)
-    const liveSource = withoutReviewSection(source)
+    const manuscript = portableManuscriptView(source, review)
     this.doc.transact(() => {
       this.meta.set('schemaVersion', 1)
-      reconcileText(this.text, liveSource)
+      reconcileText(this.text, manuscript.source)
       const authors = review.authors.map((author) => ({ id: author.id, name: author.name }))
       const anchors = review.ranges.filter((candidate) => candidate.complete).map<CollaborativeAnchor>((range) => {
         const record = [...review.changes, ...review.threads].find((candidate) => candidate.anchorId === range.anchorId)
         return {
           id: range.anchorId,
-          start: this.relativePosition(range.start),
-          end: this.relativePosition(range.end),
+          start: this.relativePosition(manuscript.offset(range.start)),
+          end: this.relativePosition(manuscript.offset(range.end)),
           ...(record?.anchorContext ? { context: record.anchorContext } : {}),
         }
       })
+      const importedAnchorIds = new Set(anchors.map((anchor) => anchor.id))
+      const referencedAnchorIds = new Set([...review.changes, ...review.threads].map((record) => record.anchorId).filter(Boolean))
+      for (const anchorId of referencedAnchorIds) {
+        const existing = this.anchors.get(anchorId)
+        if (!importedAnchorIds.has(anchorId) && existing) anchors.push(portableValue(existing))
+      }
       const proposals = review.changes.map<CollaborativeProposal>((change) => ({
         id: change.id,
         anchorId: change.anchorId,

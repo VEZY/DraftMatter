@@ -41,6 +41,7 @@ export {
   createCollaborativeProseMirrorState,
   reconcileCollaborativeProseMirrorDocument,
   setCollaborativeEditorPresence,
+  withoutCollaborativeReviewAnchors,
   type CollaborativeEditorBinding,
   type CollaborativeEditorUser,
   type CollaborativeProseMirrorState,

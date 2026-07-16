@@ -67,7 +67,7 @@ export class HocuspocusCollaborationClient {
     this.editorBinding = {
       document: collaboration.doc,
       awareness: collaboration.awareness,
-      publishPortableSource: (source) => { this.publishPortableSource(source) },
+      publishPortableSource: (source) => this.publishPortableSource(source),
       review: new CollaborativeReviewBinding(collaboration, (source) => { this.lastPortableSource = source }),
     }
     this.provider = provider

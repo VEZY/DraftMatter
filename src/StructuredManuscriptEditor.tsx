@@ -15,6 +15,7 @@ import { renderEquation } from './equationRenderer'
 import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
 import { reviewProposalText } from './reviewPresentation'
+import { reanchorPortableReviews } from './reviewReanchor'
 import { captureReviewSuggestion, type ReviewSuggestionIntent } from './reviewSuggestionCapture'
 import { parseStructuredManuscript, serializeStructuredManuscript, type StructuredManuscriptMetadata } from './structuredManuscript'
 import type { ExecutionFreshnessStatus } from './executionFreshness'
@@ -23,6 +24,7 @@ import { motionAwareScrollBehavior } from './accessibility'
 import {
   createCollaborativeProseMirrorState,
   reconcileCollaborativeProseMirrorDocument,
+  withoutCollaborativeReviewAnchors,
   type CollaborativeEditorBinding,
 } from './sharedEditor/prosemirrorCollaboration'
 
@@ -169,39 +171,59 @@ interface ReviewDecorationRecord {
   proposal?: string
 }
 
-function reviewDecorationIndex(source: string) {
+interface ReviewDecorationIndex {
+  records: Map<string, ReviewDecorationRecord[]>
+  anchors: Map<string, { start?: number; end?: number; points: number[] }>
+}
+
+function reviewDecorationIndex(source: string): ReviewDecorationIndex {
   const parsed = parseReviewMarkup(source)
   const records = new Map<string, ReviewDecorationRecord[]>()
   for (const record of [
     ...parsed.changes.map((change) => ({ id: change.id, anchorId: change.anchorId, kind: 'change' as const, status: change.status, authorId: change.authorId, changeKind: change.changeKind, proposal: change.proposal })),
     ...parsed.threads.map((thread) => ({ id: thread.id, anchorId: thread.anchorId, kind: 'thread' as const, status: thread.status, authorId: thread.authorId })),
   ]) records.set(record.anchorId, [...(records.get(record.anchorId) ?? []), record])
-  return records
+  const anchors = new Map<string, { start?: number; end?: number; points: number[] }>()
+  let removed = 0
+  parseStructuredManuscript(source).document.descendants((node, position) => {
+    if (node.type !== manuscriptSchema.nodes.review_anchor) return true
+    const anchorId = String(node.attrs.anchorId)
+    const anchor = anchors.get(anchorId) ?? { points: [] }
+    const normalizedPosition = position - removed
+    if (node.attrs.edge === 'start') anchor.start = normalizedPosition
+    else if (node.attrs.edge === 'end') anchor.end = normalizedPosition
+    else anchor.points.push(normalizedPosition)
+    anchors.set(anchorId, anchor)
+    removed += node.nodeSize
+    return true
+  })
+  return { records, anchors }
 }
 
 function reviewDecorations(
   document: ProseMirrorNode,
-  records: Map<string, ReviewDecorationRecord[]>,
+  index: ReviewDecorationIndex,
   markupView: MarkupView,
   authorId?: string,
   activeReviewId?: string,
   activeAnchorId?: string,
 ) {
   if (markupView === 'original' || markupView === 'final') return DecorationSet.empty
-  const anchors = new Map<string, { start?: number; end?: number; points: number[] }>()
+  const documentAnchors = new Map<string, { start?: number; end?: number; points: number[] }>()
   document.descendants((node, position) => {
     if (node.type !== manuscriptSchema.nodes.review_anchor) return true
     const id = String(node.attrs.anchorId)
-    const anchor = anchors.get(id) ?? { points: [] }
+    const anchor = documentAnchors.get(id) ?? { points: [] }
     if (node.attrs.edge === 'start') anchor.start = position + node.nodeSize
     else if (node.attrs.edge === 'end') anchor.end = position
     else anchor.points.push(position + node.nodeSize)
-    anchors.set(id, anchor)
+    documentAnchors.set(id, anchor)
     return true
   })
+  const anchors = documentAnchors.size > 0 ? documentAnchors : index.anchors
   const decorations: Decoration[] = []
   for (const [anchorId, anchor] of anchors) {
-    const visibleRecords = (records.get(anchorId) ?? []).filter((record) => record.status !== 'deleted' && (!authorId || record.authorId === authorId))
+    const visibleRecords = (index.records.get(anchorId) ?? []).filter((record) => record.status !== 'deleted' && (!authorId || record.authorId === authorId))
     if (!visibleRecords.length) continue
     const record = visibleRecords.find((candidate) => candidate.id === activeReviewId)
       ?? visibleRecords.find((candidate) => candidate.status === 'open' || candidate.status === 'needs-rebase')
@@ -2022,9 +2044,18 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   activeReviewAnchorIdRef.current = activeReviewAnchorId
   collaborationRef.current = collaboration
 
+  const metadataForEditor = (parsed: ReturnType<typeof parseStructuredManuscript>) => collaborationRef.current
+    ? { ...parsed.metadata, originalDocumentJson: withoutCollaborativeReviewAnchors(parsed.document).toJSON() }
+    : parsed.metadata
+
+  const serializeEditorDocument = (document: ProseMirrorNode, metadata: StructuredManuscriptMetadata) => {
+    const serialized = serializeStructuredManuscript(document, metadata)
+    return collaborationRef.current ? reanchorPortableReviews(serialized).source : serialized
+  }
+
   const publishSourceChange = (nextSource: string) => {
-    collaborationRef.current?.publishPortableSource?.(nextSource)
-    onChangeRef.current(nextSource)
+    const canonicalSource = collaborationRef.current?.publishPortableSource?.(nextSource) ?? nextSource
+    onChangeRef.current(canonicalSource)
   }
 
   const emitReviewSelection = (view: EditorView) => {
@@ -2040,7 +2071,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     loadedSourceRef.current = nextSource
     sourceRef.current = nextSource
     reviewDecorationRef.current = reviewDecorationIndex(nextSource)
-    metadataRef.current = parsed.metadata
+    metadataRef.current = metadataForEditor(parsed)
     onDiagnosticsRef.current?.(parsed.diagnostics)
     onOutlineRef.current?.(outlineFor(parsed.document))
     if (collaborationRef.current) {
@@ -2214,7 +2245,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       const metadata = metadataRef.current
       if (!view || !metadata || !items.length) return null
       const transaction = view.state.tr.replaceSelectionWith(citationNode(items, rendered))
-      return serializeStructuredManuscript(transaction.doc, metadata)
+      return serializeEditorDocument(transaction.doc, metadata)
     },
     replaceCitation: (id, items, rendered) => {
       const view = viewRef.current
@@ -2259,7 +2290,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         items,
         rendered: rendered || `(${items.map((item) => item.citekey).join('; ')})`,
       })
-      return serializeStructuredManuscript(transaction.doc, metadata)
+      return serializeEditorDocument(transaction.doc, metadata)
     },
     insertTable: (rows = 2, columns = 2, caption = '', label) => {
       const view = viewRef.current
@@ -2317,14 +2348,14 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     },
     source: () => {
       const view = viewRef.current
-      return view && metadataRef.current ? serializeStructuredManuscript(view.state.doc, metadataRef.current) : sourceRef.current
+      return view && metadataRef.current ? serializeEditorDocument(view.state.doc, metadataRef.current) : sourceRef.current
     },
   }))
 
   useEffect(() => {
     if (!hostRef.current) return
     const parsed = parseStructuredManuscript(sourceRef.current)
-    metadataRef.current = parsed.metadata
+    metadataRef.current = metadataForEditor(parsed)
     onDiagnosticsRef.current?.(parsed.diagnostics)
     onOutlineRef.current?.(outlineFor(parsed.document))
     const view = new EditorView(hostRef.current, {
@@ -2420,7 +2451,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         emitReviewSelection(view)
         onOutlineRef.current?.(outlineFor(next.doc))
         if (transaction.docChanged && !transaction.getMeta('dm-presentation-only') && metadataRef.current) {
-          const serialized = serializeStructuredManuscript(next.doc, metadataRef.current)
+          const serialized = serializeEditorDocument(next.doc, metadataRef.current)
           if (collaborativeOrigin && !collaborativeUndoRedo) {
             loadedSourceRef.current = serialized
             sourceRef.current = serialized
@@ -2466,7 +2497,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     const parsed = parseStructuredManuscript(source)
     loadedSourceRef.current = source
     reviewDecorationRef.current = reviewDecorationIndex(source)
-    metadataRef.current = parsed.metadata
+    metadataRef.current = metadataForEditor(parsed)
     onDiagnosticsRef.current?.(parsed.diagnostics)
     onOutlineRef.current?.(outlineFor(parsed.document))
     if (!view.state.doc.eq(parsed.document)) {

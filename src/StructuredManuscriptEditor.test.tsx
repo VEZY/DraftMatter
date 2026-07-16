@@ -10,7 +10,7 @@ import { StructuredManuscriptEditor, shouldRequestStructuredCommands, type Struc
 import { manuscriptSchema } from './manuscriptSchema'
 import { createReviewAlternative, createReviewChange } from './reviewOperations'
 import { parseStructuredManuscript } from './structuredManuscript'
-import { createCollaborativeProseMirrorState, setCollaborativeEditorPresence } from './sharedEditor/prosemirrorCollaboration'
+import { COLLABORATIVE_PROSEMIRROR_ROOT, createCollaborativeProseMirrorState, setCollaborativeEditorPresence } from './sharedEditor/prosemirrorCollaboration'
 
 const source = `---
 title: Generic
@@ -802,6 +802,8 @@ describe('full structured manuscript editor', () => {
       />
     </>)
     await act(async () => renderPeers())
+    expect(container.querySelectorAll('.dm-review-point')).toHaveLength(2)
+    expect(leftDocument.getXmlFragment(COLLABORATIVE_PROSEMIRROR_ROOT).toJSON()).not.toContain('review_anchor')
 
     await act(async () => { expect(leftRef.current?.insertHeading('Shared findings', 2, 'sec-shared')).toBe(true) })
     await act(async () => {
@@ -811,6 +813,8 @@ describe('full structured manuscript editor', () => {
     expect([...container.querySelectorAll('h2')].some((heading) => heading.textContent === 'Shared findings')).toBe(true)
     expect(leftChanges.at(-1)).toContain('## Shared findings {#sec-shared}')
     expect(leftChanges.at(-1)).toContain('.draftmatter-reviews')
+    expect(leftChanges.at(-1)?.match(/data-anchor="dm-comment"/g)).toHaveLength(1)
+    expect(leftChanges.at(-1)?.match(/Text/g)).toHaveLength(1)
     expect(publishPortableSource).toHaveBeenLastCalledWith(leftChanges.at(-1))
     expect(rightChanges).toEqual([])
     expect(remoteSuggestion).not.toHaveBeenCalled()

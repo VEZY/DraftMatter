@@ -36,9 +36,18 @@ function activeChanges(document: ReviewMarkupDocument) {
   return document.changes.filter((change) => change.status === 'open' || change.status === 'accepted' || change.status === 'needs-rebase')
 }
 
+function anchorFreeOffset(document: ReviewMarkupDocument, offset: number) {
+  return offset - document.anchors.reduce((removed, anchor) =>
+    removed + (anchor.end <= offset ? anchor.end - anchor.start : 0), 0)
+}
+
 export function buildReviewConflictGraph(document: ReviewMarkupDocument): ReviewConflictGraph {
   const changes = activeChanges(document)
-  const rangeByAnchor = new Map(document.ranges.filter((range) => range.complete).map((range) => [range.anchorId, range]))
+  const rangeByAnchor = new Map(document.ranges.filter((range) => range.complete).map((range) => [range.anchorId, {
+    ...range,
+    start: anchorFreeOffset(document, range.start),
+    end: anchorFreeOffset(document, range.end),
+  }]))
   const edges: ReviewConflictEdge[] = []
   for (let leftIndex = 0; leftIndex < changes.length; leftIndex += 1) {
     const left = changes[leftIndex]

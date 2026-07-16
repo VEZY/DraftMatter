@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import identicalReviewSource from '../fixtures/portable/25-review-identical.qmd?raw'
 import commentThreadSource from '../fixtures/portable/24-comment-thread.qmd?raw'
+import { buildReviewConflictGraph } from '../reviewConflicts'
 import { parseReviewMarkup } from '../reviewMarkup'
-import { appendReviewThreadMessage, ensureReviewAuthor, setReviewThreadStatus } from '../reviewOperations'
+import { appendReviewThreadMessage, createReviewChange, ensureReviewAuthor, setReviewThreadStatus } from '../reviewOperations'
 import {
   CollaborativeDocument,
   syncCollaborativeDocuments,
@@ -44,6 +45,27 @@ describe('Yjs collaboration document', () => {
     collaboration.destroy()
   })
 
+  it('restores a referenced context-free point anchor after an anchor-free editor publish', () => {
+    const collaboration = CollaborativeDocument.fromPortableSource(commentThreadSource)
+    const markerlessEdit = commentThreadSource
+      .replace(/\[\]\{[^}\r\n]*data-anchor="dm-comment-01"[^}\r\n]*\}/, '')
+      .replace('## Results', '## Results\n\nObserved independently.')
+
+    collaboration.reconcilePortableSource(markerlessEdit, 'anchor-free-editor-publish')
+
+    const snapshot = collaboration.snapshot()
+    expect(snapshot.anchors.map((anchor) => anchor.id)).toEqual(['dm-comment-01'])
+    expect(snapshot.threads.map((thread) => thread.id)).toEqual(['dm-comment-01'])
+    const projected = projectCollaborationPortableSource(collaboration)
+    expect(projected).toContain('Observed independently.')
+    expect(projected).toContain('Biomass increased[]{#dm-comment-01-point .dm-anchor data-anchor="dm-comment-01" data-edge="point" data-affinity="after"}.')
+    expect(projected.match(/data-anchor="dm-comment-01"/g)).toHaveLength(2)
+    const parsed = parseReviewMarkup(projected)
+    expect(parsed.ranges.find((range) => range.anchorId === 'dm-comment-01')).toEqual(expect.objectContaining({ complete: true }))
+    expect(parsed.threads).toEqual([expect.objectContaining({ id: 'dm-comment-01', messages: ['Please report the confidence interval.'] })])
+    collaboration.destroy()
+  })
+
   it('converges after independent offline edits without losing attribution, threads, or proposals', () => {
     const { left, right } = peersFrom(identicalReviewSource)
     const selected = 'leaf area declined'
@@ -81,6 +103,61 @@ describe('Yjs collaboration document', () => {
 
     syncCollaborativeDocuments(left, right)
     expect(left.snapshot()).toEqual(right.snapshot())
+    left.destroy()
+    right.destroy()
+  })
+
+  it('merges independently created offline alternatives with distinct authors and anchors', () => {
+    const source = '## Results\n\nLeaf area declined during drought.\n'
+    const { left, right } = peersFrom(source)
+    const quote = 'Leaf area declined'
+    const start = source.indexOf(quote)
+    const alice = createReviewChange(source, {
+      start,
+      end: start + quote.length,
+      author: { id: 'dm-author-alice', name: 'Alice Martin' },
+      kind: 'replace',
+      proposal: 'Leaf area declined by 18%',
+      timestamp: '2026-07-16T08:50:00.000Z',
+      changeId: 'dm-change-alice-offline',
+      anchorId: 'dm-anchor-alice-offline',
+      startMarkerId: 'dm-marker-alice-start',
+      endMarkerId: 'dm-marker-alice-end',
+    })
+    const marcus = createReviewChange(source, {
+      start,
+      end: start + quote.length,
+      author: { id: 'dm-author-marcus', name: 'Marcus Chen' },
+      kind: 'replace',
+      proposal: 'Leaf expansion slowed during drought',
+      timestamp: '2026-07-16T08:50:01.000Z',
+      changeId: 'dm-change-marcus-offline',
+      anchorId: 'dm-anchor-marcus-offline',
+      startMarkerId: 'dm-marker-marcus-start',
+      endMarkerId: 'dm-marker-marcus-end',
+    })
+    left.reconcilePortableSource(alice.document.source, 'alice-offline-alternative')
+    right.reconcilePortableSource(marcus.document.source, 'marcus-offline-alternative')
+
+    syncCollaborativeDocuments(left, right)
+
+    expect(left.snapshot()).toEqual(right.snapshot())
+    expect(left.snapshot().authors.map((author) => author.id)).toEqual(['dm-author-alice', 'dm-author-marcus'])
+    expect(left.snapshot().proposals.map((proposal) => proposal.id)).toEqual(['dm-change-alice-offline', 'dm-change-marcus-offline'])
+    expect(left.snapshot().anchors.map((anchor) => anchor.id)).toEqual(['dm-anchor-alice-offline', 'dm-anchor-marcus-offline'])
+    const checkpoint = createCollaborationCheckpoint(left)
+    expect(checkpoint.source).toBe(createCollaborationCheckpoint(right).source)
+    const parsed = parseReviewMarkup(checkpoint.source)
+    expect(parsed.changes.map((change) => [change.id, change.authorId, change.proposal])).toEqual([
+      ['dm-change-alice-offline', 'dm-author-alice', 'Leaf area declined by 18%'],
+      ['dm-change-marcus-offline', 'dm-author-marcus', 'Leaf expansion slowed during drought'],
+    ])
+    expect(parsed.ranges.filter((range) => range.complete)).toHaveLength(2)
+    expect(buildReviewConflictGraph(parsed).edges).toEqual([{
+      leftChangeId: 'dm-change-alice-offline',
+      rightChangeId: 'dm-change-marcus-offline',
+      relation: 'identical',
+    }])
     left.destroy()
     right.destroy()
   })
