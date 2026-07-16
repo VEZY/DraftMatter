@@ -8,13 +8,14 @@ for copying into its completion log once those edits are approved.
 
 ## Certification snapshot
 
-Last audited on 2026-07-16 at commit `22f33cb`.
+The implementation tree was last audited on 2026-07-16 from a clean
+`git archive` of commit `41b1083`, followed by a fresh `npm ci`.
 
 | Verification | Result |
 | --- | --- |
-| `npm run test:release` | Passed: release identity, TypeScript, 109 Vitest files / 545 tests, 25 Chromium end-to-end tests, browser/service/CLI builds, real-process CLI checks, and 572-component compliance lock. |
-| `cargo test --manifest-path src-tauri/Cargo.toml --locked` | Passed: 60 native-host tests. |
-| `docker compose config --quiet` | Passed: portable collaboration topology is valid. |
+| `npm run test:release` | Passed from the clean export: release identity, TypeScript, 109 Vitest files / 545 tests, 25 Chromium end-to-end tests, browser/service/CLI builds, real-process CLI checks, and 572-component compliance lock. |
+| `cargo test --manifest-path src-tauri/Cargo.toml --locked` | Passed from the same clean export: 60 native-host tests. |
+| `docker compose config --quiet` | Passed from the same clean export: portable collaboration topology is valid. |
 | `npm run desktop:build -- --debug --bundles app` | Passed: macOS application bundle built and ad-hoc signed. |
 | `codesign --verify --deep --strict --verbose=2 DraftMatter.app` | Passed for the locally built macOS application. |
 | `.github/workflows/desktop-portability.yml` | Defines locked Windows, macOS, and Linux type, compliance, frontend, CLI, Rust, and application-build gates. |
