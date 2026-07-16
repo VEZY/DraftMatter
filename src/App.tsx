@@ -1356,6 +1356,7 @@ function App() {
   }
 
   const applyCollaborativeSource = (remoteSource: string) => {
+    setStructuredMode(true)
     if (remoteSource === manuscriptSourceRef.current) return
     const parsed = parsePortableDocument(remoteSource, initialDraft)
     replaceManuscriptSource(remoteSource)
