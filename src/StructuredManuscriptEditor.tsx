@@ -40,6 +40,55 @@ export interface StructuredReviewSelection {
   occurrence: number
 }
 
+export type StructuredBlockMovePlacement = 'before' | 'after'
+
+interface StructuredBlockRange {
+  id: string
+  start: number
+  end: number
+  headingLevel?: number
+}
+
+function structuredBlockRanges(document: ProseMirrorNode) {
+  const blocks: Array<StructuredBlockRange & { node: ProseMirrorNode }> = []
+  document.forEach((node, start) => {
+    const id = node.attrs.id ? String(node.attrs.id) : ''
+    if (id) blocks.push({
+      id,
+      start,
+      end: start + node.nodeSize,
+      headingLevel: node.type === manuscriptSchema.nodes.heading ? Number(node.attrs.level) : undefined,
+      node,
+    })
+  })
+  return blocks.map((block, index) => {
+    if (block.headingLevel === undefined) return block
+    const nextPeer = blocks.slice(index + 1).find((candidate) => (
+      candidate.headingLevel !== undefined && candidate.headingLevel <= block.headingLevel!
+    ))
+    return { ...block, end: nextPeer?.start ?? document.content.size }
+  })
+}
+
+export function moveStructuredBlock(
+  document: ProseMirrorNode,
+  sourceId: string,
+  targetId: string,
+  placement: StructuredBlockMovePlacement,
+) {
+  const ranges = structuredBlockRanges(document)
+  const source = ranges.find((range) => range.id === sourceId)
+  const target = ranges.find((range) => range.id === targetId)
+  if (!source || !target || source.id === target.id) return document
+  if (target.start >= source.start && target.start < source.end) return document
+  let insertPosition = placement === 'before' ? target.start : target.end
+  if (source.start < insertPosition) insertPosition -= source.end - source.start
+  if (insertPosition === source.start) return document
+  const moved = document.content.cut(source.start, source.end)
+  const remaining = document.content.cut(0, source.start).append(document.content.cut(source.end))
+  return document.copy(remaining.cut(0, insertPosition).append(moved).append(remaining.cut(insertPosition)))
+}
+
 export function shouldRequestStructuredCommands(state: EditorState, event: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'isComposing'>, readOnly = false) {
   const selection = state.selection
   return event.key === '/'
@@ -262,6 +311,43 @@ function reviewDecorations(
     }
   }
   return DecorationSet.create(document, decorations)
+}
+
+function blockHandleDecorations(
+  document: ProseMirrorNode,
+  readOnly: boolean,
+  onKeyboardMove: (sourceId: string, direction: 'up' | 'down') => void,
+) {
+  if (readOnly) return []
+  return structuredBlockRanges(document).filter((range) => range.headingLevel !== 1).map((range) => Decoration.widget(range.start, () => {
+    const handle = globalThis.document.createElement('button')
+    const isSection = range.headingLevel !== undefined
+    const label = isSection ? range.node.textContent || 'Untitled section' : range.node.type.name.replaceAll('_', ' ')
+    handle.type = 'button'
+    handle.className = `structured-block-drag-handle${isSection ? ' structured-section-drag-handle' : ''}`
+    handle.contentEditable = 'false'
+    handle.draggable = true
+    handle.dataset.blockId = range.id
+    handle.dataset.blockKind = isSection ? 'section' : 'block'
+    handle.setAttribute('aria-label', `Move ${isSection ? 'section' : 'block'} ${label}`)
+    handle.title = 'Drag to reorder · Alt+Up/Down also moves this item'
+    handle.textContent = '⋮⋮'
+    handle.addEventListener('mousedown', (event) => event.preventDefault())
+    handle.addEventListener('dragstart', (event) => {
+      event.dataTransfer?.setData('application/x-draftmatter-block', range.id)
+      event.dataTransfer?.setData('text/plain', range.id)
+      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
+      handle.dataset.dragging = 'true'
+    })
+    handle.addEventListener('dragend', () => delete handle.dataset.dragging)
+    handle.addEventListener('keydown', (event) => {
+      if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return
+      event.preventDefault()
+      event.stopPropagation()
+      onKeyboardMove(range.id, event.key === 'ArrowUp' ? 'up' : 'down')
+    })
+    return handle
+  }, { key: `dm-block-handle-${range.id}`, side: -1 }))
 }
 
 function codeCellStatusLabel(status: string) {
@@ -2139,6 +2225,49 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     return result
   }
 
+  const moveBlock = (
+    view: EditorView,
+    sourceId: string,
+    targetId: string,
+    placement: StructuredBlockMovePlacement,
+  ) => {
+    if (readOnlyRef.current) return false
+    const moved = moveStructuredBlock(view.state.doc, sourceId, targetId, placement)
+    if (moved.eq(view.state.doc)) return false
+    view.dispatch(
+      view.state.tr
+        .replaceWith(0, view.state.doc.content.size, moved.content)
+        .setMeta('dm-suggestion-intent', 'structural')
+        .scrollIntoView(),
+    )
+    return true
+  }
+
+  const moveBlockByKeyboard = (view: EditorView, sourceId: string, direction: 'up' | 'down') => {
+    const ranges = structuredBlockRanges(view.state.doc)
+    const sourceRange = ranges.find((range) => range.id === sourceId)
+    if (!sourceRange) return false
+    let target: StructuredBlockRange | undefined
+    let placement: StructuredBlockMovePlacement
+    if (sourceRange.headingLevel !== undefined) {
+      const peers = ranges.filter((range) => range.headingLevel !== undefined && range.headingLevel !== 1 && range.headingLevel <= sourceRange.headingLevel!)
+      target = direction === 'up'
+        ? peers.filter((range) => range.start < sourceRange.start).at(-1)
+        : peers.find((range) => range.start >= sourceRange.end)
+      placement = direction === 'up' ? 'before' : 'after'
+    } else {
+      const index = ranges.findIndex((range) => range.id === sourceId)
+      target = ranges[index + (direction === 'up' ? -1 : 1)]
+      placement = direction === 'up' ? 'before' : 'after'
+    }
+    if (!target || !moveBlock(view, sourceId, target.id, placement)) return false
+    window.requestAnimationFrame(() => {
+      const escaped = globalThis.CSS?.escape ? globalThis.CSS.escape(sourceId) : sourceId.replace(/["\\]/g, '\\$&')
+      hostRef.current?.querySelector<HTMLButtonElement>(`.structured-block-drag-handle[data-block-id="${escaped}"]`)?.focus()
+    })
+    return true
+  }
+
   useImperativeHandle(forwardedRef, () => ({
     focus: () => viewRef.current?.focus(),
     toggleBold: () => run(toggleMark(manuscriptSchema.marks.strong)),
@@ -2368,14 +2497,19 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         spellcheck: 'true',
         class: 'structured-editor-content',
       },
-      decorations: (state) => reviewDecorations(
-        state.doc,
-        reviewDecorationRef.current,
-        markupViewRef.current,
-        reviewAuthorIdRef.current,
-        activeReviewIdRef.current,
-        activeReviewAnchorIdRef.current,
-      ),
+      decorations: (state) => DecorationSet.create(state.doc, [
+        ...reviewDecorations(
+          state.doc,
+          reviewDecorationRef.current,
+          markupViewRef.current,
+          reviewAuthorIdRef.current,
+          activeReviewIdRef.current,
+          activeReviewAnchorIdRef.current,
+        ).find(),
+        ...blockHandleDecorations(state.doc, readOnlyRef.current, (sourceId, direction) => {
+          moveBlockByKeyboard(viewRef.current ?? view, sourceId, direction)
+        }),
+      ]),
       handleDOMEvents: {
         click: (_editorView, event) => {
           if (event.target instanceof Element && event.target.closest('.structured-link-edit')) return true
@@ -2386,6 +2520,25 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         blur: (editorView) => {
           if (pendingSuggestionRef.current) finishPendingSuggestion(editorView)
           return false
+        },
+        dragover: (_editorView, event) => {
+          const target = event.target instanceof Element ? event.target.closest('.structured-block-drag-handle') : null
+          if (!target || readOnlyRef.current) return false
+          event.preventDefault()
+          if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
+          return true
+        },
+        drop: (editorView, event) => {
+          const target = event.target instanceof Element ? event.target.closest<HTMLElement>('.structured-block-drag-handle') : null
+          const sourceId = event.dataTransfer?.getData('application/x-draftmatter-block')
+            || event.dataTransfer?.getData('text/plain')
+          const targetId = target?.dataset.blockId
+          if (!sourceId || !targetId || readOnlyRef.current) return false
+          event.preventDefault()
+          const bounds = target.getBoundingClientRect()
+          const placement: StructuredBlockMovePlacement = event.clientY > bounds.top + bounds.height / 2 ? 'after' : 'before'
+          moveBlock(editorView, sourceId, targetId, placement)
+          return true
         },
       },
       handleKeyDown: (editorView, event) => {
@@ -2430,15 +2583,16 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         const collaborationMeta = transaction.getMeta(ySyncPluginKey)
         const collaborativeOrigin = Boolean(collaborationMeta?.isChangeOrigin)
         const collaborativeUndoRedo = Boolean(collaborationMeta?.isUndoRedoOperation)
+        const requestedSuggestionIntent = transaction.getMeta('dm-suggestion-intent') as ReviewSuggestionIntent | undefined
         const suggestionIntent: ReviewSuggestionIntent | undefined = transaction.docChanged
           && suggestionModeRef.current
           && !collaborativeOrigin
           && !transaction.getMeta('dm-presentation-only')
-          ? stepTypes.every((stepType) => stepType === 'replace')
+          ? requestedSuggestionIntent ?? (stepTypes.every((stepType) => stepType === 'replace')
             ? 'text'
             : stepTypes.every((stepType) => stepType === 'addMark' || stepType === 'removeMark')
               ? 'format'
-              : 'structural'
+              : 'structural')
           : undefined
         if (pendingSuggestionRef.current && suggestionIntent && suggestionIntent !== 'text') {
           finishPendingSuggestion(view)
@@ -2540,6 +2694,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
 
   useEffect(() => {
     viewRef.current?.setProps({ editable: () => !readOnly })
+    viewRef.current?.dispatch(viewRef.current.state.tr.setMeta('dm-decoration-refresh', true))
     hostRef.current?.querySelectorAll<HTMLTextAreaElement>('.structured-code-editor').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('.structured-footnote-label-input, .structured-footnote-textarea').forEach((editor) => { editor.readOnly = readOnly })
     hostRef.current?.querySelectorAll<HTMLButtonElement>('.structured-footnote-edit').forEach((button) => { button.disabled = readOnly })

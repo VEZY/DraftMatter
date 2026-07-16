@@ -4526,8 +4526,44 @@ kbd {
 .structured-editor-content {
   min-height: 70vh;
   outline: none;
+  position: relative;
   white-space: pre-wrap;
 }
+
+.structured-block-drag-handle {
+  align-items: center;
+  background: rgba(255, 255, 255, .96);
+  border: 1px solid #dfe5e1;
+  border-radius: 4px;
+  color: #98a39d;
+  cursor: grab;
+  display: inline-flex;
+  font: 700 8px/1 Inter, ui-sans-serif, sans-serif;
+  height: 22px;
+  justify-content: center;
+  left: -31px;
+  letter-spacing: -2px;
+  opacity: 0;
+  padding: 0;
+  position: absolute;
+  transform: translateY(.3em);
+  transition: border-color .12s ease, color .12s ease, opacity .12s ease;
+  width: 22px;
+  z-index: 4;
+}
+
+.structured-block-drag-handle:hover,
+.structured-block-drag-handle:focus-visible,
+.structured-block-drag-handle[data-dragging="true"],
+.structured-block-drag-handle:has(+ *:hover) {
+  border-color: #bdcbc4;
+  color: #65756d;
+  opacity: 1;
+}
+
+.structured-block-drag-handle:active { cursor: grabbing; }
+.structured-block-drag-handle:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.structured-section-drag-handle { color: #7f9188; }
 
 .structured-editor-content .ProseMirror-yjs-selection {
   border-radius: 2px;

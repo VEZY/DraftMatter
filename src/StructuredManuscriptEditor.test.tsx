@@ -6,7 +6,7 @@ import { EditorState } from 'prosemirror-state'
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness'
 import * as Y from 'yjs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { StructuredManuscriptEditor, shouldRequestStructuredCommands, type StructuredManuscriptEditorHandle } from './StructuredManuscriptEditor'
+import { StructuredManuscriptEditor, moveStructuredBlock, shouldRequestStructuredCommands, type StructuredManuscriptEditorHandle } from './StructuredManuscriptEditor'
 import { manuscriptSchema } from './manuscriptSchema'
 import { createReviewAlternative, createReviewChange } from './reviewOperations'
 import { parseStructuredManuscript } from './structuredManuscript'
@@ -60,6 +60,47 @@ Check this statement.
 `
 
 const shortSource = '# Node commands\n\nPlace content here.\n'
+
+describe('portable block reordering', () => {
+  const reorderSource = `# Study
+
+## Introduction
+
+Intro one.
+
+Intro two.
+
+## Methods
+
+Methods body.
+
+## Results
+
+Results body.
+`
+
+  it('moves a heading together with every block in its section', () => {
+    const document = parseStructuredManuscript(reorderSource).document
+    const ids = new Map<string, string>()
+    document.forEach((node) => ids.set(node.textContent, String(node.attrs.id)))
+    const moved = moveStructuredBlock(document, ids.get('Introduction')!, ids.get('Methods')!, 'after')
+
+    expect(moved.textContent.indexOf('Methods body.')).toBeLessThan(moved.textContent.indexOf('Introduction'))
+    expect(moved.textContent.indexOf('Introduction')).toBeLessThan(moved.textContent.indexOf('Intro one.'))
+    expect(moved.textContent.indexOf('Intro two.')).toBeLessThan(moved.textContent.indexOf('Results'))
+  })
+
+  it('moves an ordinary block without moving its surrounding section', () => {
+    const document = parseStructuredManuscript(reorderSource).document
+    const ids = new Map<string, string>()
+    document.forEach((node) => ids.set(node.textContent, String(node.attrs.id)))
+    const moved = moveStructuredBlock(document, ids.get('Intro two.')!, ids.get('Intro one.')!, 'before')
+
+    expect(moved.textContent.indexOf('Introduction')).toBeLessThan(moved.textContent.indexOf('Intro two.'))
+    expect(moved.textContent.indexOf('Intro two.')).toBeLessThan(moved.textContent.indexOf('Intro one.'))
+    expect(moved.textContent.indexOf('Intro one.')).toBeLessThan(moved.textContent.indexOf('Methods'))
+  })
+})
 
 describe('full structured manuscript editor', () => {
   let container: HTMLDivElement
@@ -136,6 +177,26 @@ describe('full structured manuscript editor', () => {
     expect(inspect).toHaveBeenCalledOnce()
     expect(selectReview).toHaveBeenCalledWith('dm-comment')
     expect(asset).toHaveBeenCalledWith('figures/growth.svg')
+  })
+
+  it('offers keyboard-accessible drag handles and moves a whole section', async () => {
+    const changed: string[] = []
+    const reorderSource = '# Study\n\n## Introduction\n\nIntro body.\n\n## Methods\n\nMethods body.\n\n## Results\n\nResults body.\n'
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={reorderSource} onChange={(next) => changed.push(next)} />,
+    ))
+
+    const introductionHandle = container.querySelector<HTMLButtonElement>('[aria-label="Move section Introduction"]')!
+    expect(introductionHandle.draggable).toBe(true)
+    await act(async () => introductionHandle.dispatchEvent(new KeyboardEvent('keydown', {
+      altKey: true,
+      bubbles: true,
+      key: 'ArrowDown',
+    })))
+
+    expect(changed).toHaveLength(1)
+    expect(changed[0].indexOf('Methods body.')).toBeLessThan(changed[0].indexOf('## Introduction'))
+    expect(changed[0].indexOf('Intro body.')).toBeLessThan(changed[0].indexOf('## Results'))
   })
 
   it('filters manuscript review marks by author and highlights the active navigable anchor', async () => {
