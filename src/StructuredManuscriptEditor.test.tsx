@@ -168,16 +168,20 @@ describe('full structured manuscript editor', () => {
     expect(container.textContent).not.toContain('.draftmatter-reviews')
     expect(container.textContent).not.toContain('[^one]')
     expect(container.querySelector('.dm-review-point')?.getAttribute('aria-label')).toBe('Open point comment')
+    const marginMarker = container.querySelector<HTMLButtonElement>('.dm-review-margin-marker')!
+    expect(marginMarker.getAttribute('aria-label')).toBe('Open comment at this text')
+    expect(marginMarker.dataset.commentCount).toBe('1')
+    expect(marginMarker.getAttribute('aria-pressed')).toBe('false')
 
     const raw = container.querySelector<HTMLElement>('.structured-raw-node')!
     await act(async () => raw.querySelector<HTMLButtonElement>('.structured-raw-toggle')?.click())
     expect(raw.querySelector<HTMLElement>('.structured-raw-inspector')?.hidden).toBe(false)
     expect(raw.querySelector<HTMLTextAreaElement>('.structured-raw-editor')?.value).toContain('Opaque raw payload.')
     await act(async () => raw.querySelector<HTMLButtonElement>('.structured-raw-actions > button')?.click())
-    await act(async () => (container.querySelector('.dm-review-point') as HTMLButtonElement).click())
+    await act(async () => marginMarker.click())
     await act(async () => container.querySelector('img')?.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, clientX: 24, clientY: 36 })))
     expect(inspect).toHaveBeenCalledOnce()
-    expect(selectReview).toHaveBeenCalledWith('dm-comment')
+    expect(selectReview).toHaveBeenCalledWith('dm-comment', 'dm-comment')
     expect(openReviewMenu).toHaveBeenCalledWith({ quote: 'Growth', occurrence: 0 }, { x: 24, y: 36 })
     expect(asset).toHaveBeenCalledWith('figures/growth.svg')
   })

@@ -140,7 +140,7 @@ export interface StructuredManuscriptEditorProps {
   onCitationSelect?: (id: string, items: CitationItem[]) => void
   onReviewSelectionChange?: (selection: StructuredReviewSelection | null) => void
   onReviewContextMenu?: (selection: StructuredReviewSelection, point: { x: number; y: number }) => void
-  onReviewAnchorSelect?: (anchorId: string) => void
+  onReviewAnchorSelect?: (anchorId: string, reviewId?: string) => void
   onCommandRequest?: () => void
   suggestionMode?: boolean
   suggestionAuthor?: { id: string; name: string }
@@ -285,6 +285,7 @@ function reviewDecorations(
   authorId?: string,
   activeReviewId?: string,
   activeAnchorId?: string,
+  onAnchorSelect?: (anchorId: string, reviewId?: string) => void,
 ) {
   if (markupView === 'original' || markupView === 'final') return DecorationSet.empty
   const documentAnchors = new Map<string, { start?: number; end?: number; points: number[] }>()
@@ -306,12 +307,13 @@ function reviewDecorations(
     const record = visibleRecords.find((candidate) => candidate.id === activeReviewId)
       ?? visibleRecords.find((candidate) => candidate.status === 'open' || candidate.status === 'needs-rebase')
       ?? visibleRecords[0]
+    const active = anchorId === activeAnchorId || visibleRecords.some((candidate) => candidate.id === activeReviewId)
     const classes = [
       `dm-review-${record.kind}`,
       `dm-review-${record.status}`,
       record.changeKind ? `dm-review-kind-${record.changeKind}` : '',
       markupView === 'simple' ? 'dm-review-simple' : 'dm-review-all',
-      anchorId === activeAnchorId ? 'dm-review-active' : '',
+      active ? 'dm-review-active' : '',
     ].filter(Boolean).join(' ')
     if (anchor.start !== undefined && anchor.end !== undefined && anchor.start < anchor.end) {
       decorations.push(Decoration.inline(anchor.start, anchor.end, { class: classes, 'data-review-anchor': anchorId }))
@@ -324,19 +326,54 @@ function reviewDecorations(
       marker.setAttribute('aria-label', record.kind === 'thread' ? 'Open point comment' : 'Open point suggestion')
       marker.textContent = record.kind === 'thread' ? '•' : '±'
       return marker
-    }, { key: `dm-review-point-${anchorId}-${position}`, side: 1 }))
+    }, { key: `dm-review-point-${anchorId}-${position}-${record.id}-${record.status}-${active ? 'active' : 'idle'}`, side: 1 }))
+    const visibleThreads = visibleRecords.filter((candidate) => candidate.kind === 'thread')
+    const marginPosition = anchor.start ?? anchor.points[0] ?? anchor.end
+    if (visibleThreads.length && marginPosition !== undefined) {
+      decorations.push(Decoration.widget(marginPosition, () => {
+        const marker = globalThis.document.createElement('button')
+        const open = visibleThreads.some((thread) => thread.status === 'open')
+        marker.type = 'button'
+        marker.className = `dm-review-margin-marker dm-review-${open ? 'open' : visibleThreads[0].status}${active ? ' dm-review-active' : ''}`
+        marker.dataset.reviewAnchor = anchorId
+        marker.dataset.commentCount = String(visibleThreads.length)
+        marker.setAttribute('aria-label', visibleThreads.length === 1 ? 'Open comment at this text' : `Open ${visibleThreads.length} comments at this text`)
+        marker.setAttribute('aria-pressed', String(active))
+        marker.title = visibleThreads.length === 1 ? 'Open comment' : `Open ${visibleThreads.length} comments`
+        marker.addEventListener('click', (event) => {
+          event.preventDefault()
+          event.stopPropagation()
+          const selectedThread = visibleThreads.find((thread) => thread.id === activeReviewId)
+            ?? visibleThreads.find((thread) => thread.status === 'open')
+            ?? visibleThreads[0]
+          onAnchorSelect?.(anchorId, selectedThread.id)
+        })
+        const glyph = globalThis.document.createElement('span')
+        glyph.className = 'dm-review-margin-marker-glyph'
+        glyph.setAttribute('aria-hidden', 'true')
+        glyph.textContent = '···'
+        marker.append(glyph)
+        if (visibleThreads.length > 1) {
+          const count = globalThis.document.createElement('span')
+          count.className = 'dm-review-margin-marker-count'
+          count.textContent = String(visibleThreads.length)
+          marker.append(count)
+        }
+        return marker
+      }, { key: `dm-review-margin-${anchorId}-${marginPosition}-${visibleThreads.map((thread) => `${thread.id}:${thread.status}`).join(',')}-${active ? 'active' : 'idle'}`, side: -1 }))
+    }
     const proposal = record.proposal === undefined ? '' : reviewProposalText(record.proposal)
     const proposalPosition = anchor.end ?? anchor.points[0]
     if (markupView === 'all' && record.kind === 'change' && record.changeKind !== 'delete' && proposal && proposalPosition !== undefined) {
       decorations.push(Decoration.widget(proposalPosition, () => {
         const marker = globalThis.document.createElement('button')
         marker.type = 'button'
-        marker.className = `dm-review-proposal dm-review-${record.status}${anchorId === activeAnchorId ? ' dm-review-active' : ''}`
+        marker.className = `dm-review-proposal dm-review-${record.status}${active ? ' dm-review-active' : ''}`
         marker.dataset.reviewAnchor = anchorId
         marker.setAttribute('aria-label', `Open ${record.changeKind ?? 'text'} suggestion: ${proposal}`)
         marker.textContent = proposal
         return marker
-      }, { key: `dm-review-proposal-${record.id}-${proposalPosition}`, side: 2 }))
+      }, { key: `dm-review-proposal-${record.id}-${proposalPosition}-${record.status}-${active ? 'active' : 'idle'}`, side: 2 }))
     }
   }
   return DecorationSet.create(document, decorations)
@@ -2562,6 +2599,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           reviewAuthorIdRef.current,
           activeReviewIdRef.current,
           activeReviewAnchorIdRef.current,
+          (anchorId, reviewId) => onReviewAnchorSelectRef.current?.(anchorId, reviewId),
         ).find(),
         ...blockHandleDecorations(state.doc, readOnlyRef.current, (sourceId, direction) => {
           moveBlockByKeyboard(viewRef.current ?? view, sourceId, direction)

@@ -1212,6 +1212,8 @@ function App() {
     ? allReviewQueue
     : allReviewQueue.filter((item) => item.authorId === reviewAuthorFilter), [allReviewQueue, reviewAuthorFilter])
   const activeReviewAnchorId = allReviewQueue.find((item) => item.id === activeReviewId)?.anchorId
+    ?? reviewDocument.changes.find((change) => change.id === activeReviewId)?.anchorId
+    ?? reviewDocument.threads.find((thread) => thread.id === activeReviewId)?.anchorId
   const structuredReviewProjection = useMemo(() => {
     if (!structuredMode || (markupView !== 'original' && markupView !== 'final')) return null
     return projectPortableReviewSource(manuscriptSource, { view: markupView })
@@ -2443,10 +2445,17 @@ function App() {
     requestAnimationFrame(() => structuredEditorRef.current?.scrollToReviewAnchor(anchorId))
   }
 
-  const selectReviewAnchor = (anchorId: string) => {
+  const selectReviewAnchor = (anchorId: string, reviewId?: string) => {
     showReviewPanel()
     const candidates = reviewQueue.filter((item) => item.anchorId === anchorId)
-    const item = candidates.find((candidate) => candidate.id === activeReviewId) ?? candidates[0]
+    const item = candidates.find((candidate) => candidate.id === reviewId)
+      ?? candidates.find((candidate) => candidate.id === activeReviewId)
+      ?? candidates[0]
+    if (!item && reviewId) {
+      setActiveReviewId(reviewId)
+      requestAnimationFrame(() => globalThis.document.getElementById(`review-item-${reviewId}`)?.scrollIntoView({ block: 'nearest' }))
+      return
+    }
     if (!item) return
     setActiveReviewId(item.id)
     requestAnimationFrame(() => globalThis.document.getElementById(`review-item-${item.id}`)?.scrollIntoView({ block: 'nearest' }))

@@ -255,6 +255,11 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(reviewPanel.getByText('Clarify how this sentence supports the result.')).toBeVisible()
     await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('.draftmatter-reviews')
     await expect(manuscript.locator('.dm-review-thread')).toContainText('A uniquely selected review sentence.')
+    const commentMarker = manuscript.getByRole('button', { name: 'Open comment at this text' })
+    await expect(commentMarker).toBeVisible()
+    await commentMarker.click()
+    await expect(commentMarker).toHaveAttribute('aria-pressed', 'true')
+    await expect(manuscript.locator('.dm-review-thread')).toHaveClass(/dm-review-active/)
 
     await reviewPanel.getByLabel('Markup view').selectOption('original')
     await expect(manuscript.getByText('Original preview')).toBeVisible()
