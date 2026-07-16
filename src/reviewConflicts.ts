@@ -1,6 +1,6 @@
 import type { ReviewAnchorRange, ReviewChange, ReviewMarkupDocument } from './reviewMarkup'
 
-export type ReviewConflictRelation = 'identical' | 'nested' | 'crossing'
+export type ReviewConflictRelation = 'alternative' | 'identical' | 'nested' | 'crossing'
 
 export interface ReviewConflictEdge {
   leftChangeId: string
@@ -20,7 +20,8 @@ export interface ReviewConflictGraph {
 }
 
 function relation(left: ReviewAnchorRange, right: ReviewAnchorRange): ReviewConflictRelation | undefined {
-  if (left.anchorId === right.anchorId || (left.start === right.start && left.end === right.end)) return 'identical'
+  if (left.anchorId === right.anchorId) return 'alternative'
+  if (left.start === right.start && left.end === right.end) return 'identical'
   const leftPoint = left.start === left.end
   const rightPoint = right.start === right.end
   if (leftPoint && rightPoint) return undefined

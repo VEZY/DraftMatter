@@ -43,7 +43,7 @@ describe('Phase 4 review exit gate', () => {
     const reopened = parseReviewMarkup(serializeReviewMarkup(parseReviewMarkup(alternative.document.source)))
     expect(reopened.changes).toHaveLength(2)
     expect(buildReviewConflictGraph(reopened)).toMatchObject({
-      edges: [{ leftChangeId: 'dm-change-alice', rightChangeId: 'dm-change-marcus', relation: 'identical' }],
+      edges: [{ leftChangeId: 'dm-change-alice', rightChangeId: 'dm-change-marcus', relation: 'alternative' }],
     })
 
     const withoutAnchors = [...reopened.anchors]

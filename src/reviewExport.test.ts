@@ -16,7 +16,7 @@ describe('clean review exports', () => {
     expect(bundle.final).toBeUndefined()
     expect(bundle.finalProjection).toMatchObject({ ok: false, conflicts: [expect.objectContaining({ id: 'conflict:dm-i01+dm-i02' })] })
     expect(bundle.report).toContain('# DraftMatter review report')
-    expect(bundle.report).toContain('dm-i01, dm-i02 — identical')
+    expect(bundle.report).toContain('dm-i01, dm-i02 — alternative')
     expect(bundle.report).toContain('leaf area declined by 18%')
     expect(bundle.original).not.toMatch(/\.draftmatter-reviews|\.dm-anchor|data-anchor=/)
     expect(bundle.report).not.toMatch(/\.draftmatter-reviews|\.dm-(?:anchor|change|thread|decision)|data-anchor=/)
