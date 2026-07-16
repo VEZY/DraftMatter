@@ -2022,7 +2022,16 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     toggleItalic: () => run(toggleMark(manuscriptSchema.marks.emphasis)),
     setLink: (href, title) => run(toggleMark(manuscriptSchema.marks.link, { href, title: title ?? null })),
     setParagraph: () => run(setBlockType(manuscriptSchema.nodes.paragraph)),
-    setHeading: (level) => run(setBlockType(manuscriptSchema.nodes.heading, { id: randomId('heading'), level, section: null })),
+    setHeading: (level) => {
+      const view = viewRef.current
+      const selection = view?.state.selection
+      const selectedHeading = selection && selection.$from.parent === selection.$to.parent && selection.$from.parent.type === manuscriptSchema.nodes.heading
+        ? selection.$from.parent
+        : undefined
+      return run(setBlockType(manuscriptSchema.nodes.heading, selectedHeading
+        ? { ...selectedHeading.attrs, level }
+        : { id: randomId('heading'), level, section: null }))
+    },
     insertHeading: (title, level = 2, label) => {
       const view = viewRef.current
       if (!view || readOnlyRef.current || !title.trim()) return false

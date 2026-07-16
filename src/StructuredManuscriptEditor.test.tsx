@@ -198,6 +198,23 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector('h2')?.textContent).toBe('Generic manuscript')
   })
 
+  it('preserves a portable section label and attributes when changing its heading level', async () => {
+    const changed: string[] = []
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    await act(async () => root.render(
+      <StructuredManuscriptEditor
+        ref={editorRef}
+        source={'## Field methods {#sec-field .unnumbered data-owner="lab"}\n'}
+        onChange={(next) => changed.push(next)}
+      />,
+    ))
+
+    await act(async () => { expect(editorRef.current?.setHeading(3)).toBe(true) })
+
+    expect(changed.at(-1)).toContain('### Field methods {#sec-field .unnumbered data-owner="lab"}')
+    expect(container.querySelector('.structured-heading-card')?.getAttribute('data-label')).toBe('sec-field')
+  })
+
   it('previews and inserts a multi-source citation at the retained editor selection', async () => {
     const changed: string[] = []
     const editorRef = createRef<StructuredManuscriptEditorHandle>()

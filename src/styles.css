@@ -1132,11 +1132,42 @@ button:disabled {
 }
 
 .format-toolbar .style-select {
+  align-items: center;
+  border-radius: 4px;
+  color: #5f6964;
+  display: flex;
   font-size: 10px;
   gap: 14px;
   justify-content: space-between;
+  height: 28px;
   min-width: 92px;
   padding: 0 7px;
+  position: relative;
+}
+
+.format-toolbar .style-select:hover,
+.format-toolbar .style-select:focus-within {
+  background: #f0f2f0;
+}
+
+.format-toolbar .style-select select {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  height: 100%;
+  inset: 0;
+  outline: 0;
+  padding: 0 25px 0 7px;
+  position: absolute;
+  width: 100%;
+}
+
+.format-toolbar .style-select svg {
+  margin-left: auto;
+  pointer-events: none;
 }
 
 .toolbar-divider {

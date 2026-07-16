@@ -1251,6 +1251,23 @@ function App() {
     if (!command(editor)) setToast(`Select manuscript content before using ${label.toLowerCase()}`)
   }
 
+  const applyBlockStyle = (style: string) => {
+    const commands: Record<string, { label: string; run: (editor: StructuredManuscriptEditorHandle) => boolean }> = {
+      paragraph: { label: 'Body text', run: (editor) => editor.setParagraph() },
+      'heading-1': { label: 'Heading 1', run: (editor) => editor.setHeading(1) },
+      'heading-2': { label: 'Heading 2', run: (editor) => editor.setHeading(2) },
+      'heading-3': { label: 'Heading 3', run: (editor) => editor.setHeading(3) },
+      'heading-4': { label: 'Heading 4', run: (editor) => editor.setHeading(4) },
+      'heading-5': { label: 'Heading 5', run: (editor) => editor.setHeading(5) },
+      'heading-6': { label: 'Heading 6', run: (editor) => editor.setHeading(6) },
+      bullets: { label: 'Bullet list', run: (editor) => editor.wrapBulletList() },
+      numbering: { label: 'Numbered list', run: (editor) => editor.wrapOrderedList() },
+      quote: { label: 'Block quote', run: (editor) => editor.wrapBlockquote() },
+    }
+    const selected = commands[style]
+    if (selected) runStructuredCommand(selected.run, selected.label)
+  }
+
   const addStructuredLink = () => {
     const href = window.prompt('Link destination (https://… or a project-relative path)')?.trim()
     if (href) runStructuredCommand((editor) => editor.setLink(href), 'Add link')
@@ -2973,7 +2990,31 @@ function App() {
 
         <main className="editor-area">
           <div className="format-toolbar" aria-label="Formatting toolbar">
-            <button className="style-select" onClick={() => runStructuredCommand((editor) => editor.setParagraph(), 'Body text')}>Body text <Icon name="chevronDown" size={13} /></button>
+            <label className="style-select">
+              <span className="visually-hidden">Block style</span>
+              <select
+                aria-label="Block style"
+                value=""
+                onChange={(event) => applyBlockStyle(event.target.value)}
+              >
+                <option value="" disabled>Text style</option>
+                <option value="paragraph">Body text</option>
+                <optgroup label="Headings">
+                  <option value="heading-1">Heading 1</option>
+                  <option value="heading-2">Heading 2</option>
+                  <option value="heading-3">Heading 3</option>
+                  <option value="heading-4">Heading 4</option>
+                  <option value="heading-5">Heading 5</option>
+                  <option value="heading-6">Heading 6</option>
+                </optgroup>
+                <optgroup label="Blocks">
+                  <option value="bullets">Bullet list</option>
+                  <option value="numbering">Numbered list</option>
+                  <option value="quote">Block quote</option>
+                </optgroup>
+              </select>
+              <Icon name="chevronDown" size={13} />
+            </label>
             <span className="toolbar-divider" />
             <button aria-label="Bold" onClick={() => runStructuredCommand((editor) => editor.toggleBold(), 'Bold')}><strong>B</strong></button>
             <button aria-label="Italic" onClick={() => runStructuredCommand((editor) => editor.toggleItalic(), 'Italic')}><em>I</em></button>
