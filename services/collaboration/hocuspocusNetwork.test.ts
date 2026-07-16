@@ -292,6 +292,10 @@ describe('live Hocuspocus collaboration', () => {
     const ownerDocument = new Y.Doc()
     const owner = provider(server.webSocketURL, name, ownerToken, ownerDocument)
     await owner.synced
+    owner.connection.awareness?.setLocalState({
+      draftmatter: { userId: 'owner', name: 'Olivia Owner', color: '#617f73' },
+      user: { id: 'owner', name: 'Olivia Owner', color: '#617f73' },
+    })
     const ownerCollaboration = new CollaborativeDocument(ownerDocument)
     expect(ownerCollaboration.source).toBe('')
 
@@ -313,6 +317,10 @@ describe('live Hocuspocus collaboration', () => {
 
     const editorDocument = new Y.Doc()
     const editor = provider(server.webSocketURL, name, editorToken, editorDocument)
+    editor.connection.awareness?.setLocalState({
+      draftmatter: { userId: 'editor', name: 'Eli Editor', color: '#617f73' },
+      user: { id: 'editor', name: 'Eli Editor', color: '#617f73' },
+    })
     await editor.synced
     const editorCollaboration = new CollaborativeDocument(editorDocument)
     await waitFor(
@@ -321,6 +329,11 @@ describe('live Hocuspocus collaboration', () => {
     )
     expect(editorCollaboration.source).toBe(source)
     expect(editorCollaboration.snapshot().authors).toEqual([{ id: 'legacy-author', name: 'Legacy Collaborator' }])
+    await waitFor(
+      () => [...(owner.connection.awareness?.getStates().values() ?? [])]
+        .some((state) => state.user?.id === 'editor'),
+      'Authenticated editor presence did not reach the owner.',
+    )
 
     owner.connection.destroy()
     editor.connection.destroy()

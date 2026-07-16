@@ -11,6 +11,7 @@ import { CollaborativeReviewBinding } from '../../src/sharedEditor/collaborative
 import { FileCollaborationStore } from './fileStore'
 import {
   collaborationDocumentName,
+  collaborationPresenceDiagnostic,
   commenterUpdateDiagnostic,
   commenterUpdateAllowed,
   createDraftMatterHocuspocusServer,
@@ -65,6 +66,55 @@ describe('authenticated Hocuspocus transport', () => {
     expect(parseCollaborationDocumentName('forest:paper')).toEqual({ workspaceId: 'forest', projectId: 'paper' })
     expect(() => parseCollaborationDocumentName('../forest:paper')).toThrow(/not found/)
     expect(() => parseCollaborationDocumentName('forest:../paper')).toThrow(/not found/)
+  })
+
+  it('binds ephemeral presence and cursor ownership to the authenticated connection', () => {
+    const state = {
+      draftmatter: { userId: 'editor', name: 'Eli Editor', color: '#617f73', cursor: { anchor: 12, head: 12 } },
+      user: { id: 'editor', name: 'Eli Editor', color: '#617f73' },
+    }
+    expect(collaborationPresenceDiagnostic(
+      { userId: 'editor' },
+      new Map([[42, state]]),
+      new Set(),
+      new Map(),
+    )).toBeNull()
+    expect(collaborationPresenceDiagnostic(
+      { userId: 'editor' },
+      new Map<number, Record<string, unknown>>([[41, {}], [42, state]]),
+      new Set(),
+      new Map(),
+    )).toBeNull()
+    expect(collaborationPresenceDiagnostic(
+      { userId: 'editor' },
+      new Map([[42, { ...state, user: { ...state.user, id: 'owner' } }]]),
+      new Set(),
+      new Map(),
+    )).toBe('identity-mismatch')
+    expect(collaborationPresenceDiagnostic(
+      { userId: 'editor' },
+      new Map([[42, { ...state, debug: 'undeclared' }]]),
+      new Set(),
+      new Map(),
+    )).toBe('state-invalid')
+    expect(collaborationPresenceDiagnostic(
+      { userId: 'editor' },
+      new Map([[42, state], [43, state]]),
+      new Set(),
+      new Map(),
+    )).toBe('too-many-clients')
+    expect(collaborationPresenceDiagnostic(
+      { userId: 'editor' },
+      new Map([[42, { ...state, user: { ...state.user, name: 'Impersonated' } }]]),
+      new Set(),
+      new Map([[42, state]]),
+    )).toBe('client-collision')
+    expect(collaborationPresenceDiagnostic(
+      { userId: 'editor' },
+      new Map([[43, state]]),
+      new Set([42]),
+      new Map([[42, state]]),
+    )).toBeNull()
   })
 
   it('permits attributed commenter threads and replies but rejects protected or forged review edits', () => {

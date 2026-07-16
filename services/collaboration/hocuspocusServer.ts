@@ -20,6 +20,7 @@ const ROOTS = {
   prosemirror: 'draftmatter:prosemirror',
 } as const
 const KNOWN_ROOTS = new Set<string>(Object.values(ROOTS))
+const SAFE_COLOR = /^#[a-f0-9]{6}$/i
 
 export interface CollaborationConnectionContext extends CollaborationProjectScope {
   userId: string
@@ -40,6 +41,8 @@ export interface DraftMatterHocuspocusOptions {
   allowedOrigins?: string[]
   httpHandler?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
 }
+
+export type CollaborationPresenceDiagnostic = 'too-many-clients' | 'client-collision' | 'identity-mismatch' | 'state-invalid' | null
 
 export function collaborationDocumentName(scope: CollaborationProjectScope) {
   if (!SAFE_ID.test(scope.workspaceId) || !SAFE_ID.test(scope.projectId)) throw new Error('Collaboration document scope is invalid.')
@@ -94,6 +97,86 @@ function mapSnapshot(document: Y.Doc, name: string) {
 
 function same(left: unknown, right: unknown) {
   return JSON.stringify(left) === JSON.stringify(right)
+}
+
+function validPresenceName(value: unknown) {
+  return typeof value === 'string'
+    && value.trim() === value
+    && value.length > 0
+    && value.length <= 200
+    && !/[\u0000-\u001f\u007f]/.test(value)
+}
+
+function validProseMirrorCursor(value: unknown) {
+  if (value === undefined || value === null) return true
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const cursor = value as Record<string, unknown>
+  if (!Object.keys(cursor).every((key) => key === 'anchor' || key === 'head') || !cursor.anchor || !cursor.head) return false
+  try {
+    const anchor = Y.encodeRelativePosition(Y.createRelativePositionFromJSON(cursor.anchor))
+    const head = Y.encodeRelativePosition(Y.createRelativePositionFromJSON(cursor.head))
+    return anchor.length <= 8_192 && head.length <= 8_192
+  } catch {
+    return false
+  }
+}
+
+function validPortableCursor(value: unknown) {
+  if (value === undefined) return true
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const cursor = value as Record<string, unknown>
+  return Object.keys(cursor).every((key) => key === 'anchor' || key === 'head')
+    && Number.isSafeInteger(cursor.anchor)
+    && Number(cursor.anchor) >= 0
+    && Number.isSafeInteger(cursor.head)
+    && Number(cursor.head) >= 0
+}
+
+function validPresenceState(state: Record<string, unknown>, userId: string) {
+  const fields = Object.keys(state)
+  if (fields.length === 0) return true
+  if (!fields.every((key) => key === 'draftmatter' || key === 'user' || key === 'cursor')) return false
+  try {
+    if (new TextEncoder().encode(JSON.stringify(state)).length > 64 * 1024) return false
+  } catch {
+    return false
+  }
+  const portable = state.draftmatter
+  const editor = state.user
+  if (!portable || !editor || typeof portable !== 'object' || typeof editor !== 'object' || Array.isArray(portable) || Array.isArray(editor)) return false
+  const draftmatter = portable as Record<string, unknown>
+  const user = editor as Record<string, unknown>
+  if (!Object.keys(draftmatter).every((key) => ['userId', 'name', 'color', 'cursor'].includes(key))) return false
+  if (!Object.keys(user).every((key) => key === 'id' || key === 'name' || key === 'color')) return false
+  if (draftmatter.userId !== userId || user.id !== userId) return false
+  if (!validPresenceName(draftmatter.name) || draftmatter.name !== user.name) return false
+  if (!SAFE_COLOR.test(String(user.color))) return false
+  if (draftmatter.color !== undefined && String(draftmatter.color).toLowerCase() !== String(user.color).toLowerCase()) return false
+  return validPortableCursor(draftmatter.cursor) && validProseMirrorCursor(state.cursor)
+}
+
+export function collaborationPresenceDiagnostic(
+  context: Pick<CollaborationConnectionContext, 'userId'>,
+  states: Map<number, Record<string, unknown>>,
+  ownedClientIds: Set<number>,
+  existingStates: Map<number, unknown>,
+): CollaborationPresenceDiagnostic {
+  const changed = [...states].filter(([clientId, state]) => !existingStates.has(clientId) || !same(existingStates.get(clientId), state))
+  const addedClientIds = [...states.keys()].filter((clientId) => !existingStates.has(clientId))
+  if (states.size > 4 || ownedClientIds.size + addedClientIds.length > 8 || changed.filter(([, state]) => Object.keys(state).length > 0).length > 1) return 'too-many-clients'
+  for (const [clientId, state] of states) {
+    const unchangedEcho = existingStates.has(clientId) && same(existingStates.get(clientId), state)
+    if (unchangedEcho && !ownedClientIds.has(clientId)) continue
+    if (existingStates.has(clientId) && !ownedClientIds.has(clientId)) return 'client-collision'
+    if (!validPresenceState(state, context.userId)) {
+      const portable = state.draftmatter as Record<string, unknown> | undefined
+      const editor = state.user as Record<string, unknown> | undefined
+      if (portable?.userId !== undefined && portable.userId !== context.userId) return 'identity-mismatch'
+      if (editor?.id !== undefined && editor.id !== context.userId) return 'identity-mismatch'
+      return 'state-invalid'
+    }
+  }
+  return null
 }
 
 function validSelfAuthor(value: unknown, userId: string) {
@@ -668,6 +751,21 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
           throw error
         }
       }
+    },
+    async beforeHandleAwareness({ context, states, document, connection }) {
+      if (!context || !connection) return
+      const ownedClientIds = document.getClients(connection) as Set<number>
+      const existingStates = document.awareness.getStates()
+      for (const clientId of states.keys()) {
+        if (existingStates.has(clientId) && !ownedClientIds.has(clientId)) states.delete(clientId)
+      }
+      const diagnostic = collaborationPresenceDiagnostic(
+        context,
+        states,
+        ownedClientIds,
+        existingStates,
+      )
+      if (diagnostic) throw new Error(`Collaboration presence must match the authenticated connection (${diagnostic}).`)
     },
     async beforeSync({ context, document, type, payload }) {
       if (type !== 1 && type !== 2) return
