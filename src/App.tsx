@@ -73,6 +73,7 @@ const LAST_PROJECT_ROOT_KEY = 'draftmatter.last-project-root.v1'
 const ZOTERO_VERSION_KEY = 'draftmatter.zotero-version.v1'
 const PRIMARY_EXECUTION_CELL = 'fig-canopy'
 const LEGACY_SAMPLE_CODE = 'weeks = [0, 2, 4, 6, 8, 10, 12]\ncontrol = [0, 8, 21, 39, 58, 76, 91]\ndrought = [0, 7, 19, 33, 47, 60, 72]\nplot_response(weeks, control, drought)'
+const SAMPLE_INTRODUCTION_CONTINUATION = 'Reproducible writing environments can shorten the path between an observation, its supporting analysis, and the claim that enters the literature. This manuscript keeps those elements close without exposing the mechanics during ordinary reading.'
 
 interface CommandPaletteEntry {
   id: string
@@ -498,7 +499,15 @@ function App() {
   const [selectedEnvironmentLanguage, setSelectedEnvironmentLanguage] = useState<ExecutionLanguage>('python')
   const [executionProviders, setExecutionProviders] = useState<Record<ExecutionLanguage, ExecutionProviderKind>>(() => executionProvidersFromProject())
   const [selectedKernelNames, setSelectedKernelNames] = useState<Partial<Record<ExecutionLanguage, string>>>({})
-  const [manuscriptSource, setManuscriptSource] = useState(() => localStorage.getItem(STRUCTURED_SOURCE_KEY) ?? reviewedProjection(initialDraftState))
+  const [manuscriptSource, setManuscriptSource] = useState(() => localStorage.getItem(STRUCTURED_SOURCE_KEY) ?? reviewedProjection({
+    ...initialDraftState,
+    preservedSections: [
+      ...(initialDraftState.preservedSections ?? []),
+      ...((initialDraftState.preservedSections ?? []).some((section) => section.markdown === SAMPLE_INTRODUCTION_CONTINUATION)
+        ? []
+        : [{ after: 'introduction' as const, markdown: SAMPLE_INTRODUCTION_CONTINUATION }]),
+    ],
+  }))
   const [structuredMode, setStructuredMode] = useState(true)
   const [structuredOutline, setStructuredOutline] = useState<StructuredOutlineItem[]>([])
   const [structuredReviewSelection, setStructuredReviewSelection] = useState<StructuredReviewSelection | null>(null)
@@ -3578,6 +3587,11 @@ function App() {
                 {publicationAuthors.length ? `${publicationAuthors.length} author${publicationAuthors.length === 1 ? '' : 's'}` : 'Add authors'}
               </button>
             </div>
+            {publicationAuthors.length > 0 && (
+              <div className="publication-authors" aria-label="Publication authors">
+                {publicationAuthors.map((author, index) => <span key={`${author}-${index}`}>{author}</span>)}
+              </div>
+            )}
             {!structuredOutline.some((item) => item.level === 1) && (
               <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" readOnly={!canEditManuscript} />
             )}
@@ -3648,6 +3662,7 @@ function App() {
               suggestionMode={canSuggestReview && suggestionMode && markupView !== 'original' && markupView !== 'final'}
               suggestionAuthor={activeReviewAuthor}
               onSuggestionCapture={(message) => setToast(message)}
+              onCopyReference={copyPortableReference}
               citationLabels={structuredCitationLabels}
               codeCellStatuses={Object.fromEntries(executionCellStates.map((state) => [state.cellId, state.status] as const))}
               markupView={markupView}
@@ -3656,7 +3671,9 @@ function App() {
               activeReviewAnchorId={activeReviewAnchorId}
               collaboration={collaborativeEditorBinding}
               readOnly={Boolean(structuredReviewProjection) || !canEditManuscript}
-              resolveAssetUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) ?? 'data:,' : path}
+              resolveAssetUrl={(path) => desktopSession
+                ? projectArtifactUrl(desktopSession.root, path) ?? 'data:,'
+                : path === 'figures/generated/fig-canopy.svg' ? '/fixtures/canopy-response.svg' : path}
             />
             {citationOpen && structuredCitationSelection && (
               <div className="citation-detail popover structured-citation-detail">
@@ -3752,7 +3769,7 @@ function App() {
                 </div>
               )}
               <p>
-                Reproducible writing environments can shorten the path between an observation, its supporting analysis, and the claim that enters the literature. This manuscript keeps those elements close without exposing the mechanics during ordinary reading.
+                {SAMPLE_INTRODUCTION_CONTINUATION}
               </p>
             </section>
 

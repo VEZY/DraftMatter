@@ -40,8 +40,4 @@ print(f"Wrote {output}")`,
   commentReplyTimestamps: [],
   cellStatus: 'current',
   lastSavedAt: new Date().toISOString(),
-  preservedSections: [{
-    after: 'introduction',
-    markdown: 'Reproducible writing environments can shorten the path between an observation, its supporting analysis, and the claim that enters the literature. This manuscript keeps those elements close without exposing the mechanics during ordinary reading.',
-  }],
 }

@@ -63,7 +63,7 @@ test.describe('local review identity settings', () => {
     await composer.getByLabel('Comment').fill('Please retain the confidence interval.')
     await composer.getByRole('button', { name: 'Add' }).click()
 
-    await page.getByRole('button', { name: /Editing/ }).click()
+    await page.getByRole('button', { name: 'Turn on track changes' }).click()
     await selectRenderedText(manuscript.getByText('Suggest on this sentence.', { exact: true }), 'Suggest on this sentence.')
     await page.keyboard.type('Use this revised sentence.')
 

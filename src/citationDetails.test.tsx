@@ -49,7 +49,7 @@ describe('rendered citation metadata inspector', () => {
 
   it('shows bibliographic provenance and opens only normalized explicit links', async () => {
     await act(async () => root.render(<App />))
-    await click(container.querySelector('.citation-chip')!)
+    await click(container.querySelector('.structured-citation')!)
 
     const inspector = container.querySelector('.citation-record-inspector')!
     expect(inspector.getAttribute('aria-label')).toContain('Plant modelling as a reproducible research practice')
@@ -83,7 +83,7 @@ describe('rendered citation metadata inspector', () => {
     await act(async () => root.render(<App />))
     expect(attachments).not.toHaveBeenCalled()
 
-    await click(container.querySelector('.citation-chip')!)
+    await click(container.querySelector('.structured-citation')!)
     await act(async () => { await Promise.resolve() })
 
     expect(attachments).toHaveBeenCalledWith('PXW99EKT')

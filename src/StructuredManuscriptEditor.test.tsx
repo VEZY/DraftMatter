@@ -487,6 +487,24 @@ describe('full structured manuscript editor', () => {
     expect(changed).not.toHaveBeenCalled()
   })
 
+  it('offers a portable reference action for labeled retained figure output', async () => {
+    const copied = vi.fn()
+    const figureOutput = `# Results
+
+<!-- dm-output:start cell="cell-growth" run="sha256:one" -->
+![Growth response](figures/growth.svg){#fig-growth-result}
+<!-- dm-output:end -->
+`
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={figureOutput} onChange={vi.fn()} onCopyReference={copied} />,
+    ))
+
+    const copy = container.querySelector<HTMLButtonElement>('[aria-label="Copy figure reference @fig-growth-result"]')!
+    expect(copy.textContent).toBe('Copy @fig-growth-result')
+    await act(async () => copy.click())
+    expect(copied).toHaveBeenCalledWith('fig-growth-result')
+  })
+
   it('reserves slash for commands only at an empty rendered paragraph', () => {
     const emptyParagraph = manuscriptSchema.nodes.paragraph.createChecked({ id: 'empty', section: null })
     const emptyState = EditorState.create({ schema: manuscriptSchema, doc: manuscriptSchema.nodes.doc.createChecked(null, [emptyParagraph]) })

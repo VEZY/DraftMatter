@@ -75,11 +75,12 @@ test.describe('DM-P1-06 manuscript outline', () => {
   test('creates the first sample-mode section before portable review metadata and reopens it', async ({ page }) => {
     await page.goto('/')
     const outline = page.getByRole('complementary', { name: 'Manuscript outline' })
-    const answers = ['Discussion', '2', 'sec-discussion']
-    const answerPrompt = (dialog: import('@playwright/test').Dialog) => dialog.accept(answers.shift())
-    page.on('dialog', answerPrompt)
     await outline.getByRole('button', { name: /Add section/ }).click()
-    page.off('dialog', answerPrompt)
+    const insertion = page.getByRole('dialog', { name: 'Add section' })
+    await insertion.getByLabel('Section title').fill('Discussion')
+    await insertion.getByLabel('Heading level').selectOption('2')
+    await insertion.getByLabel('Cross-reference label').fill('sec-discussion')
+    await insertion.getByRole('button', { name: 'Insert', exact: true }).click()
 
     await expect(outline.getByText('Discussion', { exact: true })).toBeVisible()
     await expect(page.getByRole('article', { name: 'Editable manuscript' }).locator('#sec-discussion')).toHaveText('Discussion')

@@ -145,6 +145,7 @@ export interface StructuredManuscriptEditorProps {
   suggestionMode?: boolean
   suggestionAuthor?: { id: string; name: string }
   onSuggestionCapture?: (message: string, error?: boolean) => void
+  onCopyReference?: (label: string) => void
   resolveAssetUrl?: (path: string) => string
   citationLabels?: Record<string, string>
   codeCellStatuses?: Record<string, ExecutionFreshnessStatus>
@@ -1388,17 +1389,27 @@ function footnoteDefinitionNodeView(initialNode: ProseMirrorNode, view: EditorVi
   }
 }
 
-function outputNodeView(node: ProseMirrorNode, resolveAssetUrl: (path: string) => string): NodeView {
+function outputNodeView(node: ProseMirrorNode, resolveAssetUrl: (path: string) => string, onCopyReference?: (label: string) => void): NodeView {
   const dom = document.createElement('section')
   dom.className = 'structured-output'
   dom.dataset.dmId = String(node.attrs.id)
   const header = document.createElement('div')
   header.className = 'structured-output-header'
   header.textContent = `Retained ${String(node.attrs.kind)} output`
-  dom.append(header)
   const markdown = String(node.attrs.markdown)
     .replace(/^\s*<!-- dm-output:start[^>]*-->\s*/m, '')
     .replace(/\s*<!-- dm-output:end -->\s*$/m, '')
+  const label = markdown.match(/\{#([A-Za-z][\w.:-]*)(?:\s[^}]*)?\}/)?.[1]
+  if (label && onCopyReference) {
+    const copy = document.createElement('button')
+    copy.type = 'button'
+    copy.className = 'structured-output-reference'
+    copy.setAttribute('aria-label', `Copy figure reference @${label}`)
+    copy.textContent = `Copy @${label}`
+    copy.addEventListener('click', () => onCopyReference(label))
+    header.append(copy)
+  }
+  dom.append(header)
   const image = markdown.match(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/)
   if (image) {
     const element = document.createElement('img')
@@ -2106,6 +2117,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   suggestionMode = false,
   suggestionAuthor = { id: 'dm-local-author', name: 'Local author' },
   onSuggestionCapture,
+  onCopyReference,
   resolveAssetUrl,
   citationLabels,
   codeCellStatuses,
@@ -2135,6 +2147,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const suggestionModeRef = useRef(suggestionMode)
   const suggestionAuthorRef = useRef(suggestionAuthor)
   const onSuggestionCaptureRef = useRef(onSuggestionCapture)
+  const onCopyReferenceRef = useRef(onCopyReference)
   const pendingSuggestionRef = useRef<{ acceptedSource: string; draftSource: string; timeout: number } | undefined>(undefined)
   const reviewSelectionSignatureRef = useRef('')
   const draggedBlockIdRef = useRef<string | undefined>(undefined)
@@ -2159,6 +2172,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   suggestionModeRef.current = suggestionMode
   suggestionAuthorRef.current = suggestionAuthor
   onSuggestionCaptureRef.current = onSuggestionCapture
+  onCopyReferenceRef.current = onCopyReference
   resolveAssetUrlRef.current = resolveAssetUrl
   codeCellStatusesRef.current = codeCellStatuses
   readOnlyRef.current = readOnly
@@ -2608,7 +2622,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         footnote_reference: (node, editorView) => footnoteReferenceNodeView(node, editorView),
         footnote_definition: (node, editorView, getPos) => footnoteDefinitionNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         table: (node, editorView, getPos) => tableNodeView(node, editorView, getPos, () => !readOnlyRef.current),
-        output_block: (node) => outputNodeView(node, (path) => resolveAssetUrlRef.current?.(path) ?? path),
+        output_block: (node) => outputNodeView(
+          node,
+          (path) => resolveAssetUrlRef.current?.(path) ?? path,
+          (label) => onCopyReferenceRef.current?.(label),
+        ),
         image: (node, editorView, getPos) => imageNodeView(
           node,
           editorView,

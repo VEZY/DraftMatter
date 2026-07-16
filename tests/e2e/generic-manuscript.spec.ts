@@ -280,11 +280,12 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(manuscript.getByText('A carefully revised suggestion sentence.', { exact: true })).toBeVisible()
     await reviewPanel.getByLabel('Markup view').selectOption('all')
 
-    const sectionPrompts = ['Discussion', '2', 'sec-discussion']
-    const acceptSectionPrompt = (dialog: import('@playwright/test').Dialog) => dialog.accept(sectionPrompts.shift())
-    page.on('dialog', acceptSectionPrompt)
     await page.getByRole('complementary', { name: 'Manuscript outline' }).getByRole('button', { name: /Add section/ }).click()
-    page.off('dialog', acceptSectionPrompt)
+    const insertion = page.getByRole('dialog', { name: 'Add section' })
+    await insertion.getByLabel('Section title').fill('Discussion')
+    await insertion.getByLabel('Heading level').selectOption('2')
+    await insertion.getByLabel('Cross-reference label').fill('sec-discussion')
+    await insertion.getByRole('button', { name: 'Insert', exact: true }).click()
     await expect(page.getByRole('complementary', { name: 'Manuscript outline' }).getByText('Discussion')).toBeVisible()
     await expect(manuscript.locator('#sec-discussion')).toHaveText('Discussion')
     await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('## Discussion {#sec-discussion}')

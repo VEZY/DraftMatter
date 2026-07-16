@@ -67,7 +67,7 @@ describe('rendered Crossref citation search', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('.confirm-citation')!.click())
 
     expect(localStorage.getItem('draftmatter.citations.v1')).toContain('10.1016/j.envsoft.2019.104609')
-    expect(container.querySelector('.citation-chip')?.textContent).toContain('Vezy')
+    expect([...container.querySelectorAll('.structured-citation')].some((citation) => citation.textContent?.includes('Vezy'))).toBe(true)
   })
 
   it('resolves an exact DOI into a reviewable intake record without discarding the payload', async () => {

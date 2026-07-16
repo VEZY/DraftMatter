@@ -3,6 +3,9 @@ import { expect, test } from '@playwright/test'
 
 test.describe('DM-P0-06 rendered vertical slice', () => {
   test('renders, reviews, and projects the portable manuscript without exposing review source', async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined })
+    })
     await page.goto('/')
 
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
@@ -14,9 +17,9 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
     await expect(manuscript.getByLabel('Publication authors')).toContainText('Alice Martin')
     await expect(manuscript).not.toContainText('CIRAD, UMR AMAP')
     await expect(manuscript).not.toContainText('Keywords drought acclimation')
-    await expect(page.getByRole('button', { name: 'Open citation details' })).toHaveText('(Vezy et al., 2024)')
-    await expect(page.locator('.code-cell-label')).toContainText('Canopy response over time')
-    await expect(page.getByRole('img', { name: /Line chart comparing control and drought/ })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Edit citation @vezy2024' })).toHaveText('(Vezy et al., 2024)')
+    await expect(page.locator('.structured-code-cell-header')).toContainText('fig-canopy')
+    await expect(page.getByRole('img', { name: 'Leaf area response over twelve weeks' })).toBeVisible()
     await expect(reviewPanel.getByText('2 overlapping alternatives')).toBeVisible()
     await expect(reviewPanel.getByText(/Can we quantify this increase/)).toBeVisible()
     await expect(reviewPanel.locator('time[datetime="2026-07-15T09:00:00.000Z"]')).toHaveText('15 Jul 2026 · 09:00 UTC')
@@ -33,8 +36,11 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
     await expect(page).toHaveScreenshot('rendered-vertical-slice.png')
 
     await page.getByRole('button', { name: 'Export' }).click()
-    const reviewDownloadPromise = page.waitForEvent('download')
     await page.getByRole('button', { name: /Review report/ }).click()
+    const reviewExport = page.getByRole('dialog', { name: 'Save review report' })
+    await expect(reviewExport.getByLabel('File name')).toHaveValue('canopy-drought.review.md')
+    const reviewDownloadPromise = page.waitForEvent('download')
+    await reviewExport.getByRole('button', { name: 'Choose location…' }).click()
     const reviewDownload = await reviewDownloadPromise
     expect(reviewDownload.suggestedFilename()).toBe('canopy-drought.review.md')
     const reviewDownloadPath = await reviewDownload.path()

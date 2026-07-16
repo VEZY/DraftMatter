@@ -69,12 +69,12 @@ test.describe('DM-P4-05 modeled review alternatives', () => {
   test('renders the alternative selected by next and previous navigation', async ({ page }) => {
     await page.goto('/')
     const review = page.getByRole('complementary', { name: 'Review feedback' })
-    const reviewedSentence = page.locator('.reviewed-sentence')
+    const reviewedSentence = page.getByRole('article', { name: 'Editable manuscript' })
 
-    await expect(reviewedSentence.locator('.insertion')).toHaveText('reduced leaf area by 18%')
+    await expect(reviewedSentence.locator('.dm-review-proposal')).toHaveText('reduced leaf area by 18%')
     await review.getByRole('button', { name: 'Next review item' }).click()
-    await expect(reviewedSentence.locator('.insertion')).toHaveText('lowered leaf expansion during the treatment period')
+    await expect(reviewedSentence.locator('.dm-review-proposal')).toHaveText('lowered leaf expansion during the treatment period')
     await review.getByRole('button', { name: 'Previous review item' }).click()
-    await expect(reviewedSentence.locator('.insertion')).toHaveText('reduced leaf area by 18%')
+    await expect(reviewedSentence.locator('.dm-review-proposal')).toHaveText('reduced leaf area by 18%')
   })
 })

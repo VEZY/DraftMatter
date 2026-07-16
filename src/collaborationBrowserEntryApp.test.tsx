@@ -70,7 +70,7 @@ describe('fresh browser collaboration entry', () => {
   })
 
   it('switches the sample shell into the shared rendered editor when the workspace synchronizes', async () => {
-    expect(container.querySelector('.structured-manuscript-editor')).toBeNull()
+    expect(container.querySelector<HTMLElement>('.structured-manuscript-editor')?.dataset.collaborative).toBe('false')
     await act(async () => container.querySelector<HTMLButtonElement>('.collaboration-toggle')!.click())
     await act(async () => container.querySelector<HTMLButtonElement>('[data-testid="join-browser-workspace"]')!.click())
 

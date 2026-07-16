@@ -53,7 +53,9 @@ test.describe('DM-P1-07 accessibility baseline', () => {
 
     const motionDurations = await page.evaluate(() => {
       const saveIndicator = document.querySelector<HTMLElement>('.save-indicator')!
-      const chart = document.querySelector<HTMLElement>('.chart-wrap')!
+      const chart = document.createElement('div')
+      chart.className = 'chart-wrap'
+      document.body.append(chart)
       saveIndicator.classList.add('saving')
       chart.classList.add('loading')
       const milliseconds = (value: string) => value.split(',').map((duration) => {
@@ -61,11 +63,13 @@ test.describe('DM-P1-07 accessibility baseline', () => {
         return duration.trim().endsWith('ms') ? parsed : parsed * 1_000
       })
 
-      return {
+      const durations = {
         animation: milliseconds(getComputedStyle(saveIndicator).animationDuration),
         pseudoAnimation: milliseconds(getComputedStyle(chart, '::after').animationDuration),
         transition: milliseconds(getComputedStyle(chart).transitionDuration),
       }
+      chart.remove()
+      return durations
     })
     expect(motionDurations.animation.every((duration) => duration <= 0.01)).toBe(true)
     expect(motionDurations.pseudoAnimation.every((duration) => duration <= 0.01)).toBe(true)
