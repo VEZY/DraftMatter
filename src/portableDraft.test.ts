@@ -87,4 +87,13 @@ describe('portable draft source envelope', () => {
       { citekey: 'vezy2024', prefix: 'compare', locator: 'p. 18', suppressAuthor: true },
     ])
   })
+
+  it('keeps a removed review thread deleted across later manuscript edits', () => {
+    const removed = reviewedProjection({ ...initialDraft, commentDeleted: true })
+    const parsed = parsePortableDocument(removed, initialDraft)
+    const saved = reviewedProjection({ ...parsed.draft, title: 'Revised after review cleanup' })
+
+    expect(saved).toContain('{#dm-comment-01 .dm-thread data-anchor="dm-comment-01" data-author="dm-a02" data-status="deleted"}')
+    expect(parsePortableDocument(saved, initialDraft).draft.commentDeleted).toBe(true)
+  })
 })

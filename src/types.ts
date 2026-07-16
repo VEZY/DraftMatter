@@ -22,6 +22,7 @@ export interface PortableDraftBaseline {
   aliceStatus: SuggestionStatus
   marcusStatus: SuggestionStatus
   commentResolved: boolean
+  commentDeleted: boolean
   commentReplies: string[]
 }
 
@@ -45,6 +46,7 @@ export interface DraftState {
   aliceStatus: SuggestionStatus
   marcusStatus: SuggestionStatus
   commentResolved: boolean
+  commentDeleted: boolean
   commentReplies: string[]
   cellStatus: 'current' | 'stale' | 'running' | 'failed' | 'interrupted' | 'environment-changed' | 'output-missing'
   lastSavedAt: string

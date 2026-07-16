@@ -159,7 +159,7 @@ lowered leaf expansion during the treatment period
 Keep the interpretation conservative.
 ~~~
 ::::
-:::: {#dm-comment-01 .dm-thread data-anchor="dm-comment-01" data-author="dm-a02" data-status="${state.commentResolved ? 'resolved' : 'open'}"}
+:::: {#dm-comment-01 .dm-thread data-anchor="dm-comment-01" data-author="dm-a02" data-status="${state.commentDeleted ? 'deleted' : state.commentResolved ? 'resolved' : 'open'}"}
 ~~~{.dm-message}
 Can we quantify this increase in the main text?
 ~~~

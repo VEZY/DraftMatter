@@ -139,6 +139,7 @@ function hasModeledChanges(draft: DraftState, baseline: PortableDraftBaseline) {
     || baseline.aliceStatus !== draft.aliceStatus
     || baseline.marcusStatus !== draft.marcusStatus
     || baseline.commentResolved !== draft.commentResolved
+    || baseline.commentDeleted !== draft.commentDeleted
     || !sameStrings(baseline.commentReplies, draft.commentReplies)
 }
 
@@ -165,10 +166,12 @@ export function materializePortableDraftSource(draft: DraftState) {
 
   let materialized = applyPatches(source, patches)
   let review = parseReviewMarkup(materialized)
+  const baselineCommentStatus = baseline.commentDeleted ? 'deleted' : baseline.commentResolved ? 'resolved' : 'open'
+  const draftCommentStatus = draft.commentDeleted ? 'deleted' : draft.commentResolved ? 'resolved' : 'open'
   const statusUpdates: [string, string, string][] = [
     ['dm-c01', baseline.aliceStatus, draft.aliceStatus],
     ['dm-c02', baseline.marcusStatus, draft.marcusStatus],
-    ['dm-comment-01', baseline.commentResolved ? 'resolved' : 'open', draft.commentResolved ? 'resolved' : 'open'],
+    ['dm-comment-01', baselineCommentStatus, draftCommentStatus],
   ]
   for (const [recordId, previous, next] of statusUpdates) {
     if (previous === next) continue

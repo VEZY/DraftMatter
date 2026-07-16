@@ -29,6 +29,15 @@ describe('portable document core', () => {
     expect(result.draft.commentReplies).toEqual(['Added the estimate and confidence interval.'])
   })
 
+  it('reopens a removed sample thread as deleted rather than silently restoring it', () => {
+    const source = reviewedProjection({ ...initialDraft, commentDeleted: true })
+    const result = parsePortableDocument(source, initialDraft)
+
+    expect(source).toContain('data-status="deleted"')
+    expect(result.draft.commentDeleted).toBe(true)
+    expect(result.draft.commentResolved).toBe(false)
+  })
+
   it('keeps unsupported top-level sections in subsequent exports', () => {
     const source = reviewedProjection(initialDraft).replace(
       '## Conclusion',

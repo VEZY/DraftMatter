@@ -166,6 +166,7 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
     aliceStatus: parseStatus(review, 'dm-c01', fallback.aliceStatus),
     marcusStatus: parseStatus(review, 'dm-c02', fallback.marcusStatus),
     commentResolved: modeledThread?.status === 'resolved',
+    commentDeleted: modeledThread?.status === 'deleted',
     commentReplies: modeledThread?.messages.slice(1) ?? [],
     cellStatus: 'stale',
     lastSavedAt: new Date().toISOString(),
@@ -188,6 +189,7 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
       aliceStatus: draft.aliceStatus,
       marcusStatus: draft.marcusStatus,
       commentResolved: draft.commentResolved,
+      commentDeleted: draft.commentDeleted,
       commentReplies: [...draft.commentReplies],
     },
   }

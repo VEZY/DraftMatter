@@ -55,6 +55,7 @@ import { normalizeProjectRelativePath, projectFilePath } from './projectPaths'
 import { authorInitials, readUserSettings, renameLocalAuthor, saveUserSettings } from './userSettings'
 import { parsePublicationMetadata, updatePublicationAuthors } from './publicationMetadata'
 import { insertPortableSection } from './manuscriptOutline'
+import { copyPlainText } from './clipboard'
 
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
 const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
@@ -1069,6 +1070,7 @@ function App() {
   const demoReviewAvailable = reviewDocument.changes.some((change) => change.id === 'dm-c01')
     && reviewDocument.changes.some((change) => change.id === 'dm-c02')
     && reviewDocument.threads.some((thread) => thread.id === 'dm-comment-01')
+  const demoCommentAvailable = demoReviewAvailable && !draft.commentDeleted
   const openReviewCount = reviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
   const reviewProposal = reviewAuthorFilter === 'dm-a01' || activeReviewId === 'dm-c01'
     ? 'alice'
@@ -1977,6 +1979,18 @@ function App() {
     if (!reply.trim()) return
     updateDraft({ commentReplies: [...draft.commentReplies, reply.trim()] })
     setReply('')
+  }
+
+  const removeDemoComment = () => {
+    updateDraft({ commentDeleted: true, commentResolved: false })
+    setActiveReviewId(reviewQueue.find((item) => item.id !== 'dm-comment-01')?.id)
+    setToast('Comment thread removed from the active queue')
+  }
+
+  const copyPortableReference = async (label: string) => {
+    const reference = `@${label}`
+    const copied = await copyPlainText(reference)
+    setToast(copied ? `Copied ${reference}` : `Reference · ${reference}`)
   }
 
   const applyPortableReviewSource = (source: string, message: string) => {
@@ -3406,7 +3420,7 @@ function App() {
                     <div className="chart-legend"><span><i className="legend-control" /> Well-watered</span><span><i className="legend-drought" /> Drought</span></div>
                   </div>)}
                   {executionProblem && <div className="execution-inline-problem" role="alert">{executionProblem}</div>}
-                  <figcaption><strong>Figure 1.</strong> Normalized canopy area across twelve weeks. Uncertainty is not shown. <button><Icon name="link" size={13} /> fig-canopy-result</button></figcaption>
+                  <figcaption><strong>Figure 1.</strong> Normalized canopy area across twelve weeks. Uncertainty is not shown. <button onClick={() => void copyPortableReference('fig-canopy-result')} aria-label="Copy figure reference @fig-canopy-result"><Icon name="link" size={13} /> fig-canopy-result</button></figcaption>
                 </figure>
                 {executionView
                   ? <RuntimeProvenance view={executionView} />
@@ -3514,7 +3528,7 @@ function App() {
             </div>
 
             <div className="review-scroll">
-              <div className="review-location"><span>RESULTS · PARAGRAPH 1</span><button aria-label="Review item options"><Icon name="more" /></button></div>
+              <div className="review-location"><span>RESULTS · PARAGRAPH 1</span></div>
 
               {demoReviewAvailable && (reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a01' || reviewAuthorFilter === 'dm-a02') && <>
               <div className="conflict-card">
@@ -3541,22 +3555,25 @@ function App() {
                 </div>
 
                 {reviewProposalStatus === 'open' ? (
-                  <div className="review-actions"><button className="accept" onClick={() => acceptProposal(reviewProposal)}><Icon name="check" size={15} /> Accept</button><button className="reject" onClick={() => rejectProposal(reviewProposal)}><Icon name="x" size={15} /> Reject</button><button className="icon-button" aria-label="Suggestion options"><Icon name="more" /></button></div>
+                  <div className="review-actions"><button className="accept" onClick={() => acceptProposal(reviewProposal)}><Icon name="check" size={15} /> Accept</button><button className="reject" onClick={() => rejectProposal(reviewProposal)}><Icon name="x" size={15} /> Reject</button></div>
                 ) : (
                   <div className="decision-note"><Icon name={reviewProposalStatus === 'accepted' ? 'check' : reviewProposalStatus === 'rejected' ? 'x' : 'branch'} size={15} /> This proposal is {reviewProposalStatus === 'needs-rebase' ? 'preserved and needs rebase' : reviewProposalStatus}.</div>
                 )}
               </div>
 
-              {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
+              {demoCommentAvailable && (reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
               <div id="review-item-dm-comment-01" className={`comment-card ${activeReviewId === 'dm-comment-01' ? 'active' : ''} ${draft.commentResolved ? 'resolved' : ''}`} onClick={() => setActiveReviewId('dm-comment-01')}>
-                <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small>5 minutes ago</small></span><button className="icon-button subtle" aria-label="Comment options"><Icon name="more" /></button></div>
+                <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small>5 minutes ago</small></span></div>
                 <div className="comment-quote">“increased modestly”</div>
                 <p>Can we quantify this increase in the main text? The estimate is already in the supplement.</p>
                 {draft.commentReplies.map((message, index) => <div className="reply-message" key={`${message}-${index}`}><Avatar initials={currentAuthorInitials} tone="sage" small label={userSettings.author.name} /><p><strong>You</strong>{message}</p></div>)}
                 {!draft.commentResolved && (
                   <div className="reply-box"><input value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addReply() }} placeholder="Reply…" aria-label="Reply to comment" /><button onClick={addReply} disabled={!reply.trim()} aria-label="Send reply"><Icon name="arrowRight" size={15} /></button></div>
                 )}
-                <button className="resolve-button" onClick={() => updateDraft({ commentResolved: !draft.commentResolved })}><Icon name="check" size={14} /> {draft.commentResolved ? 'Reopen thread' : 'Resolve thread'}</button>
+                <div className="portable-thread-actions">
+                  <button className="resolve-button" onClick={() => updateDraft({ commentResolved: !draft.commentResolved, commentDeleted: false })}><Icon name="check" size={14} /> {draft.commentResolved ? 'Reopen thread' : 'Resolve thread'}</button>
+                  <button className="portable-delete-thread" onClick={(event) => { event.stopPropagation(); removeDemoComment() }}><Icon name="x" size={13} /> Remove</button>
+                </div>
               </div>}
               </>}
 
