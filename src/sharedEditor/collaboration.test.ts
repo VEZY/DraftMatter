@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import * as Y from 'yjs'
 import identicalReviewSource from '../fixtures/portable/25-review-identical.qmd?raw'
 import {
   CollaborativeDocument,
@@ -116,5 +117,21 @@ describe('Yjs collaboration document', () => {
     stop()
     left.destroy()
     right.destroy()
+  })
+
+  it('separates portable source changes from ProseMirror fragment updates', () => {
+    const collaboration = CollaborativeDocument.fromPortableSource(identicalReviewSource)
+    const origins: unknown[] = []
+    const stop = collaboration.onPortableUpdate((origin) => origins.push(origin))
+
+    collaboration.doc.transact(() => {
+      collaboration.doc.getXmlFragment('draftmatter:prosemirror').insert(0, [new Y.XmlElement('paragraph')])
+    }, 'rendered-editor')
+    expect(origins).toEqual([])
+
+    collaboration.edit(0, 0, '<!-- portable -->\n', 'source-edit')
+    expect(origins).toEqual(['source-edit'])
+    stop()
+    collaboration.destroy()
   })
 })

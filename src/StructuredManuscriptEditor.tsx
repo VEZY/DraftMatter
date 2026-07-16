@@ -1,6 +1,6 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { setBlockType, toggleMark, wrapIn } from 'prosemirror-commands'
-import { history, redo, undo } from 'prosemirror-history'
+import { history, redo as historyRedo, undo as historyUndo } from 'prosemirror-history'
 import { keymap } from 'prosemirror-keymap'
 import { wrapInList } from 'prosemirror-schema-list'
 import type { Mark as ProseMirrorMark, Node as ProseMirrorNode } from 'prosemirror-model'
@@ -8,6 +8,7 @@ import { EditorState, NodeSelection, type Command, type Transaction } from 'pros
 import { tableEditing } from 'prosemirror-tables'
 import { Decoration, DecorationSet, EditorView, type MarkView, type NodeView } from 'prosemirror-view'
 import { baseKeymap } from 'prosemirror-commands'
+import { redoCommand as collaborativeRedo, undoCommand as collaborativeUndo, ySyncPluginKey } from 'y-prosemirror'
 import { serializeCitationCluster } from './citation'
 import { formatCrossReferenceTarget, isCrossReferenceTarget } from './crossReference'
 import { renderEquation } from './equationRenderer'
@@ -19,6 +20,11 @@ import { parseStructuredManuscript, serializeStructuredManuscript, type Structur
 import type { ExecutionFreshnessStatus } from './executionFreshness'
 import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
 import { motionAwareScrollBehavior } from './accessibility'
+import {
+  createCollaborativeProseMirrorState,
+  reconcileCollaborativeProseMirrorDocument,
+  type CollaborativeEditorBinding,
+} from './sharedEditor/prosemirrorCollaboration'
 
 export interface StructuredOutlineItem {
   id: string
@@ -94,6 +100,7 @@ export interface StructuredManuscriptEditorProps {
   reviewAuthorId?: string
   activeReviewId?: string
   activeReviewAnchorId?: string
+  collaboration?: CollaborativeEditorBinding | null
   readOnly?: boolean
   ariaLabel?: string
   className?: string
@@ -1912,18 +1919,30 @@ function tableNodeView(
   }
 }
 
-function editorState(document: ProseMirrorNode) {
+function editorState(document: ProseMirrorNode, collaboration?: CollaborativeEditorBinding | null) {
+  const editingPlugins = collaboration
+    ? createCollaborativeProseMirrorState({
+        document: collaboration.document,
+        schema: manuscriptSchema,
+        initialDocument: document,
+        awareness: collaboration.awareness,
+      }).state.plugins
+    : [
+        history(),
+        keymap({
+          'Mod-z': historyUndo,
+          'Mod-y': historyRedo,
+          'Shift-Mod-z': historyRedo,
+        }),
+      ]
   return EditorState.create({
     schema: manuscriptSchema,
-    doc: document,
+    ...(collaboration ? {} : { doc: document }),
     plugins: [
-      history(),
+      ...editingPlugins,
       keymap({
         'Mod-b': toggleMark(manuscriptSchema.marks.strong),
         'Mod-i': toggleMark(manuscriptSchema.marks.emphasis),
-        'Mod-z': undo,
-        'Mod-y': redo,
-        'Shift-Mod-z': redo,
       }),
       keymap(baseKeymap),
       tableEditing(),
@@ -1951,6 +1970,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   reviewAuthorId,
   activeReviewId,
   activeReviewAnchorId,
+  collaboration,
   readOnly = false,
   ariaLabel = 'Rendered manuscript editor',
   className = '',
@@ -1980,6 +2000,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const reviewAuthorIdRef = useRef(reviewAuthorId)
   const activeReviewIdRef = useRef(activeReviewId)
   const activeReviewAnchorIdRef = useRef(activeReviewAnchorId)
+  const collaborationRef = useRef(collaboration)
   const reviewDecorationRef = useRef(reviewDecorationIndex(source))
   onChangeRef.current = onChange
   onDiagnosticsRef.current = onDiagnostics
@@ -1999,6 +2020,12 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   reviewAuthorIdRef.current = reviewAuthorId
   activeReviewIdRef.current = activeReviewId
   activeReviewAnchorIdRef.current = activeReviewAnchorId
+  collaborationRef.current = collaboration
+
+  const publishSourceChange = (nextSource: string) => {
+    collaborationRef.current?.publishPortableSource?.(nextSource)
+    onChangeRef.current(nextSource)
+  }
 
   const emitReviewSelection = (view: EditorView) => {
     const selection = selectedReviewText(view)
@@ -2016,7 +2043,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     metadataRef.current = parsed.metadata
     onDiagnosticsRef.current?.(parsed.diagnostics)
     onOutlineRef.current?.(outlineFor(parsed.document))
-    view.updateState(editorState(parsed.document))
+    if (collaborationRef.current) {
+      reconcileCollaborativeProseMirrorDocument(collaborationRef.current, parsed.document)
+    } else {
+      view.updateState(editorState(parsed.document))
+    }
     refreshFootnotePresentation(view)
     emitReviewSelection(view)
   }
@@ -2034,7 +2065,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         return
       }
       replaceEditorSource(view, captured.document.source)
-      onChangeRef.current(captured.document.source)
+      publishSourceChange(captured.document.source)
       const labels: Record<string, string> = {
         insert: 'Insertion captured as one portable suggestion',
         delete: 'Deletion captured as one portable suggestion',
@@ -2113,8 +2144,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     wrapBlockquote: () => run(wrapIn(manuscriptSchema.nodes.blockquote, { id: randomId('quote') })),
     wrapBulletList: () => run(wrapInList(manuscriptSchema.nodes.bullet_list, { id: randomId('list') })),
     wrapOrderedList: () => run(wrapInList(manuscriptSchema.nodes.ordered_list, { id: randomId('list'), order: 1 })),
-    undo: () => run(undo),
-    redo: () => run(redo),
+    undo: () => run(collaborationRef.current ? collaborativeUndo : historyUndo),
+    redo: () => run(collaborationRef.current ? collaborativeRedo : historyRedo),
     insertCodeCell: (language) => {
       const view = viewRef.current
       if (!view || readOnlyRef.current) return false
@@ -2297,7 +2328,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     onDiagnosticsRef.current?.(parsed.diagnostics)
     onOutlineRef.current?.(outlineFor(parsed.document))
     const view = new EditorView(hostRef.current, {
-      state: editorState(parsed.document),
+      state: editorState(parsed.document, collaboration),
       editable: () => !readOnlyRef.current,
       attributes: {
         role: 'textbox',
@@ -2361,10 +2392,16 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           () => !readOnlyRef.current,
         ),
       },
+    })
+    view.setProps({
       dispatchTransaction(transaction) {
         const stepTypes = transaction.steps.map((step) => step.toJSON().stepType)
+        const collaborationMeta = transaction.getMeta(ySyncPluginKey)
+        const collaborativeOrigin = Boolean(collaborationMeta?.isChangeOrigin)
+        const collaborativeUndoRedo = Boolean(collaborationMeta?.isUndoRedoOperation)
         const suggestionIntent: ReviewSuggestionIntent | undefined = transaction.docChanged
           && suggestionModeRef.current
+          && !collaborativeOrigin
           && !transaction.getMeta('dm-presentation-only')
           ? stepTypes.every((stepType) => stepType === 'replace')
             ? 'text'
@@ -2384,6 +2421,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         onOutlineRef.current?.(outlineFor(next.doc))
         if (transaction.docChanged && !transaction.getMeta('dm-presentation-only') && metadataRef.current) {
           const serialized = serializeStructuredManuscript(next.doc, metadataRef.current)
+          if (collaborativeOrigin && !collaborativeUndoRedo) {
+            loadedSourceRef.current = serialized
+            sourceRef.current = serialized
+            return
+          }
           if (suggestionIntent === 'text') {
             queueSuggestion(view, serialized)
             return
@@ -2394,7 +2436,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           }
           loadedSourceRef.current = serialized
           sourceRef.current = serialized
-          onChangeRef.current(serialized)
+          publishSourceChange(serialized)
         }
       },
     })
@@ -2408,7 +2450,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       viewRef.current = null
       view.destroy()
     }
-  }, [ariaLabel])
+  }, [ariaLabel, collaboration])
 
   useEffect(() => {
     if (suggestionMode) return
@@ -2428,7 +2470,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     onDiagnosticsRef.current?.(parsed.diagnostics)
     onOutlineRef.current?.(outlineFor(parsed.document))
     if (!view.state.doc.eq(parsed.document)) {
-      view.updateState(editorState(parsed.document))
+      if (collaborationRef.current) {
+        reconcileCollaborativeProseMirrorDocument(collaborationRef.current, parsed.document)
+      } else {
+        view.updateState(editorState(parsed.document))
+      }
       refreshFootnotePresentation(view)
       emitReviewSelection(view)
     } else {
@@ -2491,5 +2537,5 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     })
   }, [codeCellStatuses])
 
-  return <div ref={hostRef} className={`structured-manuscript-editor ${className}`.trim()} data-read-only={readOnly ? 'true' : 'false'} />
+  return <div ref={hostRef} className={`structured-manuscript-editor ${className}`.trim()} data-collaborative={collaboration ? 'true' : 'false'} data-read-only={readOnly ? 'true' : 'false'} />
 })

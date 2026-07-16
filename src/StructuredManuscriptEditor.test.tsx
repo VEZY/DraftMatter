@@ -3,10 +3,14 @@
 import { act, createRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import { EditorState } from 'prosemirror-state'
+import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness'
+import * as Y from 'yjs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StructuredManuscriptEditor, shouldRequestStructuredCommands, type StructuredManuscriptEditorHandle } from './StructuredManuscriptEditor'
 import { manuscriptSchema } from './manuscriptSchema'
 import { createReviewAlternative, createReviewChange } from './reviewOperations'
+import { parseStructuredManuscript } from './structuredManuscript'
+import { createCollaborativeProseMirrorState, setCollaborativeEditorPresence } from './sharedEditor/prosemirrorCollaboration'
 
 const source = `---
 title: Generic
@@ -60,6 +64,8 @@ const shortSource = '# Node commands\n\nPlace content here.\n'
 describe('full structured manuscript editor', () => {
   let container: HTMLDivElement
   let root: ReturnType<typeof createRoot>
+  let collaborativeDocuments: Y.Doc[]
+  let collaborativeAwareness: Awareness[]
 
   beforeEach(() => {
     ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -69,10 +75,14 @@ describe('full structured manuscript editor', () => {
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
+    collaborativeDocuments = []
+    collaborativeAwareness = []
   })
 
   afterEach(async () => {
     await act(async () => root.unmount())
+    collaborativeAwareness.forEach((awareness) => awareness.destroy())
+    collaborativeDocuments.forEach((document) => document.destroy())
     vi.restoreAllMocks()
     container.remove()
   })
@@ -746,5 +756,97 @@ describe('full structured manuscript editor', () => {
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-figure-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-table-edit')].every((button) => button.disabled)).toBe(true)
     expect([...container.querySelectorAll<HTMLButtonElement>('.structured-heading-edit')].every((button) => button.disabled)).toBe(true)
+  })
+
+  it('converges rendered structural edits and publishes quiet remote cursor presence', async () => {
+    const leftDocument = new Y.Doc()
+    const leftAwareness = new Awareness(leftDocument)
+    const collaborativeSource = source
+    const initialDocument = parseStructuredManuscript(collaborativeSource).document
+    createCollaborativeProseMirrorState({
+      document: leftDocument,
+      schema: manuscriptSchema,
+      initialDocument,
+      awareness: leftAwareness,
+    })
+    const rightDocument = new Y.Doc()
+    Y.applyUpdate(rightDocument, Y.encodeStateAsUpdate(leftDocument))
+    const rightAwareness = new Awareness(rightDocument)
+    collaborativeDocuments.push(leftDocument, rightDocument)
+    collaborativeAwareness.push(leftAwareness, rightAwareness)
+    setCollaborativeEditorPresence(leftAwareness, { id: 'dm-alice', name: 'Alice Martin', color: '#617f73' })
+    setCollaborativeEditorPresence(rightAwareness, { id: 'dm-marcus', name: 'Marcus Chen', color: '#7d6f8f' })
+
+    const leftRef = createRef<StructuredManuscriptEditorHandle>()
+    const rightRef = createRef<StructuredManuscriptEditorHandle>()
+    const leftChanges: string[] = []
+    const rightChanges: string[] = []
+    const remoteSuggestion = vi.fn()
+    const publishPortableSource = vi.fn()
+    const leftBinding = { document: leftDocument, awareness: leftAwareness, publishPortableSource }
+    const rightBinding = { document: rightDocument, awareness: rightAwareness }
+    const renderPeers = (leftSource = collaborativeSource, rightSource = collaborativeSource) => root.render(<>
+      <StructuredManuscriptEditor
+        ref={leftRef}
+        source={leftSource}
+        onChange={(next) => leftChanges.push(next)}
+        collaboration={leftBinding}
+      />
+      <StructuredManuscriptEditor
+        ref={rightRef}
+        source={rightSource}
+        onChange={(next) => rightChanges.push(next)}
+        onSuggestionCapture={remoteSuggestion}
+        suggestionMode
+        collaboration={rightBinding}
+      />
+    </>)
+    await act(async () => renderPeers())
+
+    await act(async () => { expect(leftRef.current?.insertHeading('Shared findings', 2, 'sec-shared')).toBe(true) })
+    await act(async () => {
+      Y.applyUpdate(rightDocument, Y.encodeStateAsUpdate(leftDocument, Y.encodeStateVector(rightDocument)), 'peer-sync')
+    })
+    expect(container.querySelectorAll('[data-collaborative="true"]')).toHaveLength(2)
+    expect([...container.querySelectorAll('h2')].some((heading) => heading.textContent === 'Shared findings')).toBe(true)
+    expect(leftChanges.at(-1)).toContain('## Shared findings {#sec-shared}')
+    expect(leftChanges.at(-1)).toContain('.draftmatter-reviews')
+    expect(publishPortableSource).toHaveBeenLastCalledWith(leftChanges.at(-1))
+    expect(rightChanges).toEqual([])
+    expect(remoteSuggestion).not.toHaveBeenCalled()
+
+    await act(async () => { expect(leftRef.current?.undo()).toBe(true) })
+    await act(async () => {
+      Y.applyUpdate(rightDocument, Y.encodeStateAsUpdate(leftDocument, Y.encodeStateVector(rightDocument)), 'peer-sync')
+    })
+    expect(leftChanges.at(-1)).not.toContain('## Shared findings {#sec-shared}')
+    expect([...container.querySelectorAll('h2')].some((heading) => heading.textContent === 'Shared findings')).toBe(false)
+    await act(async () => { expect(leftRef.current?.redo()).toBe(true) })
+    await act(async () => {
+      Y.applyUpdate(rightDocument, Y.encodeStateAsUpdate(leftDocument, Y.encodeStateVector(rightDocument)), 'peer-sync')
+    })
+    expect(leftChanges.at(-1)).toContain('## Shared findings {#sec-shared}')
+
+    const portableUpdate = leftChanges.at(-1)!
+    await act(async () => renderPeers(portableUpdate, portableUpdate))
+    expect(rightRef.current?.source()).toContain('## Shared findings {#sec-shared}')
+
+    await act(async () => leftRef.current?.focus())
+    await act(async () => {
+      applyAwarenessUpdate(rightAwareness, encodeAwarenessUpdate(leftAwareness, [leftDocument.clientID]), 'peer-awareness')
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    expect(leftAwareness.getLocalState()?.cursor).toBeDefined()
+    expect(container.querySelector('.ProseMirror-yjs-cursor')?.textContent).toContain('Alice Martin')
+
+    const externallyEdited = `${collaborativeSource}\n## Portable decision {#sec-decision}\n`
+    await act(async () => renderPeers(externallyEdited, portableUpdate))
+    await act(async () => {
+      Y.applyUpdate(rightDocument, Y.encodeStateAsUpdate(leftDocument, Y.encodeStateVector(rightDocument)), 'peer-sync')
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    expect(rightChanges).toEqual([])
+    await act(async () => renderPeers(externallyEdited, externallyEdited))
+    expect(rightRef.current?.source()).toContain('## Portable decision {#sec-decision}')
   })
 })

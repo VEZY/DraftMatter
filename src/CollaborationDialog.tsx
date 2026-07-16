@@ -19,6 +19,7 @@ import {
   type ActiveCollaborator,
   type CollaborationCheckpoint,
   type CollaborationClientStatus,
+  type CollaborativeEditorBinding,
 } from './sharedEditor'
 import { DEFAULT_USER_SETTINGS, type LocalAuthorIdentity } from './userSettings'
 
@@ -30,6 +31,7 @@ export interface CollaborationDialogProps {
   onStatus: (status: CollaborationClientStatus) => void
   onSessionStateChange?: (active: boolean) => void
   onRoleChange?: (role: WorkspaceRole | null) => void
+  onEditorBindingChange?: (binding: CollaborativeEditorBinding | null) => void
   onCheckpoint: (checkpoint: CollaborationCheckpoint) => Promise<void>
   onCheckpointStateChange?: (uncheckpointed: boolean) => void
   checkpointMode: 'working-tree' | 'download'
@@ -53,6 +55,7 @@ export function CollaborationDialog({
   onStatus,
   onSessionStateChange,
   onRoleChange,
+  onEditorBindingChange,
   onCheckpoint,
   onCheckpointStateChange,
   checkpointMode,
@@ -247,6 +250,7 @@ export function CollaborationDialog({
   }, [source])
 
   useEffect(() => () => {
+    onEditorBindingChange?.(null)
     clientRef.current?.destroy()
     onSessionStateChange?.(false)
     onRoleChange?.(null)
@@ -326,10 +330,12 @@ export function CollaborationDialog({
       })
       connectionEstablished = true
       clientRef.current = client
+      onEditorBindingChange?.(client.editorBinding)
       if (!serviceClient) setServiceClient(apiClient)
       setToken('')
       updateStatus('connected')
     } catch (error) {
+      onEditorBindingChange?.(null)
       setActiveRole(null)
       onRoleChange?.(null)
       onSessionStateChange?.(false)
@@ -339,6 +345,7 @@ export function CollaborationDialog({
 
   const disconnect = () => {
     if (uncheckpointed && !window.confirm('Leave this live session without checkpointing its latest changes?')) return
+    onEditorBindingChange?.(null)
     clientRef.current?.destroy()
     clientRef.current = null
     setCollaborators([])

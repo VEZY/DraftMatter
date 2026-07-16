@@ -39,7 +39,9 @@ export {
   COLLABORATIVE_PROSEMIRROR_ROOT,
   collaborativeProseMirrorPlugins,
   createCollaborativeProseMirrorState,
+  reconcileCollaborativeProseMirrorDocument,
   setCollaborativeEditorPresence,
+  type CollaborativeEditorBinding,
   type CollaborativeEditorUser,
   type CollaborativeProseMirrorState,
 } from './prosemirrorCollaboration'

@@ -9,6 +9,10 @@ import {
   projectCollaborationPortableSource,
   type CollaborationCheckpoint,
 } from './collaborationCheckpoint'
+import {
+  setCollaborativeEditorPresence,
+  type CollaborativeEditorBinding,
+} from './prosemirrorCollaboration'
 
 export type CollaborationClientStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
 
@@ -51,6 +55,7 @@ function documentName(workspaceId: string, projectId: string) {
 
 export class HocuspocusCollaborationClient {
   readonly collaboration: CollaborativeDocument
+  readonly editorBinding: CollaborativeEditorBinding
   private readonly provider: HocuspocusProvider
   private readonly stopUpdate: () => void
   private readonly awarenessHandler: () => void
@@ -58,8 +63,13 @@ export class HocuspocusCollaborationClient {
 
   private constructor(collaboration: CollaborativeDocument, provider: HocuspocusProvider, options: CollaborationClientOptions) {
     this.collaboration = collaboration
+    this.editorBinding = {
+      document: collaboration.doc,
+      awareness: collaboration.awareness,
+      publishPortableSource: (source) => { this.publishPortableSource(source) },
+    }
     this.provider = provider
-    this.stopUpdate = collaboration.onUpdate((_update, origin) => {
+    this.stopUpdate = collaboration.onPortableUpdate((origin) => {
       if (origin === LOCAL_ORIGIN || origin === 'collaboration-bootstrap') return
       try {
         const source = projectCollaborationPortableSource(collaboration)
@@ -79,6 +89,11 @@ export class HocuspocusCollaborationClient {
     if (typeof options.token === 'string' && (!options.token.trim() || options.token.length > 16_384)) throw new Error('A valid short-lived collaboration token is required.')
     const collaboration = new CollaborativeDocument()
     collaboration.setLocalPresence(options.presence)
+    setCollaborativeEditorPresence(collaboration.awareness, {
+      id: options.presence.userId,
+      name: options.presence.name,
+      color: options.presence.color ?? '#617f73',
+    })
     options.onStatus?.('connecting')
 
     let resolveSync!: () => void

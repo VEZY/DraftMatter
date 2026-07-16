@@ -4456,6 +4456,33 @@ kbd {
   white-space: pre-wrap;
 }
 
+.structured-editor-content .ProseMirror-yjs-selection {
+  border-radius: 2px;
+}
+
+.structured-editor-content .ProseMirror-yjs-cursor {
+  border-left: 1.5px solid;
+  border-right: 1.5px solid transparent;
+  margin-left: -1px;
+  pointer-events: none;
+  position: relative;
+}
+
+.structured-editor-content .ProseMirror-yjs-cursor > div {
+  border-radius: 3px 3px 3px 0;
+  bottom: 100%;
+  color: #fff;
+  font: 700 8px/1.2 Inter, ui-sans-serif, sans-serif;
+  left: -1.5px;
+  letter-spacing: .01em;
+  max-width: 180px;
+  overflow: hidden;
+  padding: 3px 5px;
+  position: absolute;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .structured-editor-content > *:first-child { margin-top: 0; }
 .structured-editor-content > *:last-child { margin-bottom: 0; }
 .structured-editor-content h1 { font-size: 2.35rem; letter-spacing: -.035em; line-height: 1.08; margin: 0 0 1.2em; }

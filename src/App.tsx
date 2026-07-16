@@ -50,7 +50,7 @@ import { printNativeHtml, renderNativeHtmlExport } from './nativeHtmlExport'
 import { renderDocxExport } from './docxExport'
 import { ExternalExportDialog } from './ExternalExportDialog'
 import { CollaborationDialog } from './CollaborationDialog'
-import type { CollaborationCheckpoint, CollaborationClientStatus } from './sharedEditor'
+import type { CollaborationCheckpoint, CollaborationClientStatus, CollaborativeEditorBinding } from './sharedEditor'
 import { motionAwareScrollBehavior } from './accessibility'
 import { normalizeProjectRelativePath, projectFilePath } from './projectPaths'
 import { authorInitials, readUserSettings, renameLocalAuthor, saveUserSettings } from './userSettings'
@@ -444,6 +444,7 @@ function App() {
   const [collaborationStatus, setCollaborationStatus] = useState<CollaborationClientStatus>('disconnected')
   const [collaborationSessionActive, setCollaborationSessionActive] = useState(false)
   const [collaborationRole, setCollaborationRole] = useState<WorkspaceRole | null>(null)
+  const [collaborativeEditorBinding, setCollaborativeEditorBinding] = useState<CollaborativeEditorBinding | null>(null)
   const [collaborationUncheckpointed, setCollaborationUncheckpointed] = useState(false)
   const [filename, setFilename] = useState(initialProjectMeta.filename)
   const [projectName, setProjectName] = useState(initialProjectMeta.projectName)
@@ -1373,7 +1374,10 @@ function App() {
   const updateCollaborationSessionState = (active: boolean) => {
     collaborationSessionActiveRef.current = active
     setCollaborationSessionActive(active)
-    if (!active) setCollaborationRole(null)
+    if (!active) {
+      setCollaborationRole(null)
+      setCollaborativeEditorBinding(null)
+    }
   }
 
   const updateCollaborationRole = (role: WorkspaceRole | null) => {
@@ -3543,6 +3547,7 @@ function App() {
               reviewAuthorId={reviewAuthorFilter === 'all' ? undefined : reviewAuthorFilter}
               activeReviewId={activeReviewId}
               activeReviewAnchorId={activeReviewAnchorId}
+              collaboration={collaborativeEditorBinding}
               readOnly={Boolean(structuredReviewProjection) || !canEditManuscript}
               resolveAssetUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) ?? 'data:,' : path}
             />
@@ -4023,6 +4028,7 @@ function App() {
         onStatus={updateCollaborationStatus}
         onSessionStateChange={updateCollaborationSessionState}
         onRoleChange={updateCollaborationRole}
+        onEditorBindingChange={setCollaborativeEditorBinding}
         onRequestOpen={() => setCollaborationOpen(true)}
         onCheckpoint={checkpointCollaboration}
         onCheckpointStateChange={setCollaborationUncheckpointed}

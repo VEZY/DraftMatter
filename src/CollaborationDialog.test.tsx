@@ -3,7 +3,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CollaborationDialog } from './CollaborationDialog'
-import { HocuspocusCollaborationClient } from './sharedEditor'
+import { HocuspocusCollaborationClient, type CollaborativeEditorBinding } from './sharedEditor'
 
 function input(container: HTMLElement, label: string) {
   const field = [...container.querySelectorAll('label')].find((candidate) => candidate.querySelector('span')?.textContent === label)?.querySelector('input')
@@ -80,6 +80,7 @@ describe('collaboration dialog', () => {
     }), { status: 200 })))
     const publishPortableSource = vi.fn().mockReturnValue('# Draft\n\nShared revision')
     const destroy = vi.fn()
+    const editorBinding = { document: {}, awareness: {} } as unknown as CollaborativeEditorBinding
     const createCheckpoint = vi.fn().mockReturnValue({
       source: '# Draft\n\nShared revision',
       bytes: new TextEncoder().encode('# Draft\n\nShared revision'),
@@ -90,13 +91,14 @@ describe('collaboration dialog', () => {
     const connect = vi.spyOn(HocuspocusCollaborationClient, 'connect').mockImplementation(async (options) => {
       options.onStatus?.('connected')
       options.onCollaborators?.([{ clientId: 7, userId: 'dm-a01', name: 'Remi Vezy', color: '#617f73' }])
-      return { publishPortableSource, createCheckpoint, destroy } as unknown as HocuspocusCollaborationClient
+      return { publishPortableSource, createCheckpoint, destroy, editorBinding } as unknown as HocuspocusCollaborationClient
     })
     const onClose = vi.fn()
     const onStatus = vi.fn()
     const onSessionStateChange = vi.fn()
     const onCheckpointStateChange = vi.fn()
     const onCheckpoint = vi.fn().mockResolvedValue(undefined)
+    const onEditorBindingChange = vi.fn()
     const setItem = vi.spyOn(Storage.prototype, 'setItem')
     const container = document.createElement('div')
     const root = createRoot(container)
@@ -107,6 +109,7 @@ describe('collaboration dialog', () => {
       onSessionStateChange,
       onCheckpoint,
       onCheckpointStateChange,
+      onEditorBindingChange,
       checkpointMode: 'working-tree' as const,
       checkpointTarget: 'paper.qmd',
     }
@@ -128,6 +131,7 @@ describe('collaboration dialog', () => {
     expect(container.textContent).toContain('Remi Vezy')
     expect(setItem).not.toHaveBeenCalled()
     expect(onSessionStateChange).toHaveBeenCalledWith(true)
+    expect(onEditorBindingChange).toHaveBeenCalledWith(editorBinding)
 
     await act(async () => root.render(<CollaborationDialog open source="# Draft\n\nShared revision" {...props} />))
     expect(container.textContent).toContain('Live changes are waiting for an owner checkpoint')
@@ -142,6 +146,7 @@ describe('collaboration dialog', () => {
     await act(async () => root.unmount())
     expect(destroy).toHaveBeenCalledTimes(1)
     expect(onSessionStateChange).toHaveBeenLastCalledWith(false)
+    expect(onEditorBindingChange).toHaveBeenLastCalledWith(null)
   })
 
   it('reports an effective commenter role and keeps owner checkpoints unavailable', async () => {

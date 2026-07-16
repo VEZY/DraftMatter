@@ -305,6 +305,23 @@ export class CollaborativeDocument {
     return () => this.doc.off('update', handler)
   }
 
+  onPortableUpdate(listener: (origin: unknown) => void) {
+    const portableRoots = new Set<unknown>([
+      this.text,
+      this.meta,
+      this.anchors,
+      this.authors,
+      this.proposals,
+      this.threads,
+      this.decisions,
+    ])
+    const handler = (transaction: Y.Transaction) => {
+      if ([...transaction.changedParentTypes.keys()].some((root) => portableRoots.has(root))) listener(transaction.origin)
+    }
+    this.doc.on('afterTransaction', handler)
+    return () => this.doc.off('afterTransaction', handler)
+  }
+
   setLocalPresence(presence: CollaboratorPresence | null) {
     this.awareness.setLocalState(presence ? { draftmatter: portableValue(presence) } : null)
   }

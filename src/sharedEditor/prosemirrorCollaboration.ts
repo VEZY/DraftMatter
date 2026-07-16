@@ -20,6 +20,12 @@ export interface CollaborativeEditorUser {
   color: string
 }
 
+export interface CollaborativeEditorBinding {
+  document: Y.Doc
+  awareness: Awareness
+  publishPortableSource?: (source: string) => void
+}
+
 export interface CollaborativeProseMirrorState {
   state: EditorState
   fragment: Y.XmlFragment
@@ -67,4 +73,15 @@ export function createCollaborativeProseMirrorState(options: {
       plugins: collaborativeProseMirrorPlugins(fragment, options.awareness),
     }),
   }
+}
+
+export function reconcileCollaborativeProseMirrorDocument(
+  binding: CollaborativeEditorBinding,
+  document: ProseMirrorNode,
+) {
+  const fragment = binding.document.getXmlFragment(COLLABORATIVE_PROSEMIRROR_ROOT)
+  binding.document.transact(() => {
+    prosemirrorToYXmlFragment(document, fragment)
+  }, 'draftmatter-portable-source-to-prosemirror')
+  return fragment
 }
