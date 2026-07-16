@@ -251,7 +251,13 @@ button:disabled {
   padding: 10px 12px;
 }
 
-.project-diagnostics > span {
+.project-diagnostics > header {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.project-diagnostics > header > span {
   color: #929a96;
   font-size: 7px;
   font-weight: 750;
@@ -259,7 +265,25 @@ button:disabled {
   text-transform: uppercase;
 }
 
-.project-diagnostics div {
+.project-diagnostics > header > small {
+  align-items: center;
+  background: #edf1ee;
+  border-radius: 8px;
+  color: #68756e;
+  display: inline-flex;
+  font-size: 7px;
+  height: 16px;
+  justify-content: center;
+  min-width: 16px;
+}
+
+.project-diagnostic-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.project-diagnostic-list > div {
   align-items: flex-start;
   display: flex;
   gap: 6px;
@@ -277,6 +301,21 @@ button:disabled {
 
 .project-diagnostics .diagnostic-warning i { background: #c08a42; }
 .project-diagnostics .diagnostic-error i { background: var(--danger); }
+
+.project-diagnostics details {
+  border-top: 1px solid #edf0ee;
+  padding-top: 6px;
+}
+
+.project-diagnostics summary {
+  color: #5f7468;
+  cursor: pointer;
+  font-size: 7.5px;
+  font-weight: 700;
+  list-style-position: inside;
+}
+
+.project-diagnostics details[open] summary { margin-bottom: 7px; }
 
 .visually-hidden {
   height: 1px;

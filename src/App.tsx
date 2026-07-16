@@ -43,6 +43,7 @@ import { discoverRuntimeInventory, healthyKernelsFor, type JupyterKernelProbe, t
 import { PortableReviewItems } from './PortableReviewItems'
 import { AlignedReviewRail } from './AlignedReviewRail'
 import { GitHistoryPanel } from './GitHistoryPanel'
+import { ProjectDiagnostics, prioritizeProjectDiagnostics } from './ProjectDiagnostics'
 import { buildReviewQueue } from './reviewQueue'
 import { projectPortableReviewSource } from './reviewProjector'
 import { renderReviewReport } from './reviewExport'
@@ -1203,6 +1204,7 @@ function App() {
   const retainedOutputParse = parseRetainedOutputs(executionSource)
   const retainedOutputs = retainedOutputParse.outputs
   const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics, ...executionDiagnostics, ...retainedOutputParse.diagnostics]
+  const prioritizedDiagnostics = prioritizeProjectDiagnostics(allDiagnostics)
   const configuredProvider = (cell: ExecutableCell): ExecutionProviderKind => {
     const explicit = cell.attributes.provider
     return explicit === 'kernel' || explicit === 'direct' ? explicit : executionProviders[cell.language]
@@ -3234,12 +3236,7 @@ function App() {
                   <button onClick={() => { setRecoveryOpen(true); setProjectMenuOpen(false) }}><Icon name="history" size={16} /><span><strong>Recovery history</strong><small>{recoveries.length ? `${recoveries.length} local version${recoveries.length === 1 ? '' : 's'}` : 'No local versions yet'}</small></span><span className="menu-count">{recoveries.length}</span></button>
                   <button onClick={() => download('reviewed')}><Icon name="download" size={16} /><span><strong>Download portable source</strong><small>Save {filename} to this computer</small></span></button>
                 </div>
-                {allDiagnostics.length > 0 && (
-                  <div className="project-diagnostics">
-                    <span>Import checks</span>
-                    {allDiagnostics.slice(0, 3).map((item) => <div className={`diagnostic-${item.level}`} key={item.code}><i />{item.message}</div>)}
-                  </div>
-                )}
+                <ProjectDiagnostics diagnostics={allDiagnostics} />
               </div>
             )}
           </div>
@@ -3410,7 +3407,7 @@ function App() {
               <div className="project-health-title"><Icon name="spark" size={16} /> Project health</div>
               <div><span><i className={`health-dot ${cslState === 'error' ? 'warning' : 'okay'}`} /> Citations</span><small>{documentCitationKeys.length} cited · {citations.length} indexed{cslState === 'loading' ? ' · formatting' : ''}{citations.some((record) => record.availability === 'cached') ? ' · offline cache active' : ''}</small></div>
               <div><span><i className={`health-dot ${draft.cellStatus === 'current' ? 'okay' : 'warning'}`} /> Figures</span><small>{draft.cellStatus === 'current' ? 'Up to date' : cellStatusLabel(draft.cellStatus)}</small></div>
-              <div><span><i className={`health-dot ${allDiagnostics.some((item) => item.level === 'error') ? 'warning' : 'okay'}`} /> Source</span><small>{allDiagnostics.length ? `${allDiagnostics.length} check${allDiagnostics.length === 1 ? '' : 's'}` : 'Portable'}</small></div>
+              <div><span><i className={`health-dot ${prioritizedDiagnostics.some((item) => item.level !== 'info') ? 'warning' : 'okay'}`} /> Source</span><small>{prioritizedDiagnostics.length ? `${prioritizedDiagnostics.length} check${prioritizedDiagnostics.length === 1 ? '' : 's'} · ${prioritizedDiagnostics[0].level}` : 'Portable'}</small></div>
             </div>
 
             <div className="panel-footer">
