@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { normalizePublicationOrcid, parsePublicationMetadata, removeDuplicateLeadingTitle, updatePublicationAuthorDetails, updatePublicationAuthors } from './publicationMetadata'
+import { buildPublicationByline, normalizePublicationOrcid, parsePublicationMetadata, removeDuplicateLeadingTitle, updatePublicationAuthorDetails, updatePublicationAuthors } from './publicationMetadata'
 
 describe('publication metadata', () => {
   it('reads scalar and mapped author lists without absorbing unrelated YAML arrays', () => {
@@ -59,6 +59,19 @@ bibliography: references.bib
     expect(updated).toContain('bibliography: references.bib\n')
     expect(normalizePublicationOrcid('https://orcid.org/0000-0002-1825-0097')).toBe('0000-0002-1825-0097')
     expect(() => normalizePublicationOrcid('0000-0002-1825-0098')).toThrow(/check digit/)
+  })
+
+  it('deduplicates affiliations in first-appearance order for publication bylines', () => {
+    expect(buildPublicationByline([
+      { name: 'Ada Researcher', orcid: 'https://orcid.org/0000-0001-2345-6789', affiliations: ['Field Institute', 'Open Methods Lab', 'Field Institute'] },
+      { name: 'Lin Reviewer', affiliations: ['Field Institute'] },
+    ])).toEqual({
+      authors: [
+        { name: 'Ada Researcher', orcid: '0000-0001-2345-6789', affiliations: ['Field Institute', 'Open Methods Lab'], affiliationNumbers: [1, 2] },
+        { name: 'Lin Reviewer', affiliations: ['Field Institute'], affiliationNumbers: [1] },
+      ],
+      affiliations: ['Field Institute', 'Open Methods Lab'],
+    })
   })
 
   it('promotes inline authors to mapped YAML when rich metadata is added', () => {

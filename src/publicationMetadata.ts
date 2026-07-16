@@ -11,6 +11,48 @@ export interface PublicationAuthor {
   affiliations: string[]
 }
 
+export interface PublicationBylineAuthor extends PublicationAuthor {
+  affiliationNumbers: number[]
+}
+
+export interface PublicationByline {
+  authors: PublicationBylineAuthor[]
+  affiliations: string[]
+}
+
+export function buildPublicationByline(authorDetails: PublicationAuthor[], fallbackNames: string[] = []): PublicationByline {
+  const source: PublicationAuthor[] = authorDetails.length
+    ? authorDetails
+    : fallbackNames.map((name) => ({ name, affiliations: [] }))
+  const affiliations: string[] = []
+  const affiliationNumbers = new Map<string, number>()
+  const authors = source.flatMap<PublicationBylineAuthor>((author) => {
+    const name = author.name.trim()
+    if (!name) return []
+    const seenNumbers = new Set<number>()
+    const numbers = author.affiliations.flatMap((value) => {
+      const affiliation = value.trim()
+      if (!affiliation) return []
+      let number = affiliationNumbers.get(affiliation)
+      if (!number) {
+        affiliations.push(affiliation)
+        number = affiliations.length
+        affiliationNumbers.set(affiliation, number)
+      }
+      if (seenNumbers.has(number)) return []
+      seenNumbers.add(number)
+      return [number]
+    })
+    return [{
+      name,
+      ...(author.orcid?.trim() ? { orcid: normalizedOrcidValue(author.orcid) } : {}),
+      affiliations: numbers.map((number) => affiliations[number - 1]),
+      affiliationNumbers: numbers,
+    }]
+  })
+  return { authors, affiliations }
+}
+
 interface SourceLine {
   raw: string
   content: string

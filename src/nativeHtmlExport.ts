@@ -2,7 +2,7 @@ import { validateCleanProjection } from './document'
 import { formatCrossReferenceTarget } from './crossReference'
 import { parseDisplayEquation } from './displayEquation'
 import { resolveFootnotes, type ResolvedFootnoteDocument } from './footnotes'
-import { parsePublicationMetadata, removeDuplicateLeadingTitle } from './publicationMetadata'
+import { buildPublicationByline, normalizePublicationOrcid, parsePublicationMetadata, removeDuplicateLeadingTitle, type PublicationMetadata } from './publicationMetadata'
 import { parseTableCaptionLine, pipeTableAlignments, pipeTableCells } from './tableSyntax'
 
 export interface NativeHtmlExportOptions {
@@ -31,6 +31,41 @@ function safeAssetUrl(value: string) {
   if (!trimmed || /^(?:javascript|vbscript|file):/i.test(trimmed)) return ''
   if (/^data:/i.test(trimmed) && !/^data:image\/(?:png|gif|jpeg|webp|svg\+xml);base64,/i.test(trimmed)) return ''
   return escapeHtml(trimmed)
+}
+
+function renderPublicationByline(metadata: PublicationMetadata) {
+  const byline = buildPublicationByline(metadata.authorDetails, metadata.authors)
+  if (!byline.authors.length) return { html: '', meta: '' }
+  const rich = byline.authors.some((author) => Boolean(author.orcid || author.affiliationNumbers.length))
+  const meta = byline.authors.map((author) => {
+    let validOrcid: string | undefined
+    try { validOrcid = normalizePublicationOrcid(author.orcid ?? '') } catch { validOrcid = undefined }
+    const orcid = validOrcid
+      ? `\n<meta name="citation_author_orcid" content="https://orcid.org/${escapeHtml(validOrcid)}">`
+      : ''
+    return `<meta name="citation_author" content="${escapeHtml(author.name)}">${orcid}`
+  }).join('\n')
+  if (!rich) return {
+    html: `<p class="authors">${byline.authors.map((author) => escapeHtml(author.name)).join(' · ')}</p>`,
+    meta,
+  }
+  const authors = byline.authors.map((author) => {
+    const affiliationReferences = author.affiliationNumbers.length
+      ? `<sup class="affiliation-references" aria-label="Affiliations ${author.affiliationNumbers.join(', ')}">${author.affiliationNumbers.map((number) => `<a href="#affiliation-${number}">${number}</a>`).join(',')}</sup>`
+      : ''
+    let validOrcid: string | undefined
+    try { validOrcid = normalizePublicationOrcid(author.orcid ?? '') } catch { validOrcid = undefined }
+    const orcid = author.orcid
+      ? validOrcid
+        ? `<a class="orcid" href="https://orcid.org/${escapeHtml(validOrcid)}" rel="noopener noreferrer">ORCID ${escapeHtml(validOrcid)}</a>`
+        : `<span class="orcid">ORCID ${escapeHtml(author.orcid)}</span>`
+      : ''
+    return `<span class="author"><span class="author-name">${escapeHtml(author.name)}</span>${affiliationReferences}${orcid ? ` ${orcid}` : ''}</span>`
+  }).join(' · ')
+  const affiliations = byline.affiliations.length
+    ? `<ol class="affiliations">${byline.affiliations.map((affiliation, index) => `<li id="affiliation-${index + 1}">${escapeHtml(affiliation)}</li>`).join('')}</ol>`
+    : ''
+  return { html: `<div class="byline"><p class="authors">${authors}</p>${affiliations}</div>`, meta }
 }
 
 interface FootnoteRenderContext {
@@ -230,9 +265,7 @@ export function renderNativeHtmlExport(source: string, options: NativeHtmlExport
   }
   const metadata = parsePublicationMetadata(source)
   const title = options.title ?? metadata.title ?? 'DraftMatter manuscript'
-  const authors = metadata.authors.length
-    ? `<p class="authors">${metadata.authors.map(escapeHtml).join(' · ')}</p>`
-    : ''
+  const authors = renderPublicationByline(metadata)
   const bibliography = options.bibliography?.length
     ? `<section class="bibliography" aria-labelledby="references"><h2 id="references">References</h2>${options.bibliography.map((entry) => `<p id="ref-${safeId(entry.id)}">${escapeHtml(entry.value)}</p>`).join('')}</section>`
     : ''
@@ -247,12 +280,13 @@ export function renderNativeHtmlExport(source: string, options: NativeHtmlExport
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>${escapeHtml(title)}</title>
+${authors.meta}
 <style>
-:root{color-scheme:light;--ink:#26312c;--muted:#69756f;--line:#dfe4e0;--paper:#fff;--wash:#f5f7f5;--accent:#466b59}*{box-sizing:border-box}html{background:var(--wash);font-family:Georgia,"Times New Roman",serif;color:var(--ink);line-height:1.65}body{background:var(--paper);box-shadow:0 10px 40px rgba(31,44,37,.08);margin:40px auto;max-width:840px;padding:72px 84px}h1,h2,h3,h4,h5,h6{font-family:Inter,system-ui,sans-serif;line-height:1.25;margin:1.8em 0 .65em}h1{font-size:2.35rem;margin-top:0}h2{border-bottom:1px solid var(--line);font-size:1.35rem;padding-bottom:.35em}p{margin:.75em 0}.authors{color:var(--muted);font-family:Inter,system-ui,sans-serif;margin-top:-1.4rem}a{color:var(--accent)}cite{font-style:normal;color:#385e4c}.equation{font-family:"STIX Two Math",Cambria,serif}.display-equation{margin:1.4rem 0;overflow:auto;text-align:center}figure{margin:1.6rem 0}figure img{display:block;height:auto;max-width:100%}figcaption{color:var(--muted);font-family:Inter,system-ui,sans-serif;font-size:.82rem;margin-top:.45rem}.source-code,.execution-output{background:#f7f8f7;border:0;border-radius:3px;margin:1rem 0;overflow:auto;padding:.65rem .8rem;white-space:pre-wrap}.source-code code,.execution-output samp,.raw-source{font-family:"SFMono-Regular",Consolas,monospace;font-size:.78rem}.execution-output samp{color:var(--ink)}.raw-source{background:#fff8f3;border-left:3px solid #c98b65;overflow:auto;padding:.75rem}.table-wrap{overflow-x:auto}table{border-collapse:collapse;margin:1.25rem 0;width:100%}caption{caption-side:bottom;color:var(--muted);font-family:Inter,system-ui,sans-serif;font-size:.82rem;padding-top:.45rem;text-align:left}th,td{border-bottom:1px solid var(--line);padding:.5rem;text-align:left}th{font-family:Inter,system-ui,sans-serif;font-size:.82rem}blockquote{border-left:3px solid #afbeb6;color:#53615a;margin:1.2rem 0;padding:.2rem 1rem}.footnote-reference{font-size:.75em;text-decoration:none;vertical-align:super}.footnotes{color:#46534c;font-size:.85rem;margin-top:2rem}.footnotes hr{border:0;border-top:1px solid var(--line);margin:0 0 1rem;width:28%}.footnotes li{padding-left:.25rem}.footnote-backref{text-decoration:none}.missing-footnote{color:#8b4f36}.bibliography p{font-size:.9rem;padding-left:1.5rem;text-indent:-1.5rem}@media print{html{background:#fff}body{box-shadow:none;margin:0;max-width:none;padding:0}@page{margin:18mm 16mm}a{color:inherit;text-decoration:none}h1{font-size:2.1rem}h1,h2,h3{break-after:avoid}h2{margin-top:1.2em}.display-equation,figure,table{margin-top:1rem;margin-bottom:1rem}.source-code,.execution-output,figure,table,.footnotes li,.bibliography p{break-inside:avoid}.bibliography h2{margin-top:1em}}@media(max-width:700px){body{box-shadow:none;margin:0;padding:36px 24px}}
+:root{color-scheme:light;--ink:#26312c;--muted:#69756f;--line:#dfe4e0;--paper:#fff;--wash:#f5f7f5;--accent:#466b59}*{box-sizing:border-box}html{background:var(--wash);font-family:Georgia,"Times New Roman",serif;color:var(--ink);line-height:1.65}body{background:var(--paper);box-shadow:0 10px 40px rgba(31,44,37,.08);margin:40px auto;max-width:840px;padding:72px 84px}h1,h2,h3,h4,h5,h6{font-family:Inter,system-ui,sans-serif;line-height:1.25;margin:1.8em 0 .65em}h1{font-size:2.35rem;margin-top:0}h2{border-bottom:1px solid var(--line);font-size:1.35rem;padding-bottom:.35em}p{margin:.75em 0}.authors{color:var(--muted);font-family:Inter,system-ui,sans-serif;margin-top:-1.4rem}.author{white-space:nowrap}.affiliation-references{font-size:.7em;margin-left:.08em;vertical-align:super}.affiliation-references a{text-decoration:none}.orcid{font-size:.72em;white-space:nowrap}.affiliations{color:var(--muted);font-family:Inter,system-ui,sans-serif;font-size:.76rem;line-height:1.4;margin:-.35rem 0 1.4rem;padding-left:1.35rem}.affiliations li{padding-left:.15rem}.byline{break-inside:avoid}a{color:var(--accent)}cite{font-style:normal;color:#385e4c}.equation{font-family:"STIX Two Math",Cambria,serif}.display-equation{margin:1.4rem 0;overflow:auto;text-align:center}figure{margin:1.6rem 0}figure img{display:block;height:auto;max-width:100%}figcaption{color:var(--muted);font-family:Inter,system-ui,sans-serif;font-size:.82rem;margin-top:.45rem}.source-code,.execution-output{background:#f7f8f7;border:0;border-radius:3px;margin:1rem 0;overflow:auto;padding:.65rem .8rem;white-space:pre-wrap}.source-code code,.execution-output samp,.raw-source{font-family:"SFMono-Regular",Consolas,monospace;font-size:.78rem}.execution-output samp{color:var(--ink)}.raw-source{background:#fff8f3;border-left:3px solid #c98b65;overflow:auto;padding:.75rem}.table-wrap{overflow-x:auto}table{border-collapse:collapse;margin:1.25rem 0;width:100%}caption{caption-side:bottom;color:var(--muted);font-family:Inter,system-ui,sans-serif;font-size:.82rem;padding-top:.45rem;text-align:left}th,td{border-bottom:1px solid var(--line);padding:.5rem;text-align:left}th{font-family:Inter,system-ui,sans-serif;font-size:.82rem}blockquote{border-left:3px solid #afbeb6;color:#53615a;margin:1.2rem 0;padding:.2rem 1rem}.footnote-reference{font-size:.75em;text-decoration:none;vertical-align:super}.footnotes{color:#46534c;font-size:.85rem;margin-top:2rem}.footnotes hr{border:0;border-top:1px solid var(--line);margin:0 0 1rem;width:28%}.footnotes li{padding-left:.25rem}.footnote-backref{text-decoration:none}.missing-footnote{color:#8b4f36}.bibliography p{font-size:.9rem;padding-left:1.5rem;text-indent:-1.5rem}@media print{html{background:#fff}body{box-shadow:none;margin:0;max-width:none;padding:0}@page{margin:18mm 16mm}a{color:inherit;text-decoration:none}h1{font-size:2.1rem}h1,h2,h3{break-after:avoid}h2{margin-top:1.2em}.display-equation,figure,table{margin-top:1rem;margin-bottom:1rem}.source-code,.execution-output,figure,table,.footnotes li,.bibliography p{break-inside:avoid}.bibliography h2{margin-top:1em}}@media(max-width:700px){body{box-shadow:none;margin:0;padding:36px 24px}}
 </style>
 </head>
 <body>
-<header><h1>${escapeHtml(title)}</h1>${authors}</header>
+<header><h1>${escapeHtml(title)}</h1>${authors.html}</header>
 <main>${renderedBody}</main>
 ${footnotes}
 ${bibliography}

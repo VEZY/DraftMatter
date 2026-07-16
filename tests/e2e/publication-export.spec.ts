@@ -6,8 +6,14 @@ const figure = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0
 const source = `---
 title: "Independent canopy synthesis"
 author:
-  - Ada Researcher
-  - Lin Reviewer
+  - name: Ada Researcher
+    orcid: 0000-0001-2345-6789
+    affiliations:
+      - Field Institute
+      - Open Methods Lab
+  - name: Lin Reviewer
+    affiliations:
+      - Field Institute
 ---
 
 # Independent canopy synthesis
@@ -88,7 +94,11 @@ test.describe('DM-P5-01/02 native publication exports', () => {
 
     expect(htmlDownload.suggestedFilename()).toBe('canopy-drought.html')
     expect(html).toContain('<title>Independent canopy synthesis</title>')
-    expect(html).toContain('<p class="authors">Ada Researcher · Lin Reviewer</p>')
+    expect(html).toContain('<span class="author-name">Ada Researcher</span>')
+    expect(html).toContain('ORCID 0000-0001-2345-6789')
+    expect(html).toContain('<span class="author-name">Lin Reviewer</span>')
+    expect(html).toContain('<li id="affiliation-1">Field Institute</li>')
+    expect(html).toContain('<li id="affiliation-2">Open Methods Lab</li>')
     expect(html.match(/<h1>/g)).toHaveLength(1)
     expect(html).not.toContain('<main><h1')
     expect(html).toContain('Canopy area differed by <strong>18%</strong>')
@@ -168,7 +178,12 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(docx.subarray(0, 4)).toEqual(Buffer.from([0x50, 0x4b, 0x03, 0x04]))
     expect(readableDocx).toContain('Independent canopy synthesis')
     expect(readableDocx.match(/Independent canopy synthesis/g)).toHaveLength(1)
-    expect(readableDocx).toContain('Ada Researcher · Lin Reviewer')
+    expect(readableDocx).toContain('Ada Researcher')
+    expect(readableDocx).toContain('Lin Reviewer')
+    expect(readableDocx).toContain('(ORCID 0000-0001-2345-6789)')
+    expect(readableDocx.match(/Field Institute/g)).toHaveLength(1)
+    expect(readableDocx).toContain('Open Methods Lab')
+    expect(readableDocx).toContain('<dc:creator>Ada Researcher; Lin Reviewer</dc:creator>')
     expect(readableDocx).toContain('(Field and Stone, 2026)')
     expect(readableDocx).toContain('Independent measurements of canopy area')
     expect(readableDocx).not.toContain('[@field2026]')

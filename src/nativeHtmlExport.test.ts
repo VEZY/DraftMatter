@@ -77,6 +77,32 @@ describe('native HTML export', () => {
     expect(() => renderNativeHtmlExport('Text []{#a .dm-anchor data-anchor="a"}.')).toThrow(/clean DraftMatter projection/)
   })
 
+  it('publishes ORCID identities and deduplicated affiliation references', () => {
+    const html = renderNativeHtmlExport(`---
+title: "Author metadata study"
+author:
+  - name: "Ada Researcher"
+    orcid: 0000-0001-2345-6789
+    affiliations:
+      - Field Institute
+      - Open Methods Lab
+  - name: "Lin Reviewer"
+    affiliations:
+      - Field Institute
+---
+
+Publication body.
+`)
+
+    expect(html).toContain('<meta name="citation_author" content="Ada Researcher">')
+    expect(html).toContain('<meta name="citation_author_orcid" content="https://orcid.org/0000-0001-2345-6789">')
+    expect(html).toContain('<a class="orcid" href="https://orcid.org/0000-0001-2345-6789"')
+    expect(html).toContain('aria-label="Affiliations 1, 2"')
+    expect(html).toContain('<li id="affiliation-1">Field Institute</li>')
+    expect(html).toContain('<li id="affiliation-2">Open Methods Lab</li>')
+    expect(html.match(/<li id="affiliation-\d+">Field Institute<\/li>/g)).toHaveLength(1)
+  })
+
   it('escapes raw HTML and rejects active asset URLs', () => {
     const html = renderNativeHtmlExport('<script>alert(1)</script>\n\n![unsafe](javascript:alert(1))\n')
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')

@@ -87,4 +87,31 @@ describe('native DOCX export', () => {
   it('blocks review storage instead of representing it as tracked changes', () => {
     expect(() => renderDocxExport('Text\n\n::::: {.draftmatter-reviews .hidden}\n:::::\n')).toThrow(/clean DraftMatter projection/)
   })
+
+  it('publishes structured author identities, affiliations, and document creators', () => {
+    const result = renderDocxExport(`---
+title: "Author metadata study"
+author:
+  - name: "Ada Researcher"
+    orcid: 0000-0001-2345-6789
+    affiliations:
+      - Field Institute
+      - Open Methods Lab
+  - name: "Lin Reviewer"
+    affiliations:
+      - Field Institute
+---
+
+Publication body.
+`)
+    const readable = new TextDecoder().decode(result.bytes)
+
+    expect(readable).toContain('<w:style w:type="paragraph" w:styleId="Affiliation">')
+    expect(readable).toContain('Ada Researcher')
+    expect(readable).toContain('(ORCID 0000-0001-2345-6789)')
+    expect(readable).toContain('<w:vertAlign w:val="superscript"/><w:sz w:val="14"/>')
+    expect(readable.match(/Field Institute/g)).toHaveLength(1)
+    expect(readable).toContain('Open Methods Lab')
+    expect(readable).toContain('<dc:creator>Ada Researcher; Lin Reviewer</dc:creator>')
+  })
 })
