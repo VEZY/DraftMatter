@@ -26,8 +26,8 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
     pool,
     identity,
     entitlements,
-    // Revocation is rare; disconnecting all rooms guarantees that a revoked reader
-    // cannot continue receiving broadcasts. Authorized clients reconnect normally.
+    // Membership and project-role changes are rare; disconnecting rooms guarantees
+    // that stale capabilities stop immediately. Authorized clients reconnect normally.
     onMembershipRevoked: () => server?.hocuspocus.closeConnections(),
   })
   const webhooks = new SignedEntitlementWebhookProcessor({ pool, secret: config.webhookSecret })

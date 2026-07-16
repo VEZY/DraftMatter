@@ -95,4 +95,18 @@ describe('browser collaboration service client', () => {
     expect(request).toHaveBeenNthCalledWith(5, 'https://collab.example.org/api/workspaces/forest/projects/paper/notifications/notice-1/read', expect.objectContaining({ method: 'POST' }))
     expect(request).toHaveBeenNthCalledWith(6, 'https://collab.example.org/api/workspaces/forest/projects/paper/review-requests/review-1', expect.objectContaining({ method: 'DELETE' }))
   })
+
+  it('manages effective project roles through scoped owner routes', async () => {
+    const request = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ access: [{ userId: 'editor', workspaceRole: 'editor', effectiveRole: 'editor' }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ userId: 'editor', workspaceRole: 'editor', projectRole: 'viewer', effectiveRole: 'viewer' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ userId: 'editor', workspaceRole: 'editor', effectiveRole: 'editor' }), { status: 200 }))
+    const client = new CollaborationServiceClient('https://collab.example.org', 'access-token', request)
+
+    await expect(client.listProjectAccess('forest', 'paper')).resolves.toEqual([expect.objectContaining({ effectiveRole: 'editor' })])
+    await expect(client.setProjectRole('forest', 'paper', 'editor', 'viewer')).resolves.toMatchObject({ projectRole: 'viewer', effectiveRole: 'viewer' })
+    await expect(client.clearProjectRole('forest', 'paper', 'editor')).resolves.toMatchObject({ effectiveRole: 'editor' })
+    expect(request).toHaveBeenNthCalledWith(2, 'https://collab.example.org/api/workspaces/forest/projects/paper/access/editor', expect.objectContaining({ method: 'POST', body: JSON.stringify({ role: 'viewer' }) }))
+    expect(request).toHaveBeenNthCalledWith(3, 'https://collab.example.org/api/workspaces/forest/projects/paper/access/editor', expect.objectContaining({ method: 'DELETE' }))
+  })
 })

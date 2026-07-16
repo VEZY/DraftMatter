@@ -11,6 +11,7 @@ type WorkspaceApi = Pick<PostgresWorkspaceService,
   'getCurrentIdentity' | 'createWorkspace' | 'listWorkspaces' | 'createProject' | 'getProject' | 'listProjects'
   | 'createInvitation' | 'acceptInvitation' | 'revokeInvitation' | 'revokeMember'
   | 'listMembers' | 'listInvitations' | 'listAuditEvents'
+  | 'listProjectAccess' | 'setProjectRole' | 'clearProjectRole'
   | 'listReviewParticipants' | 'listReviewRequests' | 'createReviewRequest' | 'decideReviewRequest' | 'cancelReviewRequest'
   | 'listProjectNotifications' | 'markProjectNotificationRead'>
   & Pick<PostgresWorkspaceService, 'scheduleWorkspaceDeletion' | 'getWorkspaceDeletion' | 'cancelWorkspaceDeletion'>
@@ -229,6 +230,16 @@ export function createCollaborationHttpApi(options: CollaborationHttpApiOptions)
         if (request.method === 'GET' && parts.length === 4) return json(200, { projects: await options.workspaces.listProjects(token, workspaceId) }, headers)
         if (request.method === 'POST' && parts.length === 4) return json(201, await options.workspaces.createProject(token, workspaceId, await body(request, maximum)), headers)
         if (request.method === 'GET' && parts.length === 5) return json(200, await options.workspaces.getProject(token, workspaceId, parts[4]), headers)
+        if (parts[5] === 'access') {
+          const projectId = parts[4]
+          if (parts.length === 6 && request.method === 'GET') return json(200, { access: await options.workspaces.listProjectAccess(token, workspaceId, projectId) }, headers)
+          if (parts.length === 7 && request.method === 'POST') {
+            const requestBody = await body<{ role?: 'editor' | 'commenter' | 'viewer' }>(request, maximum)
+            if (!requestBody.role) throw new CollaborationHttpError(400, 'invalid-request', 'A project role is required.')
+            return json(200, await options.workspaces.setProjectRole(token, workspaceId, projectId, parts[6], requestBody.role), headers)
+          }
+          if (parts.length === 7 && request.method === 'DELETE') return json(200, await options.workspaces.clearProjectRole(token, workspaceId, projectId, parts[6]), headers)
+        }
         if (parts.length === 6 && parts[5] === 'review-participants' && request.method === 'GET') {
           return json(200, { participants: await options.workspaces.listReviewParticipants(token, workspaceId, parts[4]) }, headers)
         }

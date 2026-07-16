@@ -64,6 +64,39 @@ describe('authenticated collaboration workspace service', () => {
     await expect(service.listProjects(bob, 'alpha')).rejects.toMatchObject({ code: 'not-found' })
   })
 
+  it('applies owner-controlled project roles without changing workspace membership', async () => {
+    const { service } = fixture()
+    const owner = await session(service, 'owner')
+    const editor = await session(service, 'editor')
+    const viewer = await session(service, 'viewer')
+    await service.createWorkspace(owner, { id: 'forest', name: 'Forest study' })
+    await service.createProject(owner, 'forest', { id: 'paper', name: 'Canopy paper' })
+    await service.createProject(owner, 'forest', { id: 'appendix', name: 'Appendix' })
+    await service.acceptInvitation(editor, (await service.createInvitation(owner, 'forest', { role: 'editor' })).token)
+    await service.acceptInvitation(viewer, (await service.createInvitation(owner, 'forest', { role: 'viewer' })).token)
+
+    await expect(service.setProjectRole(editor, 'forest', 'paper', 'viewer', 'editor')).rejects.toMatchObject({ code: 'forbidden' })
+    await expect(service.setProjectRole(owner, 'forest', 'paper', 'owner', 'viewer')).rejects.toMatchObject({ code: 'forbidden' })
+    await expect(service.setProjectRole(owner, 'missing', 'paper', 'editor', 'viewer')).rejects.toMatchObject({ code: 'not-found' })
+
+    await expect(service.setProjectRole(owner, 'forest', 'paper', 'editor', 'viewer')).resolves.toMatchObject({ workspaceRole: 'editor', projectRole: 'viewer', effectiveRole: 'viewer' })
+    await expect(service.authorizeProject(editor, 'forest', 'paper', 'edit')).rejects.toMatchObject({ code: 'forbidden' })
+    await expect(service.authorizeProject(editor, 'forest', 'appendix', 'edit')).resolves.toMatchObject({ role: 'editor' })
+    expect(await service.listProjects(editor, 'forest')).toEqual([
+      expect.objectContaining({ id: 'appendix', role: 'editor' }),
+      expect.objectContaining({ id: 'paper', role: 'viewer' }),
+    ])
+
+    await expect(service.setProjectRole(owner, 'forest', 'paper', 'viewer', 'commenter')).resolves.toMatchObject({ workspaceRole: 'viewer', effectiveRole: 'commenter' })
+    await expect(service.authorizeProject(viewer, 'forest', 'paper', 'comment')).resolves.toMatchObject({ role: 'commenter' })
+    await expect(service.clearProjectRole(owner, 'forest', 'paper', 'editor')).resolves.toMatchObject({ effectiveRole: 'editor' })
+    await expect(service.authorizeProject(editor, 'forest', 'paper', 'edit')).resolves.toMatchObject({ role: 'editor' })
+    expect(await service.listProjectAccess(owner, 'forest', 'paper')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ userId: 'owner', workspaceRole: 'owner', effectiveRole: 'owner' }),
+      expect.objectContaining({ userId: 'viewer', workspaceRole: 'viewer', projectRole: 'commenter', effectiveRole: 'commenter' }),
+    ]))
+  })
+
   it('supports one-use guest review invitations and immediate membership revocation', async () => {
     const { service } = fixture()
     const owner = await session(service, 'owner')

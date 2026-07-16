@@ -335,6 +335,8 @@ export function CollaborationDialog({
   if (!open) return null
   const connected = status === 'connected' && Boolean(clientRef.current)
   const activeWorkspace = workspaces.find((workspace) => workspace.id === workspaceId)
+  const activeProject = projects.find((project) => project.id === projectId)
+  const activeProjectWorkspace = activeWorkspace ? { ...activeWorkspace, role: activeProject?.role ?? activeWorkspace.role } : undefined
 
   return (
     <div className="modal-backdrop collaboration-backdrop" onMouseDown={onClose}>
@@ -356,7 +358,7 @@ export function CollaborationDialog({
               </div>
             </section>
             <div className="collaboration-note"><Icon name="check" size={16} /><span>Offline edits reconnect through Yjs. Incompatible review decisions pause checkpointing until they are explicitly resolved.</span></div>
-            {serviceClient && activeWorkspace && profile && <CollaborationReviewPanel client={serviceClient} workspace={activeWorkspace} projectId={projectId} currentUserId={profile.userId} />}
+            {serviceClient && activeProjectWorkspace && profile && <CollaborationReviewPanel client={serviceClient} workspace={activeProjectWorkspace} projectId={projectId} currentUserId={profile.userId} />}
             {serviceClient && activeWorkspace?.role === 'owner' && profile && <CollaborationAccessPanel client={serviceClient} workspace={activeWorkspace} projectId={projectId} currentUserId={profile.userId} />}
             <div className={`collaboration-checkpoint ${uncheckpointed ? 'pending' : ''}`}>
               <span><strong>{checkpointMode === 'working-tree' ? 'Owner-controlled working tree' : 'Portable owner copy'}</strong><small>{checkpointMode === 'working-tree' ? `Write deterministic review state to ${checkpointTarget}. Git remains a separate explicit action.` : `Download deterministic review state as ${checkpointTarget}.`}</small></span>

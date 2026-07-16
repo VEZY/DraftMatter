@@ -4396,6 +4396,8 @@ kbd {
 .collaboration-admin-item strong { overflow: hidden; color: var(--ink); font-size: 9px; text-overflow: ellipsis; }
 .collaboration-admin-item small { color: var(--muted); font-size: 8px; text-transform: capitalize; }
 .collaboration-admin-item button { min-height: 26px; padding: 0 7px; }
+.collaboration-member-access > label { flex: 0 0 auto; }
+.collaboration-member-access select { width: 112px; height: 27px; padding: 0 22px 0 7px; border-color: #dfe5e2; background-color: #fbfcfb; color: #53635c; font-size: 8px; }
 .collaboration-recovery-row { display: flex; align-items: center; gap: 12px; padding: 10px; border-radius: 7px; background: #f6f8f7; }
 .collaboration-recovery-row > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 3px; }
 .collaboration-recovery-row strong { color: var(--ink); font-size: 10px; }

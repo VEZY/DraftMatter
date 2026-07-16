@@ -6,6 +6,7 @@ import type {
   WorkspaceMembership,
   WorkspaceNotification,
   WorkspaceProject,
+  WorkspaceProjectAccess,
   WorkspaceRecord,
   WorkspaceReviewParticipant,
   WorkspaceReviewRequest,
@@ -154,6 +155,18 @@ export class CollaborationServiceClient {
 
   createProject(workspaceId: string, request: { id: string; name: string }) {
     return this.call<WorkspaceProject>(`/api/workspaces/${encoded(workspaceId)}/projects`, { method: 'POST', body: JSON.stringify(request) })
+  }
+
+  async listProjectAccess(workspaceId: string, projectId: string) {
+    return (await this.call<{ access: WorkspaceProjectAccess[] }>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/access`)).access
+  }
+
+  setProjectRole(workspaceId: string, projectId: string, userId: string, role: Exclude<WorkspaceRole, 'owner'>) {
+    return this.call<WorkspaceProjectAccess>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/access/${encoded(userId)}`, { method: 'POST', body: JSON.stringify({ role }) })
+  }
+
+  clearProjectRole(workspaceId: string, projectId: string, userId: string) {
+    return this.call<WorkspaceProjectAccess>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/access/${encoded(userId)}`, { method: 'DELETE' })
   }
 
   async listReviewParticipants(workspaceId: string, projectId: string) {

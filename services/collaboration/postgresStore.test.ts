@@ -47,7 +47,7 @@ describe('managed PostgreSQL and object-storage persistence', () => {
   it('runs ordered migrations idempotently and enforces one active owner', async () => {
     const { pool } = await database()
     const repeated = await runCollaborationMigrations(pool)
-    expect(repeated).toEqual({ applied: [], alreadyApplied: ['001', '002', '003', '004', '005'] })
+    expect(repeated).toEqual({ applied: [], alreadyApplied: ['001', '002', '003', '004', '005', '006'] })
     await expect(pool.query(`INSERT INTO draftmatter_memberships(workspace_id, user_id, role) VALUES ('forest', 'editor', 'owner')`)).rejects.toThrow()
     const tables = await pool.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'draftmatter_%'`)
     expect(tables.rows.map((row: { table_name: string }) => row.table_name)).toEqual(expect.arrayContaining([
@@ -59,6 +59,7 @@ describe('managed PostgreSQL and object-storage persistence', () => {
       'draftmatter_deletion_requests',
       'draftmatter_review_requests',
       'draftmatter_notifications',
+      'draftmatter_project_roles',
     ]))
     await pool.end()
   })

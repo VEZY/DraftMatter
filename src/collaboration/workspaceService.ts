@@ -46,6 +46,15 @@ export interface WorkspaceProject {
   workspaceId: string
   name: string
   createdAt: string
+  role?: WorkspaceRole
+}
+
+export interface WorkspaceProjectAccess {
+  userId: string
+  workspaceRole: WorkspaceRole
+  projectRole?: Exclude<WorkspaceRole, 'owner'>
+  effectiveRole: WorkspaceRole
+  displayName?: string
 }
 
 export interface WorkspaceMembership {
@@ -211,6 +220,7 @@ export class AuthenticatedWorkspaceService implements ProjectAuthorizationServic
   private readonly workspaces = new Map<string, WorkspaceRecord>()
   private readonly memberships = new Map<string, WorkspaceMembership>()
   private readonly projects = new Map<string, WorkspaceProject>()
+  private readonly projectRoles = new Map<string, Exclude<WorkspaceRole, 'owner'>>()
   private readonly invitations = new Map<string, StoredInvitation>()
   private readonly auditEvents = new Map<string, WorkspaceAuditEvent[]>()
   private readonly rateWindows = new Map<string, number[]>()
@@ -290,10 +300,14 @@ export class AuthenticatedWorkspaceService implements ProjectAuthorizationServic
   }
 
   private requireProjectAccess(workspaceId: string, projectId: string, userId: string, capability: ProjectCapability) {
-    const access = this.requireWorkspaceAccess(workspaceId, userId, capability)
+    const access = this.requireWorkspaceAccess(workspaceId, userId, 'read')
     const project = this.projects.get(`${workspaceId}:${projectId}`)
     if (!project) throw new WorkspaceAccessError('not-found', 'The collaboration project was not found.')
-    return { ...access, project }
+    const role: WorkspaceRole = access.membership.role === 'owner'
+      ? 'owner'
+      : this.projectRoles.get(`${workspaceId}:${projectId}:${userId}`) ?? access.membership.role
+    if (!roleAllows(role, capability)) throw new WorkspaceAccessError('forbidden', 'Your project role does not allow this action.')
+    return { ...access, membership: { ...access.membership, role }, project }
   }
 
   private audit(workspaceId: string, actorId: string, action: string, targetId?: string, metadata?: Record<string, string>) {
@@ -339,14 +353,22 @@ export class AuthenticatedWorkspaceService implements ProjectAuthorizationServic
   async getProject(token: string, workspaceId: string, projectId: string) {
     const claims = await this.authenticate(token)
     this.rateLimit(claims, 'read')
-    return clone(this.requireProjectAccess(workspaceId, projectId, claims.sub, 'read').project)
+    const access = this.requireProjectAccess(workspaceId, projectId, claims.sub, 'read')
+    return clone({ ...access.project, role: access.membership.role })
   }
 
   async listProjects(token: string, workspaceId: string) {
     const claims = await this.authenticate(token)
     this.rateLimit(claims, 'read')
     this.requireWorkspaceAccess(workspaceId, claims.sub, 'read')
-    return [...this.projects.values()].filter((project) => project.workspaceId === workspaceId).sort((left, right) => left.id.localeCompare(right.id)).map(clone)
+    const membership = this.membership(workspaceId, claims.sub)!
+    return [...this.projects.values()]
+      .filter((project) => project.workspaceId === workspaceId)
+      .sort((left, right) => left.id.localeCompare(right.id))
+      .map((project) => clone({
+        ...project,
+        role: membership.role === 'owner' ? 'owner' : this.projectRoles.get(`${workspaceId}:${project.id}:${claims.sub}`) ?? membership.role,
+      }))
   }
 
   async authorizeProject(token: string, workspaceId: string, projectId: string, capability: ProjectCapability) {
@@ -354,6 +376,54 @@ export class AuthenticatedWorkspaceService implements ProjectAuthorizationServic
     this.rateLimit(claims, capability === 'read' ? 'read' : 'write')
     const { membership } = this.requireProjectAccess(workspaceId, projectId, claims.sub, capability)
     return { userId: claims.sub, sessionId: claims.sid, role: membership.role, capability }
+  }
+
+  async listProjectAccess(token: string, workspaceId: string, projectId: string): Promise<WorkspaceProjectAccess[]> {
+    const claims = await this.authenticate(token)
+    this.rateLimit(claims, 'read')
+    const { membership } = this.requireProjectAccess(workspaceId, projectId, claims.sub, 'manage-members')
+    if (membership.role !== 'owner') throw new WorkspaceAccessError('forbidden', 'Only workspace owners can manage project roles.')
+    return [...this.memberships.values()]
+      .filter((candidate) => candidate.workspaceId === workspaceId)
+      .sort((left, right) => left.joinedAt.localeCompare(right.joinedAt) || left.userId.localeCompare(right.userId))
+      .map((candidate) => {
+        const projectRole = candidate.role === 'owner' ? undefined : this.projectRoles.get(`${workspaceId}:${projectId}:${candidate.userId}`)
+        return {
+          userId: candidate.userId,
+          workspaceRole: candidate.role,
+          ...(projectRole ? { projectRole } : {}),
+          effectiveRole: candidate.role === 'owner' ? 'owner' : projectRole ?? candidate.role,
+        }
+      })
+  }
+
+  async setProjectRole(token: string, workspaceId: string, projectId: string, userId: string, role: Exclude<WorkspaceRole, 'owner'>) {
+    const claims = await this.authenticate(token)
+    this.rateLimit(claims, 'write')
+    const { membership } = this.requireProjectAccess(workspaceId, projectId, claims.sub, 'manage-members')
+    if (membership.role !== 'owner') throw new WorkspaceAccessError('forbidden', 'Only workspace owners can manage project roles.')
+    safeId(userId, 'User ID')
+    if (!['editor', 'commenter', 'viewer'].includes(role)) throw new WorkspaceAccessError('invalid-request', 'Project role is invalid.')
+    const target = this.membership(workspaceId, userId)
+    if (!target) throw new WorkspaceAccessError('not-found', 'The workspace member was not found.')
+    if (target.role === 'owner') throw new WorkspaceAccessError('forbidden', 'The workspace owner role cannot be overridden.')
+    this.projectRoles.set(`${workspaceId}:${projectId}:${userId}`, role)
+    this.audit(workspaceId, claims.sub, 'project.role.set', userId, { projectId, role })
+    return { userId, workspaceRole: target.role, projectRole: role, effectiveRole: role } satisfies WorkspaceProjectAccess
+  }
+
+  async clearProjectRole(token: string, workspaceId: string, projectId: string, userId: string) {
+    const claims = await this.authenticate(token)
+    this.rateLimit(claims, 'write')
+    const { membership } = this.requireProjectAccess(workspaceId, projectId, claims.sub, 'manage-members')
+    if (membership.role !== 'owner') throw new WorkspaceAccessError('forbidden', 'Only workspace owners can manage project roles.')
+    safeId(userId, 'User ID')
+    const target = this.membership(workspaceId, userId)
+    if (!target) throw new WorkspaceAccessError('not-found', 'The workspace member was not found.')
+    if (target.role === 'owner') throw new WorkspaceAccessError('forbidden', 'The workspace owner role cannot be overridden.')
+    this.projectRoles.delete(`${workspaceId}:${projectId}:${userId}`)
+    this.audit(workspaceId, claims.sub, 'project.role.cleared', userId, { projectId })
+    return { userId, workspaceRole: target.role, effectiveRole: target.role } satisfies WorkspaceProjectAccess
   }
 
   async createInvitation(token: string, workspaceId: string, request: { role: Exclude<WorkspaceRole, 'owner'>; email?: string; expiresInMs?: number }): Promise<CreatedInvitation> {
@@ -421,6 +491,7 @@ export class AuthenticatedWorkspaceService implements ProjectAuthorizationServic
     if (!membership) throw new WorkspaceAccessError('not-found', 'The workspace member was not found.')
     if (membership.role === 'owner') throw new WorkspaceAccessError('forbidden', 'The workspace owner cannot be revoked.')
     this.memberships.delete(`${workspaceId}:${userId}`)
+    for (const key of this.projectRoles.keys()) if (key.startsWith(`${workspaceId}:`) && key.endsWith(`:${userId}`)) this.projectRoles.delete(key)
     this.audit(workspaceId, claims.sub, 'member.revoked', userId, { previousRole: membership.role })
   }
 

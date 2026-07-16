@@ -106,6 +106,52 @@ describe('PostgreSQL workspace authorization', () => {
     await pool.end()
   })
 
+  it('persists tenant-scoped project roles and cancels reviews that a downgrade would strand', async () => {
+    const policyChanges: string[] = []
+    const { pool, service } = await database((workspaceId, userId) => policyChanges.push(`${workspaceId}:${userId}`))
+    await service.createWorkspace('owner', { id: 'forest', name: 'Forest study' })
+    await service.createProject('owner', 'forest', { id: 'paper', name: 'Canopy response' })
+    await service.createProject('owner', 'forest', { id: 'appendix', name: 'Appendix' })
+    await service.createWorkspace('other-owner', { id: 'other', name: 'Other lab' })
+    await service.createProject('other-owner', 'other', { id: 'private', name: 'Private paper' })
+    await service.acceptInvitation('editor', (await service.createInvitation('owner', 'forest', { role: 'editor' })).token)
+
+    await expect(service.listProjectAccess('editor', 'forest', 'paper')).rejects.toMatchObject({ code: 'forbidden' })
+    await expect(service.setProjectRole('other-owner', 'forest', 'paper', 'editor', 'viewer')).rejects.toMatchObject({ code: 'not-found' })
+    const review = await service.createReviewRequest('owner', 'forest', 'paper', { reviewerId: 'editor', message: 'Please review before submission.' })
+    await expect(service.setProjectRole('owner', 'forest', 'paper', 'editor', 'viewer')).resolves.toMatchObject({
+      userId: 'editor',
+      workspaceRole: 'editor',
+      projectRole: 'viewer',
+      effectiveRole: 'viewer',
+      displayName: 'Editor',
+    })
+    expect(policyChanges).toEqual(['forest:editor'])
+    await expect(service.authorizeProject('editor', 'forest', 'paper', 'edit')).rejects.toMatchObject({ code: 'forbidden' })
+    await expect(service.authorizeProject('editor', 'forest', 'appendix', 'edit')).resolves.toMatchObject({ role: 'editor' })
+    expect(await service.listProjects('editor', 'forest')).toEqual([
+      expect.objectContaining({ id: 'appendix', role: 'editor' }),
+      expect.objectContaining({ id: 'paper', role: 'viewer' }),
+    ])
+    expect(await service.listReviewRequests('owner', 'forest', 'paper')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: review.id, status: 'cancelled' }),
+    ]))
+    expect(await service.listProjectNotifications('owner', 'forest', 'paper')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ reviewRequestId: review.id, kind: 'review-cancelled', actorId: 'owner' }),
+    ]))
+
+    const restarted = new PostgresWorkspaceService({ pool, identity: new FixtureIdentity() })
+    expect(await restarted.getProject('editor', 'forest', 'paper')).toMatchObject({ role: 'viewer' })
+    expect(await restarted.listProjectAccess('owner', 'forest', 'paper')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ userId: 'editor', workspaceRole: 'editor', projectRole: 'viewer', effectiveRole: 'viewer' }),
+    ]))
+    await expect(restarted.clearProjectRole('owner', 'forest', 'paper', 'editor')).resolves.toMatchObject({ workspaceRole: 'editor', effectiveRole: 'editor' })
+    await expect(restarted.authorizeProject('editor', 'forest', 'paper', 'edit')).resolves.toMatchObject({ role: 'editor' })
+    const audit = await restarted.listAuditEvents('owner', 'forest')
+    expect(audit.map((event) => event.action)).toEqual(expect.arrayContaining(['project.role.set', 'project.role.cleared', 'review.cancelled']))
+    await pool.end()
+  })
+
   it('persists tenant-scoped review approvals and user-scoped notifications atomically', async () => {
     const { pool, service } = await database()
     await service.createWorkspace('owner', { id: 'forest', name: 'Forest study' })

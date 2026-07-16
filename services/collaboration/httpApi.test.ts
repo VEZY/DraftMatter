@@ -8,8 +8,8 @@ function fixture() {
     getCurrentIdentity: vi.fn(async () => ({ userId: 'owner', displayName: 'Owner Researcher', email: 'owner@example.test' })),
     createWorkspace: vi.fn(async (_token: string, request: { id: string; name: string }) => ({ ...request, createdAt: '2026-07-15T00:00:00.000Z' })),
     listWorkspaces: vi.fn(async () => [{ id: 'forest', name: 'Forest study', createdAt: '2026-07-15T00:00:00.000Z', role: 'owner' as const }]),
-    createProject: vi.fn(async (_token: string, workspaceId: string, request: { id: string; name: string }) => ({ ...request, workspaceId, createdAt: '2026-07-15T00:00:00.000Z' })),
-    getProject: vi.fn(async (_token: string, workspaceId: string, projectId: string) => ({ id: projectId, workspaceId, name: 'Canopy response', createdAt: '2026-07-15T00:00:00.000Z' })),
+    createProject: vi.fn(async (_token: string, workspaceId: string, request: { id: string; name: string }) => ({ ...request, workspaceId, createdAt: '2026-07-15T00:00:00.000Z', role: 'owner' as const })),
+    getProject: vi.fn(async (_token: string, workspaceId: string, projectId: string) => ({ id: projectId, workspaceId, name: 'Canopy response', createdAt: '2026-07-15T00:00:00.000Z', role: 'owner' as const })),
     listProjects: vi.fn(async () => []),
     createInvitation: vi.fn(async (_token: string, workspaceId: string, request: { role: 'editor' | 'commenter' | 'viewer'; email?: string }) => ({
       invitation: { id: 'invite-01', workspaceId, role: request.role, createdAt: '2026-07-15T00:00:00.000Z', expiresAt: '2026-07-22T00:00:00.000Z', createdBy: 'owner' },
@@ -21,6 +21,9 @@ function fixture() {
     listMembers: vi.fn(async () => []),
     listInvitations: vi.fn(async () => []),
     listAuditEvents: vi.fn(async () => []),
+    listProjectAccess: vi.fn(async () => [{ userId: 'editor', workspaceRole: 'editor' as const, projectRole: 'viewer' as const, effectiveRole: 'viewer' as const }]),
+    setProjectRole: vi.fn(async (_token: string, _workspaceId: string, _projectId: string, userId: string, role: 'editor' | 'commenter' | 'viewer') => ({ userId, workspaceRole: 'editor' as const, projectRole: role, effectiveRole: role })),
+    clearProjectRole: vi.fn(async (_token: string, _workspaceId: string, _projectId: string, userId: string) => ({ userId, workspaceRole: 'editor' as const, effectiveRole: 'editor' as const })),
     listReviewParticipants: vi.fn(async () => [{ userId: 'reviewer', role: 'commenter' as const, displayName: 'Review Researcher' }]),
     listReviewRequests: vi.fn(async () => []),
     createReviewRequest: vi.fn(async (_token: string, workspaceId: string, projectId: string, request: { reviewerId: string; message: string }) => ({ id: 'review-01', workspaceId, projectId, requestedBy: 'owner', reviewerId: request.reviewerId, message: request.message, status: 'open' as const, createdAt: '2026-07-15T00:00:00.000Z' })),
@@ -151,6 +154,26 @@ describe('collaboration HTTP API', () => {
     const read = await api(request('/api/workspaces/forest/projects/paper/notifications/notification-01/read', { method: 'POST', headers }))
     expect(read.status).toBe(200)
     expect(workspaces.markProjectNotificationRead).toHaveBeenCalledWith('oidc-token', 'forest', 'paper', 'notification-01')
+  })
+
+  it('routes owner-controlled project role overrides', async () => {
+    const { api, workspaces } = fixture()
+    const headers = { authorization: 'Bearer oidc-token', 'content-type': 'application/json' }
+    const listed = await api(request('/api/workspaces/forest/projects/paper/access', { headers }))
+    expect(listed.status).toBe(200)
+    expect(workspaces.listProjectAccess).toHaveBeenCalledWith('oidc-token', 'forest', 'paper')
+
+    const assigned = await api(request('/api/workspaces/forest/projects/paper/access/editor', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ role: 'viewer' }),
+    }))
+    expect(assigned.status).toBe(200)
+    expect(workspaces.setProjectRole).toHaveBeenCalledWith('oidc-token', 'forest', 'paper', 'editor', 'viewer')
+
+    const cleared = await api(request('/api/workspaces/forest/projects/paper/access/editor', { method: 'DELETE', headers }))
+    expect(cleared.status).toBe(200)
+    expect(workspaces.clearProjectRole).toHaveBeenCalledWith('oidc-token', 'forest', 'paper', 'editor')
   })
 
   it('returns the authenticated collaboration identity without exposing token claims', async () => {

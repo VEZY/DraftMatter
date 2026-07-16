@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { isTauri } from '@tauri-apps/api/core'
-import type { WorkspaceAuditEvent, WorkspaceInvitation, WorkspaceMembership, WorkspaceRole } from './collaboration/workspaceService'
+import type { WorkspaceAuditEvent, WorkspaceInvitation, WorkspaceMembership, WorkspaceProjectAccess, WorkspaceRole } from './collaboration/workspaceService'
 import { CollaborationServiceClient, type CollaborationRecoveryCheckpoint, type WorkspaceDeletion, type WorkspaceSummary } from './collaboration/serviceClient'
 import { createCollaborationInvitationLink } from './collaboration/invitationLink'
 import { copyPlainText } from './clipboard'
@@ -23,6 +23,7 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
   const [busy, setBusy] = useState('')
   const [problem, setProblem] = useState('')
   const [members, setMembers] = useState<WorkspaceMembership[]>([])
+  const [projectAccess, setProjectAccess] = useState<WorkspaceProjectAccess[]>([])
   const [invitations, setInvitations] = useState<WorkspaceInvitation[]>([])
   const [events, setEvents] = useState<WorkspaceAuditEvent[]>([])
   const [recoveries, setRecoveries] = useState<CollaborationRecoveryCheckpoint[]>([])
@@ -39,14 +40,16 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
     setBusy('refresh')
     setProblem('')
     try {
-      const [nextMembers, nextInvitations, nextEvents, nextRecoveries, nextDeletion] = await Promise.all([
+      const [nextMembers, nextProjectAccess, nextInvitations, nextEvents, nextRecoveries, nextDeletion] = await Promise.all([
         client.listMembers(workspace.id),
+        projectId ? client.listProjectAccess(workspace.id, projectId) : Promise.resolve([]),
         client.listInvitations(workspace.id),
         client.listAuditEvents(workspace.id),
         projectId ? client.listRecoveryCheckpoints(workspace.id, projectId) : Promise.resolve([]),
         client.getWorkspaceDeletion(workspace.id),
       ])
       setMembers(nextMembers)
+      setProjectAccess(nextProjectAccess)
       setInvitations(nextInvitations)
       setEvents(nextEvents)
       setRecoveries(nextRecoveries)
@@ -108,6 +111,23 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
     try {
       await client.removeMember(workspace.id, userId)
       setMembers((current) => current.filter((member) => member.userId !== userId))
+      setProjectAccess((current) => current.filter((member) => member.userId !== userId))
+    } catch (error) {
+      setProblem(error instanceof Error ? error.message : String(error))
+    } finally {
+      setBusy('')
+    }
+  }
+
+  const changeProjectRole = async (userId: string, role: 'inherit' | Exclude<WorkspaceRole, 'owner'>) => {
+    if (!projectId) return
+    setBusy(`role:${userId}`)
+    setProblem('')
+    try {
+      const updated = role === 'inherit'
+        ? await client.clearProjectRole(workspace.id, projectId, userId)
+        : await client.setProjectRole(workspace.id, projectId, userId, role)
+      setProjectAccess((current) => current.map((entry) => entry.userId === userId ? updated : entry))
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error))
     } finally {
@@ -158,7 +178,7 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
 
   return (
     <section className="collaboration-access">
-      <button className="collaboration-access-toggle" onClick={toggle} aria-expanded={open}><Icon name="users" size={15} /><span><strong>Workspace access & recovery</strong><small>Invitations, revocation, activity, and immutable cloud recovery</small></span><Icon name="chevronDown" size={14} /></button>
+      <button className="collaboration-access-toggle" onClick={toggle} aria-expanded={open}><Icon name="users" size={15} /><span><strong>Workspace access & recovery</strong><small>Invitations, manuscript roles, activity, and immutable cloud recovery</small></span><Icon name="chevronDown" size={14} /></button>
       {open && (
         <div className="collaboration-access-body">
           <div className="collaboration-invite-row">
@@ -169,7 +189,11 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
           {createdToken && <div className="collaboration-invite-token"><span><strong>{createdLink ? 'Browser invitation created' : 'Invitation secret created'}</strong><small>{createdLink ? 'Share this once. Its secret stays after # so it is not sent in web requests.' : 'Share this token once. DraftMatter does not store the secret after this session.'}</small></span><input value={createdLink || createdToken} readOnly aria-label={createdLink ? 'Invitation link' : 'Invitation token'} /><button onClick={() => void copyInvitation()}>{copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy'}</button></div>}
 
           <div className="collaboration-admin-grid">
-            <section><span className="collaboration-section-label">Members · {members.length}</span>{members.map((member) => <div className="collaboration-admin-item" key={member.userId}><span><strong>{member.userId === currentUserId ? 'You' : member.userId}</strong><small>{member.role}</small></span>{member.userId !== currentUserId && <button onClick={() => void removeMember(member.userId)} disabled={Boolean(busy)}>Remove</button>}</div>)}</section>
+            <section><span className="collaboration-section-label">Members · {members.length}</span>{members.map((member) => {
+              const access = projectAccess.find((entry) => entry.userId === member.userId)
+              const label = member.userId === currentUserId ? 'You' : access?.displayName ?? member.userId
+              return <div className="collaboration-admin-item collaboration-member-access" key={member.userId}><span><strong>{label}</strong><small>{member.role} workspace role{access && access.effectiveRole !== member.role ? ` · ${access.effectiveRole} here` : ''}</small></span>{member.role !== 'owner' && <label><span className="sr-only">Project role for {label}</span><select value={access?.projectRole ?? 'inherit'} onChange={(event) => void changeProjectRole(member.userId, event.target.value as 'inherit' | Exclude<WorkspaceRole, 'owner'>)} disabled={Boolean(busy) || !projectId} aria-label={`Project role for ${label}`}><option value="inherit">Inherit {member.role}</option><option value="editor">Editor here</option><option value="commenter">Commenter here</option><option value="viewer">Viewer here</option></select></label>}{member.userId !== currentUserId && <button onClick={() => void removeMember(member.userId)} disabled={Boolean(busy)}>Remove</button>}</div>
+            })}</section>
             <section><span className="collaboration-section-label">Open invitations · {invitations.filter((item) => !item.revokedAt && !item.acceptedAt).length}</span>{invitations.filter((item) => !item.revokedAt && !item.acceptedAt).map((invitation) => <div className="collaboration-admin-item" key={invitation.id}><span><strong>{invitation.email ?? 'Share link'}</strong><small>{invitation.role} · expires {new Date(invitation.expiresAt).toLocaleDateString()}</small></span><button onClick={() => void revokeInvitation(invitation.id)} disabled={Boolean(busy)}>Revoke</button></div>)}</section>
           </div>
 

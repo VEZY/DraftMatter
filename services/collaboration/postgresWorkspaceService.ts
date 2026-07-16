@@ -15,6 +15,7 @@ import {
   type WorkspaceNotification,
   type WorkspaceNotificationKind,
   type WorkspaceProject,
+  type WorkspaceProjectAccess,
   type WorkspaceRateLimit,
   type WorkspaceRecord,
   type WorkspaceReviewParticipant,
@@ -40,6 +41,18 @@ interface ProjectRow {
   id: string
   name: string
   created_at: Date | string
+}
+
+interface ProjectWithRoleRow extends ProjectRow {
+  effective_role: WorkspaceRole
+}
+
+interface ProjectAccessRow {
+  user_id: string
+  workspace_role: WorkspaceRole
+  project_role: Exclude<WorkspaceRole, 'owner'> | null
+  effective_role: WorkspaceRole
+  display_name: string | null
 }
 
 interface InvitationRow {
@@ -111,8 +124,24 @@ function membership(row: MembershipRow): WorkspaceMembership {
   return { workspaceId: row.workspace_id, userId: row.user_id, role: row.role, joinedAt: iso(row.joined_at) }
 }
 
-function project(row: ProjectRow): WorkspaceProject {
-  return { id: row.id, workspaceId: row.workspace_id, name: row.name, createdAt: iso(row.created_at) }
+function project(row: ProjectRow | ProjectWithRoleRow): WorkspaceProject {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    name: row.name,
+    createdAt: iso(row.created_at),
+    ...('effective_role' in row ? { role: row.effective_role } : {}),
+  }
+}
+
+function projectAccess(row: ProjectAccessRow): WorkspaceProjectAccess {
+  return {
+    userId: row.user_id,
+    workspaceRole: row.workspace_role,
+    ...(row.project_role ? { projectRole: row.project_role } : {}),
+    effectiveRole: row.effective_role,
+    ...(row.display_name ? { displayName: row.display_name } : {}),
+  }
 }
 
 function invitation(row: InvitationRow): WorkspaceInvitation {
@@ -285,14 +314,24 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
 
   private async requireProjectAccess(database: Pick<PoolClient, 'query'> | Database, workspaceId: string, projectId: string, userId: string, capability: ProjectCapability) {
     safeId(projectId, 'Project ID')
-    const current = await this.requireWorkspaceAccess(database, workspaceId, userId, capability)
+    const current = await this.requireWorkspaceAccess(database, workspaceId, userId, 'read')
     const result = await database.query<ProjectRow>(
       `SELECT workspace_id, id, name, created_at FROM draftmatter_projects
        WHERE workspace_id = $1 AND id = $2 AND deleted_at IS NULL`,
       [workspaceId, projectId],
     )
     if (!result.rowCount) throw new WorkspaceAccessError('not-found', 'The collaboration project was not found.')
-    return { membership: current, project: result.rows[0] }
+    let effectiveRole = current.role
+    if (current.role !== 'owner') {
+      const override = await database.query<{ role: Exclude<WorkspaceRole, 'owner'> }>(
+        `SELECT role FROM draftmatter_project_roles
+         WHERE workspace_id = $1 AND project_id = $2 AND user_id = $3`,
+        [workspaceId, projectId, userId],
+      )
+      effectiveRole = override.rows[0]?.role ?? current.role
+    }
+    if (!roleAllows(effectiveRole, capability)) throw new WorkspaceAccessError('forbidden', 'Your project role does not allow this action.')
+    return { membership: { ...current, role: effectiveRole }, project: result.rows[0] }
   }
 
   private async audit(client: PoolClient, workspaceId: string, actorId: string, action: string, targetId?: string, metadata?: Record<string, string>) {
@@ -322,6 +361,28 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
         iso(this.clock()),
       ],
     )
+  }
+
+  private async cancelAssignedProjectReviews(
+    client: PoolClient,
+    workspaceId: string,
+    projectId: string,
+    reviewerId: string,
+    actorId: string,
+    reason: string,
+  ) {
+    const cancelledAt = iso(this.clock())
+    const cancelled = await client.query<ReviewRequestRow>(
+      `UPDATE draftmatter_review_requests SET status = 'cancelled', cancelled_at = $4
+       WHERE workspace_id = $1 AND project_id = $2 AND reviewer_id = $3 AND status = 'open'
+       RETURNING id, workspace_id, project_id, requested_by, reviewer_id, message, status,
+                 created_at, decided_at, decided_by, decision_note, cancelled_at`,
+      [workspaceId, projectId, reviewerId, cancelledAt],
+    )
+    for (const review of cancelled.rows) {
+      await this.notify(client, { workspaceId, projectId, userId: review.requested_by, actorId, reviewRequestId: review.id, kind: 'review-cancelled' })
+      await this.audit(client, workspaceId, actorId, 'review.cancelled', review.id, { projectId, reason })
+    }
   }
 
   async createWorkspace(token: string, request: { id: string; name: string }) {
@@ -356,7 +417,7 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
     if (!name || name.length > 300) throw new WorkspaceAccessError('invalid-request', 'Project name must be between 1 and 300 characters.')
     try {
       return await transaction(this.pool, async (client) => {
-        await this.requireWorkspaceAccess(client, workspaceId, identity.userId, 'edit')
+        const membership = await this.requireWorkspaceAccess(client, workspaceId, identity.userId, 'edit')
         await this.entitlements.assertWorkspaceWritable(workspaceId, client)
         const createdAt = iso(this.clock())
         await client.query(
@@ -364,7 +425,7 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
           [workspaceId, id, name, createdAt],
         )
         await this.audit(client, workspaceId, identity.userId, 'project.created', id)
-        return { id, workspaceId, name, createdAt }
+        return { id, workspaceId, name, createdAt, role: membership.role }
       })
     } catch (error) {
       if (isUniqueViolation(error)) throw new WorkspaceAccessError('invalid-request', 'That project identifier is unavailable.')
@@ -393,16 +454,20 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
   async getProject(token: string, workspaceId: string, projectId: string) {
     const identity = await this.authenticate(token, 'read')
     const access = await this.requireProjectAccess(this.pool, workspaceId, projectId, identity.userId, 'read')
-    return project(access.project)
+    return { ...project(access.project), role: access.membership.role }
   }
 
   async listProjects(token: string, workspaceId: string) {
     const identity = await this.authenticate(token, 'read')
-    await this.requireWorkspaceAccess(this.pool, workspaceId, identity.userId, 'read')
-    const result = await this.pool.query<ProjectRow>(
-      `SELECT workspace_id, id, name, created_at FROM draftmatter_projects
-       WHERE workspace_id = $1 AND deleted_at IS NULL ORDER BY id`,
-      [workspaceId],
+    const membership = await this.requireWorkspaceAccess(this.pool, workspaceId, identity.userId, 'read')
+    const result = await this.pool.query<ProjectWithRoleRow>(
+      `SELECT p.workspace_id, p.id, p.name, p.created_at,
+              CASE WHEN $3 = 'owner' THEN 'owner' ELSE COALESCE(r.role, $3) END AS effective_role
+       FROM draftmatter_projects p
+       LEFT JOIN draftmatter_project_roles r
+         ON r.workspace_id = p.workspace_id AND r.project_id = p.id AND r.user_id = $2
+       WHERE p.workspace_id = $1 AND p.deleted_at IS NULL ORDER BY p.id`,
+      [workspaceId, identity.userId, membership.role],
     )
     return result.rows.map(project)
   }
@@ -423,17 +488,117 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
     return { userId: identity.userId, sessionId: identity.sessionId, role: access.membership.role, capability }
   }
 
+  async listProjectAccess(token: string, workspaceId: string, projectId: string) {
+    const identity = await this.authenticate(token, 'read')
+    const access = await this.requireProjectAccess(this.pool, workspaceId, projectId, identity.userId, 'manage-members')
+    if (access.membership.role !== 'owner') throw new WorkspaceAccessError('forbidden', 'Only workspace owners can manage project roles.')
+    const result = await this.pool.query<ProjectAccessRow>(
+      `SELECT m.user_id, m.role AS workspace_role, r.role AS project_role,
+              CASE WHEN m.role = 'owner' THEN 'owner' ELSE COALESCE(r.role, m.role) END AS effective_role,
+              u.display_name
+       FROM draftmatter_memberships m
+       JOIN draftmatter_users u ON u.id = m.user_id
+       LEFT JOIN draftmatter_project_roles r
+         ON r.workspace_id = m.workspace_id AND r.project_id = $2 AND r.user_id = m.user_id
+       WHERE m.workspace_id = $1 AND m.revoked_at IS NULL
+       ORDER BY m.joined_at, m.user_id`,
+      [workspaceId, projectId],
+    )
+    return result.rows.map(projectAccess)
+  }
+
+  async setProjectRole(
+    token: string,
+    workspaceId: string,
+    projectId: string,
+    userId: string,
+    role: Exclude<WorkspaceRole, 'owner'>,
+  ) {
+    const identity = await this.authenticate(token, 'write')
+    safeId(userId, 'User ID')
+    if (!['editor', 'commenter', 'viewer'].includes(role)) throw new WorkspaceAccessError('invalid-request', 'Project role is invalid.')
+    const updated = await transaction(this.pool, async (client) => {
+      const access = await this.requireProjectAccess(client, workspaceId, projectId, identity.userId, 'manage-members')
+      if (access.membership.role !== 'owner') throw new WorkspaceAccessError('forbidden', 'Only workspace owners can manage project roles.')
+      await this.entitlements.assertWorkspaceWritable(workspaceId, client)
+      const target = await client.query<MembershipRow & { display_name: string | null }>(
+        `SELECT m.workspace_id, m.user_id, m.role, m.joined_at, u.display_name
+         FROM draftmatter_memberships m JOIN draftmatter_users u ON u.id = m.user_id
+         WHERE m.workspace_id = $1 AND m.user_id = $2 AND m.revoked_at IS NULL FOR UPDATE`,
+        [workspaceId, userId],
+      )
+      const member = target.rows[0]
+      if (!member) throw new WorkspaceAccessError('not-found', 'The workspace member was not found.')
+      if (member.role === 'owner') throw new WorkspaceAccessError('forbidden', 'The workspace owner role cannot be overridden.')
+      await client.query(
+        `INSERT INTO draftmatter_project_roles(workspace_id, project_id, user_id, role, assigned_by, assigned_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (workspace_id, project_id, user_id) DO UPDATE SET
+           role = EXCLUDED.role, assigned_by = EXCLUDED.assigned_by, assigned_at = EXCLUDED.assigned_at`,
+        [workspaceId, projectId, userId, role, identity.userId, iso(this.clock())],
+      )
+      if (!roleAllows(role, 'comment')) await this.cancelAssignedProjectReviews(client, workspaceId, projectId, userId, identity.userId, 'project-role-changed')
+      await this.audit(client, workspaceId, identity.userId, 'project.role.set', userId, { projectId, role })
+      return {
+        userId,
+        workspaceRole: member.role,
+        projectRole: role,
+        effectiveRole: role,
+        ...(member.display_name ? { displayName: member.display_name } : {}),
+      } satisfies WorkspaceProjectAccess
+    })
+    await this.onMembershipRevoked?.(workspaceId, userId)
+    return updated
+  }
+
+  async clearProjectRole(token: string, workspaceId: string, projectId: string, userId: string) {
+    const identity = await this.authenticate(token, 'write')
+    safeId(userId, 'User ID')
+    const updated = await transaction(this.pool, async (client) => {
+      const access = await this.requireProjectAccess(client, workspaceId, projectId, identity.userId, 'manage-members')
+      if (access.membership.role !== 'owner') throw new WorkspaceAccessError('forbidden', 'Only workspace owners can manage project roles.')
+      await this.entitlements.assertWorkspaceWritable(workspaceId, client)
+      const target = await client.query<MembershipRow & { display_name: string | null }>(
+        `SELECT m.workspace_id, m.user_id, m.role, m.joined_at, u.display_name
+         FROM draftmatter_memberships m JOIN draftmatter_users u ON u.id = m.user_id
+         WHERE m.workspace_id = $1 AND m.user_id = $2 AND m.revoked_at IS NULL FOR UPDATE`,
+        [workspaceId, userId],
+      )
+      const member = target.rows[0]
+      if (!member) throw new WorkspaceAccessError('not-found', 'The workspace member was not found.')
+      if (member.role === 'owner') throw new WorkspaceAccessError('forbidden', 'The workspace owner role cannot be overridden.')
+      await client.query(
+        'DELETE FROM draftmatter_project_roles WHERE workspace_id = $1 AND project_id = $2 AND user_id = $3',
+        [workspaceId, projectId, userId],
+      )
+      if (!roleAllows(member.role, 'comment')) await this.cancelAssignedProjectReviews(client, workspaceId, projectId, userId, identity.userId, 'project-role-cleared')
+      await this.audit(client, workspaceId, identity.userId, 'project.role.cleared', userId, { projectId })
+      return {
+        userId,
+        workspaceRole: member.role,
+        effectiveRole: member.role,
+        ...(member.display_name ? { displayName: member.display_name } : {}),
+      } satisfies WorkspaceProjectAccess
+    })
+    await this.onMembershipRevoked?.(workspaceId, userId)
+    return updated
+  }
+
   async listReviewParticipants(token: string, workspaceId: string, projectId: string) {
     const identity = await this.authenticate(token, 'read')
     await this.requireProjectAccess(this.pool, workspaceId, projectId, identity.userId, 'read')
     const result = await this.pool.query<ReviewParticipantRow>(
-      `SELECT m.user_id, m.role, u.display_name
+      `SELECT m.user_id,
+              CASE WHEN m.role = 'owner' THEN 'owner' ELSE COALESCE(r.role, m.role) END AS role,
+              u.display_name
        FROM draftmatter_memberships m
        JOIN draftmatter_users u ON u.id = m.user_id
+       LEFT JOIN draftmatter_project_roles r
+         ON r.workspace_id = m.workspace_id AND r.project_id = $2 AND r.user_id = m.user_id
        WHERE m.workspace_id = $1 AND m.revoked_at IS NULL
-         AND m.role IN ('owner', 'editor', 'commenter')
+         AND (CASE WHEN m.role = 'owner' THEN 'owner' ELSE COALESCE(r.role, m.role) END) IN ('owner', 'editor', 'commenter')
        ORDER BY m.joined_at, m.user_id`,
-      [workspaceId],
+      [workspaceId, projectId],
     )
     return result.rows.map(reviewParticipant)
   }
@@ -720,6 +885,7 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
         await this.notify(client, { workspaceId, projectId: review.project_id, userId: recipient, actorId: identity.userId, reviewRequestId: review.id, kind: 'review-cancelled' })
         await this.audit(client, workspaceId, identity.userId, 'review.cancelled', review.id, { projectId: review.project_id, reason: 'member-revoked' })
       }
+      await client.query('DELETE FROM draftmatter_project_roles WHERE workspace_id = $1 AND user_id = $2', [workspaceId, userId])
       await client.query(
         'UPDATE draftmatter_memberships SET revoked_at = $3 WHERE workspace_id = $1 AND user_id = $2',
         [workspaceId, userId, iso(this.clock())],

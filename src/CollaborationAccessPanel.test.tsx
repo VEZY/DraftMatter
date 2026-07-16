@@ -15,7 +15,16 @@ describe('collaboration workspace administration', () => {
   it('loads access and recovery state and creates a one-time invitation', async () => {
     const client = {
       urls: { apiUrl: 'https://collab.example.test', websocketUrl: 'wss://collab.example.test' },
-      listMembers: vi.fn().mockResolvedValue([{ workspaceId: 'forest', userId: 'owner-1', role: 'owner', joinedAt: '2026-07-15T00:00:00.000Z' }]),
+      listMembers: vi.fn().mockResolvedValue([
+        { workspaceId: 'forest', userId: 'owner-1', role: 'owner', joinedAt: '2026-07-15T00:00:00.000Z' },
+        { workspaceId: 'forest', userId: 'editor-1', role: 'editor', joinedAt: '2026-07-15T00:01:00.000Z' },
+      ]),
+      listProjectAccess: vi.fn().mockResolvedValue([
+        { userId: 'owner-1', workspaceRole: 'owner', effectiveRole: 'owner', displayName: 'Owner Researcher' },
+        { userId: 'editor-1', workspaceRole: 'editor', effectiveRole: 'editor', displayName: 'Editing Researcher' },
+      ]),
+      setProjectRole: vi.fn().mockResolvedValue({ userId: 'editor-1', workspaceRole: 'editor', projectRole: 'viewer', effectiveRole: 'viewer', displayName: 'Editing Researcher' }),
+      clearProjectRole: vi.fn().mockResolvedValue({ userId: 'editor-1', workspaceRole: 'editor', effectiveRole: 'editor', displayName: 'Editing Researcher' }),
       listInvitations: vi.fn().mockResolvedValue([]),
       listAuditEvents: vi.fn().mockResolvedValue([{ id: 'audit-1', workspaceId: 'forest', actorId: 'owner-1', action: 'project.created', targetId: 'paper', at: '2026-07-15T00:00:00.000Z' }]),
       listRecoveryCheckpoints: vi.fn().mockResolvedValue([{ id: 'recovery-1', snapshotId: 'snapshot-1', name: 'Initial review', createdBy: 'owner-1', createdAt: '2026-07-15T00:00:00.000Z' }]),
@@ -42,10 +51,20 @@ describe('collaboration workspace administration', () => {
       await new Promise((resolve) => window.setTimeout(resolve, 0))
     })
     expect(client.listMembers).toHaveBeenCalledWith('forest')
+    expect(client.listProjectAccess).toHaveBeenCalledWith('forest', 'paper')
     expect(client.listRecoveryCheckpoints).toHaveBeenCalledWith('forest', 'paper')
     expect(client.getWorkspaceDeletion).toHaveBeenCalledWith('forest')
     expect(container.textContent).toContain('Named cloud recovery · 1')
     expect(container.textContent).toContain('project created')
+
+    const projectRole = container.querySelector<HTMLSelectElement>('[aria-label="Project role for Editing Researcher"]')!
+    await act(async () => {
+      projectRole.value = 'viewer'
+      projectRole.dispatchEvent(new Event('change', { bubbles: true }))
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    expect(client.setProjectRole).toHaveBeenCalledWith('forest', 'paper', 'editor-1', 'viewer')
+    expect(container.textContent).toContain('viewer here')
 
     const role = container.querySelector<HTMLSelectElement>('.collaboration-invite-row select')!
     await act(async () => {
