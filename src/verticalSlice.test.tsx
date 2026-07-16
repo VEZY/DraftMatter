@@ -49,9 +49,9 @@ describe('rendered Phase 0 vertical slice', () => {
     const alternatives = [...container.querySelectorAll('.proposal-option')].map((option) => normalizedText(option))
     const renderedSlice = {
       title: normalizedText(container.querySelector('.paper-title')),
-      citation: normalizedText(container.querySelector('.citation-chip')),
-      codeCell: normalizedText(container.querySelector('.code-cell-label')),
-      outputLabel: container.querySelector('.cell-output svg')?.getAttribute('aria-label'),
+      citation: normalizedText(container.querySelector('.structured-citation, .citation-chip')),
+      codeCell: normalizedText(container.querySelector('.structured-code-cell-header, .code-cell-label')),
+      outputLabel: container.querySelector('.structured-output img')?.getAttribute('alt') ?? container.querySelector('.cell-output svg')?.getAttribute('aria-label'),
       conflict: normalizedText(container.querySelector('.conflict-heading')),
       alternatives,
       comment: normalizedText(container.querySelector('.comment-card > p')),
@@ -64,10 +64,10 @@ describe('rendered Phase 0 vertical slice', () => {
           "MCMarcus Chen15 Jul 2026 · 09:04 UTCOpendid not substantially alter leaf expansionlowered leaf expansion during the treatment period",
         ],
         "citation": "(Vezy et al., 2024)",
-        "codeCell": "PyCanopy response over timeCurrent",
+        "codeCell": "pythonfig-canopyNeeds runShow code",
         "comment": "Can we quantify this increase in the main text? The estimate is already in the supplement.",
         "conflict": "2 overlapping alternativesCompare one at a time",
-        "outputLabel": "Line chart comparing control and drought canopy response over twelve weeks",
+        "outputLabel": "Leaf area response over twelve weeks",
         "title": "Drought acclimation reshapes canopy development",
       }
     `)

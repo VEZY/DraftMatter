@@ -50,13 +50,13 @@ import { renderReviewReport } from './reviewExport'
 import { printNativeHtml, renderNativeHtmlExport } from './nativeHtmlExport'
 import { renderDocxExport } from './docxExport'
 import { ExternalExportDialog } from './ExternalExportDialog'
+import { InsertBlockDialog, type InsertBlockKind, type InsertBlockRequest } from './InsertBlockDialog'
 import { CollaborationDialog } from './CollaborationDialog'
 import type { CollaborationCheckpoint, CollaborationClientStatus, CollaborativeEditorBinding } from './sharedEditor'
 import { motionAwareScrollBehavior } from './accessibility'
 import { normalizeProjectRelativePath, projectFilePath } from './projectPaths'
 import { authorInitials, readUserSettings, renameLocalAuthor, saveUserSettings } from './userSettings'
 import { parsePublicationMetadata, updatePublicationAuthors } from './publicationMetadata'
-import { insertPortableSection } from './manuscriptOutline'
 import { copyPlainText } from './clipboard'
 import { countWords, measurePortableManuscript } from './manuscriptMetrics'
 import { ReviewTimestamp } from './ReviewTimestamp'
@@ -429,6 +429,7 @@ function App() {
   const [commandOpen, setCommandOpen] = useState(false)
   const [commandQuery, setCommandQuery] = useState('')
   const [commandActiveIndex, setCommandActiveIndex] = useState(0)
+  const [insertBlockKind, setInsertBlockKind] = useState<InsertBlockKind>()
   const [reply, setReply] = useState('')
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'conflict' | 'error'>('saved')
   const [saveProblem, setSaveProblem] = useState('')
@@ -489,7 +490,7 @@ function App() {
   const [executionProviders, setExecutionProviders] = useState<Record<ExecutionLanguage, ExecutionProviderKind>>(() => executionProvidersFromProject())
   const [selectedKernelNames, setSelectedKernelNames] = useState<Partial<Record<ExecutionLanguage, string>>>({})
   const [manuscriptSource, setManuscriptSource] = useState(() => localStorage.getItem(STRUCTURED_SOURCE_KEY) ?? reviewedProjection(initialDraftState))
-  const [structuredMode, setStructuredMode] = useState(() => localStorage.getItem(STRUCTURED_MODE_KEY) === 'true')
+  const [structuredMode, setStructuredMode] = useState(true)
   const [structuredOutline, setStructuredOutline] = useState<StructuredOutlineItem[]>([])
   const [structuredReviewSelection, setStructuredReviewSelection] = useState<StructuredReviewSelection | null>(null)
   const [externalExportSource, setExternalExportSource] = useState<string>()
@@ -1496,14 +1497,24 @@ function App() {
   const runStructuredCommand = (command: (editor: StructuredManuscriptEditorHandle) => boolean, label: string) => {
     if (!canEditManuscript) {
       setToast('Your collaboration role has read-only manuscript access')
-      return
+      return false
     }
     const editor = structuredEditorRef.current
     if (!structuredMode || !editor) {
       setToast(`${label} is available in the full portable manuscript editor`)
-      return
+      return false
     }
-    if (!command(editor)) setToast(`Select manuscript content before using ${label.toLowerCase()}`)
+    if (!command(editor)) {
+      setToast(`Select manuscript content before using ${label.toLowerCase()}`)
+      return false
+    }
+    return true
+  }
+
+  const openInsertBlock = (kind: InsertBlockKind) => {
+    if (!canEditManuscript) return
+    if (!structuredMode) setStructuredMode(true)
+    setInsertBlockKind(kind)
   }
 
   const applyBlockStyle = (style: string) => {
@@ -1528,78 +1539,44 @@ function App() {
     if (href) runStructuredCommand((editor) => editor.setLink(href), 'Add link')
   }
 
-  const insertStructuredFigure = () => {
-    const path = window.prompt('Project-relative image path (for example figures/result.svg)')?.trim()
-    if (!path) return
-    const alt = window.prompt('Accessible description for the figure')?.trim() ?? ''
-    const caption = window.prompt('Figure caption (optional)')?.trim() || undefined
-    runStructuredCommand((editor) => editor.insertFigure(path, alt, caption), 'Insert image')
-  }
-
-  const insertStructuredTable = () => {
-    const caption = window.prompt('Table caption (optional)')?.trim() ?? ''
-    const label = caption ? window.prompt('Table label (optional, for example tbl-results)')?.trim() : undefined
-    const normalizedLabel = label?.replace(/^#/, '')
-    if (normalizedLabel && !/^tbl-[a-zA-Z0-9](?:[a-zA-Z0-9_.:-]*[a-zA-Z0-9])?$/.test(normalizedLabel)) {
-      setToast('Table labels use the portable tbl-… form, for example tbl-results')
-      return
+  const insertStructuredRequest = (request: InsertBlockRequest) => {
+    if (request.kind === 'section') {
+      const inserted = runStructuredCommand((editor) => editor.insertHeading(request.title, request.level, request.label), 'Add section')
+      if (inserted) setToast(`Section added · ${request.title}`)
+      return inserted
     }
-    runStructuredCommand((editor) => editor.insertTable(2, 2, caption, normalizedLabel), 'Insert table')
-  }
-
-  const insertStructuredEquation = (display = false) => {
-    const tex = window.prompt(`${display ? 'Display' : 'Inline'} equation (TeX, without $ delimiters)`)?.trim()
-    if (!tex) return
-    const label = display ? window.prompt('Equation label (optional, for example eq-growth)')?.trim() : undefined
-    runStructuredCommand((editor) => editor.insertEquation(tex, display, label), `Insert ${display ? 'display' : 'inline'} equation`)
-  }
-
-  const insertStructuredCrossReference = () => {
-    const target = window.prompt('Cross-reference target (for example fig-growth, tbl-results, eq-model, or sec-methods)')?.trim()
-    if (target) runStructuredCommand((editor) => editor.insertCrossReference(target), 'Insert cross-reference')
-  }
-
-  const insertStructuredFootnote = () => {
-    const label = window.prompt('Footnote label (letters, numbers, dots, colons, underscores, or hyphens)')?.trim()
-    if (!label) return
-    const content = window.prompt('Footnote text')?.trim()
-    if (content) runStructuredCommand((editor) => editor.insertFootnote(label, content), 'Insert footnote')
-  }
-
-  const insertStructuredCodeCell = () => {
-    const language = window.prompt('Code language: python, r, or julia', 'python')?.trim().toLowerCase()
-    if (language === 'python' || language === 'r' || language === 'julia') {
-      runStructuredCommand((editor) => editor.insertCodeCell(language), `Insert ${language === 'r' ? 'R' : language} code cell`)
-    } else if (language) {
-      setToast('DraftMatter executable cells currently support Python, R, or Julia')
+    if (request.kind === 'figure') {
+      const inserted = runStructuredCommand((editor) => editor.insertFigure(request.source, request.alt, request.caption, request.label), 'Insert figure')
+      if (inserted) setToast('Figure inserted · portable project path retained')
+      return inserted
     }
+    if (request.kind === 'table') {
+      const inserted = runStructuredCommand((editor) => editor.insertTable(request.rows, request.columns, request.caption, request.label), 'Insert table')
+      if (inserted) setToast(`Table inserted · ${request.rows} rows × ${request.columns} columns`)
+      return inserted
+    }
+    if (request.kind === 'equation-inline' || request.kind === 'equation-display') {
+      const display = request.kind === 'equation-display'
+      const inserted = runStructuredCommand((editor) => editor.insertEquation(request.tex, display, display ? request.label : undefined), `Insert ${display ? 'display' : 'inline'} equation`)
+      if (inserted) setToast(`${display ? 'Display' : 'Inline'} equation inserted`)
+      return inserted
+    }
+    if (request.kind === 'cross-reference') {
+      const inserted = runStructuredCommand((editor) => editor.insertCrossReference(request.target), 'Insert cross-reference')
+      if (inserted) setToast(`Cross-reference inserted · @${request.target}`)
+      return inserted
+    }
+    if (request.kind === 'footnote') {
+      const inserted = runStructuredCommand((editor) => editor.insertFootnote(request.label, request.content), 'Insert footnote')
+      if (inserted) setToast(`Footnote inserted · ${request.label}`)
+      return inserted
+    }
+    const inserted = runStructuredCommand((editor) => editor.insertCodeCell(request.language), `Insert ${request.language === 'r' ? 'R' : request.language} code cell`)
+    if (inserted) setToast(`${request.language === 'r' ? 'R' : request.language} code cell inserted`)
+    return inserted
   }
 
-  const addStructuredSection = () => {
-    if (!canEditManuscript) return
-    const title = window.prompt('Section heading')?.trim()
-    if (!title) return
-    const requestedLevel = Number(window.prompt('Heading level (1–6)', '2'))
-    const level = Number.isInteger(requestedLevel) && requestedLevel >= 1 && requestedLevel <= 6 ? requestedLevel : 2
-    const label = window.prompt('Section label (optional, for example sec-methods)')?.trim().replace(/^#/, '')
-    if (label && !/^sec-[a-zA-Z0-9](?:[a-zA-Z0-9_.:-]*[a-zA-Z0-9])?$/.test(label)) {
-      setToast('Section labels use the portable sec-… form, for example sec-methods')
-      return
-    }
-    try {
-      const portable = insertPortableSection(manuscriptSource, { title, level, label })
-      const editor = structuredEditorRef.current
-      if (structuredMode && editor) {
-        if (!editor.insertHeading(title, level, label)) setToast('Choose a valid, unused section label before adding this heading')
-        return
-      }
-      setStructuredMode(true)
-      updateStructuredManuscript(portable)
-      setToast(`Section added · ${title}`)
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : String(error))
-    }
-  }
+  const addStructuredSection = () => openInsertBlock('section')
 
   const discoverExecutionEnvironments = async (showDialog = false) => {
     if (showDialog) setEnvironmentOpen(true)
@@ -3095,7 +3072,7 @@ function App() {
       keywords: 'math latex tex formula',
       icon: <span className="command-icon">∑</span>,
       disabled: !canEditManuscript,
-      action: () => { setCommandOpen(false); insertStructuredEquation() },
+      action: () => { setCommandOpen(false); openInsertBlock('equation-inline') },
     },
     {
       id: 'display-equation',
@@ -3104,7 +3081,7 @@ function App() {
       keywords: 'math latex tex formula block',
       icon: <span className="command-icon">∫</span>,
       disabled: !canEditManuscript,
-      action: () => { setCommandOpen(false); insertStructuredEquation(true) },
+      action: () => { setCommandOpen(false); openInsertBlock('equation-display') },
     },
     {
       id: 'cross-reference',
@@ -3113,7 +3090,7 @@ function App() {
       keywords: 'xref link target figure table equation section',
       icon: <span className="command-icon">§</span>,
       disabled: !canEditManuscript,
-      action: () => { setCommandOpen(false); insertStructuredCrossReference() },
+      action: () => { setCommandOpen(false); openInsertBlock('cross-reference') },
     },
     {
       id: 'footnote',
@@ -3122,7 +3099,7 @@ function App() {
       keywords: 'note reference definition',
       icon: <span className="command-icon">¹</span>,
       disabled: !canEditManuscript,
-      action: () => { setCommandOpen(false); insertStructuredFootnote() },
+      action: () => { setCommandOpen(false); openInsertBlock('footnote') },
     },
     {
       id: 'table',
@@ -3131,7 +3108,7 @@ function App() {
       keywords: 'rows columns data grid caption',
       icon: <span className="command-icon"><Icon name="table" size={17} /></span>,
       disabled: !canEditManuscript,
-      action: () => { setCommandOpen(false); insertStructuredTable() },
+      action: () => { setCommandOpen(false); openInsertBlock('table') },
     },
     {
       id: 'figure',
@@ -3140,7 +3117,7 @@ function App() {
       keywords: 'image picture graphic caption',
       icon: <span className="command-icon"><Icon name="image" size={17} /></span>,
       disabled: !canEditManuscript,
-      action: () => { setCommandOpen(false); insertStructuredFigure() },
+      action: () => { setCommandOpen(false); openInsertBlock('figure') },
     },
     {
       id: 'code-cell',
@@ -3149,7 +3126,7 @@ function App() {
       keywords: 'execute python r julia source',
       icon: <span className="command-icon"><Icon name="code" size={17} /></span>,
       disabled: !canEditManuscript,
-      action: () => { setCommandOpen(false); insertStructuredCodeCell() },
+      action: () => { setCommandOpen(false); openInsertBlock('code-cell') },
     },
     {
       id: 'run-cell',
@@ -3451,10 +3428,10 @@ function App() {
             <button aria-label="Add link" onClick={addStructuredLink} disabled={!canEditManuscript}><Icon name="link" size={16} /></button>
             <span className="toolbar-divider" />
             <button aria-label="Block quote" onClick={() => runStructuredCommand((editor) => editor.wrapBlockquote(), 'Block quote')} disabled={!canEditManuscript}><Icon name="quote" size={17} /></button>
-            <button aria-label="Insert image" onClick={insertStructuredFigure} disabled={!canEditManuscript}><Icon name="image" size={17} /></button>
-            <button aria-label="Insert table" onClick={() => runStructuredCommand((editor) => editor.insertTable(), 'Insert table')} disabled={!canEditManuscript}><Icon name="table" size={17} /></button>
-            <button aria-label="Insert equation" onClick={() => insertStructuredEquation()} disabled={!canEditManuscript}><span className="toolbar-symbol">∑</span></button>
-            <button aria-label="Insert code cell" onClick={insertStructuredCodeCell} disabled={!canEditManuscript}><Icon name="code" size={17} /></button>
+            <button aria-label="Insert image" onClick={() => openInsertBlock('figure')} disabled={!canEditManuscript}><Icon name="image" size={17} /></button>
+            <button aria-label="Insert table" onClick={() => openInsertBlock('table')} disabled={!canEditManuscript}><Icon name="table" size={17} /></button>
+            <button aria-label="Insert equation" onClick={() => openInsertBlock('equation-inline')} disabled={!canEditManuscript}><span className="toolbar-symbol">∑</span></button>
+            <button aria-label="Insert code cell" onClick={() => openInsertBlock('code-cell')} disabled={!canEditManuscript}><Icon name="code" size={17} /></button>
             <span className="toolbar-divider" />
             <button aria-label="Undo" onClick={() => structuredMode ? structuredEditorRef.current?.undo() : undoDraft()} disabled={!canEditManuscript || (!structuredMode && !canUndo)}><Icon name="undo" size={16} /></button>
             <button aria-label="Redo" onClick={() => structuredMode ? structuredEditorRef.current?.redo() : redoDraft()} disabled={!canEditManuscript || (!structuredMode && !canRedo)}><Icon name="redo" size={16} /></button>
@@ -3884,6 +3861,15 @@ function App() {
           </aside>
         )}
       </div>
+
+      {insertBlockKind && (
+        <InsertBlockDialog
+          key={insertBlockKind}
+          kind={insertBlockKind}
+          onClose={() => setInsertBlockKind(undefined)}
+          onInsert={insertStructuredRequest}
+        />
+      )}
 
       {settingsOpen && (
         <div className="modal-backdrop execution-dialog-backdrop" onMouseDown={() => setSettingsOpen(false)}>
