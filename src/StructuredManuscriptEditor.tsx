@@ -13,7 +13,7 @@ import { formatCrossReferenceTarget, isCrossReferenceTarget } from './crossRefer
 import { renderEquation } from './equationRenderer'
 import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
-import { captureReviewSuggestion } from './reviewSuggestionCapture'
+import { captureReviewSuggestion, type ReviewSuggestionIntent } from './reviewSuggestionCapture'
 import { parseStructuredManuscript, serializeStructuredManuscript, type StructuredManuscriptMetadata } from './structuredManuscript'
 import type { ExecutionFreshnessStatus } from './executionFreshness'
 import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
@@ -1972,32 +1972,44 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     emitReviewSelection(view)
   }
 
-  const finishPendingSuggestion = (view: EditorView) => {
-    const pending = pendingSuggestionRef.current
-    if (!pending) return
-    window.clearTimeout(pending.timeout)
-    pendingSuggestionRef.current = undefined
+  const captureSuggestion = (
+    view: EditorView,
+    acceptedSource: string,
+    draftSource: string,
+    intent: ReviewSuggestionIntent,
+  ) => {
     try {
-      const captured = captureReviewSuggestion(pending.acceptedSource, pending.draftSource, suggestionAuthorRef.current)
+      const captured = captureReviewSuggestion(acceptedSource, draftSource, suggestionAuthorRef.current, intent)
       if (!captured) {
-        replaceEditorSource(view, pending.acceptedSource)
+        replaceEditorSource(view, acceptedSource)
         return
       }
       replaceEditorSource(view, captured.document.source)
       onChangeRef.current(captured.document.source)
-      const label = captured.change.changeKind === 'insert'
-        ? 'Insertion captured as one portable suggestion'
-        : captured.change.changeKind === 'delete'
-          ? 'Deletion captured as one portable suggestion'
-          : 'Replacement captured as one portable suggestion'
+      const labels: Record<string, string> = {
+        insert: 'Insertion captured as one portable suggestion',
+        delete: 'Deletion captured as one portable suggestion',
+        replace: 'Replacement captured as one portable suggestion',
+        format: 'Formatting captured as one portable suggestion',
+        structural: 'Block structure captured as one portable suggestion',
+      }
+      const label = labels[captured.change.changeKind] ?? 'Change captured as one portable suggestion'
       onSuggestionCaptureRef.current?.(label)
     } catch (error) {
-      replaceEditorSource(view, pending.acceptedSource)
+      replaceEditorSource(view, acceptedSource)
       onSuggestionCaptureRef.current?.(
         error instanceof Error ? `Suggestion was not captured: ${error.message}` : 'Suggestion was not captured.',
         true,
       )
     }
+  }
+
+  const finishPendingSuggestion = (view: EditorView) => {
+    const pending = pendingSuggestionRef.current
+    if (!pending) return
+    window.clearTimeout(pending.timeout)
+    pendingSuggestionRef.current = undefined
+    captureSuggestion(view, pending.acceptedSource, pending.draftSource, 'text')
   }
 
   const queueSuggestion = (view: EditorView, draftSource: string) => {
@@ -2287,10 +2299,17 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         ),
       },
       dispatchTransaction(transaction) {
-        const capturesTextSuggestion = transaction.docChanged
+        const stepTypes = transaction.steps.map((step) => step.toJSON().stepType)
+        const suggestionIntent: ReviewSuggestionIntent | undefined = transaction.docChanged
           && suggestionModeRef.current
-          && transaction.steps.every((step) => step.toJSON().stepType === 'replace')
-        if (transaction.docChanged && pendingSuggestionRef.current && !capturesTextSuggestion) {
+          && !transaction.getMeta('dm-presentation-only')
+          ? stepTypes.every((stepType) => stepType === 'replace')
+            ? 'text'
+            : stepTypes.every((stepType) => stepType === 'addMark' || stepType === 'removeMark')
+              ? 'format'
+              : 'structural'
+          : undefined
+        if (pendingSuggestionRef.current && suggestionIntent && suggestionIntent !== 'text') {
           finishPendingSuggestion(view)
           onSuggestionCaptureRef.current?.('The text suggestion was captured first. Repeat the separate formatting action.')
           return
@@ -2302,8 +2321,12 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         onOutlineRef.current?.(outlineFor(next.doc))
         if (transaction.docChanged && !transaction.getMeta('dm-presentation-only') && metadataRef.current) {
           const serialized = serializeStructuredManuscript(next.doc, metadataRef.current)
-          if (capturesTextSuggestion) {
+          if (suggestionIntent === 'text') {
             queueSuggestion(view, serialized)
+            return
+          }
+          if (suggestionIntent) {
+            captureSuggestion(view, sourceRef.current, serialized, suggestionIntent)
             return
           }
           loadedSourceRef.current = serialized

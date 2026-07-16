@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { parseReviewMarkup } from './reviewMarkup'
 import { projectPortableReviewSource } from './reviewProjector'
-import { captureReviewSuggestion, reviewSuggestionDiff } from './reviewSuggestionCapture'
+import { captureReviewSuggestion, reviewSuggestionDiff, reviewTransformationDiff } from './reviewSuggestionCapture'
 
 const author = { id: 'dm-author-local', name: 'Local Author' }
 
@@ -42,5 +42,43 @@ describe('grouped rendered suggestion capture', () => {
   it('does nothing when presentation and source bytes are unchanged', () => {
     expect(reviewSuggestionDiff('# Stable\n', '# Stable\n')).toBeNull()
     expect(captureReviewSuggestion('# Stable\n', '# Stable\n', author)).toBeNull()
+  })
+
+  it('captures inline formatting as a portable format replacement', () => {
+    const accepted = '# Result\n\nGrowth recovered.\n'
+    const draft = '# Result\n\nGrowth **recovered**.\n'
+    const difference = reviewTransformationDiff(accepted, draft, 'format')
+
+    expect(difference).toEqual({
+      start: accepted.indexOf('recovered'),
+      end: accepted.indexOf('recovered') + 'recovered'.length,
+      kind: 'format',
+      proposal: '**recovered**',
+    })
+    const captured = captureReviewSuggestion(accepted, draft, author, 'format')!
+    expect(captured.change).toMatchObject({ changeKind: 'format', proposal: '**recovered**' })
+    expect(projectPortableReviewSource(captured.document.source, { view: 'original' }).source?.trimEnd()).toBe(accepted.trimEnd())
+    expect(projectPortableReviewSource(captured.document.source, { view: 'final' }).source?.trimEnd()).toBe(draft.trimEnd())
+  })
+
+  it.each([
+    ['heading', 'Promote this paragraph.', '## Promote this paragraph.'],
+    ['list', 'List this paragraph.', '- List this paragraph.'],
+    ['quote', 'Quote this paragraph.', '> Quote this paragraph.'],
+  ])('expands a %s prefix edit to a complete structural line', (_label, acceptedLine, draftLine) => {
+    const accepted = `# Result\n\n${acceptedLine}\n\nTail.\n`
+    const draft = `# Result\n\n${draftLine}\n\nTail.\n`
+    const difference = reviewTransformationDiff(accepted, draft, 'structural')
+
+    expect(difference).toEqual({
+      start: accepted.indexOf(acceptedLine),
+      end: accepted.indexOf(acceptedLine) + acceptedLine.length,
+      kind: 'structural',
+      proposal: draftLine,
+    })
+    const captured = captureReviewSuggestion(accepted, draft, author, 'structural')!
+    expect(captured.change).toMatchObject({ changeKind: 'structural', proposal: draftLine })
+    expect(projectPortableReviewSource(captured.document.source, { view: 'original' }).source?.trimEnd()).toBe(accepted.trimEnd())
+    expect(projectPortableReviewSource(captured.document.source, { view: 'final' }).source?.trimEnd()).toBe(draft.trimEnd())
   })
 })

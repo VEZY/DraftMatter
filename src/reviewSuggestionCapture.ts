@@ -4,11 +4,21 @@ import {
   type ReviewChangeOperationResult,
   type ReviewChangeKind,
 } from './reviewOperations'
+import { parseReviewMarkup } from './reviewMarkup'
 
 export interface ReviewSuggestionDiff {
   start: number
   end: number
   kind: Extract<ReviewChangeKind, 'insert' | 'delete' | 'replace'>
+  proposal?: string
+}
+
+export type ReviewSuggestionIntent = 'text' | 'format' | 'structural'
+
+export interface ReviewTransformationDiff {
+  start: number
+  end: number
+  kind: ReviewChangeKind
   proposal?: string
 }
 
@@ -86,12 +96,57 @@ export function reviewSuggestionDiff(acceptedSource: string, draftSource: string
   return { start, end, kind: 'replace', proposal }
 }
 
+function lineStart(source: string, offset: number) {
+  return source.lastIndexOf('\n', Math.max(0, offset - 1)) + 1
+}
+
+function lineEnd(source: string, offset: number, manuscriptEnd: number) {
+  const newline = source.indexOf('\n', offset)
+  const end = newline < 0 || newline > manuscriptEnd ? manuscriptEnd : newline
+  return end > 0 && source[end - 1] === '\r' ? end - 1 : end
+}
+
+/**
+ * Formatting and block-structure commands often look like a point insertion
+ * in Markdown (for example, adding `## `). Anchor the complete affected source
+ * line instead so the portable record remains a semantic replacement and can
+ * be accepted or rejected without splitting Markdown syntax.
+ */
+export function reviewTransformationDiff(
+  acceptedSource: string,
+  draftSource: string,
+  intent: ReviewSuggestionIntent,
+): ReviewTransformationDiff | null {
+  const difference = reviewSuggestionDiff(acceptedSource, draftSource)
+  if (!difference || intent === 'text') return difference
+  if (intent === 'format' && difference.start !== difference.end && difference.proposal !== undefined) {
+    return { ...difference, kind: 'format' }
+  }
+
+  const acceptedEnd = parseReviewMarkup(acceptedSource).sectionStart ?? acceptedSource.length
+  const draftEnd = parseReviewMarkup(draftSource).sectionStart ?? draftSource.length
+  const start = lineStart(acceptedSource, difference.start)
+  const draftStart = lineStart(draftSource, difference.start)
+  const end = lineEnd(acceptedSource, difference.end, acceptedEnd)
+  const proposalOffset = difference.kind === 'delete'
+    ? difference.start
+    : difference.start + (difference.proposal?.length ?? 0)
+  const proposalEnd = lineEnd(draftSource, proposalOffset, draftEnd)
+  return {
+    start,
+    end,
+    kind: intent,
+    proposal: draftSource.slice(draftStart, proposalEnd),
+  }
+}
+
 export function captureReviewSuggestion(
   acceptedSource: string,
   draftSource: string,
   author: ReviewAuthorIdentity,
+  intent: ReviewSuggestionIntent = 'text',
 ): ReviewChangeOperationResult | null {
-  const difference = reviewSuggestionDiff(acceptedSource, draftSource)
+  const difference = reviewTransformationDiff(acceptedSource, draftSource, intent)
   if (!difference) return null
   return createReviewChange(acceptedSource, { ...difference, author })
 }

@@ -9,6 +9,10 @@ Paste over this sentence.
 Delete this sentence.
 
 Insert after this sentence.
+
+Format this phrase.
+
+Promote this paragraph.
 `
 
 async function reviewChangeCount(page: import('@playwright/test').Page) {
@@ -65,5 +69,26 @@ test.describe('DM-P4-02 rendered suggestion transactions', () => {
     await expect(manuscript.getByText('Delete this sentence.', { exact: true })).toBeVisible()
     await expect(manuscript.locator('.structured-editor-content p').filter({ hasText: 'Insert after this sentence.' })).toContainText('Insert after this sentence.')
     await expect(page.getByRole('complementary', { name: 'Review feedback' }).getByText('A carefully replaced')).toBeVisible()
+  })
+
+  test('captures toolbar formatting and block structure without changing accepted prose', async ({ page }) => {
+    const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
+
+    await manuscript.getByText('Format this phrase.', { exact: true }).selectText()
+    await page.getByRole('button', { name: 'Bold' }).click()
+    await waitForChangeCount(page, 1)
+
+    await manuscript.getByText('Promote this paragraph.', { exact: true }).selectText()
+    await page.getByLabel('Block style').selectOption('heading-2')
+    await waitForChangeCount(page, 2)
+
+    const portable = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')
+    expect(portable).toContain('data-kind="format"')
+    expect(portable).toContain('data-kind="structural"')
+    expect(portable).toContain('**Format this phrase.**')
+    expect(portable).toContain('## Promote this paragraph.')
+    await expect(manuscript.getByText('Format this phrase.', { exact: true })).toBeVisible()
+    await expect(manuscript.getByText('Format this phrase.', { exact: true })).not.toHaveCSS('font-weight', '700')
+    await expect(manuscript.getByText('Promote this paragraph.', { exact: true })).not.toHaveRole('heading')
   })
 })
