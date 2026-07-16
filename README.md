@@ -27,6 +27,20 @@ npm run release:verify
 
 The local MVP supports opening and creating `.md`/`.qmd` projects; deterministic, portable comments and suggestions; BibTeX/CSL JSON/RIS/EndNote citation intake; Crossref and local Zotero acquisition; explicit trusted execution with retained outputs; recovery history; native clean Markdown/HTML/print-PDF/DOCX exports; optional inert Pandoc/Quarto exports; rendered/source Git diffs; selected local checkpoints; and guarded branches and remotes.
 
+## Clean export CLI
+
+The build also produces a portable Node.js command at `dist-cli/draftmatter.js`. It uses the same review projector and inert native HTML renderer as the app and never executes manuscript code.
+
+```sh
+npm run build:cli
+node dist-cli/draftmatter.js render paper.qmd --view original -o original.qmd
+node dist-cli/draftmatter.js render paper.qmd --view final --select dm-change-id -o final.qmd
+node dist-cli/draftmatter.js render paper.qmd --view final --format html -o article.html
+node dist-cli/draftmatter.js review-report paper.qmd -o review-report.md
+```
+
+Final rendering exits with status `2` and writes no output when overlapping proposals still need a choice. The diagnostic lists every conflict and candidate; pass one `--select` ID from each conflict. Use `-` for standard input or output. Package managers that install this project’s `bin` entry expose the same command as `draftmatter`.
+
 Useful implementation notes:
 
 - [Performance and recovery budgets](./docs/performance-and-recovery.md)

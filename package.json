@@ -3,10 +3,17 @@
   "private": true,
   "version": "0.1.0",
   "type": "module",
+  "files": [
+    "dist-cli"
+  ],
+  "bin": {
+    "draftmatter": "dist-cli/draftmatter.js"
+  },
   "scripts": {
     "dev": "vite",
-    "build": "npm run build:collaboration && tsc -p tsconfig.app.json --noEmit && vite build",
+    "build": "npm run build:collaboration && npm run build:cli && tsc -p tsconfig.app.json --noEmit && vite build",
     "build:collaboration": "npm run check:service && vite build --config vite.service.config.ts && node scripts/copy-collaboration-assets.mjs",
+    "build:cli": "vite build --config vite.cli.config.ts",
     "collaboration:start": "node dist-service/main.js",
     "preview": "vite preview",
     "check": "tsc -p tsconfig.app.json --noEmit",
@@ -15,9 +22,10 @@
     "compliance:check": "node scripts/generate-compliance.mjs --verify",
     "release:verify": "node scripts/verify-release.mjs",
     "test": "vitest run src services",
+    "test:cli": "node scripts/verify-cli.mjs",
     "test:e2e": "playwright test",
     "test:e2e:update": "playwright test --update-snapshots",
-    "test:release": "npm run release:verify && npm run check && npm test && npm run test:e2e && npm run build && npm run compliance:check",
+    "test:release": "npm run release:verify && npm run check && npm test && npm run test:e2e && npm run build && npm run test:cli && npm run compliance:check",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build"
