@@ -18,3 +18,26 @@ test('opens a pre-filled portable comment from the manuscript context menu', asy
   await expect(composer.locator('input')).toHaveValue('Attach the review directly to this sentence.')
   await expect(composer.locator('textarea')).toBeFocused()
 })
+
+test('opens a pre-filled comment from a retained figure', async ({ page }) => {
+  const source = `# Figure comments
+
+<!-- dm-output:start cell="cell-growth" run="sha256:one" -->
+![Growth response over time](/fixtures/canopy-response.svg){#fig-growth}
+<!-- dm-output:end -->
+`
+  await page.addInitScript((portableSource) => {
+    localStorage.setItem('draftmatter.structured-source.v1', portableSource)
+    localStorage.setItem('draftmatter.structured-mode.v1', 'true')
+  }, source)
+  await page.goto('/')
+
+  await page.getByRole('img', { name: 'Growth response over time' }).click({ button: 'right' })
+  const menu = page.getByRole('menu', { name: 'Review selection' })
+  await expect(menu).toBeVisible()
+  await menu.getByRole('menuitem', { name: /Add comment/ }).click()
+
+  const composer = page.getByRole('group', { name: 'New comment' })
+  await expect(composer.locator('input')).toHaveValue('Growth response over time')
+  await expect(composer.locator('textarea')).toBeFocused()
+})

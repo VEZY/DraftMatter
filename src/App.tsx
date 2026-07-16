@@ -12,6 +12,7 @@ import { applyDraftCitationTransaction, applyDraftCodeTransaction, applyDraftTex
 import { downloadText, projectCurrentManuscriptSource, reviewedProjection } from './projections'
 import { sampleCitations } from './sampleCitations'
 import { initialDraft } from './sampleDraft'
+import { SAMPLE_INTRODUCTION_CONTINUATION, seedSampleIntroduction, upgradeSampleIntroduction } from './sampleWorkspace'
 import { LOCAL_DRAFT_KEY, readLocalDraft, readRecoverySnapshots, saveRecoverySnapshot, type RecoverySnapshot } from './storage'
 import type { CitationItem, CitationRecord, DocumentDiagnostic, DraftState, MarkupView, SuggestionStatus } from './types'
 import { queryZoteroLibrary, type ZoteroVersionStamp } from './zotero'
@@ -73,7 +74,6 @@ const LAST_PROJECT_ROOT_KEY = 'draftmatter.last-project-root.v1'
 const ZOTERO_VERSION_KEY = 'draftmatter.zotero-version.v1'
 const PRIMARY_EXECUTION_CELL = 'fig-canopy'
 const LEGACY_SAMPLE_CODE = 'weeks = [0, 2, 4, 6, 8, 10, 12]\ncontrol = [0, 8, 21, 39, 58, 76, 91]\ndrought = [0, 7, 19, 33, 47, 60, 72]\nplot_response(weeks, control, drought)'
-const SAMPLE_INTRODUCTION_CONTINUATION = 'Reproducible writing environments can shorten the path between an observation, its supporting analysis, and the claim that enters the literature. This manuscript keeps those elements close without exposing the mechanics during ordinary reading.'
 
 interface CommandPaletteEntry {
   id: string
@@ -258,7 +258,7 @@ function getInitialDraftState(): DraftState {
   const draft = getInitialDraft()
   const source = localStorage.getItem(STRUCTURED_SOURCE_KEY)
   const structuredMode = localStorage.getItem(STRUCTURED_MODE_KEY) === 'true'
-  return structuredMode && source ? parsePortableDocument(source, draft).draft : draft
+  return structuredMode && source ? parsePortableDocument(upgradeSampleIntroduction(source), draft).draft : seedSampleIntroduction(draft)
 }
 
 function getInitialZoteroVersion(): ZoteroVersionStamp {
@@ -499,15 +499,11 @@ function App() {
   const [selectedEnvironmentLanguage, setSelectedEnvironmentLanguage] = useState<ExecutionLanguage>('python')
   const [executionProviders, setExecutionProviders] = useState<Record<ExecutionLanguage, ExecutionProviderKind>>(() => executionProvidersFromProject())
   const [selectedKernelNames, setSelectedKernelNames] = useState<Partial<Record<ExecutionLanguage, string>>>({})
-  const [manuscriptSource, setManuscriptSource] = useState(() => localStorage.getItem(STRUCTURED_SOURCE_KEY) ?? reviewedProjection({
-    ...initialDraftState,
-    preservedSections: [
-      ...(initialDraftState.preservedSections ?? []),
-      ...((initialDraftState.preservedSections ?? []).some((section) => section.markdown === SAMPLE_INTRODUCTION_CONTINUATION)
-        ? []
-        : [{ after: 'introduction' as const, markdown: SAMPLE_INTRODUCTION_CONTINUATION }]),
-    ],
-  }))
+  const [manuscriptSource, setManuscriptSource] = useState(() => {
+    const saved = localStorage.getItem(STRUCTURED_SOURCE_KEY)
+    if (saved) return upgradeSampleIntroduction(saved)
+    return reviewedProjection(initialDraftState)
+  })
   const [structuredMode, setStructuredMode] = useState(true)
   const [structuredOutline, setStructuredOutline] = useState<StructuredOutlineItem[]>([])
   const [structuredReviewSelection, setStructuredReviewSelection] = useState<StructuredReviewSelection | null>(null)

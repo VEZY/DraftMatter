@@ -222,9 +222,13 @@ function semanticReviewTarget(view: EditorView, event: MouseEvent): StructuredRe
   let quote = ''
   view.state.doc.descendants((node) => {
     if (String(node.attrs.id ?? '') !== id) return true
+    const retainedOutputDescription = typeof node.attrs.markdown === 'string'
+      ? node.attrs.markdown.match(/!\[([^\]]+)\]\(/)?.[1] ?? node.attrs.markdown.replace(/<!--[^>]*-->/g, '').trim()
+      : undefined
     quote = [
       node.attrs.captionMarkdown,
       node.attrs.alt,
+      retainedOutputDescription,
       node.attrs.tex,
       node.attrs.contentMarkdown,
       node.attrs.code,

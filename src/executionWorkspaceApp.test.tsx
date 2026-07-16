@@ -33,6 +33,18 @@ const project: ProjectSnapshot = {
   bibliographies: [],
 }
 
+async function flushUntil(predicate: () => boolean, timeout = 2_000) {
+  const startedAt = Date.now()
+  while (!predicate()) {
+    if (Date.now() - startedAt > timeout) {
+      throw new Error('Timed out waiting for the execution workspace to render')
+    }
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 20))
+    })
+  }
+}
+
 describe('document execution workspace', () => {
   let container: HTMLDivElement
   let appRoot: ReturnType<typeof createRoot>
@@ -307,18 +319,14 @@ describe('document execution workspace', () => {
       },
     })
     appRoot = createRoot(container)
-    await act(async () => {
-      appRoot.render(<App />)
-      await new Promise((resolve) => window.setTimeout(resolve, 20))
-    })
+    await act(async () => appRoot.render(<App />))
+    await flushUntil(() => container.textContent?.includes('py-prepare') ?? false)
     vi.mocked(desktopHost.executeKernel).mockClear()
 
     const runPython = [...container.querySelectorAll<HTMLButtonElement>('.structured-execution-bar button')]
       .find((button) => button.textContent?.includes('Run Python'))!
-    await act(async () => {
-      runPython.click()
-      await new Promise((resolve) => window.setTimeout(resolve, 30))
-    })
+    await act(async () => runPython.click())
+    await flushUntil(() => Boolean(container.querySelector('[aria-labelledby="execution-environment-title"]')))
 
     expect(desktopHost.executeKernel).not.toHaveBeenCalled()
     const dialog = container.querySelector<HTMLElement>('[aria-labelledby="execution-environment-title"]')!

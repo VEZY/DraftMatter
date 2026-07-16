@@ -133,6 +133,15 @@ function sectionContent(sections: SourceSection[], key: Exclude<SectionKey, 'fro
   return fallback
 }
 
+function firstParagraph(content: string) {
+  const separator = /\n[ \t]*\n/.exec(content)
+  if (!separator) return { primary: content, remainder: '' }
+  return {
+    primary: content.slice(0, separator.index).trimEnd(),
+    remainder: content.slice(separator.index + separator[0].length).trim(),
+  }
+}
+
 export function parsePortableDocument(sourceInput: string, fallback: DraftState): ParsedPortableDocument {
   const originalSource = sourceInput
   const source = sourceInput.replaceAll('\r\n', '\n')
@@ -147,7 +156,9 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
 
   const { frontmatter, body } = parseFrontmatter(sourceWithoutReview, diagnostics)
   const sections = splitSections(body)
-  const intro = cleanCitation(sectionContent(sections, 'introduction', fallback.introduction, diagnostics))
+  const introductionContent = sectionContent(sections, 'introduction', fallback.introduction, diagnostics)
+  const introductionParts = firstParagraph(introductionContent)
+  const intro = cleanCitation(introductionParts.primary)
   const methods = parseMethods(sectionContent(sections, 'methods', fallback.methods, diagnostics), fallback, diagnostics)
   const modeledThread = reviewDocument.threads.find((thread) => thread.id === 'dm-comment-01')
   const modeledAliceChange = reviewDocument.changes.find((change) => change.id === 'dm-c01')
@@ -184,7 +195,10 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
     cellStatus: 'stale',
     lastSavedAt: new Date().toISOString(),
     frontmatterSource: frontmatter,
-    preservedSections: collectPreservedSections(sections),
+    preservedSections: [
+      ...collectPreservedSections(sections),
+      ...(introductionParts.remainder ? [{ after: 'introduction' as const, markdown: introductionParts.remainder }] : []),
+    ],
   }
 
   draft.portableEnvelope = {
