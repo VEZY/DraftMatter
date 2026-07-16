@@ -56,6 +56,7 @@ import { authorInitials, readUserSettings, renameLocalAuthor, saveUserSettings }
 import { parsePublicationMetadata, updatePublicationAuthors } from './publicationMetadata'
 import { insertPortableSection } from './manuscriptOutline'
 import { copyPlainText } from './clipboard'
+import { countWords, measurePortableManuscript } from './manuscriptMetrics'
 
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
 const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
@@ -1040,11 +1041,8 @@ function App() {
     return () => window.clearTimeout(timeout)
   }, [toast])
 
-  const words = useMemo(() => {
-    if (structuredMode) return manuscriptSource.replace(/---[\s\S]*?---|<!--[^]*?-->|```[^]*?```|:::::[^]*$/g, ' ').trim().split(/\s+/).filter(Boolean).length
-    const text = [draft.title, draft.abstract, draft.introduction, draft.methods, draft.resultsLead, draft.conclusion].join(' ')
-    return text.trim().split(/\s+/).length
-  }, [draft, manuscriptSource, structuredMode])
+  const manuscriptMetrics = useMemo(() => measurePortableManuscript(manuscriptSource), [manuscriptSource])
+  const words = manuscriptMetrics.words
 
   const cleanSourceResult = sourceTab === 'reviewed' ? null : projectCurrentManuscriptSource(manuscriptSource, draft, structuredMode, sourceTab)
   const sourceDiagnostics = cleanSourceResult && !cleanSourceResult.ok ? cleanSourceResult.diagnostics : []
@@ -1058,10 +1056,10 @@ function App() {
   const executionProjection = useMemo(() => cleanExecutionProjection(manuscriptSource), [manuscriptSource])
   const executionSource = executionProjection.ok ? executionProjection.source : manuscriptSource
   const reviewDocument = useMemo(() => parseReviewMarkup(manuscriptSource), [manuscriptSource])
-  const reviewQueue = useMemo(
-    () => buildReviewQueue(reviewDocument, reviewAuthorFilter === 'all' ? {} : { authorIds: [reviewAuthorFilter] }),
-    [reviewAuthorFilter, reviewDocument],
-  )
+  const allReviewQueue = useMemo(() => buildReviewQueue(reviewDocument), [reviewDocument])
+  const reviewQueue = useMemo(() => reviewAuthorFilter === 'all'
+    ? allReviewQueue
+    : allReviewQueue.filter((item) => item.authorId === reviewAuthorFilter), [allReviewQueue, reviewAuthorFilter])
   const structuredReviewProjection = useMemo(() => {
     if (!structuredMode || (markupView !== 'original' && markupView !== 'final')) return null
     return projectPortableReviewSource(manuscriptSource, { view: markupView })
@@ -1072,6 +1070,9 @@ function App() {
     && reviewDocument.threads.some((thread) => thread.id === 'dm-comment-01')
   const demoCommentAvailable = demoReviewAvailable && !draft.commentDeleted
   const openReviewCount = reviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
+  const totalOpenReviewCount = allReviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
+  const activeReviewPosition = Math.max(0, reviewQueue.findIndex((item) => item.id === activeReviewId))
+  const reviewLocationLabel = reviewQueue.length ? `REVIEW ${activeReviewPosition + 1} OF ${reviewQueue.length}` : 'NO FEEDBACK IN THIS VIEW'
   const reviewProposal = reviewAuthorFilter === 'dm-a01' || activeReviewId === 'dm-c01'
     ? 'alice'
     : reviewAuthorFilter === 'dm-a02' || activeReviewId === 'dm-c02'
@@ -2901,12 +2902,12 @@ function App() {
   }
   const legacyOutlineItems = [
     { id: 'title', title: draft.title, level: 1 },
-    { id: 'abstract', title: 'Abstract', level: 2, detail: '112' },
-    { id: 'introduction', title: 'Introduction', level: 2, detail: '146' },
-    { id: 'methods', title: 'Methods', level: 2, detail: '185' },
+    { id: 'abstract', title: 'Abstract', level: 2, detail: `${countWords(draft.abstract)}w` },
+    { id: 'introduction', title: 'Introduction', level: 2, detail: `${countWords(draft.introduction)}w` },
+    { id: 'methods', title: 'Methods', level: 2, detail: `${countWords(draft.methods)}w` },
     { id: 'code-cell', title: 'Canopy response', level: 3, detail: 'Fig. 1' },
-    { id: 'results', title: 'Results', level: 2, detail: '164' },
-    { id: 'conclusion', title: 'Conclusion', level: 2, detail: '88' },
+    { id: 'results', title: 'Results', level: 2, detail: `${countWords(draft.resultsLead)}w` },
+    { id: 'conclusion', title: 'Conclusion', level: 2, detail: `${countWords(draft.conclusion)}w` },
     { id: 'references', title: 'References', level: 2, detail: String(renderedBibliography.length) },
   ]
   const normalizedOutlineQuery = outlineQuery.trim().toLocaleLowerCase()
@@ -2991,10 +2992,10 @@ function App() {
             <span className="shortcut"><Icon name="command" size={12} />K</span>
           </button>
           <span className="topbar-divider" />
-          <button className={`review-toggle ${activeNav === 'review' ? 'active' : ''}`} onClick={showReviewPanel}>
+          <button className={`review-toggle ${activeNav === 'review' ? 'active' : ''}`} onClick={showReviewPanel} aria-label={`Review, ${totalOpenReviewCount} open item${totalOpenReviewCount === 1 ? '' : 's'}`}>
             <Icon name="message" size={16} />
             Review
-            <span className="count-badge">3</span>
+            {totalOpenReviewCount > 0 && <span className="count-badge" aria-hidden="true">{totalOpenReviewCount}</span>}
           </button>
           <div className="export-wrap">
             <button className="primary-button" onClick={() => setExportOpen((open) => !open)}>
@@ -3043,7 +3044,7 @@ function App() {
         <nav className="app-rail" aria-label="Workspace navigation">
           <div className="rail-items">
             <button className={activeNav === 'manuscript' ? 'active' : ''} onClick={() => setActiveNav('manuscript')} data-label="Manuscript" aria-label="Manuscript" aria-current={activeNav === 'manuscript' ? 'page' : undefined}><Icon name="document" /></button>
-            <button className={activeNav === 'review' ? 'active' : ''} onClick={showReviewPanel} data-label="Review" aria-label="Review, 3 open items" aria-current={activeNav === 'review' ? 'page' : undefined}><Icon name="message" /><span className="rail-notice">3</span></button>
+            <button className={activeNav === 'review' ? 'active' : ''} onClick={showReviewPanel} data-label="Review" aria-label={`Review, ${totalOpenReviewCount} open item${totalOpenReviewCount === 1 ? '' : 's'}`} aria-current={activeNav === 'review' ? 'page' : undefined}><Icon name="message" />{totalOpenReviewCount > 0 && <span className="rail-notice" aria-hidden="true">{totalOpenReviewCount}</span>}</button>
             <button className={activeNav === 'sources' ? 'active' : ''} onClick={() => { setActiveNav('sources'); openCitationPicker() }} data-label="Sources" aria-label="Sources" aria-current={activeNav === 'sources' ? 'page' : undefined}><Icon name="book" /></button>
             <button className={activeNav === 'history' ? 'active' : ''} onClick={() => setActiveNav('history')} data-label="History" aria-label="History" aria-current={activeNav === 'history' ? 'page' : undefined}><Icon name="history" /></button>
           </div>
@@ -3479,8 +3480,8 @@ function App() {
           )}
 
           <div className="editor-statusbar">
-            <span><Icon name="eye" size={14} /> Page 1 of 3</span>
-            <span>{words} words · 4 min read</span>
+            <span><Icon name="document" size={14} /> {manuscriptMetrics.headings} heading{manuscriptMetrics.headings === 1 ? '' : 's'}</span>
+            <span>{words} word{words === 1 ? '' : 's'} · {manuscriptMetrics.readingMinutes} min read</span>
             <span><Icon name="clock" size={14} /> Autosave on</span>
           </div>
         </main>
@@ -3528,7 +3529,7 @@ function App() {
             </div>
 
             <div className="review-scroll">
-              <div className="review-location"><span>RESULTS · PARAGRAPH 1</span></div>
+              <div className="review-location"><span>{reviewLocationLabel}</span></div>
 
               {demoReviewAvailable && (reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a01' || reviewAuthorFilter === 'dm-a02') && <>
               <div className="conflict-card">

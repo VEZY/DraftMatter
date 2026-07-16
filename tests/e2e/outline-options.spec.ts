@@ -38,6 +38,8 @@ test.describe('DM-P1-06 manuscript outline', () => {
     const outline = page.getByRole('complementary', { name: 'Manuscript outline' })
     const tree = outline.locator('.outline-tree')
     await expect(tree.getByText('Diagnostics', { exact: true })).toBeVisible()
+    await expect(page.locator('.editor-statusbar')).toContainText('6 headings')
+    await expect(page.locator('.editor-statusbar')).toContainText('22 words · 1 min read')
 
     await outline.getByRole('button', { name: 'Outline options' }).click()
     const options = page.getByRole('dialog', { name: 'Outline display options' })

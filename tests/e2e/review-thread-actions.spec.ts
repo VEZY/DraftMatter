@@ -13,14 +13,23 @@ test.describe('DM-P4-01 review thread actions', () => {
   test('removes a sample comment from the active queue and reopens its deleted audit record', async ({ page }) => {
     await page.goto('/')
     const review = page.getByRole('complementary', { name: 'Review feedback' })
+    const topbar = page.locator('.topbar')
+    const rail = page.getByRole('navigation', { name: 'Workspace navigation' })
+    await expect(topbar.getByRole('button', { name: 'Review, 3 open items' })).toBeVisible()
+    await expect(rail.getByRole('button', { name: 'Review, 3 open items' })).toBeVisible()
+    await expect(review).toContainText('REVIEW 1 OF 3')
     await expect(review.getByText('Can we quantify this increase in the main text?')).toBeVisible()
 
     await review.getByRole('button', { name: 'Remove' }).click()
     await expect(review.getByText('Can we quantify this increase in the main text?')).toHaveCount(0)
+    await expect(topbar.getByRole('button', { name: 'Review, 2 open items' })).toBeVisible()
+    await expect(rail.getByRole('button', { name: 'Review, 2 open items' })).toBeVisible()
+    await expect(review).toContainText('REVIEW 1 OF 2')
     await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toContain('data-status="deleted"')
 
     await page.reload()
     await expect(page.getByRole('complementary', { name: 'Review feedback' }).getByText('Can we quantify this increase in the main text?')).toHaveCount(0)
+    await expect(page.locator('.topbar').getByRole('button', { name: 'Review, 2 open items' })).toBeVisible()
     const portable = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')
     expect(portable).toContain('{#dm-comment-01 .dm-thread')
     expect(portable).toContain('data-status="deleted"')
