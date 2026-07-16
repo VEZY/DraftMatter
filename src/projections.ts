@@ -5,6 +5,17 @@ import { citationItemsForDraft, serializeCitationCluster } from './citation'
 
 const REVIEW_START = '::::: {.draftmatter-reviews .hidden data-schema="1"}'
 const REVIEW_END = ':::::'
+const REVIEW_AUTHOR_ID = /^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/
+
+function escapedReviewAttribute(value: string) {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replace(/[\r\n]/g, ' ')
+}
 
 export type CleanProjectionResult =
   | { ok: true; source: string; diagnostics: DocumentDiagnostic[] }
@@ -110,9 +121,17 @@ export function reviewedProjection(state: DraftState) {
   const replyBlocks = state.commentReplies
     .map((reply, index) => {
       const timestamp = state.commentReplyTimestamps?.[index]
-      return `~~~{.dm-message data-author="dm-a01"${timestamp ? ` data-at="${timestamp}"` : ''} data-index="${index + 1}"}\n${reply}\n~~~`
+      const candidateId = state.commentReplyAuthors?.[index]?.id
+      const authorId = candidateId && REVIEW_AUTHOR_ID.test(candidateId) ? candidateId : 'dm-a01'
+      return `~~~{.dm-message data-author="${authorId}"${timestamp ? ` data-at="${timestamp}"` : ''} data-index="${index + 1}"}\n${reply}\n~~~`
     })
     .join('\n')
+  const additionalAuthors = new Map<string, { name: string; createdAt?: string }>()
+  for (const [index, author] of (state.commentReplyAuthors ?? []).entries()) {
+    if (!REVIEW_AUTHOR_ID.test(author.id) || author.id === 'dm-a01' || author.id === 'dm-a02' || additionalAuthors.has(author.id)) continue
+    additionalAuthors.set(author.id, { name: author.name, createdAt: state.commentReplyTimestamps?.[index] })
+  }
+  const replyAuthorRecords = [...additionalAuthors].map(([id, author]) => `:::: {#${id} .dm-author data-name="${escapedReviewAttribute(author.name)}"${author.createdAt ? ` data-created="${author.createdAt}"` : ''}}\n::::`).join('\n')
   const aliceUpdated = state.reviewUpdatedAt?.alice ? ` data-updated="${state.reviewUpdatedAt.alice}"` : ''
   const marcusUpdated = state.reviewUpdatedAt?.marcus ? ` data-updated="${state.reviewUpdatedAt.marcus}"` : ''
   const commentUpdated = state.reviewUpdatedAt?.comment ? ` data-updated="${state.reviewUpdatedAt.comment}"` : ''
@@ -175,7 +194,7 @@ ${replyBlocks}
 ::::
 :::: {#dm-a02 .dm-author data-name="Marcus Chen" data-created="2026-07-15T09:04:00.000Z"}
 ::::
-${REVIEW_END}
+${replyAuthorRecords ? `${replyAuthorRecords}\n` : ''}${REVIEW_END}
 `
 }
 

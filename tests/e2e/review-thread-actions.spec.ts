@@ -23,7 +23,8 @@ test.describe('DM-P4-01 review thread actions', () => {
     await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toContain('data-index="1"')
     const replied = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')
     expect(replied).toMatch(/#dm-comment-01 \.dm-thread[^}]*data-updated="\d{4}-\d{2}-\d{2}T[^}]+Z"/)
-    expect(replied).toMatch(/\.dm-message data-author="dm-a01" data-at="\d{4}-\d{2}-\d{2}T[^"]+Z" data-index="1"/)
+    expect(replied).toMatch(/\.dm-message data-author="dm-local-author" data-at="\d{4}-\d{2}-\d{2}T[^"]+Z" data-index="1"/)
+    expect(replied.match(/data-name="Remi Vezy"/g)).toHaveLength(1)
 
     await comment.getByRole('button', { name: 'Resolve thread' }).click()
     await expect(comment.getByRole('button', { name: 'Reopen thread' })).toBeVisible()
@@ -33,6 +34,7 @@ test.describe('DM-P4-01 review thread actions', () => {
     const reopenedReview = page.getByRole('complementary', { name: 'Review feedback' })
     const reopenedComment = reopenedReview.locator('#review-item-dm-comment-01')
     await expect(reopenedComment).toContainText('The interval is now included.')
+    await expect(reopenedComment.getByText('You', { exact: true })).toBeVisible()
     await expect(reopenedComment.getByRole('button', { name: 'Reopen thread' })).toBeVisible()
     await reopenedComment.getByRole('button', { name: 'Reopen thread' }).click()
     await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toMatch(/#dm-comment-01 \.dm-thread[^}]*data-status="open"[^}]*data-updated=/)

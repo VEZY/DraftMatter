@@ -49,6 +49,10 @@ describe('portable draft source envelope', () => {
       marcusStatus: 'needs-rebase' as const,
       commentResolved: true,
       commentReplies: ['Added the interval.', 'The raw block is still present.'],
+      commentReplyAuthors: [
+        { id: 'dm-author-zoe-dupont-01', name: 'Zoé Dupont' },
+        { id: 'dm-author-zoe-dupont-01', name: 'Zoé Dupont' },
+      ],
       reviewUpdatedAt: {
         alice: '2026-07-15T15:00:00.000Z',
         marcus: '2026-07-15T15:00:00.000Z',
@@ -66,6 +70,8 @@ describe('portable draft source envelope', () => {
     expect(saved).toContain('data-status="accepted" data-created="2026-07-15T09:00:00.000Z" data-updated="2026-07-15T15:00:00.000Z"')
     expect(saved).toContain('data-status="resolved" data-created="2026-07-15T09:08:00.000Z" data-updated="2026-07-15T15:05:00.000Z"')
     expect(saved).toContain('data-at="2026-07-15T15:05:00.000Z" data-index="2"')
+    expect(saved.match(/data-name="Zoé Dupont"/g)).toHaveLength(1)
+    expect(saved).toContain('.dm-message data-author="dm-author-zoe-dupont-01" data-at="2026-07-15T15:04:00.000Z" data-index="1"')
     expect(saved).toContain('<!-- dm-output:start cell="fig-canopy" run="sha256:6f42f1a" -->')
     expect(reopened.draft).toMatchObject({
       title: edited.title,
@@ -80,6 +86,7 @@ describe('portable draft source envelope', () => {
       marcusStatus: 'needs-rebase',
       commentResolved: true,
       commentReplies: edited.commentReplies,
+      commentReplyAuthors: edited.commentReplyAuthors,
       reviewUpdatedAt: edited.reviewUpdatedAt,
       commentReplyTimestamps: edited.commentReplyTimestamps,
     })

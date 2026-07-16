@@ -2001,6 +2001,7 @@ function App() {
     const timestamp = new Date().toISOString()
     updateDraft({
       commentReplies: [...draft.commentReplies, reply.trim()],
+      commentReplyAuthors: [...(draft.commentReplyAuthors ?? []), { ...userSettings.author }],
       commentReplyTimestamps: [...(draft.commentReplyTimestamps ?? []), timestamp],
       reviewUpdatedAt: { ...draft.reviewUpdatedAt, comment: timestamp },
     })
@@ -3597,7 +3598,10 @@ function App() {
                 <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small><ReviewTimestamp value={demoCommentThread?.updatedAt ?? demoCommentThread?.createdAt} verb={demoCommentThread?.updatedAt ? 'Updated' : 'Created'} fallback="Portable comment" /></small></span></div>
                 <div className="comment-quote">“increased modestly”</div>
                 <p>Can we quantify this increase in the main text? The estimate is already in the supplement.</p>
-                {draft.commentReplies.map((message, index) => <div className="reply-message" key={`${message}-${index}`}><Avatar initials={currentAuthorInitials} tone="sage" small label={userSettings.author.name} /><p><strong>You</strong>{message}</p></div>)}
+                {draft.commentReplies.map((message, index) => {
+                  const author = draft.commentReplyAuthors?.[index] ?? { id: 'dm-a01', name: 'Alice Martin' }
+                  return <div className="reply-message" key={`${message}-${index}`}><Avatar initials={authorInitials(author.name)} tone="sage" small label={author.name} /><p><strong>{author.id === userSettings.author.id ? 'You' : author.name}</strong>{message}</p></div>
+                })}
                 {!draft.commentResolved && (
                   <div className="reply-box"><input value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addReply() }} placeholder="Reply…" aria-label="Reply to comment" /><button onClick={addReply} disabled={!reply.trim()} aria-label="Send reply"><Icon name="arrowRight" size={15} /></button></div>
                 )}

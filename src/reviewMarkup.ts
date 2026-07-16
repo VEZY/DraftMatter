@@ -489,14 +489,14 @@ function rewrittenMessageBlock(raw: string, block: ReturnType<typeof literalBloc
   return `${fence}${header.slice(marker.length)}${ending}${message}${ending}${fence}${ending}`
 }
 
-export function updateReviewThreadMessages(
-  document: ReviewMarkupDocument,
-  recordId: string,
-  messages: string[],
-  authorId = 'dm-a01',
-  timestamps: (string | undefined)[] = [],
-  updatedAt?: string,
-) {
+export interface ReviewThreadMessageUpdateOptions {
+  defaultAuthorId?: string
+  authorIds?: (string | undefined)[]
+  timestamps?: (string | undefined)[]
+  updatedAt?: string
+}
+
+export function updateReviewThreadMessages(document: ReviewMarkupDocument, recordId: string, messages: string[], options: ReviewThreadMessageUpdateOptions = {}) {
   const record = document.threads.find((candidate) => candidate.id === recordId)
   if (!record) throw new Error(`Review thread ${recordId} was not found.`)
   if (messages.length === 0) throw new Error(`Review thread ${recordId} must retain its opening message.`)
@@ -522,8 +522,8 @@ export function updateReviewThreadMessages(
     const added = messages.slice(blocks.length).map((message, offset) => {
       const fence = messageFence(message)
       const index = blocks.length + offset
-      const timestamp = timestamps[index] ? ` data-at="${timestamps[index]}"` : ''
-      return `${fence}{.dm-message data-author="${authorId}"${timestamp} data-index="${index}"}${lineEnding}${message}${lineEnding}${fence}${lineEnding}`
+      const timestamp = options.timestamps?.[index] ? ` data-at="${options.timestamps[index]}"` : ''
+      return `${fence}{.dm-message data-author="${options.authorIds?.[index] ?? options.defaultAuthorId ?? 'dm-a01'}"${timestamp} data-index="${index}"}${lineEnding}${message}${lineEnding}${fence}${lineEnding}`
     }).join('')
     patches.push({ start: blocks.at(-1)!.end, end: blocks.at(-1)!.end, replacement: added })
   }
@@ -533,5 +533,5 @@ export function updateReviewThreadMessages(
     updatedRaw = `${updatedRaw.slice(0, patch.start)}${patch.replacement}${updatedRaw.slice(patch.end)}`
   }
   const updated = parseReviewMarkup(`${document.source.slice(0, record.start)}${updatedRaw}${document.source.slice(record.end)}`)
-  return updatedAt ? updateReviewRecordTimestamp(updated, recordId, updatedAt) : updated
+  return options.updatedAt ? updateReviewRecordTimestamp(updated, recordId, options.updatedAt) : updated
 }

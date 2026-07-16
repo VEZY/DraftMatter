@@ -2,6 +2,7 @@ import { parseLosslessPortableSource } from './portableSource'
 import { parseReviewMarkup, serializeReviewMarkup, updateReviewRecordStatus, updateReviewThreadMessages } from './reviewMarkup'
 import type { DraftState, PortableDraftBaseline } from './types'
 import { citationItemsForDraft, sameCitationItems, serializeCitationCluster } from './citation'
+import { ensureReviewAuthor } from './reviewOperations'
 
 interface SourcePatch {
   start: number
@@ -178,15 +179,22 @@ export function materializePortableDraftSource(draft: DraftState) {
     if ([...review.changes, ...review.threads].some((record) => record.id === recordId)) review = updateReviewRecordStatus(review, recordId, next, updatedAt)
   }
   if (!sameStrings(baseline.commentReplies, draft.commentReplies)) {
+    for (const [index, author] of (draft.commentReplyAuthors ?? []).entries()) {
+      if (!author || review.authors.some((candidate) => candidate.id === author.id)) continue
+      review = ensureReviewAuthor(review, author, draft.commentReplyTimestamps?.[index]).document
+    }
     const thread = review.threads.find((candidate) => candidate.id === 'dm-comment-01')
     if (thread?.messages[0]) {
       review = updateReviewThreadMessages(
         review,
         thread.id,
         [thread.messages[0], ...draft.commentReplies],
-        'dm-a01',
-        [thread.messageRecords[0]?.timestamp, ...(draft.commentReplyTimestamps ?? [])],
-        draft.reviewUpdatedAt?.comment,
+        {
+          defaultAuthorId: 'dm-a01',
+          timestamps: [thread.messageRecords[0]?.timestamp, ...(draft.commentReplyTimestamps ?? [])],
+          updatedAt: draft.reviewUpdatedAt?.comment,
+          authorIds: [thread.messageRecords[0]?.authorId, ...(draft.commentReplyAuthors ?? []).map((author) => author.id)],
+        },
       )
     }
   }

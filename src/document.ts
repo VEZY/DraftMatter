@@ -152,6 +152,7 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
   const modeledThread = reviewDocument.threads.find((thread) => thread.id === 'dm-comment-01')
   const modeledAliceChange = reviewDocument.changes.find((change) => change.id === 'dm-c01')
   const modeledMarcusChange = reviewDocument.changes.find((change) => change.id === 'dm-c02')
+  const reviewAuthors = new Map(reviewDocument.authors.map((author) => [author.id, author.name]))
 
   const draft: DraftState = {
     ...fallback,
@@ -170,6 +171,10 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
     commentResolved: modeledThread?.status === 'resolved',
     commentDeleted: modeledThread?.status === 'deleted',
     commentReplies: modeledThread?.messages.slice(1) ?? [],
+    commentReplyAuthors: modeledThread?.messageRecords.slice(1).map((message) => {
+      const id = message.authorId ?? modeledThread.authorId
+      return { id, name: reviewAuthors.get(id) ?? id }
+    }) ?? [],
     reviewUpdatedAt: {
       ...(modeledAliceChange?.updatedAt ? { alice: modeledAliceChange.updatedAt } : {}),
       ...(modeledMarcusChange?.updatedAt ? { marcus: modeledMarcusChange.updatedAt } : {}),

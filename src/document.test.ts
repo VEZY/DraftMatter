@@ -14,6 +14,8 @@ describe('portable document core', () => {
       marcusStatus: 'needs-rebase',
       commentResolved: true,
       commentReplies: ['Added the estimate and confidence interval.'],
+      commentReplyAuthors: [{ id: 'dm-local-author', name: 'Remi Vezy' }],
+      commentReplyTimestamps: ['2026-07-15T15:10:00.000Z'],
     })
 
     const result = parsePortableDocument(source, initialDraft)
@@ -27,6 +29,8 @@ describe('portable document core', () => {
     expect(result.draft.marcusStatus).toBe('needs-rebase')
     expect(result.draft.commentResolved).toBe(true)
     expect(result.draft.commentReplies).toEqual(['Added the estimate and confidence interval.'])
+    expect(result.draft.commentReplyAuthors).toEqual([{ id: 'dm-local-author', name: 'Remi Vezy' }])
+    expect(result.draft.commentReplyTimestamps).toEqual(['2026-07-15T15:10:00.000Z'])
   })
 
   it('reopens a removed sample thread as deleted rather than silently restoring it', () => {

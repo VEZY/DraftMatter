@@ -31,6 +31,11 @@ export interface PortableDraftEnvelope {
   baseline: PortableDraftBaseline
 }
 
+export interface ReviewReplyAuthor {
+  id: string
+  name: string
+}
+
 export interface DraftState {
   title: string
   abstract: string
@@ -48,6 +53,7 @@ export interface DraftState {
   commentResolved: boolean
   commentDeleted: boolean
   commentReplies: string[]
+  commentReplyAuthors?: ReviewReplyAuthor[]
   reviewUpdatedAt?: Partial<Record<'alice' | 'marcus' | 'comment', string>>
   commentReplyTimestamps?: string[]
   cellStatus: 'current' | 'stale' | 'running' | 'failed' | 'interrupted' | 'environment-changed' | 'output-missing'

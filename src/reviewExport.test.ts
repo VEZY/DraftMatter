@@ -5,6 +5,8 @@ import originalGolden from './fixtures/golden/review-identical.original.md?raw'
 import { buildReviewExportBundle, renderReviewReport } from './reviewExport'
 import { decideReviewChange } from './reviewOperations'
 import { parseReviewMarkup } from './reviewMarkup'
+import { reviewedProjection } from './projections'
+import { initialDraft } from './sampleDraft'
 
 describe('clean review exports', () => {
   it('keeps unresolved Final unavailable while still producing Original and a separate report', () => {
@@ -46,5 +48,17 @@ describe('clean review exports', () => {
     const report = renderReviewReport(source)
     expect(report).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
     expect(report).not.toContain('<script>')
+  })
+
+  it('reports the persisted reply author rather than the thread creator', () => {
+    const report = renderReviewReport(reviewedProjection({
+      ...initialDraft,
+      commentReplies: ['The interval is now included.'],
+      commentReplyAuthors: [{ id: 'dm-local-author', name: 'Remi Vezy' }],
+      commentReplyTimestamps: ['2026-07-15T16:10:00.000Z'],
+    }))
+
+    expect(report).toContain('Message 1 — Marcus Chen · 2026-07-15T09:08:00.000Z')
+    expect(report).toContain('Message 2 — Remi Vezy · 2026-07-15T16:10:00.000Z')
   })
 })
