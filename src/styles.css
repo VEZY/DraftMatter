@@ -2412,6 +2412,34 @@ button:disabled {
   min-height: 0;
   overflow-y: auto;
   padding: 0 13px 18px;
+  position: relative;
+}
+
+[data-review-balloon][data-review-balloon-anchor] {
+  position: relative;
+  transform: translateY(var(--review-balloon-offset, 0px));
+  z-index: 1;
+}
+
+[data-review-balloon][data-review-balloon-aligned="true"]::after {
+  background: #9caf9f;
+  border-radius: 0 2px 2px 0;
+  content: "";
+  height: 22px;
+  left: 0;
+  opacity: 0.68;
+  position: absolute;
+  top: 13px;
+  width: 2px;
+  z-index: 2;
+}
+
+.review-alignment-spacer {
+  left: 0;
+  pointer-events: none;
+  position: absolute;
+  top: 0;
+  width: 1px;
 }
 
 .review-location {

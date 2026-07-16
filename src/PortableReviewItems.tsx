@@ -293,7 +293,7 @@ export function PortableReviewItems({
           const change = document.changes.find((candidate) => candidate.id === item.id)!
           const recovery = recoveryByAnchor.get(item.anchorId)
           return (
-            <div className={`conflict-card portable-review-card ${active ? 'active' : ''} ${selectedChangeIds.includes(item.id) ? 'batch-selected' : ''}`} id={`review-item-${item.id}`} key={item.id}>
+            <div className={`conflict-card portable-review-card ${active ? 'active' : ''} ${selectedChangeIds.includes(item.id) ? 'batch-selected' : ''}`} id={`review-item-${item.id}`} data-review-balloon={item.id} data-review-balloon-anchor={item.anchorId} key={item.id}>
               <div className="conflict-heading"><Icon name="branch" size={16} /><span>{item.conflictId ? 'Overlapping suggestion' : item.kind === 'unplaced-change' ? 'Unplaced suggestion' : 'Suggestion'}</span>{batchableChangeIds.includes(item.id) && <label className="review-batch-toggle" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedChangeIds.includes(item.id)} onChange={() => toggleBatchSelection(item.id)} aria-label={`Select suggestion by ${item.authorName}`} /><span>Select</span></label>}<small>{item.anchorId}</small></div>
               <button className={`proposal-option ${active ? 'selected' : ''}`} onClick={() => activate(item.id)}>
                 <span className="avatar avatar-blue avatar-small">{initials(item.authorName)}</span>
@@ -333,7 +333,7 @@ export function PortableReviewItems({
         const thread = document.threads.find((candidate) => candidate.id === item.id)!
         const recovery = recoveryByAnchor.get(item.anchorId)
         return (
-          <div className={`comment-card portable-review-card ${active ? 'active' : ''} ${thread.status === 'resolved' ? 'resolved' : ''}`} id={`review-item-${item.id}`} key={item.id} onClick={() => activate(item.id)}>
+          <div className={`comment-card portable-review-card ${active ? 'active' : ''} ${thread.status === 'resolved' ? 'resolved' : ''}`} id={`review-item-${item.id}`} data-review-balloon={item.id} data-review-balloon-anchor={item.anchorId} key={item.id} onClick={() => activate(item.id)}>
             <div className="comment-author"><span className="avatar avatar-clay avatar-small">{initials(item.authorName)}</span><span><strong>{item.authorName}</strong><small><ReviewTimestamp value={thread.updatedAt ?? thread.createdAt} verb={thread.updatedAt ? 'Updated' : 'Created'} fallback={item.kind === 'unplaced-thread' ? 'Location needs attention' : statusLabel(thread.status)} detail={item.kind === 'unplaced-thread' ? 'Location needs attention' : statusLabel(thread.status)} /></small></span></div>
             <div className="comment-quote">“{thread.anchorContext?.quote || item.excerpt}”</div>
             {thread.messageRecords.map((message, index) => index === 0

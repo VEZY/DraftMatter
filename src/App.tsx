@@ -41,6 +41,7 @@ import { buildExecutionAvailability, parseRetainedOutputs } from './retainedOutp
 import { RuntimeProvenance } from './RuntimeProvenance'
 import { discoverRuntimeInventory, healthyKernelsFor, type JupyterKernelProbe, type RuntimeInventory, type RuntimeLanguage } from './runtimeDiscovery'
 import { PortableReviewItems } from './PortableReviewItems'
+import { AlignedReviewRail } from './AlignedReviewRail'
 import { GitHistoryPanel } from './GitHistoryPanel'
 import { buildReviewQueue } from './reviewQueue'
 import { projectPortableReviewSource } from './reviewProjector'
@@ -499,6 +500,7 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bibliographyInputRef = useRef<HTMLInputElement>(null)
   const structuredEditorRef = useRef<StructuredManuscriptEditorHandle>(null)
+  const editorAreaRef = useRef<HTMLElement>(null)
   const draftRef = useRef(draft)
   const manuscriptSourceRef = useRef(manuscriptSource)
   const desktopSessionRef = useRef<DesktopSession | null>(null)
@@ -3355,7 +3357,7 @@ function App() {
           </aside>
         ))}
 
-        <main className="editor-area">
+        <main className="editor-area" ref={editorAreaRef}>
           <div className="format-toolbar" aria-label="Formatting toolbar">
             <label className="style-select">
               <span className="visually-hidden">Block style</span>
@@ -3649,18 +3651,18 @@ function App() {
               <p className={`reviewed-sentence markup-${markupView}`}>
                 The drought treatment{' '}
                 {markupView === 'original' ? (
-                  <span>did not substantially alter leaf expansion</span>
+                  <span data-review-anchor={demoAliceChange?.anchorId}>did not substantially alter leaf expansion</span>
                 ) : markupView === 'final' ? (
-                  <span>{activeReplacement}</span>
+                  <span data-review-anchor={demoAliceChange?.anchorId}>{activeReplacement}</span>
                 ) : markupView === 'simple' ? (
-                  <span className="simple-change" onClick={showReviewPanel}>{activeReplacement}</span>
+                  <span className="simple-change" data-review-anchor={demoAliceChange?.anchorId} onClick={showReviewPanel}>{activeReplacement}</span>
                 ) : (
                   <>
-                    <span className="deletion" onClick={showReviewPanel}>did not substantially alter leaf expansion</span>{' '}
-                    <span className="insertion" onClick={showReviewPanel}>{activeReplacement}</span>
+                    <span className="deletion" data-review-anchor={demoAliceChange?.anchorId} onClick={showReviewPanel}>did not substantially alter leaf expansion</span>{' '}
+                    <span className="insertion" data-review-anchor={demoAliceChange?.anchorId} onClick={showReviewPanel}>{activeReplacement}</span>
                   </>
                 )}
-                , while root allocation <mark onClick={showReviewPanel}>increased modestly</mark> <button className="citation-inline" onClick={() => setCitationOpen(true)}>{resultsCitationLabel}</button>.
+                , while root allocation <mark data-review-anchor={demoCommentThread?.anchorId} onClick={showReviewPanel}>increased modestly</mark> <button className="citation-inline" onClick={() => setCitationOpen(true)}>{resultsCitationLabel}</button>.
                 <button className="comment-anchor" onClick={showReviewPanel} aria-label="Open comment">1</button>
               </p>
               <p>
@@ -3742,11 +3744,11 @@ function App() {
               <Icon name="chevronDown" size={13} />
             </div>
 
-            <div className="review-scroll">
+            <AlignedReviewRail editorRef={editorAreaRef}>
               <div className="review-location"><span>{reviewLocationLabel}</span></div>
 
               {demoReviewAvailable && (reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a01' || reviewAuthorFilter === 'dm-a02') && <>
-              <div className="conflict-card">
+              <div className="conflict-card" data-review-balloon="dm-c01" data-review-balloon-anchor={demoAliceChange?.anchorId}>
                 <div className="conflict-heading"><Icon name="branch" size={16} /><span>{reviewAuthorFilter === 'all' ? '2 overlapping alternatives' : 'Filtered alternative'}</span><small>{reviewAuthorFilter === 'all' ? 'Compare one at a time' : 'Author filter active'}</small></div>
 
                 {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a01') &&
@@ -3777,7 +3779,7 @@ function App() {
               </div>
 
               {demoCommentAvailable && (reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
-              <div id="review-item-dm-comment-01" className={`comment-card ${activeReviewId === 'dm-comment-01' ? 'active' : ''} ${draft.commentResolved ? 'resolved' : ''}`} onClick={() => selectReviewItem('dm-comment-01')}>
+              <div id="review-item-dm-comment-01" className={`comment-card ${activeReviewId === 'dm-comment-01' ? 'active' : ''} ${draft.commentResolved ? 'resolved' : ''}`} data-review-balloon="dm-comment-01" data-review-balloon-anchor={demoCommentThread?.anchorId} onClick={() => selectReviewItem('dm-comment-01')}>
                 <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small><ReviewTimestamp value={demoCommentThread?.updatedAt ?? demoCommentThread?.createdAt} verb={demoCommentThread?.updatedAt ? 'Updated' : 'Created'} fallback="Portable comment" /></small></span></div>
                 <div className="comment-quote">“increased modestly”</div>
                 <p>Can we quantify this increase in the main text? The estimate is already in the supplement.</p>
@@ -3810,7 +3812,7 @@ function App() {
                 selectedTarget={structuredMode ? structuredReviewSelection : null}
                 onApply={applyPortableReviewSource}
               />
-            </div>
+            </AlignedReviewRail>
           </aside>
         )}
       </div>
