@@ -19,6 +19,7 @@ title: "Phase 1 article"
 First observation.
 `
 const editedSource = originalSource.replace('First observation.', 'Edited without source punctuation.')
+const externalSource = originalSource.replace('First observation.', 'Changed safely in another editor.')
 
 const project: ProjectSnapshot = {
   root: projectRoot,
@@ -158,5 +159,53 @@ describe('DM-P1-GATE local project workflow', () => {
     await act(async () => buttonWithText(container, 'Recovery history').click())
     const recoveryDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Recovery history"]')!
     expect(recoveryDialog.querySelectorAll('.recovery-list > button')).toHaveLength(2)
+  })
+
+  it('reloads a clean external edit without creating a conflict', async () => {
+    localStorage.setItem('draftmatter.last-project-root.v1', projectRoot)
+    await act(async () => appRoot.render(<App />))
+    await flush(50)
+
+    persistedSource = externalSource
+    persistedHash = 'document-external'
+    vi.mocked(desktopHost.documentStatus)
+      .mockResolvedValueOnce({ kind: 'modified', hash: persistedHash, modifiedMs: 2 })
+      .mockImplementation(async () => ({ kind: 'current', hash: persistedHash, modifiedMs: 2 }))
+    await flush(1_300)
+
+    expect(container.querySelector('.structured-manuscript-editor')?.textContent).toContain('Changed safely in another editor.')
+    expect(container.querySelector('.save-alert')).toBeNull()
+    expect(container.querySelector('.toast')?.textContent).toContain('Reloaded external changes')
+  })
+
+  it('snapshots the newest editor copy immediately before blocking on a save conflict', async () => {
+    localStorage.setItem('draftmatter.last-project-root.v1', projectRoot)
+    await act(async () => appRoot.render(<App />))
+    await flush(50)
+    vi.mocked(desktopHost.saveDocument).mockRejectedValueOnce({
+      kind: 'conflict',
+      message: 'paper.qmd changed outside DraftMatter.',
+    })
+
+    await act(async () => buttonWithText(container, 'View source').click())
+    await act(async () => buttonWithText(container, 'Edit source').click())
+    const sourceEditor = container.querySelector<HTMLTextAreaElement>('[aria-label="Reviewed portable source"]')!
+    const textareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    await act(async () => {
+      textareaSetter?.call(sourceEditor, editedSource)
+      sourceEditor.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => buttonWithText(container, 'Apply source').click())
+    await flush(1_000)
+
+    const alert = container.querySelector<HTMLElement>('.save-alert.conflict')!
+    expect(alert.textContent).toContain('A recovery snapshot of your editor copy was saved before disk reload.')
+    expect(readRecoverySnapshots(localStorage).some((snapshot) => snapshot.source === editedSource)).toBe(true)
+    expect(persistedSource).toBe(originalSource)
+
+    await act(async () => buttonWithText(alert, 'Reload disk version').click())
+    await flush(50)
+    expect(container.querySelector('.structured-manuscript-editor')?.textContent).toContain('First observation.')
+    expect(readRecoverySnapshots(localStorage).some((snapshot) => snapshot.source === editedSource)).toBe(true)
   })
 })

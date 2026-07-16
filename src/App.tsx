@@ -437,6 +437,7 @@ function App() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bibliographyInputRef = useRef<HTMLInputElement>(null)
   const structuredEditorRef = useRef<StructuredManuscriptEditorHandle>(null)
+  const draftRef = useRef(draft)
   const manuscriptSourceRef = useRef(manuscriptSource)
   const desktopSessionRef = useRef<DesktopSession | null>(null)
   const draftRevisionRef = useRef(0)
@@ -468,6 +469,7 @@ function App() {
   const executionActiveLanguageRef = useRef<ExecutionLanguage | undefined>(undefined)
   const executionActiveProviderRef = useRef<ExecutionProviderKind | undefined>(undefined)
   const crossrefSessionRef = useRef<CrossrefSearchSession | null>(null)
+  draftRef.current = draft
   if (!crossrefSessionRef.current) {
     crossrefSessionRef.current = new CrossrefSearchSession({
       search: (request, signal) => desktopHost.searchCrossref(request, signal),
@@ -485,6 +487,22 @@ function App() {
       if (!desktopSessionRef.current) setSaveState('error')
       return null
     }
+  }
+
+  const preserveDesktopConflict = (message: string) => {
+    const session = desktopSessionRef.current
+    const recoveryFilename = session?.path.split('/').at(-1) ?? filename
+    const recovered = writeRecoverySnapshot(
+      draftRef.current,
+      recoveryFilename,
+      manuscriptSourceRef.current,
+      new Date().toISOString(),
+    ) !== null
+    desktopSaveBlockedRef.current = true
+    setSaveProblem(`${message} ${recovered
+      ? 'A recovery snapshot of your editor copy was saved before disk reload.'
+      : 'Download your editor copy before reloading the disk version.'}`)
+    setSaveState('conflict')
   }
 
   const reviewProposal = reviewAuthorFilter === 'dm-a01' || activeReviewId === 'dm-c01'
@@ -709,11 +727,10 @@ function App() {
           if (draftRevisionRef.current === revision) setSaveState('saved')
         } catch (error) {
           const failure = normaliseHostFailure(error)
-          setSaveProblem(failure.message)
           if (failure.kind === 'conflict') {
-            desktopSaveBlockedRef.current = true
-            setSaveState('conflict')
+            preserveDesktopConflict(failure.message)
           } else {
+            setSaveProblem(failure.message)
             setSaveState('error')
           }
         }
@@ -725,12 +742,6 @@ function App() {
   useEffect(() => {
     if (!desktopSession) return
     let disposed = false
-
-    const preserveConflict = (message: string) => {
-      desktopSaveBlockedRef.current = true
-      setSaveProblem(message)
-      setSaveState('conflict')
-    }
 
     const checkExternalStatus = async () => {
       if (disposed || externalCheckRunningRef.current || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current) return
@@ -755,19 +766,19 @@ function App() {
           return
         }
         if (status.kind === 'deleted') {
-          preserveConflict(`${current.path} was deleted outside DraftMatter. Your editor copy has not been overwritten.`)
+          preserveDesktopConflict(`${current.path} was deleted outside DraftMatter. Your editor copy has not been overwritten.`)
           return
         }
 
         const dirty = draftRevisionRef.current !== current.savedRevision
         if (dirty) {
-          preserveConflict(`${current.path} changed outside DraftMatter while you had unsaved edits.`)
+          preserveDesktopConflict(`${current.path} changed outside DraftMatter while you had unsaved edits.`)
           return
         }
 
         const document = await desktopHost.readDocument(current.root, current.path)
         if (disposed || draftRevisionRef.current !== current.savedRevision) {
-          preserveConflict(`${current.path} changed outside DraftMatter while you were editing.`)
+          preserveDesktopConflict(`${current.path} changed outside DraftMatter while you were editing.`)
           return
         }
         const parsed = parsePortableDocument(document.content, initialDraft)
