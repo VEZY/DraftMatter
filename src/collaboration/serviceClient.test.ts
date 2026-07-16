@@ -70,4 +70,29 @@ describe('browser collaboration service client', () => {
     expect(request).toHaveBeenNthCalledWith(2, 'https://collab.example.org/api/workspaces/forest', expect.objectContaining({ method: 'DELETE' }))
     expect(request).toHaveBeenNthCalledWith(3, 'https://collab.example.org/api/workspaces/forest/deletion/cancel', expect.objectContaining({ method: 'POST' }))
   })
+
+  it('coordinates durable review approvals and notification reads through project-scoped routes', async () => {
+    const review = { id: 'review-1', workspaceId: 'forest', projectId: 'paper', requestedBy: 'owner', reviewerId: 'reviewer', message: 'Please verify.', status: 'open', createdAt: '2026-07-15T00:00:00.000Z' }
+    const notification = { id: 'notice-1', workspaceId: 'forest', projectId: 'paper', userId: 'reviewer', actorId: 'owner', reviewRequestId: 'review-1', kind: 'review-requested', createdAt: '2026-07-15T00:00:00.000Z' }
+    const request = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ participants: [{ userId: 'reviewer', role: 'commenter', displayName: 'Reviewer' }] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify(review), { status: 201 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...review, status: 'approved', decidedBy: 'reviewer' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ notifications: [notification] }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...notification, readAt: '2026-07-15T00:01:00.000Z' }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ ...review, status: 'cancelled', cancelledAt: '2026-07-15T00:02:00.000Z' }), { status: 200 }))
+    const client = new CollaborationServiceClient('https://collab.example.org', 'access-token', request)
+
+    await expect(client.listReviewParticipants('forest', 'paper')).resolves.toEqual([expect.objectContaining({ userId: 'reviewer' })])
+    await expect(client.createReviewRequest('forest', 'paper', { reviewerId: 'reviewer', message: 'Please verify.' })).resolves.toMatchObject({ status: 'open' })
+    await expect(client.decideReviewRequest('forest', 'paper', 'review-1', { decision: 'approved' })).resolves.toMatchObject({ status: 'approved' })
+    await expect(client.listProjectNotifications('forest', 'paper')).resolves.toEqual([expect.objectContaining({ kind: 'review-requested' })])
+    await expect(client.markProjectNotificationRead('forest', 'paper', 'notice-1')).resolves.toMatchObject({ readAt: '2026-07-15T00:01:00.000Z' })
+    await expect(client.cancelReviewRequest('forest', 'paper', 'review-1')).resolves.toMatchObject({ status: 'cancelled' })
+
+    expect(request).toHaveBeenNthCalledWith(2, 'https://collab.example.org/api/workspaces/forest/projects/paper/review-requests', expect.objectContaining({ method: 'POST', body: JSON.stringify({ reviewerId: 'reviewer', message: 'Please verify.' }) }))
+    expect(request).toHaveBeenNthCalledWith(3, 'https://collab.example.org/api/workspaces/forest/projects/paper/review-requests/review-1/decision', expect.objectContaining({ method: 'POST' }))
+    expect(request).toHaveBeenNthCalledWith(5, 'https://collab.example.org/api/workspaces/forest/projects/paper/notifications/notice-1/read', expect.objectContaining({ method: 'POST' }))
+    expect(request).toHaveBeenNthCalledWith(6, 'https://collab.example.org/api/workspaces/forest/projects/paper/review-requests/review-1', expect.objectContaining({ method: 'DELETE' }))
+  })
 })

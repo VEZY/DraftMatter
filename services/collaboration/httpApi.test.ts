@@ -21,6 +21,13 @@ function fixture() {
     listMembers: vi.fn(async () => []),
     listInvitations: vi.fn(async () => []),
     listAuditEvents: vi.fn(async () => []),
+    listReviewParticipants: vi.fn(async () => [{ userId: 'reviewer', role: 'commenter' as const, displayName: 'Review Researcher' }]),
+    listReviewRequests: vi.fn(async () => []),
+    createReviewRequest: vi.fn(async (_token: string, workspaceId: string, projectId: string, request: { reviewerId: string; message: string }) => ({ id: 'review-01', workspaceId, projectId, requestedBy: 'owner', reviewerId: request.reviewerId, message: request.message, status: 'open' as const, createdAt: '2026-07-15T00:00:00.000Z' })),
+    decideReviewRequest: vi.fn(async (_token: string, workspaceId: string, projectId: string, reviewRequestId: string, request: { decision: 'approved' | 'changes-requested'; note?: string }) => ({ id: reviewRequestId, workspaceId, projectId, requestedBy: 'owner', reviewerId: 'reviewer', message: 'Please review', status: request.decision, createdAt: '2026-07-15T00:00:00.000Z', decidedAt: '2026-07-15T01:00:00.000Z', decidedBy: 'reviewer', decisionNote: request.note })),
+    cancelReviewRequest: vi.fn(async (_token: string, workspaceId: string, projectId: string, reviewRequestId: string) => ({ id: reviewRequestId, workspaceId, projectId, requestedBy: 'owner', reviewerId: 'reviewer', message: 'Please review', status: 'cancelled' as const, createdAt: '2026-07-15T00:00:00.000Z', cancelledAt: '2026-07-15T01:00:00.000Z' })),
+    listProjectNotifications: vi.fn(async () => []),
+    markProjectNotificationRead: vi.fn(async (_token: string, workspaceId: string, projectId: string, notificationId: string) => ({ id: notificationId, workspaceId, projectId, userId: 'owner', actorId: 'reviewer', reviewRequestId: 'review-01', kind: 'review-approved' as const, createdAt: '2026-07-15T01:00:00.000Z', readAt: '2026-07-15T01:01:00.000Z' })),
     scheduleWorkspaceDeletion: vi.fn(async (_token: string, workspaceId: string) => ({ id: 'delete-01', workspaceId, requestedBy: 'owner', requestedAt: '2026-07-15T00:00:00.000Z', executeAfter: '2026-07-22T00:00:00.000Z', status: 'scheduled' as const })),
     getWorkspaceDeletion: vi.fn(async () => undefined),
     cancelWorkspaceDeletion: vi.fn(async () => ({ id: 'delete-01', status: 'cancelled' as const })),
@@ -107,6 +114,43 @@ describe('collaboration HTTP API', () => {
     const blocked = await api(request('/api/workspaces', { headers: { authorization: 'Bearer oidc-token', origin: 'https://evil.example.test' } }))
     expect(blocked.status).toBe(403)
     expect(blocked.headers.get('access-control-allow-origin')).toBeNull()
+  })
+
+  it('routes project review requests, decisions, and user notification acknowledgements', async () => {
+    const { api, workspaces } = fixture()
+    const headers = { authorization: 'Bearer oidc-token', 'content-type': 'application/json' }
+    const participants = await api(request('/api/workspaces/forest/projects/paper/review-participants', { headers }))
+    expect(participants.status).toBe(200)
+    expect(workspaces.listReviewParticipants).toHaveBeenCalledWith('oidc-token', 'forest', 'paper')
+    const listed = await api(request('/api/workspaces/forest/projects/paper/review-requests', { headers }))
+    expect(listed.status).toBe(200)
+    expect(workspaces.listReviewRequests).toHaveBeenCalledWith('oidc-token', 'forest', 'paper')
+    const notifications = await api(request('/api/workspaces/forest/projects/paper/notifications', { headers }))
+    expect(notifications.status).toBe(200)
+    expect(workspaces.listProjectNotifications).toHaveBeenCalledWith('oidc-token', 'forest', 'paper')
+    const created = await api(request('/api/workspaces/forest/projects/paper/review-requests', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ reviewerId: 'reviewer', message: 'Please verify the interpretation.' }),
+    }))
+    expect(created.status).toBe(201)
+    expect(workspaces.createReviewRequest).toHaveBeenCalledWith('oidc-token', 'forest', 'paper', { reviewerId: 'reviewer', message: 'Please verify the interpretation.' })
+
+    const decided = await api(request('/api/workspaces/forest/projects/paper/review-requests/review-01/decision', {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ decision: 'approved', note: 'Checked.' }),
+    }))
+    expect(decided.status).toBe(200)
+    expect(workspaces.decideReviewRequest).toHaveBeenCalledWith('oidc-token', 'forest', 'paper', 'review-01', { decision: 'approved', note: 'Checked.' })
+
+    const cancelled = await api(request('/api/workspaces/forest/projects/paper/review-requests/review-01', { method: 'DELETE', headers }))
+    expect(cancelled.status).toBe(200)
+    expect(workspaces.cancelReviewRequest).toHaveBeenCalledWith('oidc-token', 'forest', 'paper', 'review-01')
+
+    const read = await api(request('/api/workspaces/forest/projects/paper/notifications/notification-01/read', { method: 'POST', headers }))
+    expect(read.status).toBe(200)
+    expect(workspaces.markProjectNotificationRead).toHaveBeenCalledWith('oidc-token', 'forest', 'paper', 'notification-01')
   })
 
   it('returns the authenticated collaboration identity without exposing token claims', async () => {

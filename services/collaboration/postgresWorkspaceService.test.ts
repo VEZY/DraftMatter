@@ -105,6 +105,77 @@ describe('PostgreSQL workspace authorization', () => {
     await expect(limited.getProject('owner', 'forest', 'paper')).rejects.toMatchObject({ code: 'rate-limited', retryAfterMs: expect.any(Number) })
     await pool.end()
   })
+
+  it('persists tenant-scoped review approvals and user-scoped notifications atomically', async () => {
+    const { pool, service } = await database()
+    await service.createWorkspace('owner', { id: 'forest', name: 'Forest study' })
+    await service.createProject('owner', 'forest', { id: 'paper', name: 'Canopy response' })
+    await service.createWorkspace('other-owner', { id: 'other', name: 'Other lab' })
+    await service.createProject('other-owner', 'other', { id: 'private', name: 'Private paper' })
+
+    const reviewerInvite = await service.createInvitation('owner', 'forest', { role: 'commenter' })
+    await service.acceptInvitation('reviewer', reviewerInvite.token)
+    const viewerInvite = await service.createInvitation('owner', 'forest', { role: 'viewer' })
+    await service.acceptInvitation('viewer', viewerInvite.token)
+
+    expect(await service.listReviewParticipants('owner', 'forest', 'paper')).toEqual([
+      expect.objectContaining({ userId: 'owner', role: 'owner' }),
+      expect.objectContaining({ userId: 'reviewer', role: 'commenter' }),
+    ])
+    await expect(service.createReviewRequest('owner', 'forest', 'paper', { reviewerId: 'viewer', message: 'Please approve.' })).rejects.toMatchObject({ code: 'invalid-request' })
+
+    const created = await service.createReviewRequest('owner', 'forest', 'paper', {
+      reviewerId: 'reviewer',
+      message: 'Please verify the statistical interpretation.',
+    })
+    expect(created).toMatchObject({ requestedBy: 'owner', reviewerId: 'reviewer', status: 'open' })
+    await expect(service.createReviewRequest('owner', 'forest', 'paper', { reviewerId: 'reviewer', message: 'Duplicate' })).rejects.toMatchObject({ code: 'invalid-request' })
+    await expect(service.listReviewRequests('other-owner', 'forest', 'paper')).rejects.toMatchObject({ code: 'not-found' })
+    expect(await service.listReviewRequests('viewer', 'forest', 'paper')).toEqual([])
+
+    const reviewerNotifications = await service.listProjectNotifications('reviewer', 'forest', 'paper')
+    expect(reviewerNotifications).toEqual([expect.objectContaining({ kind: 'review-requested', actorId: 'owner' })])
+    expect(reviewerNotifications[0]).not.toHaveProperty('readAt')
+    await expect(service.markProjectNotificationRead('owner', 'forest', 'paper', reviewerNotifications[0].id)).rejects.toMatchObject({ code: 'not-found' })
+    const read = await service.markProjectNotificationRead('reviewer', 'forest', 'paper', reviewerNotifications[0].id)
+    const readAgain = await service.markProjectNotificationRead('reviewer', 'forest', 'paper', reviewerNotifications[0].id)
+    expect(readAgain.readAt).toBe(read.readAt)
+
+    await expect(service.decideReviewRequest('owner', 'forest', 'paper', created.id, { decision: 'approved' })).rejects.toMatchObject({ code: 'forbidden' })
+    const approved = await service.decideReviewRequest('reviewer', 'forest', 'paper', created.id, {
+      decision: 'approved',
+      note: 'The interpretation matches the reported interval.',
+    })
+    expect(approved).toMatchObject({ status: 'approved', decidedBy: 'reviewer', decisionNote: 'The interpretation matches the reported interval.' })
+    await expect(service.decideReviewRequest('reviewer', 'forest', 'paper', created.id, { decision: 'changes-requested' })).rejects.toMatchObject({ code: 'invalid-request' })
+
+    const cancellable = await service.createReviewRequest('owner', 'forest', 'paper', { reviewerId: 'reviewer', message: 'A second review pass.' })
+    await expect(service.cancelReviewRequest('viewer', 'forest', 'paper', cancellable.id)).rejects.toMatchObject({ code: 'forbidden' })
+    await expect(service.cancelReviewRequest('owner', 'forest', 'paper', cancellable.id)).resolves.toMatchObject({ status: 'cancelled', cancelledAt: expect.any(String) })
+
+    const restarted = new PostgresWorkspaceService({ pool, identity: new FixtureIdentity() })
+    expect(await restarted.listReviewRequests('owner', 'forest', 'paper')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: created.id, status: 'approved' }),
+      expect.objectContaining({ id: cancellable.id, status: 'cancelled' }),
+    ]))
+    const ownerNotifications = await restarted.listProjectNotifications('owner', 'forest', 'paper')
+    expect(ownerNotifications).toEqual([expect.objectContaining({ reviewRequestId: created.id, kind: 'review-approved', actorId: 'reviewer' })])
+    expect(await restarted.listProjectNotifications('reviewer', 'forest', 'paper')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ reviewRequestId: cancellable.id, kind: 'review-cancelled', actorId: 'owner' }),
+    ]))
+    const revokedReview = await restarted.createReviewRequest('owner', 'forest', 'paper', { reviewerId: 'reviewer', message: 'Review before revocation.' })
+    await restarted.revokeMember('owner', 'forest', 'reviewer')
+    expect(await restarted.listReviewRequests('owner', 'forest', 'paper')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ id: revokedReview.id, status: 'cancelled' }),
+    ]))
+    expect(await restarted.listProjectNotifications('owner', 'forest', 'paper')).toEqual(expect.arrayContaining([
+      expect.objectContaining({ reviewRequestId: revokedReview.id, kind: 'review-cancelled', actorId: 'owner' }),
+    ]))
+    await expect(restarted.listProjectNotifications('reviewer', 'forest', 'paper')).rejects.toMatchObject({ code: 'not-found' })
+    const audit = await restarted.listAuditEvents('owner', 'forest')
+    expect(audit.map((event) => event.action)).toEqual(expect.arrayContaining(['review.requested', 'review.approved', 'review.cancelled']))
+    await pool.end()
+  })
 })
 
 describe('signed entitlement webhook boundary', () => {

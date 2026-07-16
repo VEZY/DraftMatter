@@ -78,6 +78,43 @@ export interface WorkspaceAuditEvent {
   metadata?: Record<string, string>
 }
 
+export interface WorkspaceReviewParticipant {
+  userId: string
+  role: WorkspaceRole
+  displayName?: string
+}
+
+export type WorkspaceReviewRequestStatus = 'open' | 'approved' | 'changes-requested' | 'cancelled'
+
+export interface WorkspaceReviewRequest {
+  id: string
+  workspaceId: string
+  projectId: string
+  requestedBy: string
+  reviewerId: string
+  message: string
+  status: WorkspaceReviewRequestStatus
+  createdAt: string
+  decidedAt?: string
+  decidedBy?: string
+  decisionNote?: string
+  cancelledAt?: string
+}
+
+export type WorkspaceNotificationKind = 'review-requested' | 'review-approved' | 'review-changes-requested' | 'review-cancelled'
+
+export interface WorkspaceNotification {
+  id: string
+  workspaceId: string
+  projectId: string
+  userId: string
+  actorId: string
+  reviewRequestId: string
+  kind: WorkspaceNotificationKind
+  createdAt: string
+  readAt?: string
+}
+
 export interface CreatedInvitation {
   invitation: WorkspaceInvitation
   token: string

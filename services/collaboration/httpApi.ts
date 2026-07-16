@@ -10,7 +10,9 @@ import { WorkspaceAccessError } from '../../src/collaboration/workspaceService'
 type WorkspaceApi = Pick<PostgresWorkspaceService,
   'getCurrentIdentity' | 'createWorkspace' | 'listWorkspaces' | 'createProject' | 'getProject' | 'listProjects'
   | 'createInvitation' | 'acceptInvitation' | 'revokeInvitation' | 'revokeMember'
-  | 'listMembers' | 'listInvitations' | 'listAuditEvents'>
+  | 'listMembers' | 'listInvitations' | 'listAuditEvents'
+  | 'listReviewParticipants' | 'listReviewRequests' | 'createReviewRequest' | 'decideReviewRequest' | 'cancelReviewRequest'
+  | 'listProjectNotifications' | 'markProjectNotificationRead'>
   & Pick<PostgresWorkspaceService, 'scheduleWorkspaceDeletion' | 'getWorkspaceDeletion' | 'cancelWorkspaceDeletion'>
   & Pick<PostgresWorkspaceService, 'authorizeProject'>
 
@@ -227,6 +229,26 @@ export function createCollaborationHttpApi(options: CollaborationHttpApiOptions)
         if (request.method === 'GET' && parts.length === 4) return json(200, { projects: await options.workspaces.listProjects(token, workspaceId) }, headers)
         if (request.method === 'POST' && parts.length === 4) return json(201, await options.workspaces.createProject(token, workspaceId, await body(request, maximum)), headers)
         if (request.method === 'GET' && parts.length === 5) return json(200, await options.workspaces.getProject(token, workspaceId, parts[4]), headers)
+        if (parts.length === 6 && parts[5] === 'review-participants' && request.method === 'GET') {
+          return json(200, { participants: await options.workspaces.listReviewParticipants(token, workspaceId, parts[4]) }, headers)
+        }
+        if (parts[5] === 'review-requests') {
+          const projectId = parts[4]
+          if (parts.length === 6 && request.method === 'GET') return json(200, { requests: await options.workspaces.listReviewRequests(token, workspaceId, projectId) }, headers)
+          if (parts.length === 6 && request.method === 'POST') return json(201, await options.workspaces.createReviewRequest(token, workspaceId, projectId, await body(request, maximum)), headers)
+          const reviewRequestId = parts[6]
+          if (reviewRequestId && parts.length === 7 && request.method === 'DELETE') return json(200, await options.workspaces.cancelReviewRequest(token, workspaceId, projectId, reviewRequestId), headers)
+          if (reviewRequestId && parts.length === 8 && parts[7] === 'decision' && request.method === 'POST') {
+            return json(200, await options.workspaces.decideReviewRequest(token, workspaceId, projectId, reviewRequestId, await body(request, maximum)), headers)
+          }
+        }
+        if (parts[5] === 'notifications') {
+          const projectId = parts[4]
+          if (parts.length === 6 && request.method === 'GET') return json(200, { notifications: await options.workspaces.listProjectNotifications(token, workspaceId, projectId) }, headers)
+          if (parts.length === 8 && parts[7] === 'read' && request.method === 'POST') {
+            return json(200, await options.workspaces.markProjectNotificationRead(token, workspaceId, projectId, parts[6]), headers)
+          }
+        }
         if (parts.length === 6 && parts[5] === 'recoveries' && options.backups) {
           const projectId = parts[4]
           const authorization = await options.workspaces.authorizeProject(token, workspaceId, projectId, 'checkpoint')

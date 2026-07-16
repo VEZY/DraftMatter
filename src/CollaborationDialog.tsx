@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { CollaborationAccessPanel } from './CollaborationAccessPanel'
+import { CollaborationReviewPanel } from './CollaborationReviewPanel'
 import {
   CollaborationServiceClient,
   normalizeCollaborationServiceUrl,
@@ -332,6 +333,7 @@ export function CollaborationDialog({
               </div>
             </section>
             <div className="collaboration-note"><Icon name="check" size={16} /><span>Offline edits reconnect through Yjs. Incompatible review decisions pause checkpointing until they are explicitly resolved.</span></div>
+            {serviceClient && activeWorkspace && profile && <CollaborationReviewPanel client={serviceClient} workspace={activeWorkspace} projectId={projectId} currentUserId={profile.userId} />}
             {serviceClient && activeWorkspace?.role === 'owner' && profile && <CollaborationAccessPanel client={serviceClient} workspace={activeWorkspace} projectId={projectId} currentUserId={profile.userId} />}
             <div className={`collaboration-checkpoint ${uncheckpointed ? 'pending' : ''}`}>
               <span><strong>{checkpointMode === 'working-tree' ? 'Owner-controlled working tree' : 'Portable owner copy'}</strong><small>{checkpointMode === 'working-tree' ? `Write deterministic review state to ${checkpointTarget}. Git remains a separate explicit action.` : `Download deterministic review state as ${checkpointTarget}.`}</small></span>

@@ -4,8 +4,11 @@ import type {
   WorkspaceAuditEvent,
   WorkspaceInvitation,
   WorkspaceMembership,
+  WorkspaceNotification,
   WorkspaceProject,
   WorkspaceRecord,
+  WorkspaceReviewParticipant,
+  WorkspaceReviewRequest,
   WorkspaceRole,
 } from './workspaceService'
 
@@ -151,6 +154,34 @@ export class CollaborationServiceClient {
 
   createProject(workspaceId: string, request: { id: string; name: string }) {
     return this.call<WorkspaceProject>(`/api/workspaces/${encoded(workspaceId)}/projects`, { method: 'POST', body: JSON.stringify(request) })
+  }
+
+  async listReviewParticipants(workspaceId: string, projectId: string) {
+    return (await this.call<{ participants: WorkspaceReviewParticipant[] }>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/review-participants`)).participants
+  }
+
+  async listReviewRequests(workspaceId: string, projectId: string) {
+    return (await this.call<{ requests: WorkspaceReviewRequest[] }>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/review-requests`)).requests
+  }
+
+  createReviewRequest(workspaceId: string, projectId: string, request: { reviewerId: string; message: string }) {
+    return this.call<WorkspaceReviewRequest>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/review-requests`, { method: 'POST', body: JSON.stringify(request) })
+  }
+
+  decideReviewRequest(workspaceId: string, projectId: string, reviewRequestId: string, request: { decision: 'approved' | 'changes-requested'; note?: string }) {
+    return this.call<WorkspaceReviewRequest>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/review-requests/${encoded(reviewRequestId)}/decision`, { method: 'POST', body: JSON.stringify(request) })
+  }
+
+  cancelReviewRequest(workspaceId: string, projectId: string, reviewRequestId: string) {
+    return this.call<WorkspaceReviewRequest>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/review-requests/${encoded(reviewRequestId)}`, { method: 'DELETE' })
+  }
+
+  async listProjectNotifications(workspaceId: string, projectId: string) {
+    return (await this.call<{ notifications: WorkspaceNotification[] }>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/notifications`)).notifications
+  }
+
+  markProjectNotificationRead(workspaceId: string, projectId: string, notificationId: string) {
+    return this.call<WorkspaceNotification>(`/api/workspaces/${encoded(workspaceId)}/projects/${encoded(projectId)}/notifications/${encoded(notificationId)}/read`, { method: 'POST' })
   }
 
   acceptInvitation(token: string) {

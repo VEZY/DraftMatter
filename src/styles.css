@@ -4323,6 +4323,49 @@ kbd {
 .collaboration-checkpoint small { color: var(--muted); font-size: 10px; line-height: 1.45; }
 .collaboration-checkpoint button { flex: 0 0 auto; min-height: 34px; padding: 0 12px; border: 1px solid var(--sage-dark); border-radius: 7px; background: var(--sage-dark); color: #fff; font-size: 10px; font-weight: 700; }
 .collaboration-checkpoint button:disabled { border-color: #d8ddda; background: #f0f2f1; color: #8b9691; }
+.collaboration-review-panel { overflow: hidden; border: 1px solid #dce3df; border-radius: 9px; background: #fff; }
+.collaboration-review-toggle { display: flex; width: 100%; align-items: center; gap: 10px; padding: 12px 13px; border: 0; background: #f9fbfa; color: #587367; text-align: left; }
+.collaboration-review-toggle > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
+.collaboration-review-toggle strong { color: var(--ink); font-size: 10px; }
+.collaboration-review-toggle small { color: var(--muted); font-size: 9px; }
+.collaboration-review-toggle em { display: grid; min-width: 20px; height: 20px; place-items: center; border-radius: 10px; background: #e6efe9; color: #456857; font-size: 8px; font-style: normal; font-weight: 800; }
+.collaboration-review-toggle[aria-expanded="true"] > svg:last-child { transform: rotate(180deg); }
+.collaboration-review-body { display: flex; flex-direction: column; gap: 13px; padding: 14px; border-top: 1px solid #e5e9e7; }
+.collaboration-review-request-form { display: grid; grid-template-columns: minmax(150px, .65fr) 1fr auto; align-items: end; gap: 9px; padding: 10px; border-radius: 8px; background: #f5f8f6; }
+.collaboration-review-request-form textarea,
+.collaboration-review-decision textarea { width: 100%; resize: vertical; border: 1px solid #d8ddda; border-radius: 7px; outline: none; background: #fff; color: var(--ink); font: 10px/1.45 Inter, ui-sans-serif, sans-serif; padding: 8px 9px; }
+.collaboration-review-request-form textarea:focus,
+.collaboration-review-decision textarea:focus { border-color: #829d91; box-shadow: 0 0 0 3px rgba(97, 127, 115, .12); }
+.collaboration-review-request-form > button,
+.collaboration-review-decision button,
+.collaboration-review-cancel { min-height: 34px; padding: 0 10px; border: 1px solid #cfd8d3; border-radius: 6px; background: #fff; color: var(--ink); font-size: 9px; font-weight: 700; }
+.collaboration-review-request-form > button { border-color: var(--sage-dark); background: var(--sage-dark); color: #fff; }
+.collaboration-review-request-form > button:disabled { border-color: #d9dfdc; background: #eef1ef; color: #8b9590; }
+.collaboration-review-grid { display: grid; grid-template-columns: 1.15fr .85fr; gap: 12px; }
+.collaboration-review-grid > section { min-width: 0; }
+.collaboration-review-card { position: relative; margin-bottom: 7px; padding: 10px; border: 1px solid #e3e8e5; border-radius: 8px; background: #fff; }
+.collaboration-review-card.status-approved { border-color: #d6e2dc; background: #fbfdfc; }
+.collaboration-review-card.status-changes-requested { border-color: #eadfca; background: #fffdf9; }
+.collaboration-review-card.status-cancelled { opacity: .68; }
+.collaboration-review-card header { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.collaboration-review-card header > span { display: flex; min-width: 0; flex-direction: column; gap: 2px; }
+.collaboration-review-card header strong { color: var(--ink); font-size: 9px; }
+.collaboration-review-card header small { color: var(--muted); font-size: 7.5px; }
+.collaboration-review-card header i { flex: 0 0 auto; padding: 3px 6px; border-radius: 999px; background: #eef3f0; color: #5d7468; font-size: 7px; font-style: normal; font-weight: 750; }
+.collaboration-review-card > p { margin: 8px 0; color: #53615a; font-size: 9px; line-height: 1.5; }
+.collaboration-review-card blockquote { margin: 8px 0; padding: 6px 8px; border-left: 2px solid #aebfb7; background: #f7f9f8; color: #617069; font-size: 8px; line-height: 1.45; }
+.collaboration-review-decision { display: grid; gap: 6px; }
+.collaboration-review-decision > span { display: flex; justify-content: flex-end; gap: 5px; }
+.collaboration-review-decision button { min-height: 28px; }
+.collaboration-review-decision button.approve { display: inline-flex; align-items: center; gap: 4px; border-color: #739484; background: #eef5f1; color: #3f6855; }
+.collaboration-review-cancel { min-height: 27px; padding: 0; border: 0; background: transparent; color: #8b6a61; }
+.collaboration-notification { display: flex; width: 100%; align-items: flex-start; gap: 7px; margin-bottom: 6px; padding: 8px; border: 1px solid #e5e9e7; border-radius: 7px; background: #fff; color: #64736c; text-align: left; }
+.collaboration-notification.unread { border-color: #cedbd4; background: #f6faf7; color: #4d725f; }
+.collaboration-notification.read { opacity: .67; }
+.collaboration-notification > span { display: flex; min-width: 0; flex-direction: column; gap: 3px; }
+.collaboration-notification strong { color: var(--ink); font-size: 8px; line-height: 1.35; }
+.collaboration-notification small { color: var(--muted); font-size: 7px; }
+.collaboration-review-empty { margin: 0; padding: 10px; border: 1px dashed #dfe5e1; border-radius: 7px; color: var(--muted); font-size: 8px; line-height: 1.45; }
 .collaboration-access { overflow: hidden; border: 1px solid #dce2df; border-radius: 9px; background: #fff; }
 .collaboration-access-toggle { display: flex; width: 100%; align-items: center; gap: 10px; padding: 12px 13px; border: 0; background: #fafbfa; color: #587367; text-align: left; }
 .collaboration-access-toggle > span { display: flex; min-width: 0; flex: 1; flex-direction: column; gap: 2px; }
@@ -4701,6 +4744,8 @@ img.ProseMirror-separator { border: 0 !important; display: inline !important; he
   .collaboration-invite-row,
   .collaboration-invite-token,
   .collaboration-admin-grid,
+  .collaboration-review-request-form,
+  .collaboration-review-grid,
   .collaboration-people { grid-template-columns: 1fr; }
   .collaboration-service-fields { align-items: stretch; }
   .collaboration-discover { justify-self: start; }

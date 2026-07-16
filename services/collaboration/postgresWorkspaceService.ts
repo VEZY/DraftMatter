@@ -12,9 +12,14 @@ import {
   type WorkspaceAuditEvent,
   type WorkspaceInvitation,
   type WorkspaceMembership,
+  type WorkspaceNotification,
+  type WorkspaceNotificationKind,
   type WorkspaceProject,
   type WorkspaceRateLimit,
   type WorkspaceRecord,
+  type WorkspaceReviewParticipant,
+  type WorkspaceReviewRequest,
+  type WorkspaceReviewRequestStatus,
   type WorkspaceRole,
 } from '../../src/collaboration/workspaceService'
 import { PostgresEntitlementService } from './entitlements'
@@ -48,6 +53,39 @@ interface InvitationRow {
   accepted_at: Date | string | null
   accepted_by: string | null
   revoked_at: Date | string | null
+}
+
+interface ReviewParticipantRow {
+  user_id: string
+  role: WorkspaceRole
+  display_name: string | null
+}
+
+interface ReviewRequestRow {
+  id: string
+  workspace_id: string
+  project_id: string
+  requested_by: string
+  reviewer_id: string
+  message: string
+  status: WorkspaceReviewRequestStatus
+  created_at: Date | string
+  decided_at: Date | string | null
+  decided_by: string | null
+  decision_note: string | null
+  cancelled_at: Date | string | null
+}
+
+interface NotificationRow {
+  id: string
+  workspace_id: string
+  project_id: string
+  user_id: string
+  actor_id: string
+  review_request_id: string
+  kind: WorkspaceNotificationKind
+  created_at: Date | string
+  read_at: Date | string | null
 }
 
 interface PostgresWorkspaceServiceOptions {
@@ -89,6 +127,45 @@ function invitation(row: InvitationRow): WorkspaceInvitation {
     ...(row.accepted_at ? { acceptedAt: iso(row.accepted_at) } : {}),
     ...(row.accepted_by ? { acceptedBy: row.accepted_by } : {}),
     ...(row.revoked_at ? { revokedAt: iso(row.revoked_at) } : {}),
+  }
+}
+
+function reviewParticipant(row: ReviewParticipantRow): WorkspaceReviewParticipant {
+  return {
+    userId: row.user_id,
+    role: row.role,
+    ...(row.display_name ? { displayName: row.display_name } : {}),
+  }
+}
+
+function reviewRequest(row: ReviewRequestRow): WorkspaceReviewRequest {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    projectId: row.project_id,
+    requestedBy: row.requested_by,
+    reviewerId: row.reviewer_id,
+    message: row.message,
+    status: row.status,
+    createdAt: iso(row.created_at),
+    ...(row.decided_at ? { decidedAt: iso(row.decided_at) } : {}),
+    ...(row.decided_by ? { decidedBy: row.decided_by } : {}),
+    ...(row.decision_note ? { decisionNote: row.decision_note } : {}),
+    ...(row.cancelled_at ? { cancelledAt: iso(row.cancelled_at) } : {}),
+  }
+}
+
+function notification(row: NotificationRow): WorkspaceNotification {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    projectId: row.project_id,
+    userId: row.user_id,
+    actorId: row.actor_id,
+    reviewRequestId: row.review_request_id,
+    kind: row.kind,
+    createdAt: iso(row.created_at),
+    ...(row.read_at ? { readAt: iso(row.read_at) } : {}),
   }
 }
 
@@ -226,6 +303,27 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
     )
   }
 
+  private async notify(
+    client: PoolClient,
+    request: { workspaceId: string; projectId: string; userId: string; actorId: string; reviewRequestId: string; kind: WorkspaceNotificationKind },
+  ) {
+    await client.query(
+      `INSERT INTO draftmatter_notifications
+       (id, workspace_id, project_id, user_id, actor_id, review_request_id, kind, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+      [
+        safeId(`notification-${this.idFactory()}`, 'Notification ID'),
+        request.workspaceId,
+        request.projectId,
+        request.userId,
+        request.actorId,
+        request.reviewRequestId,
+        request.kind,
+        iso(this.clock()),
+      ],
+    )
+  }
+
   async createWorkspace(token: string, request: { id: string; name: string }) {
     const identity = await this.authenticate(token, 'write')
     const id = safeId(request.id, 'Workspace ID')
@@ -323,6 +421,191 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
     const access = await this.requireProjectAccess(this.pool, workspaceId, projectId, identity.userId, capability)
     if (capability !== 'read') await this.entitlements.assertWorkspaceWritable(workspaceId)
     return { userId: identity.userId, sessionId: identity.sessionId, role: access.membership.role, capability }
+  }
+
+  async listReviewParticipants(token: string, workspaceId: string, projectId: string) {
+    const identity = await this.authenticate(token, 'read')
+    await this.requireProjectAccess(this.pool, workspaceId, projectId, identity.userId, 'read')
+    const result = await this.pool.query<ReviewParticipantRow>(
+      `SELECT m.user_id, m.role, u.display_name
+       FROM draftmatter_memberships m
+       JOIN draftmatter_users u ON u.id = m.user_id
+       WHERE m.workspace_id = $1 AND m.revoked_at IS NULL
+         AND m.role IN ('owner', 'editor', 'commenter')
+       ORDER BY m.joined_at, m.user_id`,
+      [workspaceId],
+    )
+    return result.rows.map(reviewParticipant)
+  }
+
+  async listReviewRequests(token: string, workspaceId: string, projectId: string) {
+    const identity = await this.authenticate(token, 'read')
+    const access = await this.requireProjectAccess(this.pool, workspaceId, projectId, identity.userId, 'read')
+    const result = await this.pool.query<ReviewRequestRow>(
+      `SELECT id, workspace_id, project_id, requested_by, reviewer_id, message, status,
+              created_at, decided_at, decided_by, decision_note, cancelled_at
+       FROM draftmatter_review_requests
+       WHERE workspace_id = $1 AND project_id = $2
+         AND ($3 = 'owner' OR requested_by = $4 OR reviewer_id = $4)
+       ORDER BY created_at DESC, id DESC`,
+      [workspaceId, projectId, access.membership.role, identity.userId],
+    )
+    return result.rows.map(reviewRequest)
+  }
+
+  async createReviewRequest(token: string, workspaceId: string, projectId: string, request: { reviewerId: string; message: string }) {
+    const identity = await this.authenticate(token, 'write')
+    const reviewerId = safeId(request.reviewerId, 'Reviewer ID')
+    const message = request.message.trim()
+    if (!message || message.length > 1_000) throw new WorkspaceAccessError('invalid-request', 'Review request message must be between 1 and 1000 characters.')
+    if (reviewerId === identity.userId) throw new WorkspaceAccessError('invalid-request', 'Choose another workspace member as reviewer.')
+    return transaction(this.pool, async (client) => {
+      await this.requireProjectAccess(client, workspaceId, projectId, identity.userId, 'edit')
+      await this.entitlements.assertWorkspaceWritable(workspaceId, client)
+      const reviewer = await client.query<ReviewParticipantRow>(
+        `SELECT m.user_id, m.role, u.display_name
+         FROM draftmatter_memberships m JOIN draftmatter_users u ON u.id = m.user_id
+         WHERE m.workspace_id = $1 AND m.user_id = $2 AND m.revoked_at IS NULL FOR UPDATE`,
+        [workspaceId, reviewerId],
+      )
+      if (!reviewer.rows[0] || !roleAllows(reviewer.rows[0].role, 'comment')) {
+        throw new WorkspaceAccessError('invalid-request', 'Choose an active owner, editor, or commenter as reviewer.')
+      }
+      const existing = await client.query<{ id: string }>(
+        `SELECT id FROM draftmatter_review_requests
+         WHERE workspace_id = $1 AND project_id = $2 AND requested_by = $3 AND reviewer_id = $4 AND status = 'open'
+         FOR UPDATE`,
+        [workspaceId, projectId, identity.userId, reviewerId],
+      )
+      if (existing.rowCount) throw new WorkspaceAccessError('invalid-request', 'An open review request already exists for this reviewer.')
+      const id = safeId(`review-${this.idFactory()}`, 'Review request ID')
+      const createdAt = iso(this.clock())
+      let inserted: { rows: ReviewRequestRow[] }
+      try {
+        inserted = await client.query<ReviewRequestRow>(
+          `INSERT INTO draftmatter_review_requests
+           (id, workspace_id, project_id, requested_by, reviewer_id, message, created_at)
+           VALUES ($1, $2, $3, $4, $5, $6, $7)
+           RETURNING id, workspace_id, project_id, requested_by, reviewer_id, message, status,
+                     created_at, decided_at, decided_by, decision_note, cancelled_at`,
+          [id, workspaceId, projectId, identity.userId, reviewerId, message, createdAt],
+        )
+      } catch (error) {
+        if (isUniqueViolation(error)) throw new WorkspaceAccessError('invalid-request', 'An open review request already exists for this reviewer.')
+        throw error
+      }
+      await this.notify(client, { workspaceId, projectId, userId: reviewerId, actorId: identity.userId, reviewRequestId: id, kind: 'review-requested' })
+      await this.audit(client, workspaceId, identity.userId, 'review.requested', id, { projectId, reviewerId })
+      return reviewRequest(inserted.rows[0])
+    })
+  }
+
+  async decideReviewRequest(
+    token: string,
+    workspaceId: string,
+    projectId: string,
+    reviewRequestId: string,
+    request: { decision: 'approved' | 'changes-requested'; note?: string },
+  ) {
+    const identity = await this.authenticate(token, 'write')
+    const id = safeId(reviewRequestId, 'Review request ID')
+    if (!['approved', 'changes-requested'].includes(request.decision)) throw new WorkspaceAccessError('invalid-request', 'Review decision is invalid.')
+    const note = request.note?.trim() ?? ''
+    if (note.length > 2_000) throw new WorkspaceAccessError('invalid-request', 'Review decision note must not exceed 2000 characters.')
+    return transaction(this.pool, async (client) => {
+      await this.requireProjectAccess(client, workspaceId, projectId, identity.userId, 'comment')
+      await this.entitlements.assertWorkspaceWritable(workspaceId, client)
+      const current = await client.query<ReviewRequestRow>(
+        `SELECT id, workspace_id, project_id, requested_by, reviewer_id, message, status,
+                created_at, decided_at, decided_by, decision_note, cancelled_at
+         FROM draftmatter_review_requests
+         WHERE workspace_id = $1 AND project_id = $2 AND id = $3 FOR UPDATE`,
+        [workspaceId, projectId, id],
+      )
+      const review = current.rows[0]
+      if (!review) throw new WorkspaceAccessError('not-found', 'The review request was not found.')
+      if (review.reviewer_id !== identity.userId) throw new WorkspaceAccessError('forbidden', 'Only the assigned reviewer can decide this request.')
+      if (review.status !== 'open') throw new WorkspaceAccessError('invalid-request', 'This review request has already been decided or cancelled.')
+      const decidedAt = iso(this.clock())
+      const updated = await client.query<ReviewRequestRow>(
+        `UPDATE draftmatter_review_requests
+         SET status = $4, decided_at = $5, decided_by = $6, decision_note = $7
+         WHERE workspace_id = $1 AND project_id = $2 AND id = $3
+         RETURNING id, workspace_id, project_id, requested_by, reviewer_id, message, status,
+                   created_at, decided_at, decided_by, decision_note, cancelled_at`,
+        [workspaceId, projectId, id, request.decision, decidedAt, identity.userId, note || null],
+      )
+      await this.notify(client, {
+        workspaceId,
+        projectId,
+        userId: review.requested_by,
+        actorId: identity.userId,
+        reviewRequestId: id,
+        kind: request.decision === 'approved' ? 'review-approved' : 'review-changes-requested',
+      })
+      await this.audit(client, workspaceId, identity.userId, `review.${request.decision}`, id, { projectId, requestedBy: review.requested_by })
+      return reviewRequest(updated.rows[0])
+    })
+  }
+
+  async cancelReviewRequest(token: string, workspaceId: string, projectId: string, reviewRequestId: string) {
+    const identity = await this.authenticate(token, 'write')
+    const id = safeId(reviewRequestId, 'Review request ID')
+    return transaction(this.pool, async (client) => {
+      const access = await this.requireProjectAccess(client, workspaceId, projectId, identity.userId, 'read')
+      await this.entitlements.assertWorkspaceWritable(workspaceId, client)
+      const current = await client.query<ReviewRequestRow>(
+        `SELECT id, workspace_id, project_id, requested_by, reviewer_id, message, status,
+                created_at, decided_at, decided_by, decision_note, cancelled_at
+         FROM draftmatter_review_requests
+         WHERE workspace_id = $1 AND project_id = $2 AND id = $3 FOR UPDATE`,
+        [workspaceId, projectId, id],
+      )
+      const review = current.rows[0]
+      if (!review) throw new WorkspaceAccessError('not-found', 'The review request was not found.')
+      if (review.requested_by !== identity.userId && access.membership.role !== 'owner') {
+        throw new WorkspaceAccessError('forbidden', 'Only the requester or workspace owner can cancel this review request.')
+      }
+      if (review.status !== 'open') throw new WorkspaceAccessError('invalid-request', 'Only an open review request can be cancelled.')
+      const cancelledAt = iso(this.clock())
+      const updated = await client.query<ReviewRequestRow>(
+        `UPDATE draftmatter_review_requests SET status = 'cancelled', cancelled_at = $4
+         WHERE workspace_id = $1 AND project_id = $2 AND id = $3
+         RETURNING id, workspace_id, project_id, requested_by, reviewer_id, message, status,
+                   created_at, decided_at, decided_by, decision_note, cancelled_at`,
+        [workspaceId, projectId, id, cancelledAt],
+      )
+      await this.notify(client, { workspaceId, projectId, userId: review.reviewer_id, actorId: identity.userId, reviewRequestId: id, kind: 'review-cancelled' })
+      await this.audit(client, workspaceId, identity.userId, 'review.cancelled', id, { projectId, reviewerId: review.reviewer_id })
+      return reviewRequest(updated.rows[0])
+    })
+  }
+
+  async listProjectNotifications(token: string, workspaceId: string, projectId: string) {
+    const identity = await this.authenticate(token, 'read')
+    await this.requireProjectAccess(this.pool, workspaceId, projectId, identity.userId, 'read')
+    const result = await this.pool.query<NotificationRow>(
+      `SELECT id, workspace_id, project_id, user_id, actor_id, review_request_id, kind, created_at, read_at
+       FROM draftmatter_notifications
+       WHERE workspace_id = $1 AND project_id = $2 AND user_id = $3
+       ORDER BY created_at DESC, id DESC LIMIT 100`,
+      [workspaceId, projectId, identity.userId],
+    )
+    return result.rows.map(notification)
+  }
+
+  async markProjectNotificationRead(token: string, workspaceId: string, projectId: string, notificationId: string) {
+    const identity = await this.authenticate(token, 'write')
+    const id = safeId(notificationId, 'Notification ID')
+    await this.requireProjectAccess(this.pool, workspaceId, projectId, identity.userId, 'read')
+    const result = await this.pool.query<NotificationRow>(
+      `UPDATE draftmatter_notifications SET read_at = COALESCE(read_at, $5)
+       WHERE workspace_id = $1 AND project_id = $2 AND user_id = $3 AND id = $4
+       RETURNING id, workspace_id, project_id, user_id, actor_id, review_request_id, kind, created_at, read_at`,
+      [workspaceId, projectId, identity.userId, id, iso(this.clock())],
+    )
+    if (!result.rowCount) throw new WorkspaceAccessError('not-found', 'The notification was not found.')
+    return notification(result.rows[0])
   }
 
   async createInvitation(token: string, workspaceId: string, request: { role: Exclude<WorkspaceRole, 'owner'>; email?: string; expiresInMs?: number }): Promise<CreatedInvitation> {
@@ -424,6 +707,19 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
       )
       if (!current.rowCount) throw new WorkspaceAccessError('not-found', 'The workspace member was not found.')
       if (current.rows[0].role === 'owner') throw new WorkspaceAccessError('forbidden', 'The workspace owner cannot be revoked.')
+      const cancelledAt = iso(this.clock())
+      const cancelledReviews = await client.query<ReviewRequestRow>(
+        `UPDATE draftmatter_review_requests SET status = 'cancelled', cancelled_at = $3
+         WHERE workspace_id = $1 AND status = 'open' AND (requested_by = $2 OR reviewer_id = $2)
+         RETURNING id, workspace_id, project_id, requested_by, reviewer_id, message, status,
+                   created_at, decided_at, decided_by, decision_note, cancelled_at`,
+        [workspaceId, userId, cancelledAt],
+      )
+      for (const review of cancelledReviews.rows) {
+        const recipient = review.requested_by === userId ? review.reviewer_id : review.requested_by
+        await this.notify(client, { workspaceId, projectId: review.project_id, userId: recipient, actorId: identity.userId, reviewRequestId: review.id, kind: 'review-cancelled' })
+        await this.audit(client, workspaceId, identity.userId, 'review.cancelled', review.id, { projectId: review.project_id, reason: 'member-revoked' })
+      }
       await client.query(
         'UPDATE draftmatter_memberships SET revoked_at = $3 WHERE workspace_id = $1 AND user_id = $2',
         [workspaceId, userId, iso(this.clock())],
