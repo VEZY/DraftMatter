@@ -3317,19 +3317,16 @@ function App() {
           </article>
           ) : (
           <article className="manuscript" aria-label="Editable manuscript">
-            <div className="paper-meta">RESEARCH ARTICLE · PLANT ECOLOGY</div>
+            <div className="paper-meta">PORTABLE RESEARCH MANUSCRIPT · MARKDOWN / QUARTO</div>
             <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" />
-            <div className="authors">
-              <span><Avatar initials="RV" tone="sage" small /> Remi Vezy<sup>1</sup></span>
-              <span><Avatar initials="AM" tone="blue" small /> Alice Martin<sup>2</sup></span>
-              <button onClick={openPublicationAuthors}><Icon name="plus" size={13} /> Add author</button>
+            <div className="authors" aria-label="Publication authors">
+              {publicationAuthors.map((author, index) => <span key={`${author}-${index}`}><Avatar initials={authorInitials(author)} tone={index % 2 ? 'blue' : 'sage'} small label={author} /> {author}</span>)}
+              <button onClick={openPublicationAuthors}><Icon name={publicationAuthors.length ? 'users' : 'plus'} size={13} /> {publicationAuthors.length ? 'Manage authors' : 'Add author'}</button>
             </div>
-            <div className="affiliations"><sup>1</sup> CIRAD, UMR AMAP, Montpellier, France · <sup>2</sup> Wageningen University, Netherlands</div>
 
             <section id="abstract" className="abstract-block">
               <h2>Abstract</h2>
               <ManuscriptTextEditor value={draft.abstract} onChange={(abstract) => updateManuscriptText('abstract', abstract)} ariaLabel="Abstract" />
-              <div className="keywords"><strong>Keywords</strong> drought acclimation · plant architecture · reproducibility · phenotyping</div>
             </section>
 
             <section id="introduction">
@@ -3538,7 +3535,7 @@ function App() {
                 {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a01') &&
                 <button id="review-item-dm-c01" className={`proposal-option ${reviewProposal === 'alice' && activeReviewId !== 'dm-comment-01' ? 'selected' : ''}`} onClick={() => { setActiveReviewId('dm-c01'); updateDraft({ activeProposal: 'alice' }) }}>
                   <Avatar initials="AM" tone="blue" small />
-                  <span className="proposal-author"><strong>Alice Martin</strong><small>12 minutes ago</small></span>
+                  <span className="proposal-author"><strong>Alice Martin</strong><small>Portable suggestion</small></span>
                   <StatusPill status={draft.aliceStatus} />
                   <span className="proposal-copy"><del>did not substantially alter leaf expansion</del><ins>reduced leaf area by 18%</ins></span>
                 </button>}
@@ -3546,7 +3543,7 @@ function App() {
                 {(reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
                 <button id="review-item-dm-c02" className={`proposal-option ${reviewProposal === 'marcus' && activeReviewId !== 'dm-comment-01' ? 'selected' : ''}`} onClick={() => { setActiveReviewId('dm-c02'); updateDraft({ activeProposal: 'marcus' }) }}>
                   <Avatar initials="MC" tone="clay" small />
-                  <span className="proposal-author"><strong>Marcus Chen</strong><small>8 minutes ago</small></span>
+                  <span className="proposal-author"><strong>Marcus Chen</strong><small>Portable suggestion</small></span>
                   <StatusPill status={draft.marcusStatus} />
                   <span className="proposal-copy"><del>did not substantially alter leaf expansion</del><ins>lowered leaf expansion during the treatment period</ins></span>
                 </button>}
@@ -3564,7 +3561,7 @@ function App() {
 
               {demoCommentAvailable && (reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
               <div id="review-item-dm-comment-01" className={`comment-card ${activeReviewId === 'dm-comment-01' ? 'active' : ''} ${draft.commentResolved ? 'resolved' : ''}`} onClick={() => setActiveReviewId('dm-comment-01')}>
-                <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small>5 minutes ago</small></span></div>
+                <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small>Portable comment</small></span></div>
                 <div className="comment-quote">“increased modestly”</div>
                 <p>Can we quantify this increase in the main text? The estimate is already in the supplement.</p>
                 {draft.commentReplies.map((message, index) => <div className="reply-message" key={`${message}-${index}`}><Avatar initials={currentAuthorInitials} tone="sage" small label={userSettings.author.name} /><p><strong>You</strong>{message}</p></div>)}

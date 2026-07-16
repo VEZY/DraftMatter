@@ -1384,13 +1384,6 @@ button:disabled {
   font-size: 9px;
 }
 
-.affiliations {
-  color: var(--muted);
-  font-family: Inter, ui-sans-serif, sans-serif;
-  font-size: 8px;
-  line-height: 1.6;
-}
-
 .manuscript section {
   scroll-margin-top: 70px;
 }
@@ -1439,18 +1432,6 @@ button:disabled {
   color: #3d4642;
   font-size: 13.5px;
   line-height: 1.68;
-}
-
-.keywords {
-  color: var(--muted);
-  font-family: Inter, ui-sans-serif, sans-serif;
-  font-size: 8.5px;
-  line-height: 1.5;
-}
-
-.keywords strong {
-  color: #53605a;
-  margin-right: 7px;
 }
 
 .citation-chip,
