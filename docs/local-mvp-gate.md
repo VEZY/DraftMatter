@@ -33,6 +33,8 @@ The rendered DM-P1-03 manuscript path treats figure, table, equation, and sectio
 
 The native Git suite completes the remaining gate step in real temporary repositories: it creates a root checkpoint when needed, commits only selected paths, preserves unrelated staged and unstaged work, disables repository hooks/filesystem monitors, and exercises fetch/pull/push plus divergence against local bare remotes.
 
+The rendered DM-P4-01 comment path creates ordinary range comments and zero-width point comments before or after nearby selected text. Point comments emit one portable `data-edge="point"` marker, retain prefix/suffix recovery context, leave accepted prose unchanged, autosave, and reopen with their attribution and message intact. The shared review operations separately cover replies, resolve, reopen, audit-delete, external re-anchoring, and both LF and CRLF source.
+
 The rendered DM-P4-02 browser path switches a generic portable manuscript from Editing to Suggesting, then types a replacement, pastes a second replacement, deletes a selection, and inserts at a caret. The short grouping window emits exactly one attributed portable proposal per gesture, restores the unchanged accepted prose after each capture, and verifies the resulting replace/delete/insert records in the autosaved source.
 
 The rendered DM-P4-04 rebase path accepts one of two identical alternatives, opens the preserved `Needs rebase` proposal, and anchors revised wording to the accepted manuscript. The transaction materializes accepted decisions into the portable base once, marks old records `applied`/`rebased` for audit, preserves independent review anchors, appends a `rebased` decision, and leaves exactly one new open proposal linked by `data-rebased-from`.

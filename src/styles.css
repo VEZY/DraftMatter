@@ -2522,6 +2522,7 @@ button:disabled {
 }
 
 .portable-review-composer input,
+.portable-review-composer select,
 .portable-review-composer textarea {
   background: white;
   border: 1px solid var(--line-strong);
@@ -2531,6 +2532,14 @@ button:disabled {
   font-size: 9px;
   padding: 7px;
   resize: vertical;
+}
+
+.portable-review-composer select { appearance: auto; min-height: 30px; }
+
+.portable-point-note {
+  color: #68736d;
+  font-size: 7.5px;
+  line-height: 1.45;
 }
 
 .portable-review-composer > div {

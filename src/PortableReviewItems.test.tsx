@@ -31,6 +31,14 @@ async function input(element: HTMLInputElement | HTMLTextAreaElement, value: str
   })
 }
 
+async function select(element: HTMLSelectElement, value: string) {
+  await act(async () => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
+    setter?.call(element, value)
+    element.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+}
+
 describe('portable review panel items', () => {
   let container: HTMLDivElement
   let root: ReturnType<typeof createRoot>
@@ -204,6 +212,35 @@ describe('portable review panel items', () => {
     await click(button(composer, 'Add'))
 
     expect(latestSource).toMatch(/repeat first, \[\]\{#dm-[^}]+data-edge="start"[^}]*\}repeat\[\]\{#dm-[^}]+data-edge="end"[^}]*\} second\./)
+    expect(notices.at(-1)).toBe('Portable comment created')
+  })
+
+  it('creates a recoverable point comment after nearby selected text and offers either side', async () => {
+    const pointSource = '# Point comment\n\nMeasure canopy area weekly.\n'
+    await act(async () => root.render(
+      <PortableReviewItems
+        source={pointSource}
+        selectedTarget={{ quote: 'canopy area', occurrence: 0 }}
+        onApply={(next, message) => { latestSource = next; notices.push(message) }}
+      />,
+    ))
+
+    await click(button(container, 'New comment'))
+    const composer = container.querySelector('.portable-review-composer')!
+    expect([...composer.querySelectorAll<HTMLOptionElement>('select option')].map((option) => option.value)).toEqual(['range', 'point-before', 'point-after'])
+    await select(composer.querySelector('select')!, 'point-after')
+    await input(composer.querySelector('textarea')!, 'Add the sampling date here.')
+    await click(button(composer, 'Add'))
+
+    const parsed = parseReviewMarkup(latestSource)
+    const point = parsed.ranges.find((range) => range.anchorId === parsed.threads[0].anchorId)
+    expect(point).toMatchObject({ complete: true, start: expect.any(Number), end: expect.any(Number) })
+    expect(point?.start).toBe(point?.end)
+    expect(parsed.threads[0]).toMatchObject({
+      messages: ['Add the sampling date here.'],
+      anchorContext: { quote: '', prefix: expect.stringContaining('canopy area'), suffix: expect.stringContaining('weekly') },
+    })
+    expect(latestSource).toMatch(/canopy area\[\]\{#dm-[^}]+data-edge="point"[^}]*\} weekly/)
     expect(notices.at(-1)).toBe('Portable comment created')
   })
 })

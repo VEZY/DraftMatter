@@ -71,6 +71,7 @@ export function PortableReviewItems({
   const [reply, setReply] = useState('')
   const [problem, setProblem] = useState('')
   const [compose, setCompose] = useState<'comment' | 'suggestion' | null>(null)
+  const [commentAnchorMode, setCommentAnchorMode] = useState<'range' | 'point-before' | 'point-after'>('range')
   const [quote, setQuote] = useState('')
   const [selectedOccurrence, setSelectedOccurrence] = useState<number>()
   const [body, setBody] = useState('')
@@ -175,12 +176,16 @@ export function PortableReviewItems({
       setProblem(matches.length === 0 ? 'That quote was not found in the manuscript.' : 'That quote occurs more than once; use a longer selection.')
       return
     }
-    const start = selectedMatch ?? matches[0]
+    const matchedStart = selectedMatch ?? matches[0]
+    const point = commentAnchorMode === 'point-after' ? matchedStart + selected.length : matchedStart
+    const start = compose === 'comment' && commentAnchorMode !== 'range' ? point : matchedStart
+    const end = compose === 'comment' && commentAnchorMode !== 'range' ? point : matchedStart + selected.length
     try {
       const result = compose === 'comment'
-        ? createReviewThread(source, { start, end: start + selected.length, author: localAuthor, message: body.trim() })
-        : createReviewChange(source, { start, end: start + selected.length, author: localAuthor, kind: 'replace', proposal: body })
+        ? createReviewThread(source, { start, end, author: localAuthor, message: body.trim() })
+        : createReviewChange(source, { start, end, author: localAuthor, kind: 'replace', proposal: body })
       setCompose(null)
+      setCommentAnchorMode('range')
       setQuote('')
       setBody('')
       apply(result.document.source, compose === 'comment' ? 'Portable comment created' : 'Portable suggestion created')
@@ -294,14 +299,16 @@ export function PortableReviewItems({
       {compose && (
         <div className="portable-review-composer" ref={composerRef} role="group" aria-label={compose === 'comment' ? 'New comment' : 'New suggestion'}>
           <strong>{compose === 'comment' ? 'New comment' : 'Suggest replacement'}</strong>
-          <label><span>Exact manuscript text</span><input value={quote} onChange={(event) => { setQuote(event.target.value); setSelectedOccurrence(undefined) }} placeholder="Paste the selected text" /></label>
+          {compose === 'comment' && <label><span>Attach to</span><select value={commentAnchorMode} onChange={(event) => setCommentAnchorMode(event.target.value as typeof commentAnchorMode)}><option value="range">Selected text</option><option value="point-before">Point before nearby text</option><option value="point-after">Point after nearby text</option></select></label>}
+          <label><span>{compose === 'comment' && commentAnchorMode !== 'range' ? 'Exact nearby manuscript text' : 'Exact manuscript text'}</span><input value={quote} onChange={(event) => { setQuote(event.target.value); setSelectedOccurrence(undefined) }} placeholder={compose === 'comment' && commentAnchorMode !== 'range' ? 'Select text beside the comment point' : 'Paste the selected text'} /></label>
+          {compose === 'comment' && commentAnchorMode !== 'range' && <small className="portable-point-note">The comment is attached between characters; nearby text keeps that point recoverable after external edits.</small>}
           <label><span>{compose === 'comment' ? 'Comment' : 'Replacement'}</span><textarea value={body} onChange={(event) => setBody(event.target.value)} rows={3} /></label>
-          <div><button onClick={() => setCompose(null)}>Cancel</button><button className="primary-button" onClick={create}>Add</button></div>
+          <div><button onClick={() => { setCompose(null); setCommentAnchorMode('range') }}>Cancel</button><button className="primary-button" onClick={create}>Add</button></div>
         </div>
       )}
 
       <div className="review-panel-footer portable-review-footer">
-        <button onClick={() => { setCompose('comment'); setProblem(''); setQuote(selectedTarget?.quote ?? ''); setSelectedOccurrence(selectedTarget?.occurrence) }}><Icon name="message" size={15} /> New comment</button>
+        <button onClick={() => { setCompose('comment'); setCommentAnchorMode('range'); setProblem(''); setQuote(selectedTarget?.quote ?? ''); setSelectedOccurrence(selectedTarget?.occurrence) }}><Icon name="message" size={15} /> New comment</button>
         <button onClick={() => { setCompose('suggestion'); setProblem(''); setQuote(selectedTarget?.quote ?? ''); setSelectedOccurrence(selectedTarget?.occurrence) }}><Icon name="spark" size={15} /> Suggest edit</button>
         <span>{navigableQueue.length ? `${Math.max(1, activePosition + 1)} of ${navigableQueue.length}` : 'No review items'}</span>
         <button onClick={() => navigate('previous')} disabled={navigableQueue.length < 2} aria-label="Previous review item">↑</button>
