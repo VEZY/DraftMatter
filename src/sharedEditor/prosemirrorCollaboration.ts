@@ -24,6 +24,7 @@ export interface CollaborativeEditorUser {
 export interface CollaborativeEditorBinding {
   document: Y.Doc
   awareness: Awareness
+  user?: CollaborativeEditorUser
   publishPortableSource?: (source: string) => string | void
   review?: CollaborativeReviewBinding
 }

@@ -67,6 +67,7 @@ export class HocuspocusCollaborationClient {
     this.editorBinding = {
       document: collaboration.doc,
       awareness: collaboration.awareness,
+      user: { id: options.presence.userId, name: options.presence.name, color: options.presence.color ?? '#617f73' },
       publishPortableSource: (source) => this.publishPortableSource(source),
       review: new CollaborativeReviewBinding(collaboration, (source) => { this.lastPortableSource = source }),
     }

@@ -2,8 +2,10 @@
 
 import { act, createElement } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { CollaborativeDocument, createCollaborationCheckpoint } from './sharedEditor'
+import { Awareness } from 'y-protocols/awareness'
+import * as Y from 'yjs'
+import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest'
+import { CollaborativeDocument, createCollaborationCheckpoint, type CollaborativeEditorBinding } from './sharedEditor'
 import { reviewedProjection } from './projections'
 import { initialDraft } from './sampleDraft'
 
@@ -11,6 +13,10 @@ const source = reviewedProjection(initialDraft)
 const sharedSource = reviewedProjection({ ...initialDraft, title: 'Shared canopy revision' })
 const collaboration = CollaborativeDocument.fromPortableSource(sharedSource)
 const checkpoint = createCollaborationCheckpoint(collaboration)
+let editorDocument: Y.Doc
+let editorAwareness: Awareness
+let publishPortableSource: Mock<(source: string) => string>
+let editorBinding: CollaborativeEditorBinding
 
 vi.mock('./CollaborationDialog', () => ({
   CollaborationDialog: (props: {
@@ -20,6 +26,7 @@ vi.mock('./CollaborationDialog', () => ({
     onSessionStateChange: (active: boolean) => void
     onRoleChange: (role: 'owner' | 'editor' | 'commenter' | 'viewer' | null) => void
     onCheckpointStateChange: (pending: boolean) => void
+    onEditorBindingChange: (binding: CollaborativeEditorBinding | null) => void
     onCheckpoint: (value: typeof checkpoint) => Promise<void>
   }) => props.open ? createElement('div', { 'data-testid': 'collaboration-test-controls' },
     createElement('button', {
@@ -36,6 +43,8 @@ vi.mock('./CollaborationDialog', () => ({
         props.onSessionStateChange(true)
         props.onRoleChange('commenter')
         props.onStatus('connected')
+        props.onRemoteSource(sharedSource)
+        props.onEditorBindingChange(editorBinding)
       },
     }, 'Join as commenter'),
     createElement('button', {
@@ -73,6 +82,15 @@ describe('owner-controlled collaboration checkpoint', () => {
     localStorage.setItem('draftmatter.last-project-root.v1', rootPath)
     previousAvailability = desktopHost.available
     desktopHost.available = true
+    editorDocument = new Y.Doc()
+    editorAwareness = new Awareness(editorDocument)
+    publishPortableSource = vi.fn((nextSource: string) => nextSource.replace('Shared browser reply', 'Canonical shared browser reply'))
+    editorBinding = {
+      document: editorDocument,
+      awareness: editorAwareness,
+      user: { id: 'commenter', name: 'Casey Reviewer', color: '#617f73' },
+      publishPortableSource,
+    }
     vi.spyOn(desktopHost, 'openProject').mockResolvedValue(project)
     vi.spyOn(desktopHost, 'readDocument').mockResolvedValue({ path: 'paper.qmd', content: source, hash: 'document-old', modifiedMs: 1 })
     vi.spyOn(desktopHost, 'readCitationLock').mockResolvedValue({ path: '.draftmatter/citations.lock.json', content: '{"schemaVersion":1,"entries":[]}\n', hash: 'lock-old', modifiedMs: 1 })
@@ -92,8 +110,10 @@ describe('owner-controlled collaboration checkpoint', () => {
   })
 
   afterEach(async () => {
-    collaboration.destroy()
     await act(async () => appRoot.unmount())
+    collaboration.destroy()
+    editorAwareness.destroy()
+    editorDocument.destroy()
     desktopHost.available = previousAvailability
     vi.restoreAllMocks()
     container.remove()
@@ -134,6 +154,18 @@ describe('owner-controlled collaboration checkpoint', () => {
     expect(container.textContent).toContain('New comment')
     expect(container.textContent).not.toContain('Suggest edit')
     expect(container.querySelector('.review-actions')).toBeNull()
+
+    await act(async () => container.querySelector<HTMLButtonElement>('#review-item-dm-comment-01')!.click())
+    const reply = container.querySelector<HTMLInputElement>('input[aria-label^="Reply to"]')!
+    await act(async () => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
+      setter?.call(reply, 'Shared browser reply')
+      reply.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => container.querySelector<HTMLButtonElement>('.reply-box button')!.click())
+    expect(publishPortableSource).toHaveBeenCalledWith(expect.stringContaining('Shared browser reply'))
+    expect(publishPortableSource).toHaveBeenCalledWith(expect.stringContaining('data-author="commenter"'))
+    expect(container.textContent).toContain('Canonical shared browser reply')
 
     await act(async () => [...controls.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Join as viewer')!.click())
     expect(container.querySelector('.suggestion-mode-control')?.textContent).toContain('Read-only')

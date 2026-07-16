@@ -544,6 +544,9 @@ function App() {
   const canCommentReview = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.comment)
   const canSuggestReview = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.suggest)
   const canDecideReview = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.decide)
+  const activeReviewAuthor = collaborativeEditorBinding?.user
+    ? { id: collaborativeEditorBinding.user.id, name: collaborativeEditorBinding.user.name }
+    : userSettings.author
   draftRef.current = draft
   if (!crossrefSessionRef.current) {
     crossrefSessionRef.current = new CrossrefSearchSession({
@@ -647,7 +650,7 @@ function App() {
   const activeCitationRecord = citations.find((record) => record.citekey === activeCitationItem?.citekey)
   const activeZoteroItemKey = activeCitationRecord?.sourceIdentity?.provider === 'zotero' ? activeCitationRecord.sourceIdentity.itemKey : undefined
   const activeCitationBadge = citationSourceBadge(activeCitationRecord)
-  const currentAuthorInitials = authorInitials(userSettings.author.name)
+  const currentAuthorInitials = authorInitials(activeReviewAuthor.name)
   const publicationAuthors = useMemo(() => parsePublicationMetadata(manuscriptSource).authors, [manuscriptSource])
 
   const openSettings = () => {
@@ -1188,7 +1191,7 @@ function App() {
   const demoAliceChange = reviewDocument.changes.find((change) => change.id === 'dm-c01')
   const demoMarcusChange = reviewDocument.changes.find((change) => change.id === 'dm-c02')
   const demoCommentThread = reviewDocument.threads.find((thread) => thread.id === 'dm-comment-01')
-  const demoReviewAvailable = Boolean(demoAliceChange && demoMarcusChange && demoCommentThread)
+  const demoReviewAvailable = !collaborationSessionActive && Boolean(demoAliceChange && demoMarcusChange && demoCommentThread)
   const demoCommentAvailable = demoReviewAvailable && !draft.commentDeleted
   const openReviewCount = reviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
   const totalOpenReviewCount = allReviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
@@ -1344,8 +1347,9 @@ function App() {
 
   const applySourceEditing = () => {
     if (!canEditManuscript) return
-    const parsed = parsePortableDocument(sourceBuffer, initialDraft)
-    replaceManuscriptSource(sourceBuffer)
+    const nextSource = collaborativeEditorBinding?.publishPortableSource?.(sourceBuffer) ?? sourceBuffer
+    const parsed = parsePortableDocument(nextSource, initialDraft)
+    replaceManuscriptSource(nextSource)
     markDraftChanged()
     commitDraftHistory(parsed.draft)
     setDiagnostics(parsed.diagnostics)
@@ -2219,8 +2223,9 @@ function App() {
   }
 
   const applyPortableReviewSource = (source: string, message: string) => {
-    const parsed = parsePortableDocument(source, initialDraft)
-    replaceManuscriptSource(source)
+    const nextSource = collaborativeEditorBinding?.publishPortableSource?.(source) ?? source
+    const parsed = parsePortableDocument(nextSource, initialDraft)
+    replaceManuscriptSource(nextSource)
     markDraftChanged()
     commitDraftHistory(parsed.draft)
     setDiagnostics(parsed.diagnostics)
@@ -3288,7 +3293,7 @@ function App() {
               </div>
             )}
           </div>
-          <Avatar initials={currentAuthorInitials} label={userSettings.author.name} />
+          <Avatar initials={currentAuthorInitials} label={activeReviewAuthor.name} />
           <button className="icon-button mobile-panel-button" aria-label="Toggle review panel" onClick={() => setRightPanelOpen((open) => !open)}>
             <Icon name="panelRight" />
           </button>
@@ -3540,7 +3545,7 @@ function App() {
               onReviewAnchorSelect={selectReviewAnchor}
               onCommandRequest={() => setCommandOpen(true)}
               suggestionMode={canSuggestReview && suggestionMode && markupView !== 'original' && markupView !== 'final'}
-              suggestionAuthor={userSettings.author}
+              suggestionAuthor={activeReviewAuthor}
               onSuggestionCapture={(message) => setToast(message)}
               citationLabels={structuredCitationLabels}
               codeCellStatuses={Object.fromEntries(executionCellStates.map((state) => [state.cellId, state.status] as const))}
@@ -3865,7 +3870,7 @@ function App() {
                 authorId={reviewAuthorFilter === 'all' ? undefined : reviewAuthorFilter}
                 activeId={activeReviewId}
                 navigationItems={reviewQueue}
-                localAuthor={userSettings.author}
+                localAuthor={activeReviewAuthor}
                 onActiveIdChange={setActiveReviewId}
                 onNavigateToItem={(item) => {
                   if (markupView === 'original' || markupView === 'final') return
