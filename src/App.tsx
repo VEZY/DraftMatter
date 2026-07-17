@@ -67,7 +67,7 @@ import { countWords, measurePortableManuscript } from './manuscriptMetrics'
 import { ReviewTimestamp } from './ReviewTimestamp'
 import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
 import { workspaceRoleCapabilities, type WorkspaceRole } from './collaboration/workspaceService'
-import { KernelConsole } from './KernelConsole'
+import { KernelConsole, type KernelConsoleRestartEpochs, type KernelConsoleStatus, type KernelConsoleStatuses } from './KernelConsole'
 
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
 const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
@@ -110,6 +110,14 @@ function publicationAuthorDraft(author: Partial<PublicationAuthor> = {}, sourceI
 const kernelSelections: Partial<Record<ExecutionLanguage, JupyterKernelProbe>> = {}
 const kernelExecutionManager = createKernelExecutionManager(createDesktopKernelExecutionTransport(desktopHost, (language) => kernelSelections[language]))
 const kernelExecution = createTrustedKernelExecution(desktopHost, kernelExecutionManager)
+
+function initialKernelConsoleStatuses(): KernelConsoleStatuses {
+  return { python: 'not-started', r: 'not-started', julia: 'not-started' }
+}
+
+function initialKernelConsoleRestartEpochs(): KernelConsoleRestartEpochs {
+  return { python: 0, r: 0, julia: 0 }
+}
 
 function cellStatusLabel(status: DraftState['cellStatus'] | ExecutionCellFreshness['status']) {
   if (status === 'environment-changed') return 'Environment changed'
@@ -537,6 +545,9 @@ function App() {
   const [executionDiagnostics, setExecutionDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [executionProblem, setExecutionProblem] = useState('')
   const [kernelConsoleOpen, setKernelConsoleOpen] = useState(false)
+  const [kernelConsoleStatuses, setKernelConsoleStatuses] = useState<KernelConsoleStatuses>(initialKernelConsoleStatuses)
+  const [kernelConsoleRestartEpochs, setKernelConsoleRestartEpochs] = useState<KernelConsoleRestartEpochs>(initialKernelConsoleRestartEpochs)
+  const [kernelConsoleDirty, setKernelConsoleDirty] = useState(false)
   const [executionTrustOpen, setExecutionTrustOpen] = useState(false)
   const [executionTrustWarning, setExecutionTrustWarning] = useState('')
   const [executionTrustBusy, setExecutionTrustBusy] = useState(false)
@@ -1305,6 +1316,17 @@ function App() {
     Boolean(selectedKernelNames[language]) || executableCells.some((cell) => cell.language === language),
   )
   if (!configuredConsoleLanguages.length) configuredConsoleLanguages.push(selectedEnvironmentLanguage)
+  const updateKernelConsoleStatus = (language: ExecutionLanguage, status: KernelConsoleStatus) => {
+    setKernelConsoleStatuses((current) => current[language] === status ? current : { ...current, [language]: status })
+  }
+  const noteKernelRestart = (language: ExecutionLanguage) => {
+    setKernelConsoleRestartEpochs((current) => ({ ...current, [language]: current[language] + 1 }))
+  }
+  const resetKernelConsoleState = () => {
+    setKernelConsoleStatuses(initialKernelConsoleStatuses())
+    setKernelConsoleRestartEpochs((current) => ({ python: current.python + 1, r: current.r + 1, julia: current.julia + 1 }))
+    setKernelConsoleDirty(false)
+  }
 
   useEffect(() => {
     for (const language of ['python', 'r', 'julia'] as const) {
@@ -1767,6 +1789,8 @@ function App() {
       } catch {
         // Selecting a kernel is also valid before a session has been started.
       }
+      updateKernelConsoleStatus(language, 'not-started')
+      noteKernelRestart(language)
     }
     kernelSelections[language] = kernel
     setSelectedEnvironmentPaths((current) => ({ ...current, [language]: kernel.executable ?? kernel.resourceDir }))
@@ -1792,7 +1816,8 @@ function App() {
     setKernelSetupBusy(true)
     setExecutionProblem('')
     try {
-      const setup = await desktopHost.setupKernelIntegration(session.root, language)
+      const environment = selectedKernelForLanguage(language)?.executable ?? runtimeInventory?.executables[language]?.executable
+      const setup = await desktopHost.setupKernelIntegration(session.root, language, environment)
       const inventory = await discoverRuntimeInventory(desktopHost)
       if (desktopSessionRef.current?.root !== session.root) return
       setRuntimeInventory({ ...inventory, jupyter: setup.inventory })
@@ -1801,7 +1826,14 @@ function App() {
         ? setup.inventory.kernels.find((kernel) => kernel.name === setup.kernelName && kernel.health === 'available')
         : setup.inventory.kernels.find((kernel) => kernel.language === language && kernel.health === 'available')
       if (!selected) throw new Error(`${runtimeName(language)} integration finished, but its Jupyter kernel could not be verified.`)
+      try {
+        await kernelExecution.terminate(language)
+      } catch {
+        // Integration setup is also valid before a session has been started.
+      }
       kernelSelections[language] = selected
+      updateKernelConsoleStatus(language, 'not-started')
+      noteKernelRestart(language)
       setSelectedEnvironmentPaths((current) => ({ ...current, [language]: selected.executable ?? selected.resourceDir }))
       const next = { ...selectedKernelNames, [language]: selected.name }
       setSelectedKernelNames(next)
@@ -1853,6 +1885,7 @@ function App() {
     setSelectedKernelNames({})
     setSelectedEnvironmentPaths({})
     setKernelConsoleOpen(false)
+    resetKernelConsoleState()
   }
 
   const persistExecutionManifest = async (root: string, manifest: ExecutionManifest) => {
@@ -1911,6 +1944,7 @@ function App() {
     if (cell.id === primaryCell?.id) updateDraftHistory({ cellStatus: 'running' })
     setExecutionProblem('')
     setExecutionDiagnostics((current) => current.filter((diagnostic) => !diagnostic.code.startsWith('execution-run-')))
+    setKernelConsoleStatuses((current) => ({ ...current, [cell.language]: current[cell.language] === 'not-started' ? 'starting' : 'busy' }))
     try {
       const result = await kernelExecution.run(
         session.root,
@@ -1918,6 +1952,7 @@ function App() {
         controller.signal,
       )
       if (desktopSessionRef.current?.root !== session.root) return undefined
+      updateKernelConsoleStatus(cell.language, result.status === 'interrupted' ? 'interrupted' : result.status === 'failed' ? 'failed' : 'ready')
       setExecutionResult(result)
       setExecutionResults((current) => ({ ...current, [cell.id]: result }))
       const manifest = tracker.recordResult(result, sequence, cleanRunId)
@@ -1966,6 +2001,7 @@ function App() {
       if (desktopSessionRef.current?.root !== session.root) return undefined
       const interrupted = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
       const message = interrupted ? 'The run was interrupted.' : normaliseHostFailure(error).message
+      updateKernelConsoleStatus(cell.language, interrupted ? 'interrupted' : 'failed')
       tracker.markStopped(cell.id, interrupted ? 'interrupted' : 'failed', message)
       syncExecutionTracker(tracker)
       if (cell.id === primaryCell?.id) updateDraftHistory({ cellStatus: interrupted ? 'interrupted' : 'failed' })
@@ -2009,6 +2045,11 @@ function App() {
           alt: cell.id === PRIMARY_EXECUTION_CELL ? 'Canopy response over twelve weeks' : `Generated output from ${cell.id}`,
           caption: cell.id === PRIMARY_EXECUTION_CELL ? 'Normalized canopy area across twelve weeks.' : `Generated output from ${cell.id}.`,
         }]))
+        const cleanLanguages = [...new Set(cells.map((cell) => cell.language))]
+        for (const language of cleanLanguages) {
+          updateKernelConsoleStatus(language, 'starting')
+          noteKernelRestart(language)
+        }
         const outcome = await cleanExecutePortableDocument({
           source: projection.source,
           root: session.root,
@@ -2029,6 +2070,15 @@ function App() {
             executionActiveCellRef.current = active?.cellId
             executionActiveLanguageRef.current = active?.language
             setExecutionActiveCell(active?.cellId)
+            for (const language of cleanLanguages) {
+              const languageStates = states.filter((state) => state.language === language)
+              const status = languageStates.some((state) => state.status === 'running') ? 'busy'
+                : languageStates.some((state) => state.status === 'failed') ? 'failed'
+                  : languageStates.some((state) => state.status === 'interrupted') ? 'interrupted'
+                    : languageStates.length > 0 && languageStates.every((state) => state.status === 'succeeded') ? 'ready'
+                      : 'starting'
+              updateKernelConsoleStatus(language, status)
+            }
           },
         })
         setExecutionResults(Object.fromEntries(outcome.results.map((result) => [result.cellId, result])))
@@ -2050,6 +2100,8 @@ function App() {
           setToast('Clean run incomplete · previous outputs retained')
           return
         }
+
+        for (const language of cleanLanguages) updateKernelConsoleStatus(language, 'ready')
 
         let materializedSource = manuscriptSourceRef.current
         for (const result of outcome.results) {
@@ -2388,7 +2440,9 @@ function App() {
     executionAbortRef.current?.abort()
     try {
       await kernelExecution.interrupt(language)
+      updateKernelConsoleStatus(language, 'interrupted')
     } catch (error) {
+      updateKernelConsoleStatus(language, 'failed')
       setToast(normaliseHostFailure(error).message)
     }
   }
@@ -2404,12 +2458,17 @@ function App() {
         return
       }
       if (executionActiveLanguageRef.current === language) executionAbortRef.current?.abort()
+      const wasStarted = kernelConsoleStatuses[language] !== 'not-started'
+      updateKernelConsoleStatus(language, 'starting')
       await kernelExecution.restart(session.root, language)
       kernelFreshRef.current[language] = true
       executionTrackerRef.current?.sessionRestarted(language)
       if (executionTrackerRef.current) syncExecutionTracker(executionTrackerRef.current)
+      noteKernelRestart(language)
+      updateKernelConsoleStatus(language, wasStarted ? 'ready' : 'not-started')
       setToast(`${runtimeName(language)} kernel restarted`)
     } catch (error) {
+      updateKernelConsoleStatus(language, 'failed')
       setToast(normaliseHostFailure(error).message)
     }
   }
@@ -2422,9 +2481,12 @@ function App() {
       kernelFreshRef.current[language] = true
       executionTrackerRef.current?.sessionRestarted(language)
       if (executionTrackerRef.current) syncExecutionTracker(executionTrackerRef.current)
+      noteKernelRestart(language)
+      updateKernelConsoleStatus(language, 'not-started')
       updateDraftHistory({ cellStatus: draft.cellStatus === 'running' ? 'interrupted' : draft.cellStatus })
       setToast(`${runtimeName(language)} kernel terminated`)
     } catch (error) {
+      updateKernelConsoleStatus(language, 'failed')
       setToast(normaliseHostFailure(error).message)
     }
   }
@@ -4874,22 +4936,29 @@ function App() {
         </div>
       )}
 
-      {kernelConsoleOpen && desktopSession && (
-        <KernelConsole
-          languages={configuredConsoleLanguages}
-          onExecute={executeConsole}
-          onInterrupt={async (language) => { await interruptExecution(language) }}
-          onRestart={async (language) => { await restartExecution(language) }}
-          onPromoteSetup={(language, code) => {
-            const inserted = runStructuredCommand((editor) => editor.insertSetupCell(language, code), 'Add setup cell')
-            if (inserted) setToast(`${runtimeName(language)} setup cell added from the console`)
-          }}
-          onClose={() => setKernelConsoleOpen(false)}
-        />
+      {desktopSession && (
+        <div hidden={!kernelConsoleOpen}>
+          <KernelConsole
+            key={desktopSession.root}
+            languages={configuredConsoleLanguages}
+            statuses={kernelConsoleStatuses}
+            restartEpochs={kernelConsoleRestartEpochs}
+            onStatusChange={updateKernelConsoleStatus}
+            onDirtyChange={setKernelConsoleDirty}
+            onExecute={executeConsole}
+            onInterrupt={async (language) => { await interruptExecution(language) }}
+            onRestart={async (language) => { await restartExecution(language) }}
+            onPromoteSetup={(language, code) => {
+              const inserted = runStructuredCommand((editor) => editor.insertSetupCell(language, code), 'Add setup cell')
+              if (inserted) setToast(`${runtimeName(language)} setup cell added from the console`)
+            }}
+            onClose={() => setKernelConsoleOpen(false)}
+          />
+        </div>
       )}
 
       {desktopSession && !kernelConsoleOpen && (
-        <button className="kernel-console-toggle" onClick={() => setKernelConsoleOpen(true)} aria-label="Open shared kernel console"><Icon name="code" size={14} /> Console</button>
+        <button className={`kernel-console-toggle ${kernelConsoleDirty ? 'dirty' : ''}`} onClick={() => setKernelConsoleOpen(true)} aria-label={`Open shared kernel console${kernelConsoleDirty ? ', interactive state present' : ''}`}><Icon name="code" size={14} /> Console{kernelConsoleDirty && <i title="Interactive state present" />}</button>
       )}
 
       {toast && <div className="toast" role="status"><Icon name="check" size={16} /> {toast}</div>}

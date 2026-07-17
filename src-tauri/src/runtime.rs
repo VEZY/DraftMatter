@@ -568,17 +568,56 @@ fn setup_kernel_name(language: RuntimeLanguage, executable: &Path, root: &Path) 
     )
 }
 
+fn setup_runtime_executable(
+    language: RuntimeLanguage,
+    selected: Option<&str>,
+) -> Result<PathBuf, HostError> {
+    let Some(selected) = selected else {
+        return resolve_runtime_executable(language).ok_or_else(|| {
+            HostError::NotFound(format!(
+                "{} is not installed or is not visible to DraftMatter. Install the runtime, then detect environments again.",
+                runtime_name(language)
+            ))
+        });
+    };
+    let path = PathBuf::from(selected);
+    if !path.is_absolute() {
+        return Err(HostError::InvalidPath(
+            "The selected execution environment must use an absolute runtime path.".to_string(),
+        ));
+    }
+    let executable = fs::canonicalize(&path).map_err(|error| {
+        HostError::NotFound(format!(
+            "The selected {} environment is no longer available at {}: {error}",
+            runtime_name(language),
+            path.display()
+        ))
+    })?;
+    if !executable_file(&executable) {
+        return Err(HostError::NotFound(format!(
+            "The selected {} environment is not executable: {}",
+            runtime_name(language),
+            executable.display()
+        )));
+    }
+    let probe = run_version_probe(&executable).map_err(HostError::Integration)?;
+    if !probe.success {
+        return Err(HostError::Integration(format!(
+            "The selected {} environment did not pass its version check: {}",
+            runtime_name(language),
+            first_output_line(&probe).unwrap_or_else(|| "no diagnostic was returned".to_string())
+        )));
+    }
+    Ok(executable)
+}
+
 pub fn setup_kernel_integration_impl(
     raw_root: &str,
     language: RuntimeLanguage,
+    selected_environment: Option<&str>,
 ) -> Result<KernelIntegrationSetupResult, HostError> {
     let root = canonical_root(raw_root)?;
-    let executable = resolve_runtime_executable(language).ok_or_else(|| {
-        HostError::NotFound(format!(
-            "{} is not installed or is not visible to DraftMatter. Install the runtime, then detect environments again.",
-            runtime_name(language)
-        ))
-    })?;
+    let executable = setup_runtime_executable(language, selected_environment)?;
     let kernel_name = setup_kernel_name(language, &executable, &root);
     let display_name = format!("{} · DraftMatter", runtime_name(language));
     match language {
@@ -702,6 +741,13 @@ mod tests {
         assert!(resolve_runtime(RuntimeLanguage::Julia, &paths)
             .unwrap()
             .ends_with("julia"));
+    }
+
+    #[test]
+    fn kernel_setup_rejects_an_ambiguous_relative_environment_path() {
+        let error = setup_runtime_executable(RuntimeLanguage::Python, Some("env/bin/python"))
+            .unwrap_err();
+        assert!(matches!(error, HostError::InvalidPath(_)));
     }
 
     #[test]

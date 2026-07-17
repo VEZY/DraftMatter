@@ -40,6 +40,7 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(25);
 const SESSION_START_TIMEOUT: Duration = Duration::from_secs(55);
 const LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(35);
 const EXECUTION_TIMEOUT: Duration = Duration::from_secs(330);
+const KERNEL_BUSY_ERROR: &str = "This language kernel is already executing a cell.";
 
 fn is_false(value: &bool) -> bool {
     !*value
@@ -186,7 +187,11 @@ fn registry_error() -> HostError {
 }
 
 fn worker_error(error: String) -> HostError {
-    integration(error)
+    if error == KERNEL_BUSY_ERROR {
+        HostError::Conflict(error)
+    } else {
+        integration(error)
+    }
 }
 
 fn validate_kernel(
@@ -667,7 +672,7 @@ impl NativeKernel {
                                 let _ = response.send(Err("Wait for the active kernel execution to settle before restarting it.".to_string()));
                             }
                             KernelCommand::Execute { response, .. } => {
-                                let _ = response.send(Err("This language kernel is already executing a cell.".to_string()));
+                                let _ = response.send(Err(KERNEL_BUSY_ERROR.to_string()));
                             }
                         }
                     }
@@ -1003,8 +1008,10 @@ pub fn execute_kernel_impl(
         Ok(response) => response,
         Err(error) => {
             restore_artifacts(&backups)?;
-            if let Some(removed) = remove_session(request.language, registry)? {
-                terminate_session(&removed);
+            if !matches!(error, HostError::Conflict(_)) {
+                if let Some(removed) = remove_session(request.language, registry)? {
+                    terminate_session(&removed);
+                }
             }
             return Err(error);
         }
@@ -1137,6 +1144,14 @@ mod tests {
     }
 
     #[test]
+    fn a_busy_language_lane_is_a_recoverable_conflict() {
+        assert!(matches!(
+            worker_error(KERNEL_BUSY_ERROR.to_string()),
+            HostError::Conflict(message) if message == KERNEL_BUSY_ERROR
+        ));
+    }
+
+    #[test]
     fn kernel_specs_must_accept_a_connection_file() {
         let temporary = tempdir().unwrap();
         fs::write(
@@ -1251,6 +1266,47 @@ publish("mean_height", 42, unit="cm", digits=1)
         }));
         assert_eq!(restarted_result.session_generation, 2);
         assert_eq!(restarted_result.execution_sequence, 1);
+
+        let busy_registry = registry.clone();
+        let busy_trust = trust.clone();
+        let busy_root = root.to_string_lossy().into_owned();
+        let busy_kernel = kernel.name.clone();
+        let first_lane = thread::spawn(move || {
+            execute_kernel_impl(
+                KernelExecutionRequest {
+                    root: busy_root,
+                    cell_id: "kernel-lane-first".to_string(),
+                    language: RuntimeLanguage::Python,
+                    kernel_name: busy_kernel,
+                    code: "import time; time.sleep(1); print('lane-complete')".to_string(),
+                    attributes: HashMap::new(),
+                    inputs: Vec::new(),
+                },
+                &busy_trust,
+                &busy_registry,
+            )
+        });
+        thread::sleep(Duration::from_millis(200));
+        let busy = execute_kernel_impl(
+            KernelExecutionRequest {
+                root: root.to_string_lossy().into_owned(),
+                cell_id: "kernel-lane-second".to_string(),
+                language: RuntimeLanguage::Python,
+                kernel_name: kernel.name.clone(),
+                code: "print('must-not-run-concurrently')".to_string(),
+                attributes: HashMap::new(),
+                inputs: Vec::new(),
+            },
+            &trust,
+            &registry,
+        )
+        .unwrap_err();
+        assert!(matches!(busy, HostError::Conflict(_)));
+        let first_lane = first_lane.join().unwrap().unwrap();
+        assert_eq!(first_lane.status, KernelExecutionStatus::Ok);
+        assert!(first_lane.messages.iter().any(|message| {
+            matches!(message, KernelExecutionMessage::Stream { text, .. } if text.trim() == "lane-complete")
+        }));
 
         let interrupted_registry = registry.clone();
         let interrupted_trust = trust.clone();

@@ -4,6 +4,8 @@ import type { NormalizedExecutionResult } from './kernelExecution'
 import { publishedValuesFromExecution, renderPublishedValue } from './publishedValues'
 
 export type KernelConsoleStatus = 'not-started' | 'starting' | 'ready' | 'busy' | 'interrupted' | 'failed'
+export type KernelConsoleStatuses = Record<ExecutionLanguage, KernelConsoleStatus>
+export type KernelConsoleRestartEpochs = Record<ExecutionLanguage, number>
 
 interface ConsoleEntry {
   id: number
@@ -29,28 +31,36 @@ function textualMime(result: NormalizedExecutionResult) {
 
 export function KernelConsole({
   languages,
+  statuses,
+  restartEpochs,
   onExecute,
   onInterrupt,
   onRestart,
+  onStatusChange,
+  onDirtyChange,
   onPromoteSetup,
   onClose,
 }: {
   languages: ExecutionLanguage[]
+  statuses: KernelConsoleStatuses
+  restartEpochs: KernelConsoleRestartEpochs
   onExecute: (language: ExecutionLanguage, code: string) => Promise<NormalizedExecutionResult>
   onInterrupt: (language: ExecutionLanguage) => Promise<void>
   onRestart: (language: ExecutionLanguage) => Promise<void>
+  onStatusChange: (language: ExecutionLanguage, status: KernelConsoleStatus) => void
+  onDirtyChange: (dirty: boolean) => void
   onPromoteSetup: (language: ExecutionLanguage, code: string) => void
   onClose: () => void
 }) {
   const [active, setActive] = useState<ExecutionLanguage>(languages[0] ?? 'python')
   const [input, setInput] = useState('')
-  const [statuses, setStatuses] = useState<Record<ExecutionLanguage, KernelConsoleStatus>>({ python: 'not-started', r: 'not-started', julia: 'not-started' })
   const [entries, setEntries] = useState<Record<ExecutionLanguage, ConsoleEntry[]>>({ python: [], r: [], julia: [] })
   const [histories, setHistories] = useState<Record<ExecutionLanguage, string[]>>({ python: [], r: [], julia: [] })
   const [historyIndex, setHistoryIndex] = useState<number>()
   const [height, setHeight] = useState(310)
   const counter = useRef(0)
   const outputRef = useRef<HTMLDivElement>(null)
+  const previousRestartEpochs = useRef(restartEpochs)
 
   useEffect(() => {
     if (!languages.includes(active) && languages[0]) setActive(languages[0])
@@ -59,6 +69,18 @@ export function KernelConsole({
   useEffect(() => {
     if (typeof outputRef.current?.scrollTo === 'function') outputRef.current.scrollTo({ top: outputRef.current.scrollHeight })
   }, [entries, active])
+
+  useEffect(() => {
+    const reset = (['python', 'r', 'julia'] as const).filter((language) => previousRestartEpochs.current[language] !== restartEpochs[language])
+    previousRestartEpochs.current = restartEpochs
+    if (!reset.length) return
+    setHistories((current) => ({ ...current, ...Object.fromEntries(reset.map((language) => [language, []])) }))
+    setHistoryIndex(undefined)
+  }, [restartEpochs])
+
+  useEffect(() => {
+    onDirtyChange((['python', 'r', 'julia'] as const).some((language) => histories[language].length > 0))
+  }, [histories, onDirtyChange])
 
   const currentEntries = entries[active]
   const dirty = histories[active].length > 0
@@ -89,16 +111,16 @@ export function KernelConsole({
     setHistories((current) => ({ ...current, [active]: [...current[active], code] }))
     setHistoryIndex(undefined)
     setInput('')
-    setStatuses((current) => ({ ...current, [active]: current[active] === 'not-started' ? 'starting' : 'busy' }))
+    onStatusChange(active, statuses[active] === 'not-started' ? 'starting' : 'busy')
     await Promise.resolve()
-    setStatuses((current) => ({ ...current, [active]: 'busy' }))
+    onStatusChange(active, 'busy')
     try {
       const result = await onExecute(active, code)
       setEntries((current) => ({ ...current, [active]: current[active].map((entry) => entry.id === id ? { ...entry, result } : entry) }))
-      setStatuses((current) => ({ ...current, [active]: result.status === 'interrupted' ? 'interrupted' : result.status === 'failed' ? 'failed' : 'ready' }))
+      onStatusChange(active, result.status === 'interrupted' ? 'interrupted' : result.status === 'failed' ? 'failed' : 'ready')
     } catch (error) {
       setEntries((current) => ({ ...current, [active]: current[active].map((entry) => entry.id === id ? { ...entry, error: error instanceof Error ? error.message : String(error) } : entry) }))
-      setStatuses((current) => ({ ...current, [active]: 'failed' }))
+      onStatusChange(active, 'failed')
     }
   }
 
@@ -158,15 +180,15 @@ export function KernelConsole({
         <button onClick={() => { if (latestCode) onPromoteSetup(active, latestCode) }} disabled={!latestCode}>Make setup cell</button>
         <button onClick={() => void copyVisibleOutput()} disabled={!currentEntries.length}>Copy</button>
         <button onClick={() => setEntries((current) => ({ ...current, [active]: [] }))}>Clear</button>
-        <button onClick={async () => { await onInterrupt(active); setStatuses((current) => ({ ...current, [active]: 'interrupted' })) }} disabled={statuses[active] !== 'busy'}>Interrupt</button>
+        <button onClick={async () => { await onInterrupt(active); onStatusChange(active, 'interrupted') }} disabled={statuses[active] !== 'busy'}>Interrupt</button>
         <button onClick={async () => {
-          setStatuses((current) => ({ ...current, [active]: 'starting' }))
+          onStatusChange(active, 'starting')
           try {
             await onRestart(active)
             setHistories((current) => ({ ...current, [active]: [] }))
-            setStatuses((current) => ({ ...current, [active]: 'ready' }))
+            onStatusChange(active, 'ready')
           } catch {
-            setStatuses((current) => ({ ...current, [active]: 'failed' }))
+            onStatusChange(active, 'failed')
           }
         }}>Restart</button>
         <button className="primary" onClick={() => void run()} disabled={!canRun}>Run</button>

@@ -491,6 +491,25 @@ describe('full structured manuscript editor', () => {
     expect(changed).not.toHaveBeenCalled()
   })
 
+  it('marks retained published values stale inline without changing their portable markup', async () => {
+    const retained = encodeURIComponent(JSON.stringify({
+      version: 1, name: 'mean_height', value: 12.4, unit: 'cm', formatting: { digits: 1 }, rendered: '12.4 cm',
+      provenance: { cellId: 'summary', language: 'python', runHash: 'sha256:run', codeHash: 'sha256:code', environmentFingerprint: 'sha256:env', sessionGeneration: 1, executionSequence: 1, retainedOutputHashes: ['sha256:run'] },
+    }))
+    const publishedSource = `Estimate: {{mean_height}}.\n\n\`\`\`python {#summary .execute output="values"}\npublish("mean_height", 12.4, unit="cm", digits=1)\n\`\`\`\n\n<!-- dm-output:start cell="summary" run="sha256:run" -->\n<!-- dm-published-value data="${retained}" -->\n<!-- dm-output:end -->\n`
+    const changed = vi.fn()
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    await act(async () => root.render(<StructuredManuscriptEditor ref={editorRef} source={publishedSource} onChange={changed} codeCellStatuses={{ summary: 'current' }} />))
+    expect(container.querySelector('[data-dm-node="published-value"]')?.getAttribute('data-status')).toBe('current')
+
+    await act(async () => root.render(<StructuredManuscriptEditor ref={editorRef} source={publishedSource} onChange={changed} codeCellStatuses={{ summary: 'stale' }} />))
+    const published = container.querySelector<HTMLElement>('[data-dm-node="published-value"]')!
+    expect(published.dataset.status).toBe('stale')
+    expect(published.title).toContain('needs to be refreshed')
+    expect(editorRef.current?.source()).toBe(publishedSource)
+    expect(changed).not.toHaveBeenCalled()
+  })
+
   it('colors every supported cell language with an editable CodeMirror mode', async () => {
     const languageSource = `# Languages
 

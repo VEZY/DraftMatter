@@ -2490,13 +2490,16 @@ fn discover_jupyter_kernels() -> JupyterKernelInventory {
 async fn setup_kernel_integration(
     root: String,
     language: RuntimeLanguage,
+    environment: Option<String>,
     trust: tauri::State<'_, ExecutionTrustStore>,
 ) -> Result<KernelIntegrationSetupResult, HostError> {
     let canonical = canonical_root(&root)?;
     execution_trust::require_execution_trust(&canonical, trust.inner())?;
-    tauri::async_runtime::spawn_blocking(move || setup_kernel_integration_impl(&root, language))
-        .await
-        .map_err(|error| HostError::Integration(format!("The kernel setup task failed: {error}")))?
+    tauri::async_runtime::spawn_blocking(move || {
+        setup_kernel_integration_impl(&root, language, environment.as_deref())
+    })
+    .await
+    .map_err(|error| HostError::Integration(format!("The kernel setup task failed: {error}")))?
 }
 
 #[tauri::command]

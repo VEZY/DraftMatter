@@ -5,6 +5,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { KernelConsole } from './KernelConsole'
 import type { NormalizedExecutionResult } from './kernelExecution'
 
+const statuses = { python: 'not-started', r: 'not-started', julia: 'not-started' } as const
+const restartEpochs = { python: 0, r: 0, julia: 0 }
+
 const result: NormalizedExecutionResult = {
   cellId: 'console-python-1',
   language: 'python',
@@ -54,9 +57,13 @@ describe('KernelConsole', () => {
     await act(async () => {
       root.render(<KernelConsole
         languages={['python', 'r', 'julia']}
+        statuses={statuses}
+        restartEpochs={restartEpochs}
         onExecute={execute}
         onInterrupt={vi.fn()}
         onRestart={vi.fn()}
+        onStatusChange={vi.fn()}
+        onDirtyChange={vi.fn()}
         onPromoteSetup={vi.fn()}
         onClose={vi.fn()}
       />)
@@ -87,9 +94,13 @@ describe('KernelConsole', () => {
     await act(async () => {
       root.render(<KernelConsole
         languages={['julia']}
+        statuses={statuses}
+        restartEpochs={restartEpochs}
         onExecute={async () => ({ ...result, language: 'julia' })}
         onInterrupt={vi.fn()}
         onRestart={vi.fn()}
+        onStatusChange={vi.fn()}
+        onDirtyChange={vi.fn()}
         onPromoteSetup={promote}
         onClose={vi.fn()}
       />)

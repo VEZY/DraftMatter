@@ -3068,6 +3068,19 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   }, [codeCellActionsEnabled])
 
   useEffect(() => {
+    const view = viewRef.current
+    if (view && codeCellStatuses) {
+      let transaction = view.state.tr
+      view.state.doc.descendants((node, position) => {
+        if (node.type !== manuscriptSchema.nodes.published_value) return true
+        const cellId = typeof node.attrs.cellId === 'string' ? node.attrs.cellId : undefined
+        const producerStatus = cellId ? codeCellStatuses[cellId] : undefined
+        const status = !cellId ? 'missing' : producerStatus === 'current' ? 'current' : producerStatus ?? 'stale'
+        if (status !== node.attrs.status) transaction = transaction.setNodeMarkup(position, undefined, { ...node.attrs, status })
+        return true
+      })
+      if (transaction.docChanged) view.dispatch(transaction.setMeta('addToHistory', false).setMeta('dm-presentation-only', true))
+    }
     hostRef.current?.querySelectorAll<HTMLElement>('.structured-code-cell').forEach((cell) => {
       cell.dispatchEvent(new Event('dm-code-presentation-change'))
     })

@@ -111,6 +111,8 @@ describe('shared Jupyter execution workspace', () => {
       ['py-setup', 'python-fixture'], ['py-value', 'python-fixture'],
     ])
     expect(container.textContent).toContain('kernel:py-value')
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel console"]')!.click())
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('ready')
   })
 
   it('clean-runs setup first, restarts every language kernel, and never materializes setup output', async () => {
@@ -131,5 +133,27 @@ describe('shared Jupyter execution workspace', () => {
     await act(async () => environments.click())
     const dialog = container.querySelector<HTMLElement>('[aria-labelledby="execution-environment-title"]')!
     expect(dialog.textContent).toContain('shared Jupyter kernel, no notebook server')
+  })
+
+  it('keeps console history and shared kernel status when the bottom panel closes', async () => {
+    const open = container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel console"]')!
+    await act(async () => open.click())
+    const input = container.querySelector<HTMLTextAreaElement>('[aria-label="Python kernel input"]')!
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    await act(async () => {
+      setter.call(input, 'shared_value = 42')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }))
+    })
+    await settle()
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('ready')
+    expect(container.textContent).toContain('Interactive · clean run will restart this kernel')
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close kernel console"]')!.click())
+    const reopen = container.querySelector<HTMLButtonElement>('[aria-label*="interactive state present"]')!
+    expect(reopen).toBeTruthy()
+    await act(async () => reopen.click())
+    expect(container.textContent).toContain('shared_value = 42')
+    expect(container.textContent).toContain('Interactive · clean run will restart this kernel')
   })
 })

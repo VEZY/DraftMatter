@@ -530,9 +530,9 @@ export function createDesktopHost(
     discoverJupyterKernels() {
       return invokeBridge<JupyterKernelInventory>('discover_jupyter_kernels')
     },
-    setupKernelIntegration(root: string, language: RuntimeLanguage) {
+    setupKernelIntegration(root: string, language: RuntimeLanguage, environment?: string) {
       return available
-        ? invokeBridge<KernelIntegrationSetupResult>('setup_kernel_integration', { root, language })
+        ? invokeBridge<KernelIntegrationSetupResult>('setup_kernel_integration', { root, language, ...(environment ? { environment } : {}) })
         : executionUnavailable()
     },
     executionTrustStatus(root: string) {

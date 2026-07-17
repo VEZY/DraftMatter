@@ -55,7 +55,7 @@ describe('desktop host adapter', () => {
     await host.openCitationLink('doi', '10.1016/j.envsoft.2019.104609')
     await host.probeRuntime('julia')
     await host.discoverJupyterKernels()
-    await host.setupKernelIntegration('/research/canopy', 'python')
+    await host.setupKernelIntegration('/research/canopy', 'python', '/envs/python/bin/python')
     await host.executionTrustStatus('/research/canopy')
     await host.trustProjectForSession('/research/canopy', 'run-project-code-with-user-permissions')
     await host.revokeProjectTrust('/research/canopy')
@@ -119,7 +119,7 @@ describe('desktop host adapter', () => {
       ['open_citation_link', { kind: 'doi', value: '10.1016/j.envsoft.2019.104609' }],
       ['probe_runtime_executable', { language: 'julia' }],
       ['discover_jupyter_kernels', undefined],
-      ['setup_kernel_integration', { root: '/research/canopy', language: 'python' }],
+      ['setup_kernel_integration', { root: '/research/canopy', language: 'python', environment: '/envs/python/bin/python' }],
       ['execution_trust_status', { root: '/research/canopy' }],
       ['trust_project_for_session', { root: '/research/canopy', acknowledgement: 'run-project-code-with-user-permissions' }],
       ['revoke_project_trust', { root: '/research/canopy' }],

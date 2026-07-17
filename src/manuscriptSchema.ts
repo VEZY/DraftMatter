@@ -208,7 +208,9 @@ const nodes: Record<string, NodeSpec> = {
       'data-status': node.attrs.status,
       title: node.attrs.status === 'current'
         ? `Published value ${node.attrs.name}${node.attrs.cellId ? ` · ${node.attrs.cellId}` : ''}`
-        : `Published value ${node.attrs.name} is unavailable`,
+        : node.attrs.status === 'missing'
+          ? `Published value ${node.attrs.name} is unavailable`
+          : `Published value ${node.attrs.name} needs to be refreshed${node.attrs.cellId ? ` · ${node.attrs.cellId}` : ''}`,
     }, node.attrs.rendered],
     leafText: (node) => node.attrs.rendered,
   },
