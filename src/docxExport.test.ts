@@ -11,7 +11,7 @@ author:
 
 ## Results
 
-Leaf area declined by **18%** [@vezy2020].[^methods] The relationship was $y = ax + b$; see @fig-response and @tbl-summary.
+Leaf area declined by **18%** [@vezy2020].[^methods] The fitted value was {{dm:value:fit_value}}. The relationship was $y = ax + b$; see @fig-response and @tbl-summary.
 
 $$
 R^2 = 0.91
@@ -25,11 +25,12 @@ $$ {#eq-fit .unnumbered}
 | Drought | 82 |
 : Treatment **summary**. {#tbl-summary .striped}
 
-\`\`\`python
+\`\`\`python {#fit .execute}
 print("inert")
 \`\`\`
 
 <!-- dm-output:start cell="fit" run="sha256:test" -->
+<!-- dm-value key="fit_value" value="0.91" -->
 \`\`\`text
 retained model output
 \`\`\`
@@ -77,9 +78,11 @@ describe('native DOCX export', () => {
     expect(readable).toContain('<w:jc w:val="right"/>')
     expect(readable).toContain('Table: Treatment summary.')
     expect(readable).not.toContain('{#tbl-summary')
-    expect(readable).toContain('print(&quot;inert&quot;)')
+    expect(readable).toContain('The fitted value was 0.91.')
+    expect(readable).not.toContain('print(&quot;inert&quot;)')
     expect(readable).toContain('retained model output')
     expect(readable).not.toContain('source · not executed during export')
+    expect(readable).not.toContain('dm-value')
     expect(readable).not.toMatch(/\.dm-anchor|\.draftmatter-reviews|<w:(?:ins|del)\b/)
     expect(first.diagnostics).toEqual([expect.objectContaining({ code: 'figure-reference', level: 'warning' })])
   })

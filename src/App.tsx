@@ -50,6 +50,7 @@ import { projectPortableReviewSource } from './reviewProjector'
 import { renderReviewReport } from './reviewExport'
 import { printNativeHtml, renderNativeHtmlExport } from './nativeHtmlExport'
 import { renderDocxExport } from './docxExport'
+import { projectComputationsForPublication } from './publicationComputation'
 import { ExternalExportDialog } from './ExternalExportDialog'
 import { ExportFileDialog } from './ExportFileDialog'
 import { saveGeneratedFileInBrowser, type GeneratedFileExport } from './fileExport'
@@ -61,6 +62,7 @@ import { normalizeProjectRelativePath, projectFilePath } from './projectPaths'
 import { authorInitials, readUserSettings, renameLocalAuthor, saveUserSettings } from './userSettings'
 import { parsePublicationMetadata, updatePublicationAuthorDetails, type PublicationAuthor } from './publicationMetadata'
 import { copyPlainText } from './clipboard'
+import { parseRetainedComputedValues } from './computedValues'
 import { countWords, measurePortableManuscript } from './manuscriptMetrics'
 import { ReviewTimestamp } from './ReviewTimestamp'
 import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
@@ -1233,7 +1235,9 @@ function App() {
   const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL) ?? executableCells[0]
   const retainedOutputParse = parseRetainedOutputs(executionSource)
   const retainedOutputs = retainedOutputParse.outputs
-  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics, ...executionDiagnostics, ...retainedOutputParse.diagnostics]
+  const retainedComputedValueParse = useMemo(() => parseRetainedComputedValues(manuscriptSource), [manuscriptSource])
+  const retainedComputedValues = Object.values(retainedComputedValueParse.values)
+  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics, ...executionDiagnostics, ...retainedOutputParse.diagnostics, ...retainedComputedValueParse.diagnostics]
   const prioritizedDiagnostics = prioritizeProjectDiagnostics(allDiagnostics)
   const configuredProvider = (cell: ExecutableCell): ExecutionProviderKind => {
     const explicit = cell.attributes.provider
@@ -1613,6 +1617,11 @@ function App() {
     if (request.kind === 'footnote') {
       const inserted = runStructuredCommand((editor) => editor.insertFootnote(request.label, request.content), 'Insert footnote')
       if (inserted) setToast(`Footnote inserted · ${request.label}`)
+      return inserted
+    }
+    if (request.kind === 'computed-value') {
+      const inserted = runStructuredCommand((editor) => editor.insertComputedValue(request.key), 'Insert computed value')
+      if (inserted) setToast(`Computed value inserted · ${request.key}`)
       return inserted
     }
     const inserted = runStructuredCommand((editor) => editor.insertCodeCell(request.language), `Insert ${request.language === 'r' ? 'R' : request.language} code cell`)
@@ -2404,7 +2413,7 @@ function App() {
       setToast('External export blocked · resolve the overlapping alternatives')
       return
     }
-    setExternalExportSource(projection.source)
+    setExternalExportSource(projectComputationsForPublication(projection.source))
     setExportOpen(false)
   }
 
@@ -3251,9 +3260,18 @@ function App() {
       action: () => { setCommandOpen(false); openInsertBlock('figure') },
     },
     {
+      id: 'computed-value',
+      label: 'Insert computed value',
+      description: 'Place a retained statistic or model result in the sentence',
+      keywords: 'statistic result value inline reproducible number',
+      icon: <span className="command-icon">123</span>,
+      disabled: !canEditManuscript,
+      action: () => { setCommandOpen(false); openInsertBlock('computed-value') },
+    },
+    {
       id: 'code-cell',
-      label: 'Insert code cell',
-      description: 'Choose Python, R, or Julia explicitly',
+      label: 'Add reproducible output',
+      description: 'Create a hidden computation for a figure, table, or value',
       keywords: 'execute python r julia source',
       icon: <span className="command-icon"><Icon name="code" size={17} /></span>,
       disabled: !canEditManuscript,
@@ -4044,6 +4062,7 @@ function App() {
           kind={insertBlockKind}
           onClose={() => setInsertBlockKind(undefined)}
           onInsert={insertStructuredRequest}
+          computedValues={retainedComputedValues}
         />
       )}
 

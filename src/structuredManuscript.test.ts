@@ -203,6 +203,23 @@ describe('generic structured manuscript bridge', () => {
     ])
   })
 
+  it('renders retained inline computation values while preserving portable markup', () => {
+    const source = `Estimate: {{dm:value:mean_area}}. Missing: {{dm:value:confidence_interval}}.\n\n<!-- dm-output:start cell="summary" run="sha256:run" -->\n<!-- dm-value key="mean_area" value="18.4%20cm%C2%B2" -->\n<!-- dm-output:end -->\n`
+    const parsed = parseStructuredManuscript(source)
+    const values: Array<Record<string, unknown>> = []
+    parsed.document.descendants((node) => {
+      if (node.type === manuscriptSchema.nodes.computed_value) values.push(node.attrs)
+      return true
+    })
+
+    expect(values).toEqual([
+      expect.objectContaining({ key: 'mean_area', rendered: '18.4 cm²', cellId: 'summary', status: 'current' }),
+      expect.objectContaining({ key: 'confidence_interval', rendered: 'Value unavailable', status: 'missing' }),
+    ])
+    expect(parsed.document.textContent).toContain('Estimate: 18.4 cm². Missing: Value unavailable.')
+    expect(serializeStructuredManuscript(parsed.document, parsed.metadata)).toBe(source)
+  })
+
   it('returns an untouched manuscript byte-for-byte until a structured transaction changes it', () => {
     const parsed = parseStructuredManuscript(representativeSource)
 

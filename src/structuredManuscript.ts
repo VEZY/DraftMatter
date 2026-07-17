@@ -4,6 +4,7 @@ import { formatCrossReferenceTarget } from './crossReference'
 import { parseDisplayEquation } from './displayEquation'
 import { sourceHash } from './document'
 import { extractExecutableCells } from './executionCells'
+import { parseRetainedComputedValues, type RetainedComputedValue } from './computedValues'
 import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
 import { parseTableCaptionLine, pipeTableAlignments, pipeTableCells } from './tableSyntax'
@@ -55,12 +56,13 @@ function marked(nodes: ProseMirrorNode[], mark: Mark) {
 interface InlineCandidate {
   index: number
   raw: string
-  kind: 'anchor' | 'citation' | 'link' | 'strong' | 'emphasis' | 'code' | 'math' | 'cross-reference' | 'footnote'
+  kind: 'anchor' | 'computed-value' | 'citation' | 'link' | 'strong' | 'emphasis' | 'code' | 'math' | 'cross-reference' | 'footnote'
   match: RegExpMatchArray
 }
 
 const inlinePatterns: Array<[InlineCandidate['kind'], RegExp]> = [
   ['anchor', /\[\]\{[^}\r\n]*\.dm-anchor[^}\r\n]*\}/],
+  ['computed-value', /\{\{dm:value:([A-Za-z][A-Za-z0-9_.:-]{0,127})\}\}/],
   ['citation', /\[[^\]\r\n]*@[a-zA-Z0-9_:.+-]+[^\]\r\n]*\]/],
   ['link', /\[([^\]\r\n]+)\]\(([^)\s]+)(?:\s+["']([^"']*)["'])?\)/],
   ['strong', /\*\*([^*\r\n]+)\*\*|__([^_\r\n]+)__/],
@@ -79,7 +81,7 @@ function nextInlineCandidate(value: string): InlineCandidate | undefined {
   return candidates.sort((left, right) => left.index - right.index || inlinePatterns.findIndex(([kind]) => kind === left.kind) - inlinePatterns.findIndex(([kind]) => kind === right.kind))[0]
 }
 
-function inlineNodes(value: string, idPrefix: string): ProseMirrorNode[] {
+function inlineNodes(value: string, idPrefix: string, computedValues: Record<string, RetainedComputedValue>): ProseMirrorNode[] {
   const nodes: ProseMirrorNode[] = []
   let remaining = value
   let ordinal = 0
@@ -105,6 +107,16 @@ function inlineNodes(value: string, idPrefix: string): ProseMirrorNode[] {
         affinity: attributes.match(/\bdata-affinity="([^"]+)"/)?.[1] ?? 'after',
         sourceAttributes: attributes,
       }))
+    } else if (candidate.kind === 'computed-value') {
+      const key = candidate.match[1]
+      const retained = computedValues[key]
+      nodes.push(manuscriptSchema.nodes.computed_value.createChecked({
+        id,
+        key,
+        rendered: retained?.value ?? 'Value unavailable',
+        cellId: retained?.cellId ?? null,
+        status: retained ? 'current' : 'missing',
+      }))
     } else if (candidate.kind === 'citation') {
       const items = parseCitationCluster(candidate.raw)
       const keys = items.map((item) => item.citekey)
@@ -116,11 +128,11 @@ function inlineNodes(value: string, idPrefix: string): ProseMirrorNode[] {
       }))
     } else if (candidate.kind === 'link') {
       const mark = manuscriptSchema.marks.link.create({ href: candidate.match[2], title: candidate.match[3] || null })
-      nodes.push(...marked(inlineNodes(candidate.match[1], id), mark))
+      nodes.push(...marked(inlineNodes(candidate.match[1], id, computedValues), mark))
     } else if (candidate.kind === 'strong') {
-      nodes.push(...marked(inlineNodes(candidate.match[1] ?? candidate.match[2], id), manuscriptSchema.marks.strong.create()))
+      nodes.push(...marked(inlineNodes(candidate.match[1] ?? candidate.match[2], id, computedValues), manuscriptSchema.marks.strong.create()))
     } else if (candidate.kind === 'emphasis') {
-      nodes.push(...marked(inlineNodes(candidate.match[1] ?? candidate.match[2], id), manuscriptSchema.marks.emphasis.create()))
+      nodes.push(...marked(inlineNodes(candidate.match[1] ?? candidate.match[2], id, computedValues), manuscriptSchema.marks.emphasis.create()))
     } else if (candidate.kind === 'code') {
       const code = text(candidate.match[1], [manuscriptSchema.marks.code.create()])
       if (code) nodes.push(code)
@@ -136,8 +148,8 @@ function inlineNodes(value: string, idPrefix: string): ProseMirrorNode[] {
   return nodes
 }
 
-function paragraph(id: string, value: string) {
-  return manuscriptSchema.nodes.paragraph.createChecked({ id, section: null }, inlineNodes(value, id))
+function paragraph(id: string, value: string, computedValues: Record<string, RetainedComputedValue>) {
+  return manuscriptSchema.nodes.paragraph.createChecked({ id, section: null }, inlineNodes(value, id, computedValues))
 }
 
 function closingFence(lines: SourceLine[], start: number, marker: string) {
@@ -186,7 +198,7 @@ function parseCodeAttributes(cell: ReturnType<typeof extractExecutableCells>['ce
   return Object.fromEntries(Object.entries(cell.attributes).map(([key, value]) => [key, value]))
 }
 
-function parseBlocks(lines: SourceLine[], diagnostics: DocumentDiagnostic[], ordinalRef: { value: number }): ProseMirrorNode[] {
+function parseBlocks(lines: SourceLine[], diagnostics: DocumentDiagnostic[], ordinalRef: { value: number }, computedValues: Record<string, RetainedComputedValue>): ProseMirrorNode[] {
   const blocks: ProseMirrorNode[] = []
   const contents = lines.map((line) => line.content)
   let index = 0
@@ -215,7 +227,7 @@ function parseBlocks(lines: SourceLine[], diagnostics: DocumentDiagnostic[], ord
         section: null,
         label,
         sourceAttributes,
-      }, inlineNodes(title, `heading-${ordinalRef.value}`)))
+      }, inlineNodes(title, `heading-${ordinalRef.value}`, computedValues)))
       index += 1
       continue
     }
@@ -277,8 +289,8 @@ function parseBlocks(lines: SourceLine[], diagnostics: DocumentDiagnostic[], ord
         quoted.push({ content, raw: `${content}${ending}` })
         index += 1
       }
-      const children = parseBlocks(quoted, diagnostics, ordinalRef)
-      blocks.push(manuscriptSchema.nodes.blockquote.createChecked({ id: id('quote', quoted.map((line) => line.raw).join('')) }, children.length ? children : [paragraph(id('paragraph', ''), '')]))
+      const children = parseBlocks(quoted, diagnostics, ordinalRef, computedValues)
+      blocks.push(manuscriptSchema.nodes.blockquote.createChecked({ id: id('quote', quoted.map((line) => line.raw).join('')) }, children.length ? children : [paragraph(id('paragraph', ''), '', computedValues)]))
       continue
     }
 
@@ -291,7 +303,7 @@ function parseBlocks(lines: SourceLine[], diagnostics: DocumentDiagnostic[], ord
         const item = lines[index].content.match(/^\s*([-+*]|\d+[.)])\s+(.+)$/)
         if (!item || /^\d/.test(item[1]) !== ordered) break
         const itemId = id('list-item', lines[index].raw)
-        items.push(manuscriptSchema.nodes.list_item.createChecked({ id: itemId }, [paragraph(`${itemId}-paragraph`, item[2])]))
+        items.push(manuscriptSchema.nodes.list_item.createChecked({ id: itemId }, [paragraph(`${itemId}-paragraph`, item[2], computedValues)]))
         index += 1
       }
       const listType = ordered ? manuscriptSchema.nodes.ordered_list : manuscriptSchema.nodes.bullet_list
@@ -306,7 +318,7 @@ function parseBlocks(lines: SourceLine[], diagnostics: DocumentDiagnostic[], ord
       const alignments = pipeTableAlignments(lines[index + 1].content)
       const headerCells = headerValues.map((cell, cellIndex) => manuscriptSchema.nodes.table_header.createChecked(
         { id: id('table-header', `${cellIndex}:${cell}`), colspan: 1, rowspan: 1, colwidth: null, alignment: alignments[cellIndex] ?? null },
-        [paragraph(id('table-paragraph', cell), cell)],
+        [paragraph(id('table-paragraph', cell), cell, computedValues)],
       ))
       rows.push(manuscriptSchema.nodes.table_row.createChecked({ id: id('table-row', value) }, headerCells))
       index += 2
@@ -314,7 +326,7 @@ function parseBlocks(lines: SourceLine[], diagnostics: DocumentDiagnostic[], ord
         const values = pipeTableCells(lines[index].content)
         const cells = values.map((cell, cellIndex) => manuscriptSchema.nodes.table_cell.createChecked(
           { id: id('table-cell', `${cellIndex}:${cell}`), colspan: 1, rowspan: 1, colwidth: null, alignment: alignments[cellIndex] ?? null },
-          [paragraph(id('table-paragraph', cell), cell)],
+          [paragraph(id('table-paragraph', cell), cell, computedValues)],
         ))
         rows.push(manuscriptSchema.nodes.table_row.createChecked({ id: id('table-row', lines[index].raw) }, cells))
         index += 1
@@ -379,7 +391,7 @@ function parseBlocks(lines: SourceLine[], diagnostics: DocumentDiagnostic[], ord
       })]
       if (lines[index + 1]?.content.match(/^:\s+(.+)/)) {
         const caption = lines[index + 1].content.replace(/^:\s+/, '')
-        content.push(manuscriptSchema.nodes.caption.createChecked({ id: `${imageId}-caption` }, inlineNodes(caption, `${imageId}-caption`)))
+        content.push(manuscriptSchema.nodes.caption.createChecked({ id: `${imageId}-caption` }, inlineNodes(caption, `${imageId}-caption`, computedValues)))
         index += 1
       }
       blocks.push(manuscriptSchema.nodes.figure.createChecked({ id: id('figure', lines[index].raw) }, content))
@@ -402,13 +414,15 @@ function parseBlocks(lines: SourceLine[], diagnostics: DocumentDiagnostic[], ord
       index += 1
     }
     const raw = rawLines.join('')
-    blocks.push(paragraph(id('paragraph', raw), paragraphLines.join('\n')))
+    blocks.push(paragraph(id('paragraph', raw), paragraphLines.join('\n'), computedValues))
   }
   return blocks
 }
 
 export function parseStructuredManuscript(source: string): StructuredManuscript {
   const diagnostics: DocumentDiagnostic[] = []
+  const retainedComputedValues = parseRetainedComputedValues(source)
+  diagnostics.push(...retainedComputedValues.diagnostics)
   const ending = sourceLineEnding(source)
   const review = parseReviewMarkup(source)
   diagnostics.push(...review.diagnostics.filter((diagnostic) => diagnostic.level !== 'info'))
@@ -429,8 +443,8 @@ export function parseStructuredManuscript(source: string): StructuredManuscript 
     }
   }
 
-  const blocks = parseBlocks(sourceLines(body), diagnostics, { value: 0 })
-  if (!blocks.length) blocks.push(paragraph('dm-empty-paragraph', ''))
+  const blocks = parseBlocks(sourceLines(body), diagnostics, { value: 0 }, retainedComputedValues.values)
+  if (!blocks.length) blocks.push(paragraph('dm-empty-paragraph', '', retainedComputedValues.values))
   const document = manuscriptSchema.nodes.doc.createChecked(null, blocks)
   return {
     document,
@@ -482,6 +496,7 @@ function serializeInline(node: ProseMirrorNode) {
   if (node.isText) return serializeTextNode(node)
   if (node.type === manuscriptSchema.nodes.hard_break) return '  \n'
   if (node.type === manuscriptSchema.nodes.equation_inline) return `$${node.attrs.tex}$`
+  if (node.type === manuscriptSchema.nodes.computed_value) return `{{dm:value:${node.attrs.key}}}`
   if (node.type === manuscriptSchema.nodes.citation) {
     const items = Array.isArray(node.attrs.items) ? node.attrs.items : []
     return serializeCitationCluster(items.length ? items : (node.attrs.keys as string[]).map((citekey) => ({ citekey })))
@@ -597,9 +612,13 @@ export function serializeStructuredManuscript(document: ProseMirrorNode, metadat
     if (!value || typeof value !== 'object') return value
     const record = value as Record<string, unknown>
     const normalized = Object.fromEntries(Object.entries(record).map(([key, item]) => [key, sourceSemanticJson(item)]))
-    if ((record.type === 'citation' || record.type === 'cross_reference') && normalized.attrs && typeof normalized.attrs === 'object') {
+    if ((record.type === 'citation' || record.type === 'cross_reference' || record.type === 'computed_value') && normalized.attrs && typeof normalized.attrs === 'object') {
       const attrs = { ...normalized.attrs as Record<string, unknown> }
       delete attrs.rendered
+      if (record.type === 'computed_value') {
+        delete attrs.cellId
+        delete attrs.status
+      }
       normalized.attrs = attrs
     }
     return normalized

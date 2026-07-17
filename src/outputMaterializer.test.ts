@@ -139,4 +139,21 @@ describe('portable output materialization', () => {
     if (!materialized.ok) return
     expect(materialized.source).toContain('~~~text\ndirect text output\n~~~')
   })
+
+  it('materializes named inline values without exposing their stdout protocol', () => {
+    const portableSource = source.replace('produces="figures/generated/growth.svg"', 'output="values"')
+    const materialized = materializeExecutionOutput({
+      source: portableSource,
+      cellId: 'fig-growth',
+      result: result({
+        artifacts: [],
+        streams: [{ sequence: 0, name: 'stdout', text: 'DRAFTMATTER_VALUE mean_area=18.4 cm²\n' }],
+      }),
+    })
+
+    expect(materialized.ok).toBe(true)
+    if (!materialized.ok) return
+    expect(materialized.source).toContain('<!-- dm-value key="mean_area" value="18.4%20cm%C2%B2" -->')
+    expect(materialized.source).not.toContain('~~~text')
+  })
 })

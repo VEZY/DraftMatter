@@ -1,5 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Icon } from './Icon'
+import { isComputedValueKey, type RetainedComputedValue } from './computedValues'
 
 export type InsertBlockRequest =
   | { kind: 'section'; title: string; level: number; label?: string }
@@ -10,6 +11,7 @@ export type InsertBlockRequest =
   | { kind: 'cross-reference'; target: string }
   | { kind: 'footnote'; label: string; content: string }
   | { kind: 'code-cell'; language: 'python' | 'r' | 'julia' }
+  | { kind: 'computed-value'; key: string }
 
 export type InsertBlockKind = InsertBlockRequest['kind']
 
@@ -22,6 +24,7 @@ const details: Record<InsertBlockKind, { eyebrow: string; title: string; descrip
   'cross-reference': { eyebrow: 'Document link', title: 'Insert cross-reference', description: 'Link to a portable figure, table, equation, or section label.' },
   footnote: { eyebrow: 'Supporting note', title: 'Insert footnote', description: 'Create a reference here and its portable definition below.' },
   'code-cell': { eyebrow: 'Reproducible analysis', title: 'Insert code cell', description: 'Choose a language now; execution remains explicit and trusted.' },
+  'computed-value': { eyebrow: 'Reproducible result', title: 'Insert computed value', description: 'Place a named result from a computation directly in the sentence.' },
 }
 
 function cleanLabel(value: string) {
@@ -32,10 +35,12 @@ export function InsertBlockDialog({
   kind,
   onClose,
   onInsert,
+  computedValues = [],
 }: {
   kind: InsertBlockKind
   onClose: () => void
   onInsert: (request: InsertBlockRequest) => boolean
+  computedValues?: RetainedComputedValue[]
 }) {
   const detail = details[kind]
   const [title, setTitle] = useState('')
@@ -50,6 +55,7 @@ export function InsertBlockDialog({
   const [target, setTarget] = useState('')
   const [content, setContent] = useState('')
   const [language, setLanguage] = useState<'python' | 'r' | 'julia'>('python')
+  const [computedKey, setComputedKey] = useState(computedValues[0]?.key ?? '')
   const [problem, setProblem] = useState('')
 
   const valid = useMemo(() => {
@@ -59,8 +65,9 @@ export function InsertBlockDialog({
     if (kind === 'equation-inline' || kind === 'equation-display') return Boolean(tex.trim())
     if (kind === 'cross-reference') return /^(?:fig|tbl|eq|sec)-[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(target.trim().replace(/^@/, ''))
     if (kind === 'footnote') return /^[A-Za-z0-9_.:-]+$/.test(label.trim().replace(/^\[\^|\]$/g, '')) && Boolean(content.trim())
+    if (kind === 'computed-value') return isComputedValueKey(computedKey.trim())
     return true
-  }, [alt, columns, content, kind, label, rows, source, target, tex, title])
+  }, [alt, columns, computedKey, content, kind, label, rows, source, target, tex, title])
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -73,6 +80,7 @@ export function InsertBlockDialog({
     else if (kind === 'equation-display') request = { kind, tex: tex.trim(), label: cleanLabel(label) }
     else if (kind === 'cross-reference') request = { kind, target: target.trim().replace(/^@/, '') }
     else if (kind === 'footnote') request = { kind, label: label.trim().replace(/^\[\^|\]$/g, ''), content: content.trim() }
+    else if (kind === 'computed-value') request = { kind, key: computedKey.trim() }
     else request = { kind, language }
     if (onInsert(request)) onClose()
     else setProblem('The item could not be inserted at the current editor position. Place the cursor in the manuscript and try again.')
@@ -118,6 +126,7 @@ export function InsertBlockDialog({
             <label><span>Footnote text</span><textarea autoFocus value={content} onChange={(event) => setContent(event.target.value)} rows={4} placeholder="Supporting detail…" /></label>
           </>}
           {kind === 'code-cell' && <label><span>Language</span><select autoFocus value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>DraftMatter keeps each language in an independent execution environment.</small></label>}
+          {kind === 'computed-value' && <label><span>Result name</span><input autoFocus value={computedKey} onChange={(event) => setComputedKey(event.target.value)} list="computed-value-options" placeholder="mean_height" spellCheck={false} /><datalist id="computed-value-options">{computedValues.map((value) => <option key={value.key} value={value.key}>{value.value}</option>)}</datalist><small>{computedValues.length ? 'Choose a retained result or enter the name that its computation will produce.' : 'Enter the name emitted by a computation. It will show “Value unavailable” until that computation has run.'}</small></label>}
           {problem && <div className="insert-block-problem" role="alert">{problem}</div>}
         </div>
 

@@ -4,6 +4,7 @@ import { parseDisplayEquation } from './displayEquation'
 import { resolveFootnotes, type ResolvedFootnote } from './footnotes'
 import { buildPublicationByline, parsePublicationMetadata, removeDuplicateLeadingTitle, type PublicationMetadata } from './publicationMetadata'
 import { parseTableCaptionLine, pipeTableAlignments, pipeTableCells, type TableAlignment } from './tableSyntax'
+import { projectComputationsForPublication } from './publicationComputation'
 
 export interface DocxExportDiagnostic {
   code: 'figure-reference' | 'raw-source'
@@ -335,9 +336,10 @@ export function renderDocxExport(source: string, options: DocxExportOptions = {}
   if (cleanDiagnostics.some((diagnostic) => diagnostic.code === 'clean-anchor-leak' || diagnostic.code === 'clean-review-leak')) {
     throw new Error('DOCX export accepts only a clean DraftMatter projection without review storage markers.')
   }
+  const publicationSource = projectComputationsForPublication(source)
   const diagnostics: DocxExportDiagnostic[] = []
-  const rendered = documentBody(source, diagnostics, options)
-  const metadata = parsePublicationMetadata(source)
+  const rendered = documentBody(publicationSource, diagnostics, options)
+  const metadata = parsePublicationMetadata(publicationSource)
   const hasFootnotes = rendered.footnotes.length > 0
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${rendered.body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`
   const created = new Date(0).toISOString()

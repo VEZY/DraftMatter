@@ -4,6 +4,7 @@ import { parseDisplayEquation } from './displayEquation'
 import { resolveFootnotes, type ResolvedFootnoteDocument } from './footnotes'
 import { buildPublicationByline, normalizePublicationOrcid, parsePublicationMetadata, removeDuplicateLeadingTitle, type PublicationMetadata } from './publicationMetadata'
 import { parseTableCaptionLine, pipeTableAlignments, pipeTableCells } from './tableSyntax'
+import { projectComputationsForPublication } from './publicationComputation'
 
 export interface NativeHtmlExportOptions {
   title?: string
@@ -263,7 +264,8 @@ export function renderNativeHtmlExport(source: string, options: NativeHtmlExport
   if (diagnostics.some((diagnostic) => diagnostic.code === 'clean-anchor-leak' || diagnostic.code === 'clean-review-leak')) {
     throw new Error('Native HTML export accepts only a clean DraftMatter projection without review storage markers.')
   }
-  const metadata = parsePublicationMetadata(source)
+  const publicationSource = projectComputationsForPublication(source)
+  const metadata = parsePublicationMetadata(publicationSource)
   const title = options.title ?? metadata.title ?? 'DraftMatter manuscript'
   const authors = renderPublicationByline(metadata)
   const bibliography = options.bibliography?.length

@@ -188,6 +188,30 @@ const nodes: Record<string, NodeSpec> = {
     toDOM: atomDOM('equation-inline', (node) => node.attrs.tex),
     leafText: (node) => node.attrs.tex,
   },
+  computed_value: {
+    attrs: {
+      ...identified,
+      key: {},
+      rendered: { default: 'Value unavailable' },
+      cellId: { default: null },
+      status: { default: 'missing' },
+    },
+    inline: true,
+    group: 'inline',
+    atom: true,
+    selectable: true,
+    parseDOM: [{ tag: 'span[data-dm-node="computed-value"]' }],
+    toDOM: (node) => ['span', {
+      'data-dm-node': 'computed-value',
+      'data-dm-id': node.attrs.id ?? '',
+      'data-key': node.attrs.key,
+      'data-status': node.attrs.status,
+      title: node.attrs.status === 'current'
+        ? `Computed value ${node.attrs.key}${node.attrs.cellId ? ` · ${node.attrs.cellId}` : ''}`
+        : `Computed value ${node.attrs.key} is unavailable`,
+    }, node.attrs.rendered],
+    leafText: (node) => node.attrs.rendered,
+  },
   citation: {
     attrs: {
       ...identified,

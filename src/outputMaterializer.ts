@@ -1,6 +1,7 @@
 import type { ExecutableCell } from './executionCells'
 import { extractExecutableCells } from './executionCells'
 import type { JsonValue, MimeOutput, NormalizedExecutionResult } from './executionProvider'
+import { computedValuesFromExecution, retainedComputedValueDirectives, stripComputedValueProtocol } from './computedValues'
 import { sanitizeExecutionHtml } from './outputRenderer'
 import { parseLosslessPortableSource } from './portableSource'
 import type { DocumentDiagnostic } from './types'
@@ -127,14 +128,15 @@ function generatedBlock(request: MaterializeOutputRequest) {
     const stdout = request.result.streams
       .filter((stream) => stream.name === 'stdout')
       .sort((left, right) => left.sequence - right.sequence)
-      .map((stream) => stream.text)
+      .map((stream) => stripComputedValueProtocol(stream.text))
       .join('')
-    if (stdout) pieces.push(textFence(stdout))
+    if (stdout.trim()) pieces.push(textFence(stdout))
   }
-  if (pieces.length === 0) return undefined
+  const valueDirectives = retainedComputedValueDirectives(computedValuesFromExecution(request.result))
+  if (pieces.length === 0 && valueDirectives.length === 0) return undefined
   return [
     `<!-- dm-output:start cell="${request.cellId}" run="${request.result.hashes.result}" -->`,
-    pieces.join('\n\n'),
+    [...valueDirectives, ...pieces].join('\n\n'),
     '<!-- dm-output:end -->',
   ].join('\n')
 }

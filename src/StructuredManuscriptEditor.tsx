@@ -11,6 +11,7 @@ import { baseKeymap } from 'prosemirror-commands'
 import { redoCommand as collaborativeRedo, undoCommand as collaborativeUndo, ySyncPluginKey } from 'y-prosemirror'
 import { serializeCitationCluster } from './citation'
 import { formatCrossReferenceTarget, isCrossReferenceTarget } from './crossReference'
+import { parseRetainedComputedValues } from './computedValues'
 import { renderEquation } from './equationRenderer'
 import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
@@ -117,6 +118,7 @@ export interface StructuredManuscriptEditorHandle {
   undo: () => boolean
   redo: () => boolean
   insertCodeCell: (language: 'python' | 'r' | 'julia') => boolean
+  insertComputedValue: (key: string) => boolean
   insertEquation: (tex: string, display?: boolean, label?: string) => boolean
   insertCrossReference: (target: string) => boolean
   insertFootnote: (label: string, content: string) => boolean
@@ -1440,6 +1442,13 @@ function outputNodeView(node: ProseMirrorNode, resolveAssetUrl: (path: string) =
   const markdown = String(node.attrs.markdown)
     .replace(/^\s*<!-- dm-output:start[^>]*-->\s*/m, '')
     .replace(/\s*<!-- dm-output:end -->\s*$/m, '')
+    .replace(/^\s*<!-- dm-value\b[^>]*-->\s*$/gm, '')
+    .trim()
+  if (!markdown) {
+    dom.classList.add('values-only')
+    dom.setAttribute('aria-hidden', 'true')
+    return { dom }
+  }
   const label = markdown.match(/\{#([A-Za-z][\w.:-]*)(?:\s[^}]*)?\}/)?.[1]
   if (label && onCopyReference) {
     const copy = document.createElement('button')
@@ -2411,6 +2420,21 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         status: 'stale',
         attributes: { execute: true },
       }))
+      view.focus()
+      return true
+    },
+    insertComputedValue: (key) => {
+      const view = viewRef.current
+      const normalized = key.trim()
+      if (!view || readOnlyRef.current || !/^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/.test(normalized)) return false
+      const parsed = parseRetainedComputedValues(sourceRef.current).values[normalized]
+      view.dispatch(view.state.tr.replaceSelectionWith(manuscriptSchema.nodes.computed_value.createChecked({
+        id: randomId('computed-value'),
+        key: normalized,
+        rendered: parsed?.value ?? 'Value unavailable',
+        cellId: parsed?.cellId ?? null,
+        status: parsed ? 'current' : 'missing',
+      })))
       view.focus()
       return true
     },

@@ -12,7 +12,7 @@ author:
 
 ## Results {#results}
 
-Leaf area declined by **18%** [@vezy2020].[^methods] See @fig-response, @tbl-summary, and the model $y = ax + b$.
+Leaf area declined by **18%** [@vezy2020].[^methods] The fitted value was {{dm:value:fit_value}}. See @fig-response, @tbl-summary, and the model $y = ax + b$.
 
 $$
 R^2 = 0.94
@@ -31,6 +31,7 @@ print("must remain inert")
 \`\`\`
 
 <!-- dm-output:start cell="fit" run="sha256:test" -->
+<!-- dm-value key="fit_value" value="0.94" -->
 \`\`\`text
 retained model output
 \`\`\`
@@ -65,10 +66,12 @@ describe('native HTML export', () => {
     expect(html).toContain('<table id="tbl-summary"><caption>Treatment <strong>summary</strong>.</caption>')
     expect(html).toContain('<th style="text-align:right">Leaf area</th>')
     expect(html).not.toContain('{#tbl-summary')
-    expect(html).toContain('<pre class="source-code"><code class="language-python">')
-    expect(html).toContain('print(&quot;must remain inert&quot;)')
+    expect(html).toContain('The fitted value was 0.94.')
+    expect(html).not.toContain('<pre class="source-code"><code class="language-python">')
+    expect(html).not.toContain('must remain inert')
     expect(html).toContain('<pre class="execution-output"><samp>retained model output</samp></pre>')
     expect(html).not.toContain('source · not executed during export')
+    expect(html).not.toContain('dm-value')
     expect(html).not.toContain('<figcaption>python source')
     expect(html).not.toMatch(/<script|\.dm-anchor|\.draftmatter-reviews/)
   })
