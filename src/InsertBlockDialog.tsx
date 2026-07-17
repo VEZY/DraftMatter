@@ -1,6 +1,6 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Icon } from './Icon'
-import { isComputedValueKey, type RetainedComputedValue } from './computedValues'
+import { isPublishedValueName, type RetainedPublishedValue } from './publishedValues'
 
 export type InsertBlockRequest =
   | { kind: 'section'; title: string; level: number; label?: string }
@@ -11,7 +11,7 @@ export type InsertBlockRequest =
   | { kind: 'cross-reference'; target: string }
   | { kind: 'footnote'; label: string; content: string }
   | { kind: 'code-cell'; language: 'python' | 'r' | 'julia'; output: 'figure' | 'table' | 'values' }
-  | { kind: 'computed-value'; key: string }
+  | { kind: 'published-value'; name: string }
 
 export type InsertBlockKind = InsertBlockRequest['kind']
 
@@ -24,7 +24,7 @@ const details: Record<InsertBlockKind, { eyebrow: string; title: string; descrip
   'cross-reference': { eyebrow: 'Document link', title: 'Insert cross-reference', description: 'Link to a figure, table, equation, or section.' },
   footnote: { eyebrow: 'Supporting note', title: 'Insert footnote', description: 'Add supporting text at the current position.' },
   'code-cell': { eyebrow: 'Reproducible result', title: 'Add reproducible output', description: 'Create a hidden computation that produces a figure, table, or named value.' },
-  'computed-value': { eyebrow: 'Reproducible result', title: 'Insert computed value', description: 'Place a named result from a computation directly in the sentence.' },
+  'published-value': { eyebrow: 'Reproducible result', title: 'Insert published value', description: 'Place an explicitly published result directly in the sentence.' },
 }
 
 function cleanLabel(value: string) {
@@ -35,12 +35,12 @@ export function InsertBlockDialog({
   kind,
   onClose,
   onInsert,
-  computedValues = [],
+  publishedValues = [],
 }: {
   kind: InsertBlockKind
   onClose: () => void
   onInsert: (request: InsertBlockRequest) => boolean
-  computedValues?: RetainedComputedValue[]
+  publishedValues?: RetainedPublishedValue[]
 }) {
   const detail = details[kind]
   const [title, setTitle] = useState('')
@@ -56,7 +56,7 @@ export function InsertBlockDialog({
   const [content, setContent] = useState('')
   const [language, setLanguage] = useState<'python' | 'r' | 'julia'>('python')
   const [computedOutput, setComputedOutput] = useState<'figure' | 'table' | 'values'>('figure')
-  const [computedKey, setComputedKey] = useState(computedValues[0]?.key ?? '')
+  const [publishedName, setPublishedName] = useState(publishedValues[0]?.name ?? '')
   const [problem, setProblem] = useState('')
 
   const valid = useMemo(() => {
@@ -66,9 +66,9 @@ export function InsertBlockDialog({
     if (kind === 'equation-inline' || kind === 'equation-display') return Boolean(tex.trim())
     if (kind === 'cross-reference') return /^(?:fig|tbl|eq|sec)-[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(target.trim().replace(/^@/, ''))
     if (kind === 'footnote') return /^[A-Za-z0-9_.:-]+$/.test(label.trim().replace(/^\[\^|\]$/g, '')) && Boolean(content.trim())
-    if (kind === 'computed-value') return isComputedValueKey(computedKey.trim())
+    if (kind === 'published-value') return isPublishedValueName(publishedName.trim())
     return true
-  }, [alt, columns, computedKey, content, kind, label, rows, source, target, tex, title])
+  }, [alt, columns, content, kind, label, publishedName, rows, source, target, tex, title])
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -81,7 +81,7 @@ export function InsertBlockDialog({
     else if (kind === 'equation-display') request = { kind, tex: tex.trim(), label: cleanLabel(label) }
     else if (kind === 'cross-reference') request = { kind, target: target.trim().replace(/^@/, '') }
     else if (kind === 'footnote') request = { kind, label: label.trim().replace(/^\[\^|\]$/g, ''), content: content.trim() }
-    else if (kind === 'computed-value') request = { kind, key: computedKey.trim() }
+    else if (kind === 'published-value') request = { kind, name: publishedName.trim() }
     else request = { kind, language, output: computedOutput }
     if (onInsert(request)) onClose()
     else setProblem('The item could not be inserted at the current editor position. Place the cursor in the manuscript and try again.')
@@ -127,7 +127,7 @@ export function InsertBlockDialog({
             <label><span>Footnote text</span><textarea autoFocus value={content} onChange={(event) => setContent(event.target.value)} rows={4} placeholder="Supporting detail…" /></label>
           </>}
           {kind === 'code-cell' && <div className="insert-block-grid"><label><span>Produces</span><select autoFocus value={computedOutput} onChange={(event) => setComputedOutput(event.target.value as typeof computedOutput)}><option value="figure">Figure</option><option value="table">Table</option><option value="values">In-text values</option></select><small>Only this result appears in the manuscript.</small></label><label><span>Language</span><select value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>The saved source stays hidden until you choose to edit it.</small></label></div>}
-          {kind === 'computed-value' && <label><span>Result name</span><input autoFocus value={computedKey} onChange={(event) => setComputedKey(event.target.value)} list="computed-value-options" placeholder="mean_height" spellCheck={false} /><datalist id="computed-value-options">{computedValues.map((value) => <option key={value.key} value={value.key}>{value.value}</option>)}</datalist><small>{computedValues.length ? 'Choose a retained result or enter the name that its computation will produce.' : 'Enter the name emitted by a computation. It will show “Value unavailable” until that computation has run.'}</small></label>}
+          {kind === 'published-value' && <label><span>Published name</span><input autoFocus value={publishedName} onChange={(event) => setPublishedName(event.target.value)} list="published-value-options" placeholder="mean_height" spellCheck={false} /><datalist id="published-value-options">{publishedValues.map((value) => <option key={value.name} value={value.name}>{value.rendered}</option>)}</datalist><small>{publishedValues.length ? 'Choose a retained publication or enter the name a values cell will publish.' : 'Enter the name a values cell will publish. It will show “Value unavailable” until that cell has run.'}</small></label>}
           {problem && <div className="insert-block-problem" role="alert">{problem}</div>}
         </div>
 

@@ -1,7 +1,7 @@
 import type { ExecutableCell } from './executionCells'
 import { extractExecutableCells } from './executionCells'
 import type { JsonValue, MimeOutput, NormalizedExecutionResult } from './executionProvider'
-import { computedValuesFromExecution, retainedComputedValueDirectives, stripComputedValueProtocol } from './computedValues'
+import { retainedPublishedValueDirectives } from './publishedValues'
 import { sanitizeExecutionHtml } from './outputRenderer'
 import { parseLosslessPortableSource } from './portableSource'
 import type { DocumentDiagnostic } from './types'
@@ -128,17 +128,17 @@ function generatedBlock(request: MaterializeOutputRequest) {
     const stdout = request.result.streams
       .filter((stream) => stream.name === 'stdout')
       .sort((left, right) => left.sequence - right.sequence)
-      .map((stream) => stripComputedValueProtocol(stream.text))
+      .map((stream) => stream.text)
       .join('')
     if (stdout.trim()) pieces.push(textFence(stdout))
   }
-  const valueDirectives = retainedComputedValueDirectives(computedValuesFromExecution(request.result))
-  if (pieces.length === 0 && valueDirectives.length === 0) return undefined
-  return [
+  const published = retainedPublishedValueDirectives(request.result)
+  if (pieces.length === 0 && published.directives.length === 0) return { diagnostics: published.diagnostics }
+  return { diagnostics: published.diagnostics, block: [
     `<!-- dm-output:start cell="${request.cellId}" run="${request.result.hashes.result}" -->`,
-    [...valueDirectives, ...pieces].join('\n\n'),
+    [...published.directives, ...pieces].join('\n\n'),
     '<!-- dm-output:end -->',
-  ].join('\n')
+  ].join('\n') }
 }
 
 function normalizeEnding(value: string, ending: string) {
@@ -165,8 +165,12 @@ export function materializeExecutionOutput(request: MaterializeOutputRequest): M
   if (missing.length) {
     return { ...diagnostic('output-artifact-missing', `Declared artifact${missing.length === 1 ? '' : 's'} missing from the successful run: ${missing.join(', ')}.`), source: request.source }
   }
-  const block = generatedBlock(request)
-  if (!block) return { ...diagnostic('output-empty', 'The successful run has no portable artifact or MIME output to materialize.'), source: request.source }
+  const generated = generatedBlock(request)
+  if (generated.diagnostics.length) {
+    return { ok: false, source: request.source, diagnostics: generated.diagnostics }
+  }
+  const block = generated.block
+  if (!block) return { ...diagnostic('output-empty', 'The successful run has no portable artifact, published value, or MIME output to materialize.'), source: request.source }
   const ending = lineEnding(request.source)
   const replacement = normalizeEnding(block, ending)
   const existing = outputNodesFor(request.source, request.cellId)

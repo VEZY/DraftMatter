@@ -62,7 +62,7 @@ import { normalizeProjectRelativePath, projectFilePath } from './projectPaths'
 import { authorInitials, readUserSettings, renameLocalAuthor, saveUserSettings } from './userSettings'
 import { parsePublicationMetadata, updatePublicationAuthorDetails, type PublicationAuthor } from './publicationMetadata'
 import { copyPlainText } from './clipboard'
-import { parseRetainedComputedValues } from './computedValues'
+import { parseRetainedPublishedValues } from './publishedValues'
 import { countWords, measurePortableManuscript } from './manuscriptMetrics'
 import { ReviewTimestamp } from './ReviewTimestamp'
 import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
@@ -1249,9 +1249,9 @@ function App() {
   const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL) ?? executableCells[0]
   const retainedOutputParse = parseRetainedOutputs(executionSource)
   const retainedOutputs = retainedOutputParse.outputs
-  const retainedComputedValueParse = useMemo(() => parseRetainedComputedValues(manuscriptSource), [manuscriptSource])
-  const retainedComputedValues = Object.values(retainedComputedValueParse.values)
-  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics, ...executionDiagnostics, ...retainedOutputParse.diagnostics, ...retainedComputedValueParse.diagnostics]
+  const retainedPublishedValueParse = useMemo(() => parseRetainedPublishedValues(manuscriptSource), [manuscriptSource])
+  const retainedPublishedValues = Object.values(retainedPublishedValueParse.values)
+  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics, ...executionDiagnostics, ...retainedOutputParse.diagnostics, ...retainedPublishedValueParse.diagnostics]
   const prioritizedDiagnostics = prioritizeProjectDiagnostics(allDiagnostics)
   const configuredProvider = (cell: ExecutableCell): ExecutionProviderKind => {
     const explicit = cell.attributes.provider
@@ -1634,9 +1634,9 @@ function App() {
       if (inserted) setToast(`Footnote inserted · ${request.label}`)
       return inserted
     }
-    if (request.kind === 'computed-value') {
-      const inserted = runStructuredCommand((editor) => editor.insertComputedValue(request.key), 'Insert computed value')
-      if (inserted) setToast(`Computed value inserted · ${request.key}`)
+    if (request.kind === 'published-value') {
+      const inserted = runStructuredCommand((editor) => editor.insertPublishedValue(request.name), 'Insert published value')
+      if (inserted) setToast(`Published value inserted · ${request.name}`)
       return inserted
     }
     const inserted = runStructuredCommand((editor) => editor.insertCodeCell(request.language, request.output), 'Add reproducible output')
@@ -3284,13 +3284,13 @@ function App() {
       action: () => { setCommandOpen(false); openInsertBlock('figure') },
     },
     {
-      id: 'computed-value',
-      label: 'Insert computed value',
+      id: 'published-value',
+      label: 'Insert published value',
       description: 'Place a retained statistic or model result in the sentence',
       keywords: 'statistic result value inline reproducible number',
       icon: <span className="command-icon">123</span>,
       disabled: !canEditManuscript,
-      action: () => { setCommandOpen(false); openInsertBlock('computed-value') },
+      action: () => { setCommandOpen(false); openInsertBlock('published-value') },
     },
     {
       id: 'code-cell',
@@ -3612,7 +3612,7 @@ function App() {
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('figure') }}><Icon name="image" size={15} /><span><strong>Figure</strong><small>Image and caption</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('table') }}><Icon name="table" size={15} /><span><strong>Table</strong><small>Editable rows and columns</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('equation-inline') }}><span className="toolbar-symbol">∑</span><span><strong>Equation</strong><small>Inline or display mathematics</small></span></button>
-                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('computed-value') }}><span className="toolbar-symbol">123</span><span><strong>Computed value</strong><small>Statistic or model result in text</small></span></button>
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('published-value') }}><span className="toolbar-symbol">123</span><span><strong>Published value</strong><small>Statistic or model result in text</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('code-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible output</strong><small>Hidden computation for a result</small></span></button>
               </div>}
             </div>
@@ -4106,7 +4106,7 @@ function App() {
           kind={insertBlockKind}
           onClose={() => setInsertBlockKind(undefined)}
           onInsert={insertStructuredRequest}
-          computedValues={retainedComputedValues}
+          publishedValues={retainedPublishedValues}
         />
       )}
 

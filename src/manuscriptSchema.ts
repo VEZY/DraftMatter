@@ -188,10 +188,10 @@ const nodes: Record<string, NodeSpec> = {
     toDOM: atomDOM('equation-inline', (node) => node.attrs.tex),
     leafText: (node) => node.attrs.tex,
   },
-  computed_value: {
+  published_value: {
     attrs: {
       ...identified,
-      key: {},
+      name: {},
       rendered: { default: 'Value unavailable' },
       cellId: { default: null },
       status: { default: 'missing' },
@@ -200,15 +200,15 @@ const nodes: Record<string, NodeSpec> = {
     group: 'inline',
     atom: true,
     selectable: true,
-    parseDOM: [{ tag: 'span[data-dm-node="computed-value"]' }],
+    parseDOM: [{ tag: 'span[data-dm-node="published-value"]' }],
     toDOM: (node) => ['span', {
-      'data-dm-node': 'computed-value',
+      'data-dm-node': 'published-value',
       'data-dm-id': node.attrs.id ?? '',
-      'data-key': node.attrs.key,
+      'data-name': node.attrs.name,
       'data-status': node.attrs.status,
       title: node.attrs.status === 'current'
-        ? `Computed value ${node.attrs.key}${node.attrs.cellId ? ` · ${node.attrs.cellId}` : ''}`
-        : `Computed value ${node.attrs.key} is unavailable`,
+        ? `Published value ${node.attrs.name}${node.attrs.cellId ? ` · ${node.attrs.cellId}` : ''}`
+        : `Published value ${node.attrs.name} is unavailable`,
     }, node.attrs.rendered],
     leafText: (node) => node.attrs.rendered,
   },

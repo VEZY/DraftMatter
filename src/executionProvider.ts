@@ -65,6 +65,8 @@ export interface ExecutionProvenance {
   provider: ExecutionProviderKind
   providerRunId?: string
   executionCount?: number
+  sessionGeneration?: number
+  executionSequence?: number
 }
 
 export interface NormalizedExecutionResult {

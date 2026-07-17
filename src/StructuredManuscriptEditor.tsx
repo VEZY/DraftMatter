@@ -11,7 +11,7 @@ import { baseKeymap } from 'prosemirror-commands'
 import { redoCommand as collaborativeRedo, undoCommand as collaborativeUndo, ySyncPluginKey } from 'y-prosemirror'
 import { serializeCitationCluster } from './citation'
 import { formatCrossReferenceTarget, isCrossReferenceTarget } from './crossReference'
-import { parseRetainedComputedValues } from './computedValues'
+import { parseRetainedPublishedValues } from './publishedValues'
 import { renderEquation } from './equationRenderer'
 import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
@@ -118,7 +118,7 @@ export interface StructuredManuscriptEditorHandle {
   undo: () => boolean
   redo: () => boolean
   insertCodeCell: (language: 'python' | 'r' | 'julia', output?: 'figure' | 'table' | 'values') => boolean
-  insertComputedValue: (key: string) => boolean
+  insertPublishedValue: (name: string) => boolean
   insertEquation: (tex: string, display?: boolean, label?: string) => boolean
   insertCrossReference: (target: string) => boolean
   insertFootnote: (label: string, content: string) => boolean
@@ -1442,7 +1442,7 @@ function outputNodeView(node: ProseMirrorNode, resolveAssetUrl: (path: string) =
   const markdown = String(node.attrs.markdown)
     .replace(/^\s*<!-- dm-output:start[^>]*-->\s*/m, '')
     .replace(/\s*<!-- dm-output:end -->\s*$/m, '')
-    .replace(/^\s*<!-- dm-value\b[^>]*-->\s*$/gm, '')
+    .replace(/^\s*<!-- dm-published-value\b[^>]*-->\s*$/gm, '')
     .trim()
   if (!markdown) {
     dom.classList.add('values-only')
@@ -2414,10 +2414,10 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       const id = randomId(`cell-${language}`)
       const valueTemplate = output === 'values'
         ? language === 'python'
-          ? '# After computing a result, publish it like this:\n# print("DRAFTMATTER_VALUE mean_height=12.4 cm")'
+          ? '# Publish only the values used in prose:\n# publish("mean_height", mean_height, unit="cm", digits=1)'
           : language === 'r'
-            ? '# After computing a result, publish it like this:\n# cat("DRAFTMATTER_VALUE mean_height=12.4 cm\\n")'
-            : '# After computing a result, publish it like this:\n# println("DRAFTMATTER_VALUE mean_height=12.4 cm")'
+            ? '# Publish only the values used in prose:\n# publish("mean_height", mean_height, unit = "cm", digits = 1)'
+            : '# Publish only the values used in prose:\n# @publish mean_height unit="cm" digits=1'
         : ''
       insertBlock(view, manuscriptSchema.nodes.code_cell.createChecked({
         id,
@@ -2430,16 +2430,16 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       view.focus()
       return true
     },
-    insertComputedValue: (key) => {
+    insertPublishedValue: (name) => {
       const view = viewRef.current
-      const normalized = key.trim()
+      const normalized = name.trim()
       if (!view || readOnlyRef.current || !/^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/.test(normalized)) return false
-      const parsed = parseRetainedComputedValues(sourceRef.current).values[normalized]
-      view.dispatch(view.state.tr.replaceSelectionWith(manuscriptSchema.nodes.computed_value.createChecked({
-        id: randomId('computed-value'),
-        key: normalized,
-        rendered: parsed?.value ?? 'Value unavailable',
-        cellId: parsed?.cellId ?? null,
+      const parsed = parseRetainedPublishedValues(sourceRef.current).values[normalized]
+      view.dispatch(view.state.tr.replaceSelectionWith(manuscriptSchema.nodes.published_value.createChecked({
+        id: randomId('published-value'),
+        name: normalized,
+        rendered: parsed?.rendered ?? 'Value unavailable',
+        cellId: parsed?.provenance.cellId ?? null,
         status: parsed ? 'current' : 'missing',
       })))
       view.focus()

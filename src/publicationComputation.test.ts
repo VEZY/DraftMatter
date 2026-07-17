@@ -1,16 +1,30 @@
 import { describe, expect, it } from 'vitest'
 import { projectComputationsForPublication } from './publicationComputation'
+import { retainedPublishedValueDirectives } from './publishedValues'
+import type { NormalizedExecutionResult } from './executionProvider'
+
+function retainedEstimate() {
+  const result: NormalizedExecutionResult = {
+    cellId: 'analysis', language: 'python', status: 'succeeded', streams: [], errors: [], artifacts: [],
+    mime: [{ data: { 'application/vnd.draftmatter.published-value+json': { version: 1, name: 'estimate', value: 12.4 } }, metadata: {} }],
+    environment: { identity: 'python', provider: 'kernel', language: 'python', fingerprint: 'sha256:environment' },
+    hashes: { code: 'sha256:code', inputs: 'sha256:inputs', environment: 'sha256:environment', result: 'sha256:run' },
+    provenance: { provider: 'kernel', sessionGeneration: 1, executionSequence: 1 },
+    startedAt: '', finishedAt: '', durationMs: 0,
+  }
+  return retainedPublishedValueDirectives(result).directives[0]
+}
 
 describe('publication computation projection', () => {
   it('removes executable source, retains outputs, and resolves named values', () => {
-    const source = `The estimate was {{dm:value:estimate}}.
+    const source = `The estimate was {{estimate}}.
 
 \`\`\`python {#analysis .execute output="values"}
-print("DRAFTMATTER_VALUE estimate=12.4")
+publish("estimate", estimate)
 \`\`\`
 
 <!-- dm-output:start cell="analysis" run="sha256:run" -->
-<!-- dm-value key="estimate" value="12.4" -->
+${retainedEstimate()}
 
 | treatment | mean |
 | --- | --- |
@@ -22,7 +36,7 @@ print("DRAFTMATTER_VALUE estimate=12.4")
     expect(projected).toContain('The estimate was 12.4.')
     expect(projected).toContain('| dry | 12.4 |')
     expect(projected).not.toContain('print(')
-    expect(projected).not.toContain('dm-value')
+    expect(projected).not.toContain('dm-published-value')
   })
 
   it('keeps ordinary non-executable code examples', () => {

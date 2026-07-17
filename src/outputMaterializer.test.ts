@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { NormalizedExecutionResult } from './executionProvider'
 import { materializeExecutionOutput } from './outputMaterializer'
+import { PUBLISHED_VALUE_MIME } from './publishedValues'
 
 const source = `Intro remains byte-identical.
 
@@ -24,9 +25,9 @@ function result(overrides: Partial<NormalizedExecutionResult> = {}): NormalizedE
     errors: [],
     mime: [],
     artifacts: [{ path: 'figures/generated/growth.svg', bytes: 128, hash: `sha256:${'a'.repeat(64)}`, mediaType: 'image/svg+xml' }],
-    environment: { identity: 'python', provider: 'direct', language: 'python', fingerprint: 'sha256:environment' },
+    environment: { identity: 'python', provider: 'kernel', language: 'python', fingerprint: 'sha256:environment' },
     hashes: { code: 'sha256:code', inputs: 'sha256:inputs', environment: 'sha256:environment', result: `sha256:${'b'.repeat(64)}` },
-    provenance: { provider: 'direct' },
+    provenance: { provider: 'kernel', sessionGeneration: 1, executionSequence: 1 },
     startedAt: '2026-07-15T12:00:00.000Z',
     finishedAt: '2026-07-15T12:00:00.100Z',
     durationMs: 100,
@@ -124,36 +125,39 @@ describe('portable output materialization', () => {
     expect(materialized.source).toContain('&lt;!-- dm-output:end -->')
   })
 
-  it('retains direct-provider stdout when no richer output is available', () => {
+  it('retains kernel stdout when no richer output is available', () => {
     const portableSource = source.replace('produces="figures/generated/growth.svg"', 'output="text"')
     const materialized = materializeExecutionOutput({
       source: portableSource,
       cellId: 'fig-growth',
       result: result({
         artifacts: [],
-        streams: [{ sequence: 0, name: 'stdout', text: 'direct text output\n' }],
+        streams: [{ sequence: 0, name: 'stdout', text: 'kernel text output\n' }],
       }),
     })
 
     expect(materialized.ok).toBe(true)
     if (!materialized.ok) return
-    expect(materialized.source).toContain('~~~text\ndirect text output\n~~~')
+    expect(materialized.source).toContain('~~~text\nkernel text output\n~~~')
   })
 
-  it('materializes named inline values without exposing their stdout protocol', () => {
+  it('materializes native published values without displaying helper output', () => {
     const portableSource = source.replace('produces="figures/generated/growth.svg"', 'output="values"')
     const materialized = materializeExecutionOutput({
       source: portableSource,
       cellId: 'fig-growth',
       result: result({
         artifacts: [],
-        streams: [{ sequence: 0, name: 'stdout', text: 'DRAFTMATTER_VALUE mean_area=18.4 cm²\n' }],
+        mime: [{
+          data: { [PUBLISHED_VALUE_MIME]: { version: 1, name: 'mean_area', value: 18.4, unit: 'cm²', formatting: { digits: 1 } } },
+          metadata: {},
+        }],
       }),
     })
 
     expect(materialized.ok).toBe(true)
     if (!materialized.ok) return
-    expect(materialized.source).toContain('<!-- dm-value key="mean_area" value="18.4%20cm%C2%B2" -->')
+    expect(materialized.source).toContain('<!-- dm-published-value data="')
     expect(materialized.source).not.toContain('~~~text')
   })
 })

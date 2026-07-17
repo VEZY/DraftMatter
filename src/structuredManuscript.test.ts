@@ -203,18 +203,22 @@ describe('generic structured manuscript bridge', () => {
     ])
   })
 
-  it('renders retained inline computation values while preserving portable markup', () => {
-    const source = `Estimate: {{dm:value:mean_area}}. Missing: {{dm:value:confidence_interval}}.\n\n<!-- dm-output:start cell="summary" run="sha256:run" -->\n<!-- dm-value key="mean_area" value="18.4%20cm%C2%B2" -->\n<!-- dm-output:end -->\n`
+  it('renders retained published values while preserving portable markup', () => {
+    const retained = encodeURIComponent(JSON.stringify({
+      version: 1, name: 'mean_area', value: 18.4, unit: 'cm²', formatting: { digits: 1 }, rendered: '18.4 cm²',
+      provenance: { cellId: 'summary', language: 'python', runHash: 'sha256:run', codeHash: 'sha256:code', environmentFingerprint: 'sha256:env', sessionGeneration: 1, executionSequence: 1, retainedOutputHashes: ['sha256:run'] },
+    }))
+    const source = `Estimate: {{mean_area}}. Missing: {{confidence_interval}}.\n\n<!-- dm-output:start cell="summary" run="sha256:run" -->\n<!-- dm-published-value data="${retained}" -->\n<!-- dm-output:end -->\n`
     const parsed = parseStructuredManuscript(source)
     const values: Array<Record<string, unknown>> = []
     parsed.document.descendants((node) => {
-      if (node.type === manuscriptSchema.nodes.computed_value) values.push(node.attrs)
+      if (node.type === manuscriptSchema.nodes.published_value) values.push(node.attrs)
       return true
     })
 
     expect(values).toEqual([
-      expect.objectContaining({ key: 'mean_area', rendered: '18.4 cm²', cellId: 'summary', status: 'current' }),
-      expect.objectContaining({ key: 'confidence_interval', rendered: 'Value unavailable', status: 'missing' }),
+      expect.objectContaining({ name: 'mean_area', rendered: '18.4 cm²', cellId: 'summary', status: 'current' }),
+      expect.objectContaining({ name: 'confidence_interval', rendered: 'Value unavailable', status: 'missing' }),
     ])
     expect(parsed.document.textContent).toContain('Estimate: 18.4 cm². Missing: Value unavailable.')
     expect(serializeStructuredManuscript(parsed.document, parsed.metadata)).toBe(source)

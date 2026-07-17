@@ -12,7 +12,7 @@ author:
 
 ## Results {#results}
 
-Leaf area declined by **18%** [@vezy2020].[^methods] The fitted value was {{dm:value:fit_value}}. See @fig-response, @tbl-summary, and the model $y = ax + b$.
+Leaf area declined by **18%** [@vezy2020].[^methods] The fitted value was {{fit_value}}. See @fig-response, @tbl-summary, and the model $y = ax + b$.
 
 $$
 R^2 = 0.94
@@ -31,7 +31,7 @@ print("must remain inert")
 \`\`\`
 
 <!-- dm-output:start cell="fit" run="sha256:test" -->
-<!-- dm-value key="fit_value" value="0.94" -->
+<!-- dm-published-value data="%7B%22version%22%3A1%2C%22name%22%3A%22fit_value%22%2C%22value%22%3A0.94%2C%22formatting%22%3A%7B%22digits%22%3A2%7D%2C%22rendered%22%3A%220.94%22%2C%22provenance%22%3A%7B%22cellId%22%3A%22fit%22%2C%22language%22%3A%22python%22%2C%22runHash%22%3A%22sha256%3Afit%22%2C%22codeHash%22%3A%22sha256%3Acode%22%2C%22environmentFingerprint%22%3A%22sha256%3Aenv%22%2C%22sessionGeneration%22%3A1%2C%22executionSequence%22%3A1%2C%22retainedOutputHashes%22%3A%5B%22sha256%3Afit%22%5D%7D%7D" -->
 \`\`\`text
 retained model output
 \`\`\`
@@ -71,7 +71,7 @@ describe('native HTML export', () => {
     expect(html).not.toContain('must remain inert')
     expect(html).toContain('<pre class="execution-output"><samp>retained model output</samp></pre>')
     expect(html).not.toContain('source · not executed during export')
-    expect(html).not.toContain('dm-value')
+    expect(html).not.toContain('dm-published-value')
     expect(html).not.toContain('<figcaption>python source')
     expect(html).not.toMatch(/<script|\.dm-anchor|\.draftmatter-reviews/)
   })

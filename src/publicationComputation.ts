@@ -1,4 +1,4 @@
-import { parseRetainedComputedValues, replaceComputedValueMarkup } from './computedValues'
+import { parseRetainedPublishedValues, replacePublishedValueMarkup } from './publishedValues'
 
 function executableFence(value: string) {
   const match = value.match(/^[ \t]*(`{3,}|~{3,})(.*)$/)
@@ -16,7 +16,7 @@ function closingFence(value: string, fence: string) {
 export function projectComputationsForPublication(source: string) {
   const ending = source.includes('\r\n') ? '\r\n' : source.includes('\r') ? '\r' : '\n'
   const lines = source.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n')
-  const retained = parseRetainedComputedValues(source)
+  const retained = parseRetainedPublishedValues(source)
   const projected: string[] = []
   for (let index = 0; index < lines.length; index += 1) {
     const fence = executableFence(lines[index])
@@ -25,8 +25,8 @@ export function projectComputationsForPublication(source: string) {
       while (index < lines.length && !closingFence(lines[index], fence)) index += 1
       continue
     }
-    if (/^<!--\s*dm-value\b[^>]*-->\s*$/.test(lines[index])) continue
+    if (/^<!--\s*dm-published-value\b[^>]*-->\s*$/.test(lines[index])) continue
     projected.push(lines[index])
   }
-  return replaceComputedValueMarkup(projected.join(ending), retained.values)
+  return replacePublishedValueMarkup(projected.join(ending), retained.values)
 }
