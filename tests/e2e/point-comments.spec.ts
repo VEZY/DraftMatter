@@ -16,6 +16,7 @@ test.describe('DM-P4-01 rendered point comments', () => {
     await page.goto('/')
 
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
+    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Review feedback' })
     await manuscript.getByText('Measure canopy area weekly.', { exact: true }).evaluate((element) => {
       const editor = element.closest<HTMLElement>('[contenteditable="true"]')
@@ -53,6 +54,7 @@ test.describe('DM-P4-01 rendered point comments', () => {
 
     await page.reload()
     await expect.poll(acceptedProse).toBe('Measure canopy area weekly.')
+    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     await expect(page.getByRole('complementary', { name: 'Review feedback' }).getByText('Add the sampling date here.', { exact: true })).toBeVisible()
   })
 })

@@ -7,6 +7,7 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
       Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined })
     })
     await page.goto('/')
+    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
 
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
     const reviewPanel = page.getByRole('complementary', { name: 'Review feedback' })
@@ -94,8 +95,8 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
     await page.keyboard.press('ArrowDown')
     await expect(palette.getByRole('button', { name: /Insert display equation/ })).toHaveClass(/active/)
     await expect(commandSearch).toHaveAttribute('aria-activedescendant', 'command-display-equation')
-    await commandSearch.fill('portable source')
-    await expect(palette.getByRole('button', { name: /Inspect portable source/ })).toBeVisible()
+    await commandSearch.fill('manuscript source')
+    await expect(palette.getByRole('button', { name: /View manuscript source/ })).toBeVisible()
     await expect(palette.getByRole('button', { name: /Add section/ })).toBeHidden()
     await page.keyboard.press('Enter')
     const sourceInspector = page.getByRole('dialog', { name: 'Portable source inspector' })

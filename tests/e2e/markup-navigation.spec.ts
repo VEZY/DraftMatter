@@ -31,6 +31,10 @@ test.describe('DM-P4-05 markup filtering and navigation', () => {
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     }, source)
     await page.goto('/')
+    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
+    const review = page.getByRole('complementary', { name: 'Review feedback' })
+    await review.getByText('Review options', { exact: true }).click()
+    await review.getByLabel('Markup view').selectOption('all')
   })
 
   test('keeps the manuscript marks, author filter, rail selection, and navigation aligned', async ({ page }) => {
@@ -68,7 +72,10 @@ test.describe('DM-P4-05 markup filtering and navigation', () => {
 test.describe('DM-P4-05 modeled review alternatives', () => {
   test('renders the alternative selected by next and previous navigation', async ({ page }) => {
     await page.goto('/')
+    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Review feedback' })
+    await review.getByText('Review options', { exact: true }).click()
+    await review.getByLabel('Markup view').selectOption('all')
     const reviewedSentence = page.getByRole('article', { name: 'Editable manuscript' })
 
     await expect(reviewedSentence.locator('.dm-review-proposal')).toHaveText('reduced leaf area by 18%')

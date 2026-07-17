@@ -645,7 +645,7 @@ function codeCellNodeView(
     dom.dataset.expanded = expanded ? 'true' : 'false'
     dom.dataset.sourceStatus = String(node.attrs.status)
     language.textContent = cellLanguage === 'r' ? 'R' : cellLanguage
-    label.textContent = `Reproducible ${output === 'values' ? 'values' : output}`
+    label.textContent = `Reproducible ${output === 'values' ? 'values' : output} · ${cellId}`
     label.title = cellId
     const presentedStatus = presentationStatus(cellId) ?? String(node.attrs.status)
     dom.dataset.status = presentedStatus

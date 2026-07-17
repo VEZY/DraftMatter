@@ -12,6 +12,7 @@ test.describe('DM-P4-01 review thread actions', () => {
 
   test('persists reply and resolve activity timestamps across reload', async ({ page }) => {
     await page.goto('/')
+    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Review feedback' })
     const comment = review.locator('#review-item-dm-comment-01')
 
@@ -31,6 +32,7 @@ test.describe('DM-P4-01 review thread actions', () => {
     await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toMatch(/#dm-comment-01 \.dm-thread[^}]*data-status="resolved"[^}]*data-updated=/)
 
     await page.reload()
+    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const reopenedReview = page.getByRole('complementary', { name: 'Review feedback' })
     const reopenedComment = reopenedReview.locator('#review-item-dm-comment-01')
     await expect(reopenedComment).toContainText('The interval is now included.')
@@ -42,6 +44,7 @@ test.describe('DM-P4-01 review thread actions', () => {
 
   test('removes a sample comment from the active queue and reopens its deleted audit record', async ({ page }) => {
     await page.goto('/')
+    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Review feedback' })
     const topbar = page.locator('.topbar')
     const rail = page.getByRole('navigation', { name: 'Workspace navigation' })
@@ -58,6 +61,7 @@ test.describe('DM-P4-01 review thread actions', () => {
     await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toContain('data-status="deleted"')
 
     await page.reload()
+    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     await expect(page.getByRole('complementary', { name: 'Review feedback' }).getByText('Can we quantify this increase in the main text?')).toHaveCount(0)
     await expect(page.locator('.topbar').getByRole('button', { name: 'Review, 2 open items' })).toBeVisible()
     const portable = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')

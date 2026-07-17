@@ -3158,10 +3158,12 @@ button:disabled {
   bottom: -18px;
   margin: 12px -13px -18px;
   min-height: 42px;
+  pointer-events: none;
   position: sticky;
   z-index: 2;
 }
 
+.portable-review-footer button { pointer-events: auto; }
 .portable-review-footer button:first-child { margin-right: 0; }
 .portable-review-footer span { margin-left: auto; }
 
@@ -5026,7 +5028,7 @@ img.ProseMirror-separator { border: 0 !important; display: inline !important; he
 .execution-summary-bar { align-items: center; background: #f7f9f7; display: flex; gap: 10px; min-height: 42px; padding: 6px 10px; }
 .execution-summary-bar > span { align-items: center; color: #587064; display: flex; flex: 1; gap: 7px; min-width: 0; }
 .execution-summary-bar strong { color: #46534d; font-size: 9px; }
-.execution-summary-bar small { color: #7c8882; font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.execution-summary-bar small { color: #596760; font-size: 8px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .execution-summary-bar button { background: #fff; border: 1px solid #d8dfdb; border-radius: 5px; color: #5c6b64; font-size: 8px; font-weight: 700; min-height: 26px; padding: 0 8px; }
 .structured-execution-workspace.collapsed { border-color: #e6eae7; margin-bottom: 18px; }
 .structured-execution-workspace .structured-execution-bar { background: #f5f7f6; border: 0; border-bottom: 1px solid #e1e6e3; border-radius: 0; flex-wrap: wrap; margin: 0; }

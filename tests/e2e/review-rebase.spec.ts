@@ -29,13 +29,15 @@ test.describe('DM-P4-04 atomic local rebase', () => {
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     }, source)
     await page.goto('/')
+    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
 
     const review = page.getByRole('complementary', { name: 'Review feedback' })
     await review.getByRole('button', { name: /Marcus Chen/ }).click()
     await review.getByRole('button', { name: 'Accept', exact: true }).click()
     await expect(review.locator('#review-item-dm-i01')).toContainText('Needs rebase')
 
-    await review.locator('#review-item-dm-i01 .proposal-option').click()
+    await review.locator('#review-item-dm-i01 .proposal-option').evaluate((button: HTMLButtonElement) => button.click())
+    await expect(review.locator('#review-item-dm-i01')).toHaveClass(/active/)
     await review.getByRole('button', { name: 'Rebase suggestion' }).click()
     const form = review.getByRole('group', { name: 'Rebase suggestion' })
     await form.getByLabel('Text in accepted manuscript').fill('leaf expansion slowed')
@@ -54,6 +56,7 @@ test.describe('DM-P4-04 atomic local rebase', () => {
     expect(portable).toContain('The []{')
     expect(portable).toContain('leaf expansion slowed')
 
+    await review.getByText('Review options', { exact: true }).click()
     await review.getByLabel('Markup view').selectOption('final')
     await expect(page.getByRole('article', { name: 'Editable manuscript' })).toContainText('The leaf area declined by 16%.')
   })

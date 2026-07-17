@@ -38,8 +38,10 @@ test.describe('DM-P4-04 selected and author batch decisions', () => {
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     }, source)
     await page.goto('/')
+    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
 
     const review = page.getByRole('complementary', { name: 'Review feedback' })
+    await review.getByText('Review options', { exact: true }).click()
     await review.getByLabel('Review author').selectOption('dm-alice')
     await expect(review.getByRole('group', { name: 'Batch suggestion decisions' })).toContainText("Alice Martin's visible suggestions")
     await review.getByRole('button', { name: 'Select all 2' }).click()

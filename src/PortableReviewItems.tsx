@@ -122,6 +122,7 @@ export function PortableReviewItems({
   const [rebaseQuote, setRebaseQuote] = useState('')
   const [rebaseProposal, setRebaseProposal] = useState('')
   const composerRef = useRef<HTMLDivElement>(null)
+  const rebaseRef = useRef<HTMLDivElement>(null)
   const autoRecoveredSourceRef = useRef<string | undefined>(undefined)
 
   useEffect(() => {
@@ -159,6 +160,10 @@ export function PortableReviewItems({
     if (compose && typeof composerRef.current?.scrollIntoView === 'function') composerRef.current.scrollIntoView({ block: 'nearest' })
     if (compose === 'comment' && openCommentRequest) composerRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()
   }, [compose, openCommentRequest])
+
+  useEffect(() => {
+    if (rebaseChangeId && typeof rebaseRef.current?.scrollIntoView === 'function') rebaseRef.current.scrollIntoView({ block: 'center' })
+  }, [rebaseChangeId])
 
   useEffect(() => {
     if (!openCommentRequest || !canComment || !selectedTarget?.quote) return
@@ -403,7 +408,7 @@ export function PortableReviewItems({
                 <>
                   <div className="review-actions"><button className="accept" onClick={() => { setRebaseChangeId(item.id); setRebaseQuote(selectedTarget?.quote ?? ''); setRebaseProposal(change.proposal ?? '') }}><Icon name="branch" size={15} /> Rebase suggestion</button><button className="reject" onClick={() => decide(item.id, 'rejected')}><Icon name="x" size={15} /> Reject alternative</button></div>
                   {rebaseChangeId === item.id && (
-                    <div className="review-rebase-form" role="group" aria-label="Rebase suggestion">
+                    <div className="review-rebase-form" ref={rebaseRef} role="group" aria-label="Rebase suggestion">
                       <p>Anchor the revised proposal to text in the accepted manuscript. Accepted decisions are folded into the portable base once; their audit records remain.</p>
                       <label><span>Text in accepted manuscript</span><input value={rebaseQuote} onChange={(event) => setRebaseQuote(event.target.value)} placeholder="Select text in Final preview or paste it here" /></label>
                       {change.changeKind !== 'delete' && <label><span>Revised proposal</span><textarea value={rebaseProposal} onChange={(event) => setRebaseProposal(event.target.value)} rows={3} /></label>}
