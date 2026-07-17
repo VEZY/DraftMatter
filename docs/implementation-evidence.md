@@ -21,6 +21,18 @@ The implementation tree was last audited on 2026-07-16 from a clean
 | `.github/workflows/desktop-portability.yml` | Defines locked Windows, macOS, and Linux type, compliance, frontend, CLI, Rust, and application-build gates. |
 | `.github/workflows/desktop-release.yml` | Defines release verification, platform packaging, CLI packaging, checksums, SBOM/notices, and tag-only signing/notarization policy. |
 
+### Shared Jupyter-kernel audit
+
+The Jupyter-only execution and published-value work was audited on 2026-07-17.
+`npm run check` passed; `npm test` passed 117 files / 570 tests; and
+`cargo test --manifest-path src-tauri/Cargo.toml --no-fail-fast` passed 65 native
+host tests. An explicit temporary `ipykernel` integration run additionally
+verified shared state, rich artifacts and private published-value MIME,
+single-lane contention, restart generation and state clearing, interrupt, and
+post-interrupt recovery. Repository-wide removal checks found no legacy
+scalar-output protocol, namespaced value markup, alternative execution runner,
+execution-mode selector, or Python-side Jupyter control bridge.
+
 ## Task evidence
 
 ### DM-P0 — Portable format and editor-risk spike
@@ -67,15 +79,15 @@ The implementation tree was last audited on 2026-07-16 from a clean
 | Task | Automated or reproducible evidence | Implementation commit |
 | --- | --- | --- |
 | DM-P3-01 | `src/executionCells.test.ts` and `src/fixtures/execution/adversarial-cells.qmd` prove AST-aware extraction, adversarial fence handling, and stable cell IDs. | `a90f58d` |
-| DM-P3-02 | `src/runtimeDiscovery.test.ts`, `src/desktopHost.test.ts`, and Rust runtime tests cover independent Python/R/Julia discovery, project-persisted kernel environments, and explicit integration setup without project-open side effects. | `807192f` |
-| DM-P3-03 | `src/kernelExecution.ts`, `src/kernelExecutionTransport.test.ts`, and Rust native Jupyter-client tests assert one normalized Jupyter-only contract for status, streams, errors, MIME, artifacts, hashes, session generation, and execution sequence. | `807192f` + native-client follow-up |
-| DM-P3-04 | `src/executionLifecycle.test.ts`, `src/cleanExecution.test.ts`, `src/KernelConsole.test.tsx`, and `src/executionWorkspaceApp.test.tsx` cover shared sessions, setup-first execution, console reuse, interrupt, restart, terminate, ordering, and isolation. | `807192f` |
+| DM-P3-02 | `src/runtimeDiscovery.test.ts`, `src/desktopHost.test.ts`, and Rust runtime tests cover independent Python/R/Julia discovery, project-persisted kernel environments, selected-runtime repair, and explicit integration setup without project-open side effects. | `807192f`, `0b21e9c` |
+| DM-P3-03 | `src/kernelExecution.ts`, `src/kernelExecutionTransport.test.ts`, and Rust native Jupyter-client tests assert one normalized Jupyter-only contract for status, streams, errors, MIME, display updates, artifacts, hashes, session generation, execution sequence, and recoverable single-lane contention. | `a71cd0d`, `0b21e9c` |
+| DM-P3-04 | `src/executionLifecycle.test.ts`, `src/cleanExecution.test.ts`, `src/KernelConsole.test.tsx`, `src/executionWorkspaceApp.test.tsx`, and the real ipykernel integration test cover shared sessions, setup-first execution, console reuse and persistence, interrupt, restart, terminate, ordering, and isolation. | `807192f`, `a71cd0d`, `0b21e9c` |
 | DM-P3-05 | `src/outputRenderer.test.tsx` and `src/executionBrowserApp.test.tsx` cover image, HTML, Markdown, text, table, and error MIME while blocking malicious HTML from privileged APIs. | `43fcae9` |
 | DM-P3-06 | `src/outputMaterializer.test.ts` proves ordinary artifact/output-block materialization is byte-stable, idempotent, confined to reserved markers, and diagnostic on missing artifacts. | `d4cd7e8` |
 | DM-P3-07 | `src/executionFreshness.test.ts`, `src/executionLifecycle.test.ts`, and `src/cleanExecution.test.ts` cover code/input/environment/artifact invalidation and restoration by clean run-all. | `7190509` |
-| DM-P3-08 | `src/retainedOutputs.test.tsx`, `src/outputRenderer.test.tsx`, and `src/executionWorkspaceApp.test.tsx` cover current/stale/missing retained outputs independently from runtime availability. | `a75b38a` |
+| DM-P3-08 | `src/retainedOutputs.test.tsx`, `src/publishedValues.test.ts`, `src/publicationFreshness.test.ts`, `src/StructuredManuscriptEditor.test.tsx`, and `src/executionWorkspaceApp.test.tsx` cover current/stale/missing retained outputs and explicitly published scalar values independently from runtime availability. | `a75b38a`, `d2443f2`, `0b21e9c` |
 | DM-P3-09 | `src/executionTrust.test.ts`, `src/executionBrowserApp.test.tsx`, Rust trust tests, and `src/sharedEditor/browserBoundary.test.ts` prove explicit trust and a browser build without execution capability. | `ed8827e` |
-| DM-P3-GATE | `src/cleanExecution.test.ts`, `src/fixtures/execution/phase3-clean-restart.qmd`, shared-kernel lifecycle tests, and retained-output tests certify clean cross-language reproduction and unavailable-runtime reopen. | `807192f` |
+| DM-P3-GATE | `src/cleanExecution.test.ts`, `src/fixtures/execution/phase3-clean-restart.qmd`, native shared-kernel lifecycle tests, publication tests, and retained-output tests certify setup-first clean reproduction, state reuse, in-text values, and unavailable-runtime reopen. | `807192f`, `d2443f2`, `a71cd0d`, `0b21e9c` |
 
 ### DM-P4 — Comments and tracked suggestions
 
@@ -128,7 +140,7 @@ also covered here.
 | AC-L01 | Rendered editing is covered by `src/StructuredManuscriptEditor.test.tsx`, `src/genericManuscriptApp.test.tsx`, and `tests/e2e/generic-manuscript.spec.ts`. | `4b5c9e0` |
 | AC-L02 | Portable projection/export is covered by portable-fixture gates, `src/nativeHtmlExport.test.ts`, `src/draftmatterCli.test.ts`, and optional external-adapter tests. | `24809c3` |
 | AC-L03 | Unified citation acquisition and rendering is covered by `src/phase2CitationGate.test.ts` plus citation intake, Zotero, Crossref, picker, lock, and CSL tests. | `2a308a3` |
-| AC-L04 | Python/R/Julia kernel and direct execution contracts are covered by transport/provider tests, native-host tests, `src/cleanExecution.test.ts`, and the clean-restart fixture. | `7f4d388` |
+| AC-L04 | Python/R/Julia use one Jupyter-only shared-kernel contract, covered by transport tests, native-host protocol and real-kernel tests, `src/cleanExecution.test.ts`, publication tests, and the clean-restart fixture. | `807192f`, `d2443f2`, `a71cd0d`, `0b21e9c` |
 | AC-L05 | Idempotent ordinary figure/table artifacts and reserved output blocks are covered by `src/outputMaterializer.test.ts`. | `d4cd7e8` |
 | AC-L06 | Current/stale/failed state and clean-run behavior are covered by `src/executionFreshness.test.ts`, `src/executionLifecycle.test.ts`, and `src/cleanExecution.test.ts`. | `7190509` |
 | AC-L07 | Visible retained output with unavailable-runtime provenance is covered by `src/retainedOutputs.test.tsx` and `src/outputRenderer.test.tsx`. | `a75b38a` |

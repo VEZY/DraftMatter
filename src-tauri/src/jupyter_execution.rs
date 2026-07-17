@@ -1192,7 +1192,7 @@ mod tests {
             language: RuntimeLanguage::Python,
             kernel_name: kernel.name.clone(),
             code: r#"from pathlib import Path
-draftmatter_value = 41
+shared_value = 41
 path = Path("figures/kernel-result.txt")
 path.parent.mkdir(parents=True, exist_ok=True)
 path.write_text("kernel artifact", encoding="utf-8")
@@ -1232,7 +1232,7 @@ publish("mean_height", 42, unit="cm", digits=1)
                 cell_id: "kernel-second".to_string(),
                 language: RuntimeLanguage::Python,
                 kernel_name: kernel.name.clone(),
-                code: "print(draftmatter_value + 1)".to_string(),
+                code: "print(shared_value + 1)".to_string(),
                 attributes: HashMap::new(),
                 inputs: Vec::new(),
             },
@@ -1253,7 +1253,7 @@ publish("mean_height", 42, unit="cm", digits=1)
                 cell_id: "kernel-restarted".to_string(),
                 language: RuntimeLanguage::Python,
                 kernel_name: kernel.name.clone(),
-                code: "print('draftmatter_value' in globals())".to_string(),
+                code: "print('shared_value' in globals())".to_string(),
                 attributes: HashMap::new(),
                 inputs: Vec::new(),
             },
