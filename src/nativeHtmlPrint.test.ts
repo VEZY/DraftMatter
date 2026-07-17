@@ -9,13 +9,13 @@ describe('native PDF print handoff', () => {
     vi.restoreAllMocks()
   })
 
-  it('prints the publication from the main window and cleans it up after printing', () => {
+  it('prints the publication from the main window and cleans it up after printing', async () => {
     document.title = 'DraftMatter'
     document.body.innerHTML = '<main id="application">Editor</main>'
     const print = vi.spyOn(window, 'print').mockImplementation(() => undefined)
     const html = renderNativeHtmlExport('---\ntitle: "Portable report"\n---\n\nPublication body.\n')
 
-    printNativeHtml(html)
+    await printNativeHtml(html)
 
     expect(print).toHaveBeenCalledOnce()
     expect(document.querySelector('iframe')).toBeNull()
@@ -27,6 +27,20 @@ describe('native PDF print handoff', () => {
 
     window.dispatchEvent(new Event('afterprint'))
 
+    expect(document.querySelector('[data-draftmatter-print-root]')).toBeNull()
+    expect(document.querySelector('[data-draftmatter-print-style]')).toBeNull()
+    expect(document.title).toBe('DraftMatter')
+  })
+
+  it('uses a desktop print bridge and cleans up when that bridge fails', async () => {
+    document.title = 'DraftMatter'
+    document.body.innerHTML = '<main id="application">Editor</main>'
+    const html = renderNativeHtmlExport('---\ntitle: "Portable report"\n---\n\nPublication body.\n')
+    const requestPrint = vi.fn().mockRejectedValue(new Error('print unavailable'))
+
+    await expect(printNativeHtml(html, requestPrint)).rejects.toThrow('print unavailable')
+
+    expect(requestPrint).toHaveBeenCalledOnce()
     expect(document.querySelector('[data-draftmatter-print-root]')).toBeNull()
     expect(document.querySelector('[data-draftmatter-print-style]')).toBeNull()
     expect(document.title).toBe('DraftMatter')

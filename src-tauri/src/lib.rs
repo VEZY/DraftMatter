@@ -2361,6 +2361,20 @@ async fn save_export_file(
 }
 
 #[tauri::command]
+fn print_publication(webview: tauri::WebviewWindow) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        webview.print().map_err(|error| error.to_string())
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        webview
+            .eval("window.print()")
+            .map_err(|error| error.to_string())
+    }
+}
+
+#[tauri::command]
 fn acquire_citations(
     request: AcquireCitationsRequest,
 ) -> Result<AcquireCitationsResult, HostError> {
@@ -2737,6 +2751,7 @@ pub fn run() {
             save_citation_lock,
             save_document,
             save_export_file,
+            print_publication,
             acquire_citations,
             document_status,
             set_main_document,

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { convertFileSrc, isTauri } from '@tauri-apps/api/core'
+import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, searchCitations } from './bibliography'
 import { desktopHost, normaliseHostFailure, resolveMainDocument, type ProjectExecutionPreferences, type ProjectSnapshot, type ZoteroAttachment } from './desktopHost'
 import { parsePortableDocument, parseReviewMarkup } from './sharedEditor'
@@ -2352,7 +2352,7 @@ function App() {
     })
   }
 
-  const exportPublication = (kind: 'html' | 'pdf') => {
+  const exportPublication = async (kind: 'html' | 'pdf') => {
     const projection = projectCurrentManuscriptSource(manuscriptSource, draft, structuredMode, 'final')
     if (!projection.ok) {
       setDiagnostics((current) => [
@@ -2377,7 +2377,7 @@ function App() {
         formatLabel: 'clean HTML document',
         successMessage: 'Clean native HTML exported',
       })
-      else printNativeHtml(html)
+      else await printNativeHtml(html, isTauri() ? () => invoke('print_publication') : undefined)
       if (kind === 'pdf') {
         setExportOpen(false)
         setToast('System print dialog opened · choose Save as PDF, its folder, and file name')

@@ -297,7 +297,10 @@ ${bibliography}
 `
 }
 
-export function printNativeHtml(html: string) {
+export async function printNativeHtml(
+  html: string,
+  requestPrint: () => void | Promise<void> = () => window.print(),
+) {
   const parsed = new DOMParser().parseFromString(html, 'text/html')
   const publicationBody = parsed.body.innerHTML
   const publicationStyles = parsed.querySelector('style')?.textContent
@@ -328,7 +331,7 @@ export function printNativeHtml(html: string) {
   }
   window.addEventListener('afterprint', cleanup, { once: true })
   try {
-    window.print()
+    await requestPrint()
     window.setTimeout(cleanup, 60_000)
   } catch (error) {
     cleanup()

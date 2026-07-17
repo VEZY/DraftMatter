@@ -144,7 +144,7 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     await rendered.close()
 
     await page.getByRole('button', { name: 'Export' }).click()
-    await page.getByRole('button', { name: /Print \/ PDF/ }).click()
+    await page.getByRole('button', { name: 'PDF', exact: true }).click()
     const printRoot = page.locator('[data-draftmatter-print-root]')
     await expect(printRoot).toHaveCount(1)
     await expect(printRoot).toBeHidden()
@@ -157,7 +157,7 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     await expect(printRoot).toHaveCount(0)
 
     await page.getByRole('button', { name: 'Export' }).click()
-    await page.getByRole('button', { name: /Clean DOCX/ }).click()
+    await page.getByRole('button', { name: /Word document/ }).click()
     const docxDialog = page.getByRole('dialog', { name: 'Save clean Word document' })
     await expect(docxDialog.getByLabel('File name')).toHaveValue('canopy-drought.docx')
     const docxDownloadEvent = page.waitForEvent('download')
