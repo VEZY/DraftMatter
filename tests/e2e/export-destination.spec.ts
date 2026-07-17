@@ -20,7 +20,8 @@ test('chooses an export filename before opening the platform save picker', async
   await page.goto('/')
 
   await page.getByRole('button', { name: 'Export' }).click()
-  await page.getByRole('button', { name: /Portable source/ }).click()
+  await page.getByText('Advanced options', { exact: true }).click()
+  await page.getByRole('button', { name: /Project source/ }).click()
   const dialog = page.getByRole('dialog', { name: 'Save portable manuscript' })
   await expect(dialog.getByLabel('File name')).toHaveValue('canopy-drought.qmd')
   await dialog.getByLabel('File name').fill('focused-canopy-study.qmd')

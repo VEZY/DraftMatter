@@ -67,7 +67,7 @@ test.describe('portable manuscript authors', () => {
     await dialog.getByRole('button', { name: 'Close manuscript authors' }).click()
 
     await page.getByRole('button', { name: 'Export' }).click()
-    await page.getByRole('button', { name: /Native HTML/ }).click()
+    await page.getByRole('button', { name: /Web page/ }).click()
     const exportDialog = page.getByRole('dialog', { name: 'Save clean HTML document' })
     const downloadEvent = page.waitForEvent('download')
     await exportDialog.getByRole('button', { name: 'Choose location…' }).click()
