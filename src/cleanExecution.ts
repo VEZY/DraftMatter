@@ -1,4 +1,4 @@
-import { extractExecutableCells, type ExecutionLanguage } from './executionCells'
+import { extractExecutableCells, isSetupCell, type ExecutionLanguage } from './executionCells'
 import {
   ExecutionFreshnessTracker,
   type CleanRunCertification,
@@ -7,13 +7,12 @@ import {
 } from './executionFreshness'
 import {
   ExecutionLifecycle,
-  type ExecutionProviderSelector,
   type ExecutionRequestFactory,
   type ExecutionRunReport,
   type LifecycleCellState,
 } from './executionLifecycle'
-import type { NormalizedExecutionResult } from './executionProvider'
-import type { TrustedExecutionBroker } from './executionTrust'
+import type { NormalizedExecutionResult } from './kernelExecution'
+import type { TrustedKernelExecution } from './executionTrust'
 import { materializeExecutionOutput, type OutputPresentation } from './outputMaterializer'
 import { parseRetainedOutputs, type RetainedOutputBlock } from './retainedOutputs'
 import type { DocumentDiagnostic } from './types'
@@ -21,8 +20,7 @@ import type { DocumentDiagnostic } from './types'
 export interface CleanExecutionOptions {
   source: string
   root: string
-  providers: ExecutionProviderSelector
-  broker: TrustedExecutionBroker
+  execution: TrustedKernelExecution
   existingManifests?: ExecutionManifest[]
   cleanRunId?: string
   requestFactory?: ExecutionRequestFactory
@@ -102,8 +100,7 @@ export async function cleanExecutePortableDocument(options: CleanExecutionOption
   const lifecycle = new ExecutionLifecycle(
     options.root,
     extracted.cells,
-    options.providers,
-    options.broker,
+    options.execution,
     options.requestFactory,
   )
   const unsubscribe = options.onLifecycleChange ? lifecycle.subscribe(options.onLifecycleChange) : undefined
@@ -148,6 +145,8 @@ export async function cleanExecutePortableDocument(options: CleanExecutionOption
   let nextSource = options.source
   const materializationDiagnostics: DocumentDiagnostic[] = []
   for (const result of results) {
+    const cell = extracted.cells.find((candidate) => candidate.id === result.cellId)
+    if (cell && isSetupCell(cell)) continue
     const materialized = materializeExecutionOutput({
       source: nextSource,
       cellId: result.cellId,
@@ -171,7 +170,8 @@ export async function cleanExecutePortableDocument(options: CleanExecutionOption
 
   const retainedAfter = parseRetainedOutputs(nextSource)
   const certification = tracker.certifyCleanRun(cleanRunId)
-  if (!certification || retainedAfter.outputs.length !== extracted.cells.length) {
+  const publishedCellCount = extracted.cells.filter((cell) => !isSetupCell(cell)).length
+  if (!certification || retainedAfter.outputs.length !== publishedCellCount) {
     const message = 'The clean run completed but could not be certified with one portable output per cell.'
     return {
       ...base,

@@ -39,20 +39,21 @@ describe('rendered local execution workflow', () => {
     vi.spyOn(desktopHost, 'probeRuntime').mockImplementation(async (language) => language === 'python'
       ? { language, health: 'available', executable: '/usr/bin/python3', version: 'Python 3.12.4' }
       : { language, health: 'missing', message: `${language} is not installed.` })
-    vi.spyOn(desktopHost, 'discoverJupyterKernels').mockResolvedValue({ health: 'missing', kernels: [], searchedLocations: [] })
+    vi.spyOn(desktopHost, 'discoverJupyterKernels').mockResolvedValue({
+      health: 'available', searchedLocations: ['/kernels'],
+      kernels: [{ name: 'python-fixture', displayName: 'Python fixture', language: 'python', health: 'available', resourceDir: '/kernels/python-fixture' }],
+    })
     vi.spyOn(desktopHost, 'executionTrustStatus')
       .mockResolvedValueOnce({ trusted: false, scope: 'session', warning: 'Project code has the user permissions. Local execution is not a sandbox.' })
       .mockResolvedValue({ trusted: true, scope: 'session', warning: 'Project code has the user permissions. Local execution is not a sandbox.' })
     vi.spyOn(desktopHost, 'trustProjectForSession').mockResolvedValue({ trusted: true, scope: 'session', warning: 'trusted' })
     vi.spyOn(desktopHost, 'inspectExecutionArtifacts').mockResolvedValue([{ path: 'figures/generated/fig-canopy.svg', hash: `sha256:${'a'.repeat(64)}` }])
-    vi.spyOn(desktopHost, 'executeDirect').mockResolvedValue({
-      exitCode: 0,
-      interrupted: false,
-      stdout: 'Wrote figures/generated/fig-canopy.svg\n',
-      stderr: '',
+    vi.spyOn(desktopHost, 'executeKernel').mockResolvedValue({
+      status: 'ok',
+      messages: [{ kind: 'stream', sequence: 0, name: 'stdout', text: 'Wrote figures/generated/fig-canopy.svg\n' }],
       artifacts: [{ path: 'figures/generated/fig-canopy.svg', bytes: 620, hash: `sha256:${'a'.repeat(64)}`, mediaType: 'image/svg+xml' }],
-      environment: { identity: '/usr/bin/python3', version: 'Python 3.12.4' },
-      providerRunId: 'direct-rendered-1',
+      environment: { identity: 'python-fixture', version: 'Python 3.12.4' },
+      kernelRunId: 'kernel-rendered-1', sessionGeneration: 1, executionSequence: 1,
     })
     vi.spyOn(desktopHost, 'saveExecutionManifest').mockImplementation(async (request) => ({
       path: `.draftmatter/execution/${request.cellId}.json`, content: request.content, hash: 'manifest-new', modifiedMs: 2,
@@ -85,7 +86,7 @@ describe('rendered local execution workflow', () => {
     })
 
     expect(desktopHost.probeRuntime).toHaveBeenCalledTimes(3)
-    expect(desktopHost.executeDirect).not.toHaveBeenCalled()
+    expect(desktopHost.executeKernel).not.toHaveBeenCalled()
     const trustDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="execution-trust-title"]')!
     expect(trustDialog.textContent).toContain('Local execution is not a sandbox')
 
@@ -97,7 +98,7 @@ describe('rendered local execution workflow', () => {
     })
 
     expect(desktopHost.trustProjectForSession).toHaveBeenCalledWith(rootPath, 'run-project-code-with-user-permissions')
-    expect(desktopHost.executeDirect).toHaveBeenCalledWith(expect.objectContaining({
+    expect(desktopHost.executeKernel).toHaveBeenCalledWith(expect.objectContaining({
       root: rootPath,
       cellId: 'fig-canopy',
       language: 'python',
@@ -107,7 +108,7 @@ describe('rendered local execution workflow', () => {
     expect(desktopHost.saveExecutionManifest).toHaveBeenCalledWith(expect.objectContaining({
       root: rootPath,
       cellId: 'fig-canopy',
-      content: expect.stringContaining('direct-rendered-1'),
+      content: expect.stringContaining('kernel-rendered-1'),
       expectedHash: null,
     }))
     expect(desktopHost.inspectExecutionArtifacts).toHaveBeenCalledWith(rootPath, ['figures/generated/fig-canopy.svg'])

@@ -5,7 +5,7 @@ import type {
   JsonValue,
   MimeOutput,
   NormalizedExecutionResult,
-} from './executionProvider'
+} from './kernelExecution'
 
 export type RenderedExecutionOutput =
   | { kind: 'stream'; stream: ExecutionStream }

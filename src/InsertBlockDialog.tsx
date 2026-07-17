@@ -10,7 +10,10 @@ export type InsertBlockRequest =
   | { kind: 'equation-display'; tex: string; label?: string }
   | { kind: 'cross-reference'; target: string }
   | { kind: 'footnote'; label: string; content: string }
-  | { kind: 'code-cell'; language: 'python' | 'r' | 'julia'; output: 'figure' | 'table' | 'values' }
+  | { kind: 'figure-cell'; language: 'python' | 'r' | 'julia' }
+  | { kind: 'table-cell'; language: 'python' | 'r' | 'julia' }
+  | { kind: 'values-cell'; language: 'python' | 'r' | 'julia' }
+  | { kind: 'setup-cell'; language: 'python' | 'r' | 'julia' }
   | { kind: 'published-value'; name: string }
 
 export type InsertBlockKind = InsertBlockRequest['kind']
@@ -23,7 +26,10 @@ const details: Record<InsertBlockKind, { eyebrow: string; title: string; descrip
   'equation-display': { eyebrow: 'Mathematics', title: 'Insert display equation', description: 'Create a centered equation that can be referenced elsewhere.' },
   'cross-reference': { eyebrow: 'Document link', title: 'Insert cross-reference', description: 'Link to a figure, table, equation, or section.' },
   footnote: { eyebrow: 'Supporting note', title: 'Insert footnote', description: 'Add supporting text at the current position.' },
-  'code-cell': { eyebrow: 'Reproducible result', title: 'Add reproducible output', description: 'Create a hidden computation that produces a figure, table, or named value.' },
+  'figure-cell': { eyebrow: 'Reproducible result', title: 'Add reproducible figure', description: 'Create a hidden computation whose retained figure appears in the manuscript.' },
+  'table-cell': { eyebrow: 'Reproducible result', title: 'Add reproducible table', description: 'Create a hidden computation whose retained table appears in the manuscript.' },
+  'values-cell': { eyebrow: 'Reproducible result', title: 'Add published values', description: 'Create a hidden computation that explicitly publishes named scalar results for manuscript text.' },
+  'setup-cell': { eyebrow: 'Reproducible state', title: 'Add setup cell', description: 'Initialize packages, functions, datasets, and constants before ordinary cells run.' },
   'published-value': { eyebrow: 'Reproducible result', title: 'Insert published value', description: 'Place an explicitly published result directly in the sentence.' },
 }
 
@@ -55,7 +61,6 @@ export function InsertBlockDialog({
   const [target, setTarget] = useState('')
   const [content, setContent] = useState('')
   const [language, setLanguage] = useState<'python' | 'r' | 'julia'>('python')
-  const [computedOutput, setComputedOutput] = useState<'figure' | 'table' | 'values'>('figure')
   const [publishedName, setPublishedName] = useState(publishedValues[0]?.name ?? '')
   const [problem, setProblem] = useState('')
 
@@ -82,7 +87,8 @@ export function InsertBlockDialog({
     else if (kind === 'cross-reference') request = { kind, target: target.trim().replace(/^@/, '') }
     else if (kind === 'footnote') request = { kind, label: label.trim().replace(/^\[\^|\]$/g, ''), content: content.trim() }
     else if (kind === 'published-value') request = { kind, name: publishedName.trim() }
-    else request = { kind, language, output: computedOutput }
+    else if (kind === 'setup-cell' || kind === 'figure-cell' || kind === 'table-cell' || kind === 'values-cell') request = { kind, language }
+    else throw new Error(`Unsupported insertion kind: ${kind satisfies never}`)
     if (onInsert(request)) onClose()
     else setProblem('The item could not be inserted at the current editor position. Place the cursor in the manuscript and try again.')
   }
@@ -126,7 +132,8 @@ export function InsertBlockDialog({
             {labelField('Footnote label', 'method-note', 'Letters, numbers, dots, colons, underscores, and hyphens are supported.')}
             <label><span>Footnote text</span><textarea autoFocus value={content} onChange={(event) => setContent(event.target.value)} rows={4} placeholder="Supporting detail…" /></label>
           </>}
-          {kind === 'code-cell' && <div className="insert-block-grid"><label><span>Produces</span><select autoFocus value={computedOutput} onChange={(event) => setComputedOutput(event.target.value as typeof computedOutput)}><option value="figure">Figure</option><option value="table">Table</option><option value="values">In-text values</option></select><small>Only this result appears in the manuscript.</small></label><label><span>Language</span><select value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>The saved source stays hidden until you choose to edit it.</small></label></div>}
+          {(kind === 'figure-cell' || kind === 'table-cell' || kind === 'values-cell') && <label><span>Language</span><select autoFocus value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>The computation source stays hidden in exports; only the retained result is published.</small></label>}
+          {kind === 'setup-cell' && <label><span>Language</span><select autoFocus value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>Setup runs first in a fresh shared kernel and never appears in exports.</small></label>}
           {kind === 'published-value' && <label><span>Published name</span><input autoFocus value={publishedName} onChange={(event) => setPublishedName(event.target.value)} list="published-value-options" placeholder="mean_height" spellCheck={false} /><datalist id="published-value-options">{publishedValues.map((value) => <option key={value.name} value={value.name}>{value.rendered}</option>)}</datalist><small>{publishedValues.length ? 'Choose a retained publication or enter the name a values cell will publish.' : 'Enter the name a values cell will publish. It will show “Value unavailable” until that cell has run.'}</small></label>}
           {problem && <div className="insert-block-problem" role="alert">{problem}</div>}
         </div>

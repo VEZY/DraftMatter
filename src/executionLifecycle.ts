@@ -1,10 +1,6 @@
-import type { ExecutableCell, ExecutionLanguage } from './executionCells'
-import type {
-  ExecutionProviderKind,
-  ExecutionRequest,
-  NormalizedExecutionResult,
-} from './executionProvider'
-import type { TrustedExecutionBroker } from './executionTrust'
+import { isSetupCell, type ExecutableCell, type ExecutionLanguage } from './executionCells'
+import type { ExecutionRequest, NormalizedExecutionResult } from './kernelExecution'
+import type { TrustedKernelExecution } from './executionTrust'
 
 export type LifecycleCellStatus = 'never-run' | 'queued' | 'running' | 'succeeded' | 'failed' | 'interrupted'
 
@@ -24,8 +20,6 @@ export interface ExecutionRunReport {
 
 export type ExecutionRequestFactory = (cell: ExecutableCell, root: string) => Promise<ExecutionRequest> | ExecutionRequest
 export type LifecycleListener = (states: LifecycleCellState[]) => void
-export type ExecutionProviderSelector = Record<ExecutionLanguage, ExecutionProviderKind> | ((cell: ExecutableCell) => ExecutionProviderKind)
-
 const languages: ExecutionLanguage[] = ['python', 'r', 'julia']
 
 function defaultRequest(cell: ExecutableCell, root: string): ExecutionRequest {
@@ -52,12 +46,12 @@ export class ExecutionLifecycle {
   private readonly lanes = new Map<ExecutionLanguage, Promise<void>>()
   private readonly controllers = new Map<ExecutionLanguage, AbortController>()
   private readonly generations: Record<ExecutionLanguage, number> = { python: 0, r: 0, julia: 0 }
+  private readonly fresh: Record<ExecutionLanguage, boolean> = { python: true, r: true, julia: true }
 
   constructor(
     private readonly root: string,
     cells: ExecutableCell[],
-    private readonly providers: ExecutionProviderSelector,
-    private readonly broker: TrustedExecutionBroker,
+    private readonly execution: TrustedKernelExecution,
     private readonly requestFactory: ExecutionRequestFactory = defaultRequest,
   ) {
     this.cells = [...cells]
@@ -66,12 +60,8 @@ export class ExecutionLifecycle {
     }
   }
 
-  private provider(cell: ExecutableCell) {
-    return typeof this.providers === 'function' ? this.providers(cell) : this.providers[cell.language]
-  }
-
-  private languageProviders(language: ExecutionLanguage) {
-    return [...new Set(this.cells.filter((cell) => cell.language === language).map((cell) => this.provider(cell)))]
+  private setupCells(language: ExecutionLanguage) {
+    return this.cells.filter((cell) => cell.language === language && isSetupCell(cell))
   }
 
   snapshot() {
@@ -113,7 +103,7 @@ export class ExecutionLifecycle {
       this.update(cell, { status: 'running', result: undefined, message: undefined })
       try {
         const request = await this.requestFactory(cell, this.root)
-        const result = await this.broker.run(this.root, this.provider(cell), request, controller.signal)
+        const result = await this.execution.run(this.root, request, controller.signal)
         this.update(cell, { status: resultStatus(result), result })
         if (result.status === 'failed') throw new Error(`Execution failed in ${cell.id}.`)
       } catch (error) {
@@ -148,24 +138,40 @@ export class ExecutionLifecycle {
     return { requested, completed, certified: requested.length > 0 && requested.length === completed.length }
   }
 
+  private async withFreshSetup(cells: ExecutableCell[]) {
+    const languagesNeeded = [...new Set(cells.map((cell) => cell.language))]
+    const setup = languagesNeeded.flatMap((language) => this.fresh[language] ? this.setupCells(language) : [])
+    const requested = [...setup, ...cells.filter((cell) => !setup.some((candidate) => candidate.id === cell.id))]
+    const report = await this.runSequence(requested)
+    for (const language of languagesNeeded) {
+      const languageSetup = setup.filter((cell) => cell.language === language)
+      if (languageSetup.every((cell) => report.completed.includes(cell.id))) this.fresh[language] = false
+    }
+    return report
+  }
+
   runCell(cellId: string) {
-    return this.runSequence([this.cell(cellId)])
+    return this.withFreshSetup([this.cell(cellId)])
   }
 
   runAbove(cellId: string) {
     const index = this.cells.findIndex((cell) => cell.id === cellId)
     if (index < 0) throw new Error(`Executable cell ${cellId} was not found.`)
-    return this.runSequence(this.cells.slice(0, index))
+    return this.withFreshSetup(this.cells.slice(0, index).filter((cell) => !isSetupCell(cell)))
   }
 
   runLanguage(language: ExecutionLanguage) {
-    return this.runSequence(this.cells.filter((cell) => cell.language === language))
+    return this.withFreshSetup(this.cells.filter((cell) => cell.language === language && !isSetupCell(cell)))
   }
 
   async cleanRunAll(): Promise<ExecutionRunReport> {
     const present = languages.filter((language) => this.cells.some((cell) => cell.language === language))
     for (const language of present) await this.restart(language)
-    return this.runSequence(this.cells)
+    const ordered = [
+      ...this.cells.filter(isSetupCell),
+      ...this.cells.filter((cell) => !isSetupCell(cell)),
+    ]
+    return this.runSequence(ordered)
   }
 
   async interrupt(language: ExecutionLanguage) {
@@ -177,23 +183,25 @@ export class ExecutionLifecycle {
         this.update(cell, { status: 'interrupted', message: 'Interrupted by the author.' })
       }
     }
-    for (const provider of this.languageProviders(language)) await this.broker.interrupt(provider, language)
+    await this.execution.interrupt(language)
   }
 
   async restart(language: ExecutionLanguage) {
     this.generations[language] += 1
     this.controllers.get(language)?.abort()
     if (this.controllers.has(language)) {
-      for (const provider of this.languageProviders(language)) await this.broker.interrupt(provider, language)
+      await this.execution.interrupt(language)
     }
     await this.lanes.get(language)
-    for (const provider of this.languageProviders(language)) await this.broker.restart(this.root, provider, language)
+    await this.execution.restart(this.root, language)
+    this.fresh[language] = true
   }
 
   async terminate(language: ExecutionLanguage) {
     this.generations[language] += 1
     this.controllers.get(language)?.abort()
-    for (const provider of this.languageProviders(language)) await this.broker.terminate(provider, language)
+    await this.execution.terminate(language)
+    this.fresh[language] = true
     await this.lanes.get(language)
   }
 }

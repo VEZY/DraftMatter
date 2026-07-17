@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { ExecutionProvider, ExecutionRequest } from './executionProvider'
+import type { ExecutionRequest, KernelExecutionManager } from './kernelExecution'
 import {
-  createTrustedExecutionBroker,
+  createTrustedKernelExecution,
   EXECUTION_TRUST_ACKNOWLEDGEMENT,
   ExecutionBlockedError,
   type ExecutionTrustHost,
@@ -16,9 +16,8 @@ const request: ExecutionRequest = {
   inputs: [],
 }
 
-function provider(): ExecutionProvider {
+function kernels(): KernelExecutionManager {
   return {
-    kind: 'direct',
     execute: vi.fn(async () => ({ cellId: 'unreachable' }) as never),
     interrupt: vi.fn(async () => undefined),
     restart: vi.fn(async () => undefined),
@@ -39,57 +38,51 @@ function host(trusted: boolean, available = true): ExecutionTrustHost {
   }
 }
 
-describe('execution trust broker', () => {
-  it('blocks untrusted project execution before a provider receives code', async () => {
-    const executionProvider = provider()
-    const broker = createTrustedExecutionBroker(host(false), { direct: executionProvider })
+describe('trusted Jupyter execution', () => {
+  it('blocks untrusted project execution before a kernel receives code', async () => {
+    const execution = kernels()
+    const broker = createTrustedKernelExecution(host(false), execution)
 
-    await expect(broker.run('/project', 'direct', request)).rejects.toMatchObject({
+    await expect(broker.run('/project', request)).rejects.toMatchObject({
       name: 'ExecutionBlockedError',
       reason: 'project-untrusted',
     })
-    expect(executionProvider.execute).not.toHaveBeenCalled()
+    expect(execution.execute).not.toHaveBeenCalled()
   })
 
   it('gives browser collaborators no execution capability or trust probe', async () => {
-    const executionProvider = provider()
+    const execution = kernels()
     const browserHost = host(false, false)
-    const broker = createTrustedExecutionBroker(browserHost, { direct: executionProvider })
+    const broker = createTrustedKernelExecution(browserHost, execution)
 
-    await expect(broker.run('/project', 'direct', request)).rejects.toEqual(expect.objectContaining<Partial<ExecutionBlockedError>>({
+    await expect(broker.run('/project', request)).rejects.toEqual(expect.objectContaining<Partial<ExecutionBlockedError>>({
       reason: 'browser-unavailable',
     }))
     expect(browserHost.executionTrustStatus).not.toHaveBeenCalled()
-    expect(executionProvider.execute).not.toHaveBeenCalled()
+    expect(execution.execute).not.toHaveBeenCalled()
   })
 
   it('runs and restarts only after project trust is confirmed', async () => {
-    const executionProvider = provider()
-    const broker = createTrustedExecutionBroker(host(true), { direct: executionProvider })
+    const execution = kernels()
+    const broker = createTrustedKernelExecution(host(true), execution)
 
-    await broker.run('/project', 'direct', request)
-    await broker.restart('/project', 'direct', 'python')
+    await broker.run('/project', request)
+    await broker.restart('/project', 'python')
 
-    expect(executionProvider.execute).toHaveBeenCalledWith(request, undefined)
-    expect(executionProvider.restart).toHaveBeenCalledWith('python')
+    expect(execution.execute).toHaveBeenCalledWith(request, undefined)
+    expect(execution.restart).toHaveBeenCalledWith('python')
   })
 
   it('still permits interrupt and terminate controls without starting new work', async () => {
-    const executionProvider = provider()
+    const execution = kernels()
     const trustHost = host(false)
-    const broker = createTrustedExecutionBroker(trustHost, { direct: executionProvider })
+    const broker = createTrustedKernelExecution(trustHost, execution)
 
-    await broker.interrupt('direct', 'r')
-    await broker.terminate('direct', 'julia')
+    await broker.interrupt('r')
+    await broker.terminate('julia')
 
     expect(trustHost.executionTrustStatus).not.toHaveBeenCalled()
-    expect(executionProvider.interrupt).toHaveBeenCalledWith('r')
-    expect(executionProvider.terminate).toHaveBeenCalledWith('julia')
-  })
-
-  it('reports an unavailable provider without weakening trust', async () => {
-    const broker = createTrustedExecutionBroker(host(true), {})
-
-    await expect(broker.run('/project', 'kernel', request)).rejects.toMatchObject({ reason: 'provider-unavailable' })
+    expect(execution.interrupt).toHaveBeenCalledWith('r')
+    expect(execution.terminate).toHaveBeenCalledWith('julia')
   })
 })

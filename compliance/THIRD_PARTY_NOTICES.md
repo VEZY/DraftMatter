@@ -294,6 +294,11 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | @aws/lambda-invoke-store | 0.3.0 | Apache-2.0 | required |
 | npm | @bramus/specificity | 2.4.2 | MIT | development |
 | npm | @citeproc-rs/wasm | 0.2.0 | MPL-2.0 | required |
+| npm | @codemirror/commands | 6.10.4 | MIT | required |
+| npm | @codemirror/language | 6.12.4 | MIT | required |
+| npm | @codemirror/legacy-modes | 6.5.3 | MIT | required |
+| npm | @codemirror/state | 6.7.1 | MIT | required |
+| npm | @codemirror/view | 6.43.6 | MIT | required |
 | npm | @csstools/color-helpers | 6.1.0 | MIT-0 | development |
 | npm | @csstools/css-calc | 3.2.1 | MIT | development |
 | npm | @csstools/css-color-parser | 4.1.9 | MIT | development |
@@ -308,7 +313,11 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | @hocuspocus/provider | 4.4.0 | MIT | required |
 | npm | @hocuspocus/server | 4.4.0 | MIT | required |
 | npm | @jridgewell/sourcemap-codec | 1.5.5 | MIT | development |
+| npm | @lezer/common | 1.5.2 | MIT | required |
+| npm | @lezer/highlight | 1.2.3 | MIT | required |
+| npm | @lezer/lr | 1.4.10 | MIT | required |
 | npm | @lifeomic/attempt | 3.1.0 | MIT | required |
+| npm | @marijn/find-cluster-break | 1.0.3 | MIT | required |
 | npm | @napi-rs/wasm-runtime | 1.1.6 | MIT | required |
 | npm | @oxc-project/types | 0.139.0 | MIT | required |
 | npm | @playwright/test | 1.61.1 | Apache-2.0 | development |
@@ -401,7 +410,9 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | chai | 6.2.2 | MIT | development |
 | npm | character-entities | 2.0.2 | MIT | required |
 | npm | commander | 2.20.3 | MIT | development |
+| npm | commander | 8.3.0 | MIT | required |
 | npm | convert-source-map | 2.0.0 | MIT | development |
+| npm | crelt | 1.0.7 | MIT | required |
 | npm | crossws | 0.4.10 | MIT | required |
 | npm | css-tree | 3.2.1 | MIT | development |
 | npm | csstype | 3.2.3 | MIT | development |
@@ -444,6 +455,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | jsdom | 29.1.1 | MIT | development |
 | npm | json-stable-stringify | 1.3.0 | MIT | development |
 | npm | jsonify | 0.0.1 | Public Domain | development |
+| npm | katex | 0.17.0 | MIT | required |
 | npm | kleur | 4.1.5 | MIT | required |
 | npm | lib0 | 0.2.117 | MIT | required |
 | npm | lightningcss | 1.32.0 | MPL-2.0 | required |
@@ -543,6 +555,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | split2 | 4.2.0 | ISC | required |
 | npm | stackback | 0.0.2 | MIT | development |
 | npm | std-env | 4.2.0 | MIT | development |
+| npm | style-mod | 4.1.3 | MIT | required |
 | npm | symbol-tree | 3.2.4 | MIT | development |
 | npm | tinybench | 2.9.0 | MIT | development |
 | npm | tinyexec | 1.2.4 | MIT | development |

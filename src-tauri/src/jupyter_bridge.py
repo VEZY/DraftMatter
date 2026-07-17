@@ -1,10 +1,130 @@
 import json
+import os
 import queue
 import socketserver
 import sys
 import threading
 import traceback
 import uuid
+
+
+PUBLISHED_VALUE_MIME = "application/vnd.draftmatter.published-value+json"
+
+
+PYTHON_PUBLISH_HELPER = r'''
+from IPython.display import publish_display_data as _draftmatter_display_data
+import math as _draftmatter_math
+
+def publish(name, value, *, unit=None, digits=None):
+    """Publish one scalar for use as {{name}} in DraftMatter manuscript text."""
+    if not isinstance(name, str) or not name or not name[0].isalpha() or any(not (character.isalnum() or character in "_.:-") for character in name):
+        raise ValueError("Published value names must start with a letter and use only letters, numbers, dots, colons, underscores, or hyphens.")
+    if isinstance(value, bool):
+        scalar = value
+    elif isinstance(value, (int, float)) and not isinstance(value, bool):
+        if isinstance(value, float) and not _draftmatter_math.isfinite(value):
+            raise TypeError("publish() accepts only finite numeric values.")
+        scalar = value
+    elif isinstance(value, str):
+        scalar = value
+    else:
+        try:
+            scalar = value.item()
+        except (AttributeError, ValueError):
+            raise TypeError("publish() accepts one finite number, text value, or boolean; summarize arrays and tables first.") from None
+        if not isinstance(scalar, (str, int, float, bool)) or (isinstance(scalar, float) and not _draftmatter_math.isfinite(scalar)):
+            raise TypeError("publish() accepts one finite number, text value, or boolean; summarize arrays and tables first.")
+    if unit is not None and not isinstance(unit, str):
+        raise TypeError("publish() unit must be text.")
+    if digits is not None and (not isinstance(digits, int) or isinstance(digits, bool) or not 0 <= digits <= 15):
+        raise ValueError("publish() digits must be a whole number from 0 to 15.")
+    payload = {"version": 1, "name": name, "value": scalar, "formatting": {}}
+    if unit:
+        payload["unit"] = unit
+    if digits is not None:
+        payload["formatting"]["digits"] = digits
+    _draftmatter_display_data(data={"application/vnd.draftmatter.published-value+json": payload}, metadata={})
+    return value
+'''
+
+
+R_PUBLISH_HELPER = r'''
+publish <- function(name, value, unit = NULL, digits = NULL) {
+  if (!is.character(name) || length(name) != 1L || is.na(name) || !grepl("^[A-Za-z][A-Za-z0-9_.:-]{0,127}$", name)) {
+    stop("Published value names must start with a letter and use only letters, numbers, dots, colons, underscores, or hyphens.", call. = FALSE)
+  }
+  if (length(value) != 1L || is.list(value) || is.factor(value) || is.na(value) || !(is.numeric(value) || is.character(value) || is.logical(value))) {
+    stop("publish() accepts one finite number, text value, or boolean; summarize vectors, tables, and models first.", call. = FALSE)
+  }
+  if (is.numeric(value) && !is.finite(value)) stop("publish() accepts only finite numeric values.", call. = FALSE)
+  if (!is.null(unit) && (!is.character(unit) || length(unit) != 1L || is.na(unit))) stop("publish() unit must be text.", call. = FALSE)
+  if (!is.null(digits) && (!is.numeric(digits) || length(digits) != 1L || is.na(digits) || digits %% 1 != 0 || digits < 0 || digits > 15)) {
+    stop("publish() digits must be a whole number from 0 to 15.", call. = FALSE)
+  }
+  payload <- list(version = 1L, name = name, value = unname(value), formatting = list())
+  if (!is.null(unit) && nzchar(unit)) payload$unit <- unit
+  if (!is.null(digits)) payload$formatting$digits <- as.integer(digits)
+  encoded <- jsonlite::toJSON(payload, auto_unbox = TRUE, null = "null", digits = NA)
+  bundle <- list(encoded)
+  names(bundle) <- "application/vnd.draftmatter.published-value+json"
+  IRdisplay::publish_mimebundle(bundle, metadata = list())
+  invisible(value)
+}
+'''
+
+
+JULIA_PUBLISH_HELPER = r'''
+struct _DraftMatterPublishedValue
+    payload::String
+end
+
+Base.show(io::IO, ::MIME"application/vnd.draftmatter.published-value+json", value::_DraftMatterPublishedValue) = print(io, value.payload)
+Base.show(io::IO, ::MIME"text/plain", ::_DraftMatterPublishedValue) = nothing
+
+_draftmatter_json_string(value) = "\"" * replace(String(value), "\\" => "\\\\", "\"" => "\\\"", "\n" => "\\n", "\r" => "\\r", "\t" => "\\t") * "\""
+
+function _draftmatter_scalar_json(value)
+    value isa Bool && return value ? "true" : "false"
+    value isa AbstractString && return _draftmatter_json_string(value)
+    if value isa Real
+        isfinite(value) || throw(ArgumentError("publish accepts only finite numeric values."))
+        return string(value)
+    end
+    throw(ArgumentError("publish accepts one finite number, text value, or boolean; summarize arrays, tables, and models first."))
+end
+
+function _draftmatter_publish(name::AbstractString, value; unit=nothing, digits=nothing)
+    occursin(r"^[A-Za-z][A-Za-z0-9_.:-]{0,127}$", name) || throw(ArgumentError("Published value names must start with a letter and use only letters, numbers, dots, colons, underscores, or hyphens."))
+    unit === nothing || unit isa AbstractString || throw(ArgumentError("publish unit must be text."))
+    digits === nothing || (digits isa Integer && 0 <= digits <= 15) || throw(ArgumentError("publish digits must be a whole number from 0 to 15."))
+    formatting = digits === nothing ? "{}" : "{\"digits\":" * string(digits) * "}"
+    unit_field = unit === nothing || isempty(unit) ? "" : ",\"unit\":" * _draftmatter_json_string(unit)
+    payload = "{\"version\":1,\"name\":" * _draftmatter_json_string(name) * ",\"value\":" * _draftmatter_scalar_json(value) * unit_field * ",\"formatting\":" * formatting * "}"
+    display(_DraftMatterPublishedValue(payload))
+    return value
+end
+
+macro publish(variable, options...)
+    variable isa Symbol || error("@publish expects a variable name, for example @publish mean_height unit=\"cm\" digits=1")
+    keywords = Expr[]
+    for option in options
+        option isa Expr && option.head == :(=) && option.args[1] in (:unit, :digits) || error("@publish supports only unit= and digits= options")
+        push!(keywords, Expr(:kw, option.args[1], option.args[2]))
+    end
+    esc(Expr(:call, :_draftmatter_publish, Expr(:parameters, keywords...), String(variable), variable))
+end
+'''
+
+
+def publishing_helper(language):
+    normalized = str(language or "").lower()
+    if normalized in ("python", "python3"):
+        return PYTHON_PUBLISH_HELPER
+    if normalized == "r":
+        return R_PUBLISH_HELPER
+    if normalized == "julia":
+        return JULIA_PUBLISH_HELPER
+    raise RuntimeError("DraftMatter cannot inject publishing helpers into this kernel language.")
 
 
 def emit(value):
@@ -30,8 +150,12 @@ try:
     kernel_name = sys.argv[1]
     working_directory = sys.argv[2]
     secret = sys.argv[3]
+    project_environment = sys.argv[4] if len(sys.argv) > 4 else ""
+    kernel_process_environment = os.environ.copy()
+    if project_environment:
+        kernel_process_environment["JULIA_PROJECT"] = project_environment
     manager = KernelManager(kernel_name=kernel_name)
-    manager.start_kernel(cwd=working_directory)
+    manager.start_kernel(cwd=working_directory, env=kernel_process_environment)
     jobs = queue.Queue()
     startup = queue.Queue(maxsize=1)
     activity_lock = threading.Lock()
@@ -43,19 +167,22 @@ try:
             if reply.get("parent_header", {}).get("msg_id") == message_id:
                 content = reply.get("content", {})
                 language = content.get("language_info", {})
+                details = {
+                    "mode": "interactive-kernel",
+                    "kernel": kernel_name,
+                    "implementation": str(content.get("implementation") or "jupyter"),
+                    "language": str(language.get("name") or ""),
+                }
+                if project_environment:
+                    details["project"] = project_environment
                 return {
                     "identity": kernel_name,
                     "version": str(language.get("version") or content.get("implementation_version") or ""),
-                    "details": {
-                        "mode": "interactive-kernel",
-                        "kernel": kernel_name,
-                        "implementation": str(content.get("implementation") or "jupyter"),
-                        "language": str(language.get("name") or ""),
-                    },
+                    "details": details,
                 }
 
-    def execute(client, code, environment):
-        message_id = client.execute(code, allow_stdin=False, stop_on_error=False, store_history=True)
+    def execute(client, code, environment, store_history=True):
+        message_id = client.execute(code, allow_stdin=False, stop_on_error=False, store_history=store_history)
         messages = []
         sequence = 0
         execution_count = None
@@ -124,24 +251,37 @@ try:
             "status": "error" if status == "error" else "ok",
             "messages": messages,
             "executionCount": execution_count,
-            "providerRunId": "kernel:" + kernel_name + ":" + message_id,
+            "kernelRunId": "kernel:" + kernel_name + ":" + message_id,
             "environment": environment,
         }
 
+    def inject_publishing_helper(client, environment):
+        language = environment.get("details", {}).get("language")
+        response = execute(client, publishing_helper(language), environment, store_history=False)
+        if not response.get("ok") or response.get("status") != "ok":
+            errors = [message.get("message") for message in response.get("messages", []) if message.get("kind") == "error"]
+            raise RuntimeError("Could not inject DraftMatter's publishing helper into the kernel: " + (errors[0] if errors else "unknown kernel error"))
+
     def kernel_worker():
         client = None
+        session_generation = 1
+        execution_sequence = 0
         try:
             client = manager.client()
             client.start_channels()
             client.wait_for_ready(timeout=20)
             environment = kernel_environment(client)
+            inject_publishing_helper(client, environment)
             startup.put({"ok": True, "environment": environment})
             while True:
                 try:
                     task = jobs.get()
                     kind = task["kind"]
                     if kind == "execute":
+                        execution_sequence += 1
                         response = execute(client, task["code"], environment)
+                        response["sessionGeneration"] = session_generation
+                        response["executionSequence"] = execution_sequence
                     elif kind == "restart":
                         client.stop_channels()
                         manager.restart_kernel(now=True)
@@ -149,7 +289,10 @@ try:
                         client.start_channels()
                         client.wait_for_ready(timeout=20)
                         environment = kernel_environment(client)
-                        response = {"ok": True, "environment": environment}
+                        session_generation += 1
+                        execution_sequence = 0
+                        inject_publishing_helper(client, environment)
+                        response = {"ok": True, "environment": environment, "sessionGeneration": session_generation}
                     elif kind == "shutdown":
                         client.stop_channels()
                         client = None

@@ -4,7 +4,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { ExecutionOutputView } from './ExecutionOutputView'
-import type { NormalizedExecutionResult } from './executionProvider'
+import type { NormalizedExecutionResult } from './kernelExecution'
 import { isolatedHtmlDocument, renderExecutionOutputs, sanitizeExecutionHtml } from './outputRenderer'
 
 function result(): NormalizedExecutionResult {
@@ -22,9 +22,9 @@ function result(): NormalizedExecutionResult {
       { data: { 'text/plain': 'plain result' }, metadata: {} },
     ],
     artifacts: [{ path: 'figures/generated/plot.png', bytes: 12, hash: `sha256:${'a'.repeat(64)}`, mediaType: 'image/png' }],
-    environment: { identity: 'fixture', provider: 'direct', language: 'python', fingerprint: 'sha256:environment' },
+    environment: { identity: 'fixture', language: 'python', fingerprint: 'sha256:environment' },
     hashes: { code: 'sha256:code', inputs: 'sha256:inputs', environment: 'sha256:environment', result: 'sha256:result' },
-    provenance: { provider: 'direct' },
+    provenance: { sessionGeneration: 1, executionSequence: 1 },
     startedAt: '2026-07-15T12:00:00.000Z',
     finishedAt: '2026-07-15T12:00:00.001Z',
     durationMs: 1,

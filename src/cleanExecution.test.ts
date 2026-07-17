@@ -4,18 +4,17 @@ import { cleanExecutePortableDocument } from './cleanExecution'
 import { extractExecutableCells, type ExecutionLanguage } from './executionCells'
 import { ExecutionFreshnessTracker, parseExecutionManifest, serializeExecutionManifest } from './executionFreshness'
 import {
-  createDirectExecutionProvider,
-  type DirectExecutionTransport,
   type ExecutionArtifact,
   type ExecutionRequest,
   type MimeOutput,
-} from './executionProvider'
-import { createTrustedExecutionBroker, type ExecutionTrustHost } from './executionTrust'
+  type NormalizedExecutionResult,
+} from './kernelExecution'
+import { sha256 } from './kernelExecution'
+import type { TrustedKernelExecution } from './executionTrust'
 import { parseLosslessPortableSource } from './portableSource'
 import { buildExecutionAvailability, parseRetainedOutputs } from './retainedOutputs'
 import type { RuntimeInventory } from './runtimeDiscovery'
 
-const providers = { python: 'direct', r: 'direct', julia: 'direct' } as const
 const hash = (character: string) => `sha256:${character.repeat(64)}`
 const presentation = {
   'phase3-python-figure': { label: 'fig-python-profile', alt: 'Python canopy profile', caption: 'Canopy profile reproduced with Python.' },
@@ -55,31 +54,32 @@ const tableMime: Record<ExecutionLanguage, MimeOutput[]> = {
 }
 
 function executionHarness(failingLanguage?: ExecutionLanguage) {
-  const execute = vi.fn(async (request: ExecutionRequest) => ({
-    exitCode: request.language === failingLanguage ? 1 : 0,
-    interrupted: false,
-    stdout: request.language === failingLanguage ? '' : `${request.cellId} complete\n`,
-    stderr: request.language === failingLanguage ? `${request.language} fixture failed\n` : '',
-    artifacts: request.language === failingLanguage ? [] : artifacts[request.language],
-    mime: request.language === failingLanguage ? [] : tableMime[request.language],
-    environment: { identity: `${request.language}-fixture`, version: 'phase3-exit-1' },
-    providerRunId: `direct-${request.cellId}`,
-  }))
-  const transport: DirectExecutionTransport = {
-    execute,
+  let executionSequence = 0
+  const execute = vi.fn(async (_root: string, request: ExecutionRequest): Promise<NormalizedExecutionResult> => {
+    executionSequence += 1
+    const failed = request.language === failingLanguage
+    const codeHash = await sha256(request.code)
+    return {
+      cellId: request.cellId,
+      language: request.language,
+      status: failed ? 'failed' : 'succeeded',
+      streams: [{ sequence: 0, name: failed ? 'stderr' : 'stdout', text: failed ? `${request.language} fixture failed\n` : `${request.cellId} complete\n` }],
+      errors: failed ? [{ name: 'FixtureError', message: 'Execution failed', traceback: [] }] : [],
+      artifacts: failed ? [] : artifacts[request.language],
+      mime: failed ? [] : tableMime[request.language],
+      environment: { identity: `${request.language}-fixture`, version: 'phase3-kernel-1', language: request.language, fingerprint: hash('e') },
+      hashes: { code: codeHash, inputs: hash('2'), environment: hash('e'), result: hash(request.language === 'python' ? '3' : request.language === 'r' ? '4' : '5') },
+      provenance: { kernelRunId: `kernel-${request.cellId}`, sessionGeneration: 1, executionSequence },
+      startedAt: '2026-07-15T12:00:00.000Z', finishedAt: '2026-07-15T12:00:00.025Z', durationMs: 25,
+    }
+  })
+  const execution: TrustedKernelExecution = {
+    run: execute,
     interrupt: vi.fn(async () => undefined),
     restart: vi.fn(async () => undefined),
     terminate: vi.fn(async () => undefined),
   }
-  let time = Date.parse('2026-07-15T12:00:00.000Z')
-  const provider = createDirectExecutionProvider(transport, () => new Date(time += 25))
-  const host: ExecutionTrustHost = {
-    available: true,
-    executionTrustStatus: vi.fn(async () => ({ trusted: true, scope: 'session' as const, warning: 'Trusted fixture.' })),
-    trustProjectForSession: vi.fn(async () => ({ trusted: true, scope: 'session' as const, warning: 'Trusted fixture.' })),
-    revokeProjectTrust: vi.fn(async () => ({ trusted: false, scope: 'session' as const, warning: 'Revoked fixture.' })),
-  }
-  return { execute, transport, broker: createTrustedExecutionBroker(host, { direct: provider }) }
+  return { execute, execution }
 }
 
 function missingInventory(): RuntimeInventory {
@@ -100,8 +100,7 @@ describe('Phase 3 clean execution gate', () => {
     const first = await cleanExecutePortableDocument({
       source: fixture,
       root: '/portable/phase3',
-      providers,
-      broker: harness.broker,
+      execution: harness.execution,
       cleanRunId: 'clean-phase3-exit',
       presentation,
     })
@@ -116,8 +115,8 @@ describe('Phase 3 clean execution gate', () => {
       cleanRunId: 'clean-phase3-exit',
       environmentFingerprints: { python: expect.stringMatching(/^sha256:/), r: expect.stringMatching(/^sha256:/), julia: expect.stringMatching(/^sha256:/) },
     })
-    expect(harness.execute.mock.calls.map(([request]) => request.language)).toEqual(['python', 'r', 'julia'])
-    expect(vi.mocked(harness.transport.restart).mock.calls.map(([language]) => language)).toEqual(['python', 'r', 'julia'])
+    expect(harness.execute.mock.calls.map(([, request]) => request.language)).toEqual(['python', 'r', 'julia'])
+    expect(vi.mocked(harness.execution.restart).mock.calls.map(([, language]) => language)).toEqual(['python', 'r', 'julia'])
     expect(first.source.match(/<!-- dm-output:start/g)).toHaveLength(3)
     expect(first.source).toContain('![Python canopy profile](<figures/generated/python-profile.svg>){#fig-python-profile}')
     expect(first.source).toContain('| week | leaf_area |')
@@ -138,8 +137,7 @@ describe('Phase 3 clean execution gate', () => {
     const second = await cleanExecutePortableDocument({
       source: first.source,
       root: '/portable/phase3',
-      providers,
-      broker: harness.broker,
+      execution: harness.execution,
       existingManifests: first.manifests,
       cleanRunId: 'clean-phase3-repeat',
       presentation,
@@ -153,8 +151,7 @@ describe('Phase 3 clean execution gate', () => {
     const run = await cleanExecutePortableDocument({
       source: fixture,
       root: '/portable/phase3',
-      providers,
-      broker: harness.broker,
+      execution: harness.execution,
       cleanRunId: 'clean-phase3-retained',
     })
     expect(run.ok).toBe(true)
@@ -165,7 +162,6 @@ describe('Phase 3 clean execution gate', () => {
     const availability = buildExecutionAvailability({
       cells,
       states: reopened.snapshot(),
-      providers,
       inventory: missingInventory(),
       retainedOutputs: retained.outputs,
     })
@@ -192,8 +188,7 @@ describe('Phase 3 clean execution gate', () => {
     const baseline = await cleanExecutePortableDocument({
       source: fixture,
       root: '/portable/phase3',
-      providers,
-      broker: successful.broker,
+      execution: successful.execution,
       cleanRunId: 'clean-phase3-baseline',
     })
     expect(baseline.ok).toBe(true)
@@ -202,8 +197,7 @@ describe('Phase 3 clean execution gate', () => {
     const attempt = await cleanExecutePortableDocument({
       source: baseline.source,
       root: '/portable/phase3',
-      providers,
-      broker: failing.broker,
+      execution: failing.execution,
       existingManifests: baseline.manifests,
       cleanRunId: 'clean-phase3-failed',
     })

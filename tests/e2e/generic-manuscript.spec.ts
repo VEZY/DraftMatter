@@ -80,7 +80,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(manuscript.locator('#eq-fit .katex')).toBeVisible()
     await expect(manuscript.locator('.structured-equation math')).toHaveCount(2)
     await expect(manuscript.getByRole('button', { name: 'Go to footnote 1' })).toHaveText('1')
-    await expect(codeCell.getByRole('button', { name: 'Show julia code for cell-growth' })).toHaveAttribute('aria-expanded', 'false')
+    await expect(codeCell.getByRole('button', { name: 'Edit saved computation source for cell-growth' })).toHaveAttribute('aria-expanded', 'false')
     await expect(codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveCount(0)
     await expect(manuscript.getByText('Footnote 1', { exact: true })).toBeVisible()
     await expect(manuscript.getByText('Calibration details stay portable.', { exact: true })).toBeVisible()
@@ -171,7 +171,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).not.toContain('[^methods]')
 
     await expect(codeCell).toHaveScreenshot('semantic-code-cell.png')
-    await codeCell.getByRole('button', { name: 'Show julia code for cell-growth' }).click()
+    await codeCell.getByRole('button', { name: 'Edit saved computation source for cell-growth' }).click()
     await expect(codeCell).toHaveScreenshot('semantic-code-editor.png')
     const code = codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' })
     await code.fill('println("after")')
@@ -180,8 +180,8 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveCount(0)
 
     await page.reload()
-    await codeCell.getByRole('button', { name: 'Show julia code for cell-growth' }).click()
-    await expect(codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveValue('println("after")')
+    await codeCell.getByRole('button', { name: 'Edit saved computation source for cell-growth' }).click()
+    await expect(codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveText('println("after")')
     await codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' }).press('Escape')
     await expect(page.getByRole('img', { name: 'Revised canopy response' })).toBeVisible()
     await expect(page.getByRole('link', { name: 'Figure trajectory' })).toHaveAttribute('href', '#fig-trajectory')
@@ -221,7 +221,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(commandMenu.getByRole('button', { name: /Insert footnote/ })).toBeVisible()
     await expect(commandMenu.getByRole('button', { name: /Insert table/ })).toBeVisible()
     await expect(commandMenu.getByRole('button', { name: /Insert figure/ })).toBeVisible()
-    await expect(commandMenu.getByRole('button', { name: /Insert code cell/ })).toBeVisible()
+    await expect(commandMenu.getByRole('button', { name: /Add reproducible output/ })).toBeVisible()
     await commandMenu.getByRole('button', { name: /Insert citation/ }).click()
     await page.getByRole('button', { name: /Growth coordination under fluctuating water availability/ }).click()
     await page.getByRole('button', { name: 'Insert selected · 1' }).click()
@@ -246,6 +246,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await citationDetails.getByRole('button', { name: 'Done' }).click()
 
     await manuscript.getByText('A uniquely selected review sentence.', { exact: true }).selectText()
+    await page.getByRole('button', { name: /^Review,/ }).first().click()
     const reviewPanel = page.getByRole('complementary', { name: 'Review feedback' })
     await reviewPanel.getByRole('button', { name: 'New comment' }).click()
     const commentComposer = reviewPanel.getByRole('group', { name: 'New comment' })
@@ -261,6 +262,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(commentMarker).toHaveAttribute('aria-pressed', 'true')
     await expect(manuscript.locator('.dm-review-thread')).toHaveClass(/dm-review-active/)
 
+    await reviewPanel.getByText('Review options', { exact: true }).click()
     await reviewPanel.getByLabel('Markup view').selectOption('original')
     await expect(manuscript.getByText('Original preview')).toBeVisible()
     await expect(page.getByRole('textbox', { name: 'Rendered manuscript editor' })).toHaveAttribute('contenteditable', 'false')

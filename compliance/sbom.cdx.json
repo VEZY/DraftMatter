@@ -20,7 +20,7 @@
       },
       {
         "name": "draftmatter:dependency-fingerprint",
-        "value": "sha256:596bfcc4a414ac88ce2846078bfd6240be8d873dff8976a05362c9729f868bb6"
+        "value": "sha256:f47d95077f0bdf83cda150a94a3af0a0aa828eaff4b4bc7b79925af1a84c1ec9"
       }
     ]
   },
@@ -6795,6 +6795,151 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:npm/%40codemirror%2Fcommands@6.10.4",
+      "name": "@codemirror/commands",
+      "version": "6.10.4",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40codemirror%2Fcommands@6.10.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@codemirror/commands/-/commands-6.10.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40codemirror%2Flanguage@6.12.4",
+      "name": "@codemirror/language",
+      "version": "6.12.4",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40codemirror%2Flanguage@6.12.4",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@codemirror/language/-/language-6.12.4.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40codemirror%2Flegacy-modes@6.5.3",
+      "name": "@codemirror/legacy-modes",
+      "version": "6.5.3",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40codemirror%2Flegacy-modes@6.5.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@codemirror/legacy-modes/-/legacy-modes-6.5.3.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40codemirror%2Fstate@6.7.1",
+      "name": "@codemirror/state",
+      "version": "6.7.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40codemirror%2Fstate@6.7.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@codemirror/state/-/state-6.7.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40codemirror%2Fview@6.43.6",
+      "name": "@codemirror/view",
+      "version": "6.43.6",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40codemirror%2Fview@6.43.6",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@codemirror/view/-/view-6.43.6.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:npm/%40csstools%2Fcolor-helpers@6.1.0",
       "name": "@csstools/color-helpers",
       "version": "6.1.0",
@@ -7201,6 +7346,93 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:npm/%40lezer%2Fcommon@1.5.2",
+      "name": "@lezer/common",
+      "version": "1.5.2",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40lezer%2Fcommon@1.5.2",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@lezer/common/-/common-1.5.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40lezer%2Fhighlight@1.2.3",
+      "name": "@lezer/highlight",
+      "version": "1.2.3",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40lezer%2Fhighlight@1.2.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@lezer/highlight/-/highlight-1.2.3.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40lezer%2Flr@1.4.10",
+      "name": "@lezer/lr",
+      "version": "1.4.10",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40lezer%2Flr@1.4.10",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@lezer/lr/-/lr-1.4.10.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:npm/%40lifeomic%2Fattempt@3.1.0",
       "name": "@lifeomic/attempt",
       "version": "3.1.0",
@@ -7215,6 +7447,35 @@
         {
           "type": "distribution",
           "url": "https://registry.npmjs.org/@lifeomic/attempt/-/attempt-3.1.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40marijn%2Ffind-cluster-break@1.0.3",
+      "name": "@marijn/find-cluster-break",
+      "version": "1.0.3",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40marijn%2Ffind-cluster-break@1.0.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@marijn/find-cluster-break/-/find-cluster-break-1.0.3.tgz"
         }
       ],
       "properties": [
@@ -9898,6 +10159,35 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:npm/commander@8.3.0",
+      "name": "commander",
+      "version": "8.3.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/commander@8.3.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/commander/-/commander-8.3.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:npm/convert-source-map@2.0.0",
       "name": "convert-source-map",
       "version": "2.0.0",
@@ -9912,6 +10202,35 @@
         {
           "type": "distribution",
           "url": "https://registry.npmjs.org/convert-source-map/-/convert-source-map-2.0.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/crelt@1.0.7",
+      "name": "crelt",
+      "version": "1.0.7",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/crelt@1.0.7",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/crelt/-/crelt-1.0.7.tgz"
         }
       ],
       "properties": [
@@ -11130,6 +11449,35 @@
         {
           "type": "distribution",
           "url": "https://registry.npmjs.org/jsonify/-/jsonify-0.0.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/katex@0.17.0",
+      "name": "katex",
+      "version": "0.17.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/katex@0.17.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/katex/-/katex-0.17.0.tgz"
         }
       ],
       "properties": [
@@ -14001,6 +14349,35 @@
         {
           "type": "distribution",
           "url": "https://registry.npmjs.org/std-env/-/std-env-4.2.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/style-mod@4.1.3",
+      "name": "style-mod",
+      "version": "4.1.3",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/style-mod@4.1.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/style-mod/-/style-mod-4.1.3.tgz"
         }
       ],
       "properties": [

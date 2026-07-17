@@ -3,9 +3,8 @@ import { open } from '@tauri-apps/plugin-dialog'
 import { CrossrefTransportError, type CrossrefRequest, type CrossrefWork } from './crossref'
 import type { JupyterKernelInventory, RuntimeExecutableProbe, RuntimeLanguage } from './runtimeDiscovery'
 import { EXECUTION_TRUST_ACKNOWLEDGEMENT, type ExecutionTrustStatus } from './executionTrust'
-import type { DirectHostExecutionRequest } from './directExecutionTransport'
 import type { KernelHostExecutionRequest } from './kernelExecutionTransport'
-import type { ExecutionProviderKind, RawDirectExecution, RawKernelExecution } from './executionProvider'
+import type { RawKernelExecution } from './kernelExecution'
 import type { ExecutionLanguage } from './executionCells'
 import type { CitationLinkKind } from './citationLinks'
 
@@ -20,14 +19,20 @@ export interface ProjectConfig {
 }
 
 export interface ProjectExecutionLanguagePreferences {
-  provider: ExecutionProviderKind
   kernel?: string
+  environment?: string
 }
 
 export interface ProjectExecutionPreferences {
   python: ProjectExecutionLanguagePreferences
   r: ProjectExecutionLanguagePreferences
   julia: ProjectExecutionLanguagePreferences
+}
+
+export interface KernelIntegrationSetupResult {
+  language: RuntimeLanguage
+  kernelName?: string
+  inventory: JupyterKernelInventory
 }
 
 export interface ProjectEntry {
@@ -87,6 +92,33 @@ export interface SaveExecutionManifestRequest {
   cellId: string
   content: string
   expectedHash: string | null
+}
+
+export interface JuliaPackage {
+  name: string
+  version?: string
+  kind: 'package' | 'stdlib'
+}
+
+export interface JuliaEnvironment {
+  packages: JuliaPackage[]
+  projectFile: boolean
+  manifestFile: boolean
+}
+
+export interface JuliaPackageRequest {
+  root: string
+  name: string
+}
+
+export interface JuliaFormatRequest {
+  root: string
+  code: string
+}
+
+export interface JuliaFormatResult {
+  code: string
+  changed: boolean
 }
 
 export type GitChangeKind = 'modified' | 'added' | 'deleted' | 'renamed' | 'copied' | 'untracked' | 'conflicted'
@@ -330,15 +362,28 @@ export interface HostFailure {
 type InvokeBridge = <T>(command: string, args?: Record<string, unknown>) => Promise<T>
 type DirectoryPicker = (options: { directory: true; multiple: false; title: string }) => Promise<string | string[] | null>
 
+function staleDesktopHostFailure(message: string): HostFailure | undefined {
+  const match = message.match(/command\s+([a-z][a-z0-9_]*)\s+not found/i)
+  if (!match) return undefined
+  return {
+    kind: 'integration',
+    message: `The running DraftMatter desktop host does not provide ${match[1]}. Fully quit and restart DraftMatter (or restart npm run desktop:dev); a frontend reload is not enough.`,
+  }
+}
+
 export function normaliseHostFailure(error: unknown): HostFailure {
   if (typeof error === 'object' && error !== null && 'kind' in error && 'message' in error) {
     const value = error as { kind: unknown; message: unknown }
+    const message = typeof value.message === 'string' ? value.message : 'The desktop host returned an unreadable error.'
+    const staleHost = staleDesktopHostFailure(message)
+    if (staleHost) return staleHost
     return {
       kind: typeof value.kind === 'string' ? value.kind as HostFailure['kind'] : 'unknown',
-      message: typeof value.message === 'string' ? value.message : 'The desktop host returned an unreadable error.',
+      message,
     }
   }
-  return { kind: 'unknown', message: error instanceof Error ? error.message : String(error) }
+  const message = error instanceof Error ? error.message : String(error)
+  return staleDesktopHostFailure(message) ?? { kind: 'unknown', message }
 }
 
 export function normaliseCrossrefFailure(error: unknown) {
@@ -485,6 +530,11 @@ export function createDesktopHost(
     discoverJupyterKernels() {
       return invokeBridge<JupyterKernelInventory>('discover_jupyter_kernels')
     },
+    setupKernelIntegration(root: string, language: RuntimeLanguage) {
+      return available
+        ? invokeBridge<KernelIntegrationSetupResult>('setup_kernel_integration', { root, language })
+        : executionUnavailable()
+    },
     executionTrustStatus(root: string) {
       return available
         ? invokeBridge<ExecutionTrustStatus>('execution_trust_status', { root })
@@ -510,29 +560,9 @@ export function createDesktopHost(
         ? invokeBridge<Array<{ path: string; hash?: string }>>('inspect_execution_artifacts', { root, paths })
         : executionUnavailable()
     },
-    executeDirect(request: DirectHostExecutionRequest) {
-      return available
-        ? invokeBridge<RawDirectExecution>('execute_direct', { request })
-        : executionUnavailable()
-    },
     executeKernel(request: KernelHostExecutionRequest) {
       return available
         ? invokeBridge<RawKernelExecution>('execute_kernel', { request })
-        : executionUnavailable()
-    },
-    interruptDirect(language: ExecutionLanguage) {
-      return available
-        ? invokeBridge<boolean>('interrupt_direct', { language })
-        : executionUnavailable()
-    },
-    restartDirect(language: ExecutionLanguage) {
-      return available
-        ? invokeBridge<boolean>('restart_direct', { language })
-        : executionUnavailable()
-    },
-    terminateDirect(language: ExecutionLanguage) {
-      return available
-        ? invokeBridge<boolean>('terminate_direct', { language })
         : executionUnavailable()
     },
     interruptKernel(language: ExecutionLanguage) {
@@ -555,6 +585,26 @@ export function createDesktopHost(
     },
     saveExecutionManifest(request: SaveExecutionManifestRequest) {
       return invokeBridge<DocumentSnapshot>('save_execution_manifest', { request })
+    },
+    listJuliaPackages(root: string) {
+      return available
+        ? invokeBridge<JuliaEnvironment>('list_julia_packages', { root })
+        : executionUnavailable()
+    },
+    addJuliaPackage(request: JuliaPackageRequest) {
+      return available
+        ? invokeBridge<JuliaEnvironment>('add_julia_package', { request })
+        : executionUnavailable()
+    },
+    removeJuliaPackage(request: JuliaPackageRequest) {
+      return available
+        ? invokeBridge<JuliaEnvironment>('remove_julia_package', { request })
+        : executionUnavailable()
+    },
+    formatJuliaCode(request: JuliaFormatRequest) {
+      return available
+        ? invokeBridge<JuliaFormatResult>('format_julia_code', { request })
+        : executionUnavailable()
     },
     gitStatus(root: string) {
       return available

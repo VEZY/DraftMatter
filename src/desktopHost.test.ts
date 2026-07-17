@@ -42,9 +42,9 @@ describe('desktop host adapter', () => {
     await host.setMainDocument('/research/canopy', 'renamed.qmd')
     await host.setCitationPreferences('/research/canopy', 'draftmatter-numeric', 'fr-FR')
     await host.setExecutionPreferences('/research/canopy', {
-      python: { provider: 'kernel', kernel: 'python-fixture' },
-      r: { provider: 'direct' },
-      julia: { provider: 'direct' },
+      python: { kernel: 'python-fixture', environment: '/envs/python' },
+      r: {},
+      julia: {},
     })
     await host.zoteroStatus()
     await host.searchZotero('canopy water', 12)
@@ -55,30 +55,24 @@ describe('desktop host adapter', () => {
     await host.openCitationLink('doi', '10.1016/j.envsoft.2019.104609')
     await host.probeRuntime('julia')
     await host.discoverJupyterKernels()
+    await host.setupKernelIntegration('/research/canopy', 'python')
     await host.executionTrustStatus('/research/canopy')
     await host.trustProjectForSession('/research/canopy', 'run-project-code-with-user-permissions')
     await host.revokeProjectTrust('/research/canopy')
     await host.fingerprintExecutionInputs('/research/canopy', ['data/input.csv'])
     await host.inspectExecutionArtifacts('/research/canopy', ['figures/result.svg'])
-    await host.executeDirect({
-      root: '/research/canopy',
-      cellId: 'cell-1',
-      language: 'python',
-      code: 'print(1)',
-      attributes: {},
-      inputs: [],
-    })
     await host.executeKernel({
       root: '/research/canopy', cellId: 'cell-1', language: 'python', kernelName: 'python-fixture', code: 'print(1)', attributes: {}, inputs: [],
     })
-    await host.interruptDirect('python')
-    await host.restartDirect('r')
-    await host.terminateDirect('julia')
     await host.interruptKernel('python')
     await host.restartKernel('r')
     await host.terminateKernel('julia')
     await host.readExecutionManifests('/research/canopy')
-    await host.saveExecutionManifest({ root: '/research/canopy', cellId: 'cell-1', content: '{"schemaVersion":1}', expectedHash: null })
+    await host.saveExecutionManifest({ root: '/research/canopy', cellId: 'cell-1', content: '{"schemaVersion":2}', expectedHash: null })
+    await host.listJuliaPackages('/research/canopy')
+    await host.addJuliaPackage({ root: '/research/canopy', name: 'JuliaFormatter' })
+    await host.removeJuliaPackage({ root: '/research/canopy', name: 'DataFrames' })
+    await host.formatJuliaCode({ root: '/research/canopy', code: 'x=1' })
     await host.gitStatus('/research/canopy')
     await host.gitInitialize('/research/canopy')
     await host.gitDiff({ root: '/research/canopy', path: 'paper.qmd', staged: false })
@@ -114,7 +108,7 @@ describe('desktop host adapter', () => {
       ['set_main_document', { root: '/research/canopy', path: 'renamed.qmd' }],
       ['set_citation_preferences', { root: '/research/canopy', style: 'draftmatter-numeric', locale: 'fr-FR' }],
       ['set_execution_preferences', { root: '/research/canopy', preferences: {
-        python: { provider: 'kernel', kernel: 'python-fixture' }, r: { provider: 'direct' }, julia: { provider: 'direct' },
+        python: { kernel: 'python-fixture', environment: '/envs/python' }, r: {}, julia: {},
       } }],
       ['zotero_status', undefined],
       ['zotero_search', { query: 'canopy water', limit: 12 }],
@@ -125,21 +119,22 @@ describe('desktop host adapter', () => {
       ['open_citation_link', { kind: 'doi', value: '10.1016/j.envsoft.2019.104609' }],
       ['probe_runtime_executable', { language: 'julia' }],
       ['discover_jupyter_kernels', undefined],
+      ['setup_kernel_integration', { root: '/research/canopy', language: 'python' }],
       ['execution_trust_status', { root: '/research/canopy' }],
       ['trust_project_for_session', { root: '/research/canopy', acknowledgement: 'run-project-code-with-user-permissions' }],
       ['revoke_project_trust', { root: '/research/canopy' }],
       ['fingerprint_execution_inputs', { root: '/research/canopy', paths: ['data/input.csv'] }],
       ['inspect_execution_artifacts', { root: '/research/canopy', paths: ['figures/result.svg'] }],
-      ['execute_direct', { request: { root: '/research/canopy', cellId: 'cell-1', language: 'python', code: 'print(1)', attributes: {}, inputs: [] } }],
       ['execute_kernel', { request: { root: '/research/canopy', cellId: 'cell-1', language: 'python', kernelName: 'python-fixture', code: 'print(1)', attributes: {}, inputs: [] } }],
-      ['interrupt_direct', { language: 'python' }],
-      ['restart_direct', { language: 'r' }],
-      ['terminate_direct', { language: 'julia' }],
       ['interrupt_kernel', { language: 'python' }],
       ['restart_kernel', { language: 'r' }],
       ['terminate_kernel', { language: 'julia' }],
       ['read_execution_manifests', { root: '/research/canopy' }],
-      ['save_execution_manifest', { request: { root: '/research/canopy', cellId: 'cell-1', content: '{"schemaVersion":1}', expectedHash: null } }],
+      ['save_execution_manifest', { request: { root: '/research/canopy', cellId: 'cell-1', content: '{"schemaVersion":2}', expectedHash: null } }],
+      ['list_julia_packages', { root: '/research/canopy' }],
+      ['add_julia_package', { request: { root: '/research/canopy', name: 'JuliaFormatter' } }],
+      ['remove_julia_package', { request: { root: '/research/canopy', name: 'DataFrames' } }],
+      ['format_julia_code', { request: { root: '/research/canopy', code: 'x=1' } }],
       ['git_status', { root: '/research/canopy' }],
       ['git_initialize', { root: '/research/canopy' }],
       ['git_diff', { request: { root: '/research/canopy', path: 'paper.qmd', staged: false } }],
@@ -169,6 +164,8 @@ describe('desktop host adapter', () => {
     await expect(host.pickProjectFolder()).resolves.toBeNull()
     await expect(host.executionTrustStatus('/project')).rejects.toMatchObject({ kind: 'integration' })
     await expect(host.trustProjectForSession('/project', 'run-project-code-with-user-permissions')).rejects.toMatchObject({ kind: 'integration' })
+    await expect(host.listJuliaPackages('/project')).rejects.toMatchObject({ kind: 'integration' })
+    await expect(host.formatJuliaCode({ root: '/project', code: 'x=1' })).rejects.toMatchObject({ kind: 'integration' })
     await expect(host.gitStatus('/project')).rejects.toMatchObject({ kind: 'integration', message: expect.stringContaining('browser') })
     expect(picker).not.toHaveBeenCalled()
     expect(invoke).not.toHaveBeenCalled()
@@ -178,6 +175,17 @@ describe('desktop host adapter', () => {
     expect(normaliseHostFailure({ kind: 'conflict', message: 'paper.qmd changed outside DraftMatter.' })).toEqual({
       kind: 'conflict',
       message: 'paper.qmd changed outside DraftMatter.',
+    })
+  })
+
+  it('explains that newly added desktop commands require a full host restart', () => {
+    expect(normaliseHostFailure(new Error('Command add_julia_package not found'))).toEqual({
+      kind: 'integration',
+      message: expect.stringMatching(/add_julia_package.*fully quit and restart.*frontend reload is not enough/i),
+    })
+    expect(normaliseHostFailure({ kind: 'unknown', message: 'command list_julia_packages not found' })).toMatchObject({
+      kind: 'integration',
+      message: expect.stringContaining('list_julia_packages'),
     })
   })
 

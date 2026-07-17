@@ -1,5 +1,5 @@
 import type { ExecutionLanguage } from './executionCells'
-import type { ExecutionRequest, KernelExecutionTransport, RawKernelExecution } from './executionProvider'
+import type { ExecutionRequest, KernelLifecycleTransport, RawKernelExecution } from './kernelExecution'
 import type { JupyterKernelProbe } from './runtimeDiscovery'
 
 export interface KernelHostExecutionRequest {
@@ -23,7 +23,7 @@ export interface KernelExecutionHost {
 export function createDesktopKernelExecutionTransport(
   host: KernelExecutionHost,
   kernelForLanguage: (language: ExecutionLanguage) => JupyterKernelProbe | undefined,
-): KernelExecutionTransport {
+): KernelLifecycleTransport {
   return {
     async execute(request, signal) {
       if (!host.available) throw new Error('Jupyter kernel execution is unavailable outside the desktop app.')

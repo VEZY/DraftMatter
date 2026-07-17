@@ -1,4 +1,4 @@
-import type { JsonValue, NormalizedExecutionResult } from './executionProvider'
+import type { JsonValue, NormalizedExecutionResult } from './kernelExecution'
 
 export const PUBLISHED_VALUE_MIME = 'application/vnd.draftmatter.published-value+json'
 

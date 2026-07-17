@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ExecutableCell, ExecutionLanguage } from './executionCells'
-import type { NormalizedExecutionResult } from './executionProvider'
-import { sha256 } from './executionProvider'
+import type { NormalizedExecutionResult } from './kernelExecution'
+import { sha256 } from './kernelExecution'
 import {
   ExecutionFreshnessTracker,
   parseExecutionManifest,
@@ -10,7 +10,7 @@ import {
 } from './executionFreshness'
 
 function cell(id: string, language: ExecutionLanguage, source = `${language}:${id}`): ExecutableCell {
-  return { id, language, source, sourceHash: `source:${id}`, attributes: {}, classes: ['execute'], position: { startOffset: 0, endOffset: 1, startLine: 1, endLine: 1 } }
+  return { id, language, source, sourceHash: `source:${id}`, role: 'ordinary', attributes: {}, classes: ['execute'], position: { startOffset: 0, endOffset: 1, startLine: 1, endLine: 1 } }
 }
 
 const cells = [cell('py-1', 'python'), cell('r-1', 'r'), cell('py-2', 'python'), cell('jl-1', 'julia')]
@@ -25,9 +25,9 @@ async function result(target: ExecutableCell, status: NormalizedExecutionResult[
     status,
     streams: [], errors: [], mime: [],
     artifacts: target.id === 'py-1' ? [{ path: 'figures/py-1.svg', bytes: 12, hash: `sha256:${'a'.repeat(64)}`, mediaType: 'image/svg+xml' }] : [],
-    environment: { identity: environment, provider: 'direct', language: target.language, fingerprint: environmentHash },
+    environment: { identity: environment, language: target.language, fingerprint: environmentHash },
     hashes: { code: codeHash, inputs: inputsHash, environment: environmentHash, result: resultHash },
-    provenance: { provider: 'direct', providerRunId: `run-${target.id}` },
+    provenance: { kernelRunId: `run-${target.id}`, sessionGeneration: 1, executionSequence: 1 },
     startedAt: '2026-07-15T12:00:00.000Z',
     finishedAt: '2026-07-15T12:00:00.100Z',
     durationMs: 100,
@@ -128,6 +128,6 @@ describe('execution freshness and provenance', () => {
 
     expect(parseExecutionManifest(source)).toEqual({ manifest })
     expect(parseExecutionManifest('{')).toMatchObject({ error: expect.stringContaining('valid JSON') })
-    expect(parseExecutionManifest(JSON.stringify({ ...manifest, schemaVersion: 2 } as unknown as ExecutionManifest))).toEqual({ error: 'Execution manifest schemaVersion must be 1.' })
+    expect(parseExecutionManifest(JSON.stringify({ ...manifest, schemaVersion: 1 } as unknown as ExecutionManifest))).toEqual({ error: 'Execution manifest schemaVersion must be 2.' })
   })
 })

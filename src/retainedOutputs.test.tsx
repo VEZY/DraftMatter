@@ -10,15 +10,15 @@ import { buildExecutionAvailability, parseRetainedOutputs } from './retainedOutp
 import type { RuntimeInventory } from './runtimeDiscovery'
 
 function cell(id: string, language: ExecutionLanguage): ExecutableCell {
-  return { id, language, source: 'code', sourceHash: 'hash', attributes: {}, classes: ['execute'], position: { startOffset: 0, endOffset: 1, startLine: 1, endLine: 1 } }
+  return { id, language, source: 'code', sourceHash: 'hash', role: 'ordinary', attributes: {}, classes: ['execute'], position: { startOffset: 0, endOffset: 1, startLine: 1, endLine: 1 } }
 }
 
 function manifest(cellId: string, language: ExecutionLanguage): ExecutionManifest {
   return {
-    schemaVersion: 1, cellId, language, status: 'succeeded', codeHash: `sha256:${'1'.repeat(64)}`, inputsHash: `sha256:${'2'.repeat(64)}`,
+    schemaVersion: 2, cellId, language, status: 'succeeded', codeHash: `sha256:${'1'.repeat(64)}`, inputsHash: `sha256:${'2'.repeat(64)}`,
     environmentFingerprint: `sha256:${'3'.repeat(64)}`, environmentIdentity: `${language}-fixture`, resultHash: `sha256:${'4'.repeat(64)}`,
     artifacts: [{ path: `figures/${cellId}.svg`, bytes: 12, hash: `sha256:${'5'.repeat(64)}`, mediaType: 'image/svg+xml' }],
-    provider: 'direct', startedAt: '2026-06-12T10:00:00Z', finishedAt: '2026-06-12T10:00:01Z', durationMs: 1000, sequence: 0,
+    sessionGeneration: 1, executionSequence: 1, startedAt: '2026-06-12T10:00:00Z', finishedAt: '2026-06-12T10:00:01Z', durationMs: 1000, sequence: 0,
   }
 }
 
@@ -34,7 +34,7 @@ const inventory: RuntimeInventory = {
     r: { language: 'r', health: 'available', executable: '/runtime/Rscript' },
     julia: { language: 'julia', health: 'missing' },
   },
-  jupyter: { health: 'missing', kernels: [], searchedLocations: [] },
+  jupyter: { health: 'available', kernels: [{ name: 'ir', displayName: 'R', language: 'r', health: 'available', resourceDir: '/kernels/ir' }], searchedLocations: [] },
 }
 
 const source = `\`\`\`python {#py-current .execute}
@@ -98,7 +98,6 @@ describe('retained output availability', () => {
     const views = buildExecutionAvailability({
       cells,
       states: [state('py-current', 'python', 'current'), state('py-stale', 'python', 'stale')],
-      providers: { python: 'direct', r: 'direct', julia: 'direct' },
       inventory,
       retainedOutputs: parseRetainedOutputs(source).outputs,
     })
@@ -111,7 +110,6 @@ describe('retained output availability', () => {
     const [view] = buildExecutionAvailability({
       cells: [cell('jl-missing', 'julia')],
       states: [{ cellId: 'jl-missing', language: 'julia', status: 'output-missing' }],
-      providers: { python: 'direct', r: 'direct', julia: 'direct' },
       inventory,
     })
 
@@ -122,7 +120,6 @@ describe('retained output availability', () => {
     const views = buildExecutionAvailability({
       cells: [cell('py', 'python'), cell('r', 'r'), cell('jl', 'julia')],
       states: [state('py', 'python', 'current'), state('r', 'r', 'current'), state('jl', 'julia', 'current')],
-      providers: { python: 'direct', r: 'direct', julia: 'direct' },
       inventory,
       cachedResultCells: new Set(['py', 'r', 'jl']),
     })
@@ -136,7 +133,6 @@ describe('retained output availability', () => {
     const [view] = buildExecutionAvailability({
       cells: [cell('py-current', 'python')],
       states: [state('py-current', 'python', 'current')],
-      providers: { python: 'direct', r: 'direct', julia: 'direct' },
       inventory,
       retainedOutputs: parseRetainedOutputs(source).outputs,
     })

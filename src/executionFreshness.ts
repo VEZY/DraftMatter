@@ -1,5 +1,5 @@
-import type { ExecutableCell, ExecutionLanguage } from './executionCells'
-import { sha256, type ExecutionProviderKind, type NormalizedExecutionResult } from './executionProvider'
+import { isSetupCell, type ExecutableCell, type ExecutionLanguage } from './executionCells'
+import { sha256, type NormalizedExecutionResult } from './kernelExecution'
 
 export type ExecutionFreshnessStatus =
   | 'never-run'
@@ -13,7 +13,7 @@ export type ExecutionFreshnessStatus =
   | 'output-missing'
 
 export interface ExecutionManifest {
-  schemaVersion: 1
+  schemaVersion: 2
   cellId: string
   language: ExecutionLanguage
   status: NormalizedExecutionResult['status']
@@ -24,9 +24,10 @@ export interface ExecutionManifest {
   environmentVersion?: string
   resultHash: string
   artifacts: Array<{ path: string; bytes: number; hash: string; mediaType?: string }>
-  provider: ExecutionProviderKind
-  providerRunId?: string
+  kernelRunId?: string
   executionCount?: number
+  sessionGeneration: number
+  executionSequence: number
   startedAt: string
   finishedAt: string
   durationMs: number
@@ -52,7 +53,7 @@ export interface CleanRunCertification {
 
 export function executionManifestFromResult(result: NormalizedExecutionResult, sequence: number, cleanRunId?: string): ExecutionManifest {
   return {
-    schemaVersion: 1,
+    schemaVersion: 2,
     cellId: result.cellId,
     language: result.language,
     status: result.status,
@@ -63,9 +64,10 @@ export function executionManifestFromResult(result: NormalizedExecutionResult, s
     ...(result.environment.version ? { environmentVersion: result.environment.version } : {}),
     resultHash: result.hashes.result,
     artifacts: result.artifacts.map((artifact) => ({ ...artifact })),
-    provider: result.provenance.provider,
-    ...(result.provenance.providerRunId ? { providerRunId: result.provenance.providerRunId } : {}),
+    ...(result.provenance.kernelRunId ? { kernelRunId: result.provenance.kernelRunId } : {}),
     ...(result.provenance.executionCount === undefined ? {} : { executionCount: result.provenance.executionCount }),
+    sessionGeneration: result.provenance.sessionGeneration,
+    executionSequence: result.provenance.executionSequence,
     startedAt: result.startedAt,
     finishedAt: result.finishedAt,
     durationMs: result.durationMs,
@@ -92,14 +94,14 @@ function validHash(value: unknown) {
 export function parseExecutionManifest(source: string): { manifest?: ExecutionManifest; error?: string } {
   try {
     const value = JSON.parse(source) as Partial<ExecutionManifest>
-    if (value.schemaVersion !== 1) return { error: 'Execution manifest schemaVersion must be 1.' }
+    if (value.schemaVersion !== 2) return { error: 'Execution manifest schemaVersion must be 2.' }
     if (typeof value.cellId !== 'string' || !/^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/.test(value.cellId)) return { error: 'Execution manifest cellId is invalid.' }
     if (value.language !== 'python' && value.language !== 'r' && value.language !== 'julia') return { error: 'Execution manifest language is invalid.' }
     if (value.status !== 'succeeded' && value.status !== 'failed' && value.status !== 'interrupted') return { error: 'Execution manifest status is invalid.' }
     if (!validHash(value.codeHash) || !validHash(value.inputsHash) || !validHash(value.environmentFingerprint) || !validHash(value.resultHash)) return { error: 'Execution manifest hashes must be SHA-256 fingerprints.' }
     if (!Array.isArray(value.artifacts) || value.artifacts.some((artifact) => !artifact || typeof artifact.path !== 'string' || typeof artifact.bytes !== 'number' || !validHash(artifact.hash))) return { error: 'Execution manifest artifacts are invalid.' }
     const sequence = value.sequence
-    if ((value.provider !== 'kernel' && value.provider !== 'direct') || typeof value.startedAt !== 'string' || typeof value.finishedAt !== 'string' || typeof value.durationMs !== 'number' || typeof sequence !== 'number' || !Number.isInteger(sequence) || sequence < 0) return { error: 'Execution manifest provenance is invalid.' }
+    if (typeof value.sessionGeneration !== 'number' || !Number.isInteger(value.sessionGeneration) || value.sessionGeneration < 1 || typeof value.executionSequence !== 'number' || !Number.isInteger(value.executionSequence) || value.executionSequence < 1 || typeof value.startedAt !== 'string' || typeof value.finishedAt !== 'string' || typeof value.durationMs !== 'number' || typeof sequence !== 'number' || !Number.isInteger(sequence) || sequence < 0) return { error: 'Execution manifest provenance is invalid.' }
     return { manifest: value as ExecutionManifest }
   } catch (error) {
     return { error: `Execution manifest is not valid JSON: ${error instanceof Error ? error.message : String(error)}` }
@@ -174,7 +176,8 @@ export class ExecutionFreshnessTracker {
         const before = previous[index]
         const after = next[index]
         if (!before || !after || before.id !== after.id || this.codeHashes.get(before.id) !== nextHashes.get(after.id)) {
-          const changed = after ? nextCells.findIndex((cell) => cell.id === after.id) : nextCells.length
+          const setupChanged = Boolean(before && isSetupCell(before)) || Boolean(after && isSetupCell(after))
+          const changed = setupChanged ? 0 : after ? nextCells.findIndex((cell) => cell.id === after.id) : nextCells.length
           firstChanges.set(language, changed)
           break
         }
@@ -243,6 +246,16 @@ export class ExecutionFreshnessTracker {
         state.status = 'environment-changed'
         state.reason = 'The selected execution environment changed.'
       }
+    }
+  }
+
+  sessionRestarted(language: ExecutionLanguage) {
+    this.certification = undefined
+    for (const cell of this.cells.filter((candidate) => candidate.language === language)) {
+      const state = this.states.get(cell.id)!
+      if (!state.lastSuccessful) continue
+      state.status = 'stale'
+      state.reason = `The shared ${language === 'r' ? 'R' : language[0].toUpperCase() + language.slice(1)} kernel session restarted.`
     }
   }
 

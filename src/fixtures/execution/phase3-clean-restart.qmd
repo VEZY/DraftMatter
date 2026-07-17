@@ -5,7 +5,7 @@ format: html
 
 # Reproducible outputs
 
-This fixture uses only each language's standard library or base installation. Every cell declares ordinary project artifacts and can run through the direct provider on Windows, macOS, or Linux.
+This fixture uses only each language's standard library or base installation. Every cell declares ordinary project artifacts and runs through the selected shared Jupyter kernel on Windows, macOS, or Linux.
 
 ```{python} #phase3-python-figure .execute produces="figures/generated/python-profile.svg"
 from pathlib import Path

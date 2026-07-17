@@ -4,12 +4,14 @@ import { unified } from 'unified'
 import type { DocumentDiagnostic } from './types'
 
 export type ExecutionLanguage = 'python' | 'r' | 'julia'
+export type ExecutionCellRole = 'setup' | 'figure' | 'table' | 'values' | 'ordinary'
 
 export interface ExecutableCell {
   id: string
   language: ExecutionLanguage
   source: string
   sourceHash: string
+  role: ExecutionCellRole
   attributes: Record<string, string | true>
   classes: string[]
   position: {
@@ -125,6 +127,17 @@ function safeExplicitId(value?: string) {
   return value && /^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/.test(value) ? value : undefined
 }
 
+function cellRole(attributes: Record<string, string | true>): ExecutionCellRole {
+  const explicit = attributes.role
+  if (explicit === 'setup' || explicit === 'figure' || explicit === 'table' || explicit === 'values') return explicit
+  const output = attributes.output
+  return output === 'figure' || output === 'table' || output === 'values' ? output : 'ordinary'
+}
+
+export function isSetupCell(cell: Pick<ExecutableCell, 'role'>) {
+  return cell.role === 'setup'
+}
+
 export function extractExecutableCells(source: string): ExecutableCellResult {
   const tree = unified().use(remarkParse).parse(source) as Root
   const excluded = excludedDivRanges(source)
@@ -155,6 +168,7 @@ export function extractExecutableCells(source: string): ExecutableCellResult {
       language: info.language,
       source: node.value,
       sourceHash: sourceHash(node.value),
+      role: cellRole(info.attributes),
       attributes: info.attributes,
       classes: info.classes,
       position: {

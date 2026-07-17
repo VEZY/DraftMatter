@@ -1,4 +1,6 @@
+use crate::{canonical_root, HostError};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::collections::HashSet;
 use std::env;
 use std::ffi::{OsStr, OsString};
@@ -13,6 +15,7 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_PROBE_OUTPUT_BYTES: u64 = 64 * 1024;
 const MAX_KERNEL_SPEC_BYTES: u64 = 128 * 1024;
 const MAX_KERNEL_SPECS: usize = 128;
+const MAX_SETUP_DIAGNOSTIC_CHARS: usize = 8 * 1024;
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
@@ -28,6 +31,16 @@ pub enum RuntimeHealth {
     Available,
     Missing,
     Unhealthy,
+}
+
+pub(crate) fn configure_project_environment(
+    command: &mut Command,
+    language: RuntimeLanguage,
+    root: &Path,
+) {
+    if language == RuntimeLanguage::Julia {
+        command.env("JULIA_PROJECT", root);
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -59,6 +72,14 @@ pub struct JupyterKernelInventory {
     pub kernels: Vec<JupyterKernelProbe>,
     pub searched_locations: Vec<String>,
     pub message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct KernelIntegrationSetupResult {
+    pub language: RuntimeLanguage,
+    pub kernel_name: Option<String>,
+    pub inventory: JupyterKernelInventory,
 }
 
 #[derive(Debug, Deserialize)]
@@ -484,6 +505,171 @@ pub fn discover_jupyter_kernels_impl() -> JupyterKernelInventory {
     discover_jupyter_kernels_in(&kernel_roots(), &search_paths())
 }
 
+fn setup_failure(language: RuntimeLanguage, stderr: &[u8], stdout: &[u8]) -> HostError {
+    let output = if stderr.is_empty() { stdout } else { stderr };
+    let text = String::from_utf8_lossy(output);
+    let diagnostic = text
+        .chars()
+        .rev()
+        .take(MAX_SETUP_DIAGNOSTIC_CHARS)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect::<String>();
+    HostError::Integration(format!(
+        "Could not set up the {} kernel integration. {}",
+        runtime_name(language),
+        diagnostic.trim()
+    ))
+}
+
+fn run_setup_command(
+    executable: &Path,
+    arguments: &[OsString],
+    root: &Path,
+    language: RuntimeLanguage,
+) -> Result<(), HostError> {
+    let mut command = Command::new(executable);
+    command
+        .args(arguments)
+        .current_dir(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    configure_project_environment(&mut command, language, root);
+    let output = command.output().map_err(|error| {
+        HostError::Integration(format!(
+            "Could not start {} kernel setup: {error}",
+            runtime_name(language)
+        ))
+    })?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(setup_failure(language, &output.stderr, &output.stdout))
+    }
+}
+
+fn setup_kernel_name(language: RuntimeLanguage, executable: &Path, root: &Path) -> String {
+    let mut digest = Sha256::new();
+    digest.update(executable.as_os_str().to_string_lossy().as_bytes());
+    if language == RuntimeLanguage::Julia {
+        digest.update(root.as_os_str().to_string_lossy().as_bytes());
+    }
+    let suffix = digest
+        .finalize()
+        .iter()
+        .take(5)
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!(
+        "draftmatter-{}-{suffix}",
+        runtime_name(language).to_ascii_lowercase()
+    )
+}
+
+pub fn setup_kernel_integration_impl(
+    raw_root: &str,
+    language: RuntimeLanguage,
+) -> Result<KernelIntegrationSetupResult, HostError> {
+    let root = canonical_root(raw_root)?;
+    let executable = resolve_runtime_executable(language).ok_or_else(|| {
+        HostError::NotFound(format!(
+            "{} is not installed or is not visible to DraftMatter. Install the runtime, then detect environments again.",
+            runtime_name(language)
+        ))
+    })?;
+    let kernel_name = setup_kernel_name(language, &executable, &root);
+    let display_name = format!("{} · DraftMatter", runtime_name(language));
+    match language {
+        RuntimeLanguage::Python => {
+            run_setup_command(
+                &executable,
+                &[
+                    OsString::from("-m"),
+                    OsString::from("pip"),
+                    OsString::from("install"),
+                    OsString::from("ipykernel"),
+                ],
+                &root,
+                language,
+            )?;
+            run_setup_command(
+                &executable,
+                &[
+                    OsString::from("-m"),
+                    OsString::from("ipykernel"),
+                    OsString::from("install"),
+                    OsString::from("--user"),
+                    OsString::from("--name"),
+                    OsString::from(&kernel_name),
+                    OsString::from("--display-name"),
+                    OsString::from(&display_name),
+                ],
+                &root,
+                language,
+            )?;
+        }
+        RuntimeLanguage::R => {
+            let expression = format!(
+                "if (!requireNamespace('IRkernel', quietly=TRUE)) install.packages('IRkernel', repos='https://cloud.r-project.org'); IRkernel::installspec(name='{}', displayname='{}', user=TRUE)",
+                kernel_name, display_name
+            );
+            run_setup_command(
+                &executable,
+                &[
+                    OsString::from("--vanilla"),
+                    OsString::from("-e"),
+                    OsString::from(expression),
+                ],
+                &root,
+                language,
+            )?;
+        }
+        RuntimeLanguage::Julia => {
+            let project = root.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
+            let expression = format!(
+                "using Pkg; Pkg.add(\"IJulia\"); using IJulia; IJulia.installkernel(\"{}\"; env=Dict(\"JULIA_PROJECT\" => \"{}\"))",
+                display_name, project
+            );
+            run_setup_command(
+                &executable,
+                &[
+                    OsString::from("--startup-file=no"),
+                    OsString::from("--history-file=no"),
+                    OsString::from(format!("--project={}", root.to_string_lossy())),
+                    OsString::from("-e"),
+                    OsString::from(expression),
+                ],
+                &root,
+                language,
+            )?;
+        }
+    }
+    let inventory = discover_jupyter_kernels_impl();
+    let installed = inventory
+        .kernels
+        .iter()
+        .find(|kernel| {
+            kernel.language == Some(language)
+                && kernel.health == RuntimeHealth::Available
+                && (kernel.name == kernel_name
+                    || kernel.display_name.contains("DraftMatter"))
+        })
+        .map(|kernel| kernel.name.clone());
+    if installed.is_none() {
+        return Err(HostError::Integration(format!(
+            "{} kernel integration was installed, but its kernelspec was not found. Detect environments again; if it remains absent, repair the selected environment.",
+            runtime_name(language)
+        )));
+    }
+    Ok(KernelIntegrationSetupResult {
+        language,
+        kernel_name: installed,
+        inventory,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -516,6 +702,36 @@ mod tests {
         assert!(resolve_runtime(RuntimeLanguage::Julia, &paths)
             .unwrap()
             .ends_with("julia"));
+    }
+
+    #[test]
+    fn draftmatter_kernel_names_are_safe_and_environment_specific() {
+        let executable = Path::new("/opt/research/python");
+        let first = setup_kernel_name(RuntimeLanguage::Python, executable, Path::new("/project-a"));
+        let second = setup_kernel_name(RuntimeLanguage::Python, executable, Path::new("/project-b"));
+        let julia_first = setup_kernel_name(RuntimeLanguage::Julia, Path::new("/opt/julia"), Path::new("/project-a"));
+        let julia_second = setup_kernel_name(RuntimeLanguage::Julia, Path::new("/opt/julia"), Path::new("/project-b"));
+        assert_eq!(first, second);
+        assert_ne!(julia_first, julia_second);
+        assert!(first.chars().all(|character| character.is_ascii_lowercase() || character.is_ascii_digit() || character == '-'));
+    }
+
+    #[test]
+    fn activates_only_julia_in_the_open_project_environment() {
+        let root = Path::new("project-root");
+        let mut julia = Command::new("julia");
+        configure_project_environment(&mut julia, RuntimeLanguage::Julia, root);
+        let julia_project = julia
+            .get_envs()
+            .find(|(name, _)| *name == OsStr::new("JULIA_PROJECT"))
+            .and_then(|(_, value)| value);
+        assert_eq!(julia_project, Some(root.as_os_str()));
+
+        let mut python = Command::new("python");
+        configure_project_environment(&mut python, RuntimeLanguage::Python, root);
+        assert!(!python
+            .get_envs()
+            .any(|(name, _)| name == OsStr::new("JULIA_PROJECT")));
     }
 
     #[test]

@@ -25,7 +25,7 @@ describe('browser execution boundary', () => {
     localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     previousAvailability = desktopHost.available
     desktopHost.available = false
-    vi.spyOn(desktopHost, 'executeDirect')
+    vi.spyOn(desktopHost, 'executeKernel')
     container = document.createElement('div')
     document.body.append(container)
     appRoot = createRoot(container)
@@ -44,9 +44,9 @@ describe('browser execution boundary', () => {
 
   it('shows retained-source context but keeps every process control disabled', () => {
     expect(container.textContent).toContain('Execution controls are disabled in the browser')
-    const controls = container.querySelectorAll<HTMLButtonElement>('.structured-execution-workspace button')
+    const controls = container.querySelectorAll<HTMLButtonElement>('.execution-workspace-details button')
     expect(controls.length).toBeGreaterThan(0)
     expect([...controls].every((button) => button.disabled)).toBe(true)
-    expect(desktopHost.executeDirect).not.toHaveBeenCalled()
+    expect(desktopHost.executeKernel).not.toHaveBeenCalled()
   })
 })

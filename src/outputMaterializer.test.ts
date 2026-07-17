@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import type { NormalizedExecutionResult } from './executionProvider'
+import type { NormalizedExecutionResult } from './kernelExecution'
 import { materializeExecutionOutput } from './outputMaterializer'
 import { PUBLISHED_VALUE_MIME } from './publishedValues'
 
@@ -25,9 +25,9 @@ function result(overrides: Partial<NormalizedExecutionResult> = {}): NormalizedE
     errors: [],
     mime: [],
     artifacts: [{ path: 'figures/generated/growth.svg', bytes: 128, hash: `sha256:${'a'.repeat(64)}`, mediaType: 'image/svg+xml' }],
-    environment: { identity: 'python', provider: 'kernel', language: 'python', fingerprint: 'sha256:environment' },
+    environment: { identity: 'python', language: 'python', fingerprint: 'sha256:environment' },
     hashes: { code: 'sha256:code', inputs: 'sha256:inputs', environment: 'sha256:environment', result: `sha256:${'b'.repeat(64)}` },
-    provenance: { provider: 'kernel', sessionGeneration: 1, executionSequence: 1 },
+    provenance: { sessionGeneration: 1, executionSequence: 1 },
     startedAt: '2026-07-15T12:00:00.000Z',
     finishedAt: '2026-07-15T12:00:00.100Z',
     durationMs: 100,

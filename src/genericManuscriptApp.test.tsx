@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 
 import { act } from 'react'
+import { EditorView as CodeMirrorView } from '@codemirror/view'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -59,16 +60,15 @@ describe('generic portable manuscript app workflow', () => {
     expect(container.querySelector('.structured-manuscript-editor h1')?.textContent).toBe('A real portable paper')
     expect(container.querySelector('.structured-manuscript-editor h2')?.textContent).toBe('Background')
     expect(container.querySelector('.structured-citation')?.textContent).toBe('(real2026)')
-    expect(container.querySelector('.structured-code-editor')).toHaveProperty('value', 'println("before")')
+    expect(container.querySelector('.structured-code-editor .cm-content')?.textContent).toBe('println("before")')
     expect(container.textContent).not.toContain('Keep this opaque block exactly')
     expect(readRecoverySnapshots(localStorage)[0]?.source).toBe(source)
     expect(readRecoverySnapshots(localStorage)[0]?.source).not.toContain('Drought acclimation reshapes canopy development')
 
-    const code = container.querySelector('.structured-code-editor') as HTMLTextAreaElement
-    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    const code = container.querySelector('.structured-code-editor') as HTMLElement
+    const codeView = CodeMirrorView.findFromDOM(code)!
     await act(async () => {
-      setValue?.call(code, 'println("after")')
-      code.dispatchEvent(new Event('input', { bubbles: true }))
+      codeView.dispatch({ changes: { from: 0, to: codeView.state.doc.length, insert: 'println("after")' } })
     })
     await flush(450)
 
@@ -113,7 +113,7 @@ describe('generic portable manuscript app workflow', () => {
     await flush()
 
     expect(container.querySelector('.structured-manuscript-editor h2')?.textContent).toBe('Background')
-    expect(container.querySelector('.structured-code-editor')).toHaveProperty('value', 'println("after")')
+    expect(container.querySelector('.structured-code-editor .cm-content')?.textContent).toBe('println("after")')
   })
 
   it('restores a structured manuscript even when only the authoritative source autosave remains', async () => {
@@ -124,7 +124,7 @@ describe('generic portable manuscript app workflow', () => {
     await flush()
 
     expect(container.querySelector('.structured-manuscript-editor h2')?.textContent).toBe('Background')
-    expect(container.querySelector('.structured-code-editor')).toHaveProperty('value', 'println("before")')
+    expect(container.querySelector('.structured-code-editor .cm-content')?.textContent).toBe('println("before")')
     expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('Keep this opaque block exactly.')
   })
 })

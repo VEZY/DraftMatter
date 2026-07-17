@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import type { RawKernelExecution } from './executionProvider'
+import type { RawKernelExecution } from './kernelExecution'
 import { createDesktopKernelExecutionTransport, type KernelExecutionHost } from './kernelExecutionTransport'
 
 const raw: RawKernelExecution = {
@@ -7,8 +7,10 @@ const raw: RawKernelExecution = {
   messages: [{ kind: 'stream', sequence: 0, name: 'stdout', text: 'ready\n' }],
   artifacts: [],
   environment: { identity: 'python-fixture', details: { mode: 'interactive-kernel' } },
-  providerRunId: 'kernel:fixture',
+  kernelRunId: 'kernel:fixture',
   executionCount: 4,
+  sessionGeneration: 1,
+  executionSequence: 4,
 }
 
 function host(): KernelExecutionHost {

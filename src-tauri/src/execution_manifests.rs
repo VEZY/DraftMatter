@@ -84,10 +84,10 @@ fn validate_manifest(content: &str, expected_cell_id: Option<&str>) -> Result<St
     if object
         .get("schemaVersion")
         .and_then(serde_json::Value::as_u64)
-        != Some(1)
+        != Some(2)
     {
         return Err(HostError::InvalidProject(
-            "Execution manifest schemaVersion must be 1.".to_string(),
+            "Execution manifest schemaVersion must be 2.".to_string(),
         ));
     }
     let cell_id = object
@@ -108,12 +108,9 @@ fn validate_manifest(content: &str, expected_cell_id: Option<&str>) -> Result<St
     ) || !matches!(
         object.get("status").and_then(serde_json::Value::as_str),
         Some("succeeded" | "failed" | "interrupted")
-    ) || !matches!(
-        object.get("provider").and_then(serde_json::Value::as_str),
-        Some("kernel" | "direct")
     ) {
         return Err(HostError::InvalidProject(
-            "Execution manifest language, status, or provider is invalid.".to_string(),
+            "Execution manifest language or status is invalid.".to_string(),
         ));
     }
     for name in [
@@ -157,12 +154,21 @@ fn validate_manifest(content: &str, expected_cell_id: Option<&str>) -> Result<St
         .and_then(serde_json::Value::as_u64)
         .is_none()
         || object
+            .get("sessionGeneration")
+            .and_then(serde_json::Value::as_u64)
+            .is_none_or(|value| value < 1)
+        || object
+            .get("executionSequence")
+            .and_then(serde_json::Value::as_u64)
+            .is_none_or(|value| value < 1)
+        || object
             .get("durationMs")
             .and_then(serde_json::Value::as_u64)
             .is_none()
     {
         return Err(HostError::InvalidProject(
-            "Execution manifest sequence or duration is invalid.".to_string(),
+            "Execution manifest sequence, shared-session provenance, or duration is invalid."
+                .to_string(),
         ));
     }
     Ok(cell_id.to_string())
@@ -271,7 +277,7 @@ mod tests {
         format!(
             "{}\n",
             serde_json::json!({
-                "schemaVersion": 1,
+                "schemaVersion": 2,
                 "cellId": cell_id,
                 "language": "julia",
                 "status": "succeeded",
@@ -280,7 +286,9 @@ mod tests {
                 "environmentFingerprint": hash,
                 "resultHash": hash,
                 "artifacts": [],
-                "provider": "direct",
+                "kernelRunId": "kernel:research:run-1",
+                "sessionGeneration": 1,
+                "executionSequence": 1,
                 "startedAt": "2026-07-15T12:00:00Z",
                 "finishedAt": "2026-07-15T12:00:01Z",
                 "durationMs": 1000,

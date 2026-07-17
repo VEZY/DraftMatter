@@ -1,5 +1,5 @@
 import type { ExecutionLanguage } from './executionCells'
-import type { ExecutionProvider, ExecutionProviderKind, ExecutionRequest, NormalizedExecutionResult } from './executionProvider'
+import type { ExecutionRequest, KernelExecutionManager, NormalizedExecutionResult } from './kernelExecution'
 
 export const EXECUTION_TRUST_ACKNOWLEDGEMENT = 'run-project-code-with-user-permissions'
 
@@ -16,7 +16,7 @@ export interface ExecutionTrustHost {
   revokeProjectTrust(root: string): Promise<ExecutionTrustStatus>
 }
 
-export type ExecutionBlockReason = 'browser-unavailable' | 'project-untrusted' | 'provider-unavailable'
+export type ExecutionBlockReason = 'browser-unavailable' | 'project-untrusted'
 
 export class ExecutionBlockedError extends Error {
   constructor(readonly reason: ExecutionBlockReason, message: string) {
@@ -25,17 +25,11 @@ export class ExecutionBlockedError extends Error {
   }
 }
 
-export interface TrustedExecutionBroker {
-  run(root: string, provider: ExecutionProviderKind, request: ExecutionRequest, signal?: AbortSignal): Promise<NormalizedExecutionResult>
-  restart(root: string, provider: ExecutionProviderKind, language: ExecutionLanguage): Promise<void>
-  interrupt(provider: ExecutionProviderKind, language: ExecutionLanguage): Promise<void>
-  terminate(provider: ExecutionProviderKind, language: ExecutionLanguage): Promise<void>
-}
-
-function providerFor(providers: Partial<Record<ExecutionProviderKind, ExecutionProvider>>, kind: ExecutionProviderKind) {
-  const provider = providers[kind]
-  if (!provider) throw new ExecutionBlockedError('provider-unavailable', `The ${kind} execution provider is unavailable.`)
-  return provider
+export interface TrustedKernelExecution {
+  run(root: string, request: ExecutionRequest, signal?: AbortSignal): Promise<NormalizedExecutionResult>
+  restart(root: string, language: ExecutionLanguage): Promise<void>
+  interrupt(language: ExecutionLanguage): Promise<void>
+  terminate(language: ExecutionLanguage): Promise<void>
 }
 
 async function requireTrust(host: ExecutionTrustHost, root: string) {
@@ -46,20 +40,20 @@ async function requireTrust(host: ExecutionTrustHost, root: string) {
   if (!status.trusted) throw new ExecutionBlockedError('project-untrusted', status.warning)
 }
 
-export function createTrustedExecutionBroker(
+export function createTrustedKernelExecution(
   host: ExecutionTrustHost,
-  providers: Partial<Record<ExecutionProviderKind, ExecutionProvider>>,
-): TrustedExecutionBroker {
+  kernels: KernelExecutionManager,
+): TrustedKernelExecution {
   return {
-    async run(root, kind, request, signal) {
+    async run(root, request, signal) {
       await requireTrust(host, root)
-      return providerFor(providers, kind).execute(request, signal)
+      return kernels.execute(request, signal)
     },
-    async restart(root, kind, language) {
+    async restart(root, language) {
       await requireTrust(host, root)
-      await providerFor(providers, kind).restart(language)
+      await kernels.restart(language)
     },
-    interrupt: (kind, language) => providerFor(providers, kind).interrupt(language),
-    terminate: (kind, language) => providerFor(providers, kind).terminate(language),
+    interrupt: (language) => kernels.interrupt(language),
+    terminate: (language) => kernels.terminate(language),
   }
 }

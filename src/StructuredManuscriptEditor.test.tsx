@@ -3,6 +3,7 @@
 import { act, createRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import { EditorState } from 'prosemirror-state'
+import { EditorView as CodeMirrorView } from '@codemirror/view'
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness'
 import * as Y from 'yjs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
@@ -155,9 +156,9 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector('.structured-table-card')?.id).toBe('tbl-means')
     expect(container.querySelector('.structured-table-caption')?.textContent).toBe('Treatment means.')
     expect(container.querySelector<HTMLTableCellElement>('th:nth-child(2)')?.dataset.alignment).toBe('right')
-    expect(container.querySelector('.structured-code-editor')).toHaveProperty('value', 'print("before")')
-    expect(container.querySelector<HTMLTextAreaElement>('.structured-code-editor')?.hidden).toBe(true)
-    expect(container.querySelector('.structured-code-summary')?.textContent).toBe('Code hidden · 1 line · figure output')
+    expect(container.querySelector('.structured-code-editor .cm-content')?.textContent).toBe('print("before")')
+    expect(container.querySelector<HTMLElement>('.structured-code-editor')?.hidden).toBe(true)
+    expect(container.querySelector('.structured-code-summary')?.textContent).toBe('Source stays outside the manuscript · 1 line')
     expect(container.querySelector<HTMLButtonElement>('.structured-code-toggle')?.getAttribute('aria-expanded')).toBe('false')
     expect(container.querySelector('img')?.getAttribute('src')).toBe('asset://figures/growth.svg')
     expect(container.querySelector('.structured-output pre')?.textContent).toContain('<script>window.__unsafe = true</script>')
@@ -355,13 +356,12 @@ describe('full structured manuscript editor', () => {
 
     await act(async () => { expect(editorRef.current?.setHeading(2)).toBe(true) })
     expect(changed.at(-1)).toContain('## Generic manuscript')
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Show python code for cell-growth"]')?.click())
-    const code = container.querySelector('.structured-code-editor') as HTMLTextAreaElement
+    await act(async () => container.querySelector<HTMLButtonElement>('.structured-code-toggle')?.click())
+    const code = container.querySelector('.structured-code-editor') as HTMLElement
     expect(code.hidden).toBe(false)
-    const setValue = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    const codeView = CodeMirrorView.findFromDOM(code)!
     await act(async () => {
-      setValue?.call(code, 'print("after")')
-      code.dispatchEvent(new Event('input', { bubbles: true }))
+      codeView.dispatch({ changes: { from: 0, to: codeView.state.doc.length, insert: 'print("after")' } })
     })
 
     expect(changed.at(-1)).toContain('print("after")')
@@ -489,6 +489,79 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector('.structured-cell-status')?.textContent).toBe('Running')
     expect(editorRef.current?.source()).toBe(source)
     expect(changed).not.toHaveBeenCalled()
+  })
+
+  it('colors every supported cell language with an editable CodeMirror mode', async () => {
+    const languageSource = `# Languages
+
+\`\`\`python {#cell-python .execute}
+def answer():
+    return 42
+\`\`\`
+
+\`\`\`r {#cell-r .execute}
+answer <- function() 42
+\`\`\`
+
+\`\`\`julia {#cell-julia .execute}
+function answer()
+    return 42
+end
+\`\`\`
+`
+    await act(async () => root.render(<StructuredManuscriptEditor source={languageSource} onChange={vi.fn()} />))
+
+    const cells = [...container.querySelectorAll<HTMLElement>('.structured-code-cell')]
+    expect(cells).toHaveLength(3)
+    expect(cells.map((cell) => cell.dataset.language)).toEqual(['python', 'r', 'julia'])
+    expect(cells.every((cell) => cell.querySelectorAll('.cm-content span').length > 0)).toBe(true)
+  })
+
+  it('runs, interrupts, and formats a Julia cell automatically after editing', async () => {
+    const changed: string[] = []
+    const runCell = vi.fn()
+    const interruptCell = vi.fn()
+    const formatCell = vi.fn().mockResolvedValue('x = 1\n')
+    const juliaSource = '```julia {#cell-format .execute}\nx=1\n```\n'
+    await act(async () => root.render(
+      <StructuredManuscriptEditor
+        source={juliaSource}
+        onChange={(next) => changed.push(next)}
+        codeCellActionsEnabled
+        onRunCodeCell={runCell}
+        onInterruptCodeCell={interruptCell}
+        onFormatCodeCell={formatCell}
+      />,
+    ))
+
+    await act(async () => container.querySelector<HTMLButtonElement>('.structured-code-run')!.click())
+    expect(runCell).toHaveBeenCalledWith('cell-format')
+    expect(container.querySelector('.structured-code-format')).toBeNull()
+    await act(async () => container.querySelector<HTMLButtonElement>('.structured-code-toggle')!.click())
+    const codeView = CodeMirrorView.findFromDOM(container.querySelector<HTMLElement>('.cm-editor')!)!
+    await act(async () => {
+      codeView.dispatch({ changes: { from: codeView.state.doc.length, insert: ' ' } })
+      container.querySelector<HTMLButtonElement>('.structured-code-toggle')!.click()
+      await Promise.resolve()
+    })
+    expect(formatCell).toHaveBeenCalled()
+    expect(formatCell.mock.calls.at(-1)?.[0]).toBe('cell-format')
+    expect(changed.at(-1)).toContain('x = 1')
+
+    await act(async () => root.render(
+      <StructuredManuscriptEditor
+        source={changed.at(-1)!}
+        onChange={(next) => changed.push(next)}
+        codeCellStatuses={{ 'cell-format': 'running' }}
+        codeCellActionsEnabled
+        onRunCodeCell={runCell}
+        onInterruptCodeCell={interruptCell}
+        onFormatCodeCell={formatCell}
+      />,
+    ))
+    expect(container.querySelector('.structured-code-run')?.textContent).toBe('Interrupt')
+    await act(async () => container.querySelector<HTMLButtonElement>('.structured-code-run')!.click())
+    expect(interruptCell).toHaveBeenCalledWith('julia')
   })
 
   it('offers a portable reference action for labeled retained figure output', async () => {
@@ -827,7 +900,7 @@ describe('full structured manuscript editor', () => {
     await act(async () => root.render(<StructuredManuscriptEditor source={`${source}\nRead [the protocol](https://example.test).\n`} onChange={vi.fn()} readOnly />))
 
     expect(container.querySelector('.structured-editor-content')?.getAttribute('contenteditable')).toBe('false')
-    expect(container.querySelector<HTMLTextAreaElement>('.structured-code-editor')?.readOnly).toBe(true)
+    expect(container.querySelector('.structured-code-editor .cm-content')?.getAttribute('contenteditable')).toBe('false')
     expect(container.querySelector<HTMLButtonElement>('.structured-code-toggle')?.disabled).toBe(false)
     expect(container.querySelector<HTMLButtonElement>('.structured-footnote-edit')?.disabled).toBe(true)
     expect([...container.querySelectorAll<HTMLInputElement>('.structured-footnote-label-input')].every((input) => input.readOnly)).toBe(true)

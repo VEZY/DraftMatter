@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, searchCitations } from './bibliography'
-import { desktopHost, normaliseHostFailure, resolveMainDocument, type ProjectExecutionPreferences, type ProjectSnapshot, type ZoteroAttachment } from './desktopHost'
+import { desktopHost, normaliseHostFailure, resolveMainDocument, type JuliaEnvironment, type ProjectExecutionPreferences, type ProjectSnapshot, type ZoteroAttachment } from './desktopHost'
 import { parsePortableDocument, parseReviewMarkup } from './sharedEditor'
 import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
@@ -29,13 +29,12 @@ import {
 import { assignCollisionSafeCitekeys, CITATION_INTAKE_MAX_BYTES, previewCitationIntake, type CitationIntakePreview } from './citationIntake'
 import { CrossrefSearchSession, crossrefCandidateToCitationRecord, crossrefDuplicateCitekeys, type CrossrefCandidate } from './crossref'
 import { DEFAULT_ACQUISITION_BIBLIOGRAPHY, canonicalizeAcquisitionRecord, citationRecordToAcquisitionCsl, ensureBibliographyReference, persistedAcquisitionRecord } from './citationAcquisition'
-import { createDesktopDirectExecutionTransport } from './directExecutionTransport'
 import { createDesktopKernelExecutionTransport } from './kernelExecutionTransport'
-import { extractExecutableCells, type ExecutableCell, type ExecutionLanguage } from './executionCells'
+import { extractExecutableCells, isSetupCell, type ExecutableCell, type ExecutionLanguage } from './executionCells'
 import { ExecutionFreshnessTracker, parseExecutionManifest, serializeExecutionManifest, type CleanRunCertification, type ExecutionCellFreshness, type ExecutionManifest } from './executionFreshness'
-import { createDirectExecutionProvider, createKernelExecutionProvider, executionEnvironmentFingerprint, executionInputsFingerprint, sha256, type ExecutionProviderKind, type NormalizedExecutionResult } from './executionProvider'
+import { createKernelExecutionManager, executionEnvironmentFingerprint, executionInputsFingerprint, sha256, type NormalizedExecutionResult } from './kernelExecution'
 import { cleanExecutePortableDocument } from './cleanExecution'
-import { EXECUTION_TRUST_ACKNOWLEDGEMENT, createTrustedExecutionBroker } from './executionTrust'
+import { EXECUTION_TRUST_ACKNOWLEDGEMENT, createTrustedKernelExecution } from './executionTrust'
 import { ExecutionOutputView } from './ExecutionOutputView'
 import { materializeExecutionOutput } from './outputMaterializer'
 import { buildExecutionAvailability, parseRetainedOutputs } from './retainedOutputs'
@@ -67,6 +66,7 @@ import { countWords, measurePortableManuscript } from './manuscriptMetrics'
 import { ReviewTimestamp } from './ReviewTimestamp'
 import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
 import { workspaceRoleCapabilities, type WorkspaceRole } from './collaboration/workspaceService'
+import { KernelConsole } from './KernelConsole'
 
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
 const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
@@ -106,10 +106,9 @@ function publicationAuthorDraft(author: Partial<PublicationAuthor> = {}, sourceI
   }
 }
 
-const directExecutionProvider = createDirectExecutionProvider(createDesktopDirectExecutionTransport(desktopHost))
 const kernelSelections: Partial<Record<ExecutionLanguage, JupyterKernelProbe>> = {}
-const kernelExecutionProvider = createKernelExecutionProvider(createDesktopKernelExecutionTransport(desktopHost, (language) => kernelSelections[language]))
-const executionBroker = createTrustedExecutionBroker(desktopHost, { direct: directExecutionProvider, kernel: kernelExecutionProvider })
+const kernelExecutionManager = createKernelExecutionManager(createDesktopKernelExecutionTransport(desktopHost, (language) => kernelSelections[language]))
+const kernelExecution = createTrustedKernelExecution(desktopHost, kernelExecutionManager)
 
 function cellStatusLabel(status: DraftState['cellStatus'] | ExecutionCellFreshness['status']) {
   if (status === 'environment-changed') return 'Environment changed'
@@ -135,12 +134,12 @@ function runtimeName(language: RuntimeLanguage) {
   return language === 'r' ? 'R' : language[0].toUpperCase() + language.slice(1)
 }
 
-function executionProvidersFromProject(preferences?: ProjectExecutionPreferences): Record<ExecutionLanguage, ExecutionProviderKind> {
-  return {
-    python: preferences?.python?.provider === 'kernel' ? 'kernel' : 'direct',
-    r: preferences?.r?.provider === 'kernel' ? 'kernel' : 'direct',
-    julia: preferences?.julia?.provider === 'kernel' ? 'kernel' : 'direct',
-  }
+function runtimeInstallationGuidance(language: RuntimeLanguage) {
+  const name = runtimeName(language)
+  const platform = globalThis.navigator?.platform?.toLowerCase() ?? ''
+  if (platform.includes('win')) return `Install ${name} from its official Windows installer, reopen DraftMatter, then choose Detect again.`
+  if (platform.includes('mac')) return `Install ${name} from its official macOS installer or your package manager, reopen DraftMatter, then choose Detect again.`
+  return `Install ${name} with your Linux distribution’s package manager or its official installer, reopen DraftMatter, then choose Detect again.`
 }
 
 function executionKernelNamesFromProject(preferences?: ProjectExecutionPreferences): Partial<Record<ExecutionLanguage, string>> {
@@ -151,13 +150,25 @@ function executionKernelNamesFromProject(preferences?: ProjectExecutionPreferenc
 }
 
 function projectExecutionPreferences(
-  providers: Record<ExecutionLanguage, ExecutionProviderKind>,
   kernels: Partial<Record<ExecutionLanguage, string>>,
+  environments: Partial<Record<ExecutionLanguage, string>> = {},
 ): ProjectExecutionPreferences {
   return {
-    python: { provider: providers.python, ...(kernels.python ? { kernel: kernels.python } : {}) },
-    r: { provider: providers.r, ...(kernels.r ? { kernel: kernels.r } : {}) },
-    julia: { provider: providers.julia, ...(kernels.julia ? { kernel: kernels.julia } : {}) },
+    python: { ...(kernels.python ? { kernel: kernels.python } : {}), ...(environments.python ? { environment: environments.python } : {}) },
+    r: { ...(kernels.r ? { kernel: kernels.r } : {}), ...(environments.r ? { environment: environments.r } : {}) },
+    julia: { ...(kernels.julia ? { kernel: kernels.julia } : {}), ...(environments.julia ? { environment: environments.julia } : {}) },
+  }
+}
+
+function executionEnvironmentDetails(
+  language: ExecutionLanguage,
+  projectRoot?: string,
+  kernel?: string,
+) {
+  return {
+    mode: 'jupyter-kernel',
+    ...(kernel ? { kernel } : {}),
+    ...(language === 'julia' && projectRoot ? { project: projectRoot } : {}),
   }
 }
 
@@ -502,8 +513,8 @@ function App() {
   const [runtimeDiscoveryState, setRuntimeDiscoveryState] = useState<'idle' | 'discovering' | 'ready'>('idle')
   const [environmentOpen, setEnvironmentOpen] = useState(false)
   const [selectedEnvironmentLanguage, setSelectedEnvironmentLanguage] = useState<ExecutionLanguage>('python')
-  const [executionProviders, setExecutionProviders] = useState<Record<ExecutionLanguage, ExecutionProviderKind>>(() => executionProvidersFromProject())
   const [selectedKernelNames, setSelectedKernelNames] = useState<Partial<Record<ExecutionLanguage, string>>>({})
+  const [selectedEnvironmentPaths, setSelectedEnvironmentPaths] = useState<Partial<Record<ExecutionLanguage, string>>>({})
   const [manuscriptSource, setManuscriptSource] = useState(() => {
     const saved = localStorage.getItem(STRUCTURED_SOURCE_KEY)
     if (saved) return upgradeSampleIntroduction(saved)
@@ -523,9 +534,18 @@ function App() {
   const [executionActiveCell, setExecutionActiveCell] = useState<string>()
   const [executionDiagnostics, setExecutionDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [executionProblem, setExecutionProblem] = useState('')
+  const [kernelConsoleOpen, setKernelConsoleOpen] = useState(false)
   const [executionTrustOpen, setExecutionTrustOpen] = useState(false)
   const [executionTrustWarning, setExecutionTrustWarning] = useState('')
   const [executionTrustBusy, setExecutionTrustBusy] = useState(false)
+  const [executionTrustPurpose, setExecutionTrustPurpose] = useState<'run' | 'packages' | 'format' | 'console' | 'kernel-setup'>('run')
+  const [kernelSetupLanguage, setKernelSetupLanguage] = useState<ExecutionLanguage>()
+  const [kernelSetupBusy, setKernelSetupBusy] = useState(false)
+  const [juliaPackagesOpen, setJuliaPackagesOpen] = useState(false)
+  const [juliaEnvironment, setJuliaEnvironment] = useState<JuliaEnvironment>()
+  const [juliaPackageName, setJuliaPackageName] = useState('')
+  const [juliaPackageBusy, setJuliaPackageBusy] = useState(false)
+  const [juliaPackageProblem, setJuliaPackageProblem] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bibliographyInputRef = useRef<HTMLInputElement>(null)
   const structuredEditorRef = useRef<StructuredManuscriptEditorHandle>(null)
@@ -556,11 +576,12 @@ function App() {
   const executionTrackerRef = useRef<ExecutionFreshnessTracker | undefined>(undefined)
   const executionTrackerRootRef = useRef<string | undefined>(undefined)
   const executionSequenceRef = useRef(0)
+  const kernelFreshRef = useRef<Record<ExecutionLanguage, boolean>>({ python: true, r: true, julia: true })
   const executionPlanBusyRef = useRef(false)
   const pendingExecutionCommandRef = useRef<ExecutionCommand | undefined>(undefined)
+  const pendingConsoleRef = useRef<{ language: ExecutionLanguage; code: string; resolve: (result: NormalizedExecutionResult) => void; reject: (error: Error) => void } | undefined>(undefined)
   const executionActiveCellRef = useRef<string | undefined>(undefined)
   const executionActiveLanguageRef = useRef<ExecutionLanguage | undefined>(undefined)
-  const executionActiveProviderRef = useRef<ExecutionProviderKind | undefined>(undefined)
   const crossrefSessionRef = useRef<CrossrefSearchSession | null>(null)
   const activeCollaborationCapabilities = collaborationRole ? workspaceRoleCapabilities(collaborationRole) : null
   const canEditManuscript = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.edit)
@@ -1174,6 +1195,7 @@ function App() {
         setCreateProjectOpen(false)
         setPendingProject(null)
         setEnvironmentOpen(false)
+        if (!juliaPackageBusy) setJuliaPackagesOpen(false)
         setOutlineOptionsOpen(false)
         setPublicationAuthorsOpen(false)
         if (!executionTrustBusy) setExecutionTrustOpen(false)
@@ -1183,7 +1205,7 @@ function App() {
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [canRedo, canUndo, draft, executionTrustBusy])
+  }, [canRedo, canUndo, draft, executionTrustBusy, juliaPackageBusy])
 
   useEffect(() => {
     if (!commandOpen) return
@@ -1253,10 +1275,6 @@ function App() {
   const retainedPublishedValues = Object.values(retainedPublishedValueParse.values)
   const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics, ...executionDiagnostics, ...retainedOutputParse.diagnostics, ...retainedPublishedValueParse.diagnostics]
   const prioritizedDiagnostics = prioritizeProjectDiagnostics(allDiagnostics)
-  const configuredProvider = (cell: ExecutableCell): ExecutionProviderKind => {
-    const explicit = cell.attributes.provider
-    return explicit === 'kernel' || explicit === 'direct' ? explicit : executionProviders[cell.language]
-  }
   const selectedKernelForLanguage = (language: ExecutionLanguage, inventory = runtimeInventory) => {
     const healthy = inventory ? healthyKernelsFor(inventory, language) : []
     const selectedName = selectedKernelNames[language]
@@ -1264,14 +1282,11 @@ function App() {
   }
   const executionEnvironmentAvailable = (cell: ExecutableCell, inventory = runtimeInventory) => {
     if (!inventory) return false
-    return configuredProvider(cell) === 'kernel'
-      ? Boolean(selectedKernelForLanguage(cell.language, inventory))
-      : inventory.executables[cell.language].health === 'available'
+    return Boolean(selectedKernelForLanguage(cell.language, inventory))
   }
   const executionViews = buildExecutionAvailability({
     cells: executableCells,
     states: executionCellStates,
-    providers: configuredProvider,
     inventory: runtimeInventory,
     retainedOutputs,
     cachedResultCells: new Set(Object.keys(executionResults)),
@@ -1280,6 +1295,7 @@ function App() {
   const executionSummaryStatus = executionActiveCell ? 'running' : executionView?.freshness ?? 'never-run'
   const selectedEnvironmentKernels = runtimeInventory ? healthyKernelsFor(runtimeInventory, selectedEnvironmentLanguage) : []
   const selectedEnvironmentKernel = selectedKernelForLanguage(selectedEnvironmentLanguage)
+  const selectedEnvironmentRuntime = runtimeInventory?.executables[selectedEnvironmentLanguage]
   const unavailableSelectedKernelName = selectedKernelNames[selectedEnvironmentLanguage] && !selectedEnvironmentKernel
     ? selectedKernelNames[selectedEnvironmentLanguage]
     : undefined
@@ -1639,8 +1655,14 @@ function App() {
       if (inserted) setToast(`Published value inserted · ${request.name}`)
       return inserted
     }
-    const inserted = runStructuredCommand((editor) => editor.insertCodeCell(request.language, request.output), 'Add reproducible output')
-    if (inserted) setToast(`Reproducible ${request.output === 'values' ? 'values' : request.output} added · source stays hidden`)
+    if (request.kind === 'setup-cell') {
+      const inserted = runStructuredCommand((editor) => editor.insertSetupCell(request.language), 'Add setup cell')
+      if (inserted) setToast(`${runtimeName(request.language)} setup cell added · runs first in a fresh kernel`)
+      return inserted
+    }
+    const output = request.kind === 'figure-cell' ? 'figure' : request.kind === 'table-cell' ? 'table' : 'values'
+    const inserted = runStructuredCommand((editor) => editor.insertCodeCell(request.language, output), `Add reproducible ${output}`)
+    if (inserted) setToast(`Reproducible ${output} added · source stays hidden`)
     return inserted
   }
 
@@ -1658,6 +1680,7 @@ function App() {
       const inventory = await discoverRuntimeInventory(desktopHost)
       if (desktopSessionRef.current) {
         const nextKernelNames: Partial<Record<ExecutionLanguage, string>> = { ...selectedKernelNames }
+        const nextEnvironmentPaths: Partial<Record<ExecutionLanguage, string>> = { ...selectedEnvironmentPaths }
         for (const language of ['python', 'r', 'julia'] as const) {
           const healthy = healthyKernelsFor(inventory, language)
           const requestedName = nextKernelNames[language]
@@ -1667,33 +1690,26 @@ function App() {
           if (selected) {
             if (!requestedName) nextKernelNames[language] = selected.name
             kernelSelections[language] = selected
+            nextEnvironmentPaths[language] = selected.executable ?? selected.resourceDir
           } else {
             delete kernelSelections[language]
             if (!requestedName) delete nextKernelNames[language]
           }
         }
         setSelectedKernelNames(nextKernelNames)
+        setSelectedEnvironmentPaths(nextEnvironmentPaths)
         setRuntimeInventory(inventory)
         setRuntimeDiscoveryState('ready')
         const tracker = executionTrackerRef.current
         if (tracker) {
           for (const language of ['python', 'r', 'julia'] as const) {
-            const runtime = inventory.executables[language]
-            if (executionProviders[language] === 'direct' && runtime.health === 'available' && runtime.executable) {
-              tracker.environmentChanged(language, await executionEnvironmentFingerprint('direct', language, {
-                identity: runtime.executable,
-                version: runtime.version,
-                details: { mode: 'script-artifact' },
+            const selected = kernelSelections[language]
+            const previous = tracker.snapshot().find((state) => state.language === language)?.lastSuccessful
+            if (selected && previous?.environmentIdentity !== selected.name) {
+              tracker.environmentChanged(language, await executionEnvironmentFingerprint(language, {
+                identity: selected.name,
+                details: executionEnvironmentDetails(language, desktopSessionRef.current?.root, selected.name),
               }))
-            } else if (executionProviders[language] === 'kernel') {
-              const selected = kernelSelections[language]
-              const previous = tracker.snapshot().find((state) => state.language === language)?.lastSuccessful
-              if (selected && (previous?.provider !== 'kernel' || previous.environmentIdentity !== selected.name)) {
-                tracker.environmentChanged(language, await executionEnvironmentFingerprint('kernel', language, {
-                  identity: selected.name,
-                  details: { mode: 'interactive-kernel', kernel: selected.name },
-                }))
-              }
             }
           }
           setExecutionCellStates(tracker.snapshot())
@@ -1711,53 +1727,24 @@ function App() {
   }
 
   const persistExecutionPreferences = async (
-    providers: Record<ExecutionLanguage, ExecutionProviderKind>,
     kernels: Partial<Record<ExecutionLanguage, string>>,
   ) => {
     const session = desktopSessionRef.current
     if (!session) return true
     try {
-      await desktopHost.setExecutionPreferences(session.root, projectExecutionPreferences(providers, kernels))
+      await desktopHost.setExecutionPreferences(session.root, projectExecutionPreferences(kernels, Object.fromEntries(
+        (['python', 'r', 'julia'] as const).flatMap((language) => {
+          const selected = kernelSelections[language]
+          const environment = selected?.executable ?? selected?.resourceDir
+          return environment ? [[language, environment]] : []
+        }),
+      )))
       return true
     } catch (error) {
       const message = `The environment is active for this session, but its project preference could not be saved. ${normaliseHostFailure(error).message}`
       setExecutionProblem(message)
       setToast(message)
       return false
-    }
-  }
-
-  const selectExecutionProvider = async (language: ExecutionLanguage, provider: ExecutionProviderKind) => {
-    if (provider === 'kernel' && !selectedKernelForLanguage(language)) {
-      setExecutionProblem(`No healthy ${runtimeName(language)} Jupyter kernel is available.`)
-      return
-    }
-    const previous = executionProviders[language]
-    if (previous === provider) return
-    try {
-      await executionBroker.terminate(previous, language)
-    } catch {
-      // A provider switch remains safe when no previous session exists.
-    }
-    const nextProviders = { ...executionProviders, [language]: provider }
-    setExecutionProviders(nextProviders)
-    const tracker = executionTrackerRef.current
-    if (tracker) {
-      const identity = provider === 'kernel'
-        ? selectedKernelForLanguage(language)?.name
-        : runtimeInventory?.executables[language].executable
-      if (identity) {
-        tracker.environmentChanged(language, await executionEnvironmentFingerprint(provider, language, {
-          identity,
-          version: provider === 'direct' ? runtimeInventory?.executables[language].version : undefined,
-          details: provider === 'kernel' ? { mode: 'interactive-kernel', kernel: identity } : { mode: 'script-artifact' },
-        }))
-        syncExecutionTracker(tracker)
-      }
-    }
-    if (await persistExecutionPreferences(nextProviders, selectedKernelNames)) {
-      setExecutionProblem('')
-      setToast(`${runtimeName(language)} will use ${provider === 'kernel' ? 'an interactive Jupyter kernel' : 'a clean direct process'}`)
     }
   }
 
@@ -1770,40 +1757,96 @@ function App() {
     const previous = kernelSelections[language]
     if (previous?.name !== name) {
       try {
-        await executionBroker.terminate('kernel', language)
+        await kernelExecution.terminate(language)
       } catch {
         // Selecting a kernel is also valid before a session has been started.
       }
     }
     kernelSelections[language] = kernel
+    setSelectedEnvironmentPaths((current) => ({ ...current, [language]: kernel.executable ?? kernel.resourceDir }))
     const nextKernelNames = { ...selectedKernelNames, [language]: name }
     setSelectedKernelNames(nextKernelNames)
     const tracker = executionTrackerRef.current
-    if (tracker && executionProviders[language] === 'kernel') {
-      tracker.environmentChanged(language, await executionEnvironmentFingerprint('kernel', language, {
+    if (tracker) {
+      tracker.environmentChanged(language, await executionEnvironmentFingerprint(language, {
         identity: kernel.name,
-        details: { mode: 'interactive-kernel', kernel: kernel.name },
+        details: executionEnvironmentDetails(language, desktopSessionRef.current?.root, kernel.name),
       }))
       syncExecutionTracker(tracker)
     }
-    if (await persistExecutionPreferences(executionProviders, nextKernelNames)) {
+    if (await persistExecutionPreferences(nextKernelNames)) {
       setExecutionProblem('')
       setToast(`${runtimeName(language)} kernel selected · ${kernel.displayName}`)
     }
   }
 
-  const resetExecutionProviderSessions = async () => {
+  const setupKernelIntegrationTrusted = async (language: ExecutionLanguage) => {
+    const session = desktopSessionRef.current
+    if (!session || kernelSetupBusy) return
+    setKernelSetupBusy(true)
+    setExecutionProblem('')
+    try {
+      const setup = await desktopHost.setupKernelIntegration(session.root, language)
+      const inventory = await discoverRuntimeInventory(desktopHost)
+      if (desktopSessionRef.current?.root !== session.root) return
+      setRuntimeInventory({ ...inventory, jupyter: setup.inventory })
+      setRuntimeDiscoveryState('ready')
+      const selected = setup.kernelName
+        ? setup.inventory.kernels.find((kernel) => kernel.name === setup.kernelName && kernel.health === 'available')
+        : setup.inventory.kernels.find((kernel) => kernel.language === language && kernel.health === 'available')
+      if (!selected) throw new Error(`${runtimeName(language)} integration finished, but its Jupyter kernel could not be verified.`)
+      kernelSelections[language] = selected
+      setSelectedEnvironmentPaths((current) => ({ ...current, [language]: selected.executable ?? selected.resourceDir }))
+      const next = { ...selectedKernelNames, [language]: selected.name }
+      setSelectedKernelNames(next)
+      await persistExecutionPreferences(next)
+      setKernelSetupLanguage(undefined)
+      setToast(`${runtimeName(language)} kernel integration is ready · ${selected.displayName}`)
+    } catch (error) {
+      const message = normaliseHostFailure(error).message
+      setExecutionProblem(message)
+      setToast(`${runtimeName(language)} setup needs attention`)
+    } finally {
+      setKernelSetupBusy(false)
+    }
+  }
+
+  const requestKernelIntegrationSetup = async (language: ExecutionLanguage) => {
+    const session = desktopSessionRef.current
+    const runtime = runtimeInventory?.executables[language]
+    if (!session) return
+    setSelectedEnvironmentLanguage(language)
+    if (runtime?.health !== 'available') {
+      setExecutionProblem(`${runtimeName(language)} itself is missing. Install the runtime for your operating system, then choose Detect again; DraftMatter installs only the kernel integration package.`)
+      return
+    }
+    setKernelSetupLanguage(language)
+    try {
+      const trust = await desktopHost.executionTrustStatus(session.root)
+      if (!trust.trusted) {
+        setExecutionTrustPurpose('kernel-setup')
+        setExecutionTrustWarning(`${trust.warning} Setting up ${runtimeName(language)} will install ${language === 'python' ? 'ipykernel' : language === 'r' ? 'IRkernel' : 'IJulia'} into the detected environment and register a DraftMatter kernelspec.`)
+        setExecutionTrustOpen(true)
+        return
+      }
+      await setupKernelIntegrationTrusted(language)
+    } catch (error) {
+      const message = normaliseHostFailure(error).message
+      setExecutionProblem(message)
+      setToast(message)
+    }
+  }
+
+  const resetKernelSessions = async () => {
     executionAbortRef.current?.abort()
     if (desktopHost.available) {
-      await Promise.allSettled((['python', 'r', 'julia'] as const).flatMap((language) => [
-        executionBroker.terminate('direct', language),
-        executionBroker.terminate('kernel', language),
-      ]))
+      await Promise.allSettled((['python', 'r', 'julia'] as const).map((language) => kernelExecution.terminate(language)))
     }
-    executionActiveProviderRef.current = undefined
     for (const language of ['python', 'r', 'julia'] as const) delete kernelSelections[language]
-    setExecutionProviders({ python: 'direct', r: 'direct', julia: 'direct' })
+    kernelFreshRef.current = { python: true, r: true, julia: true }
     setSelectedKernelNames({})
+    setSelectedEnvironmentPaths({})
+    setKernelConsoleOpen(false)
   }
 
   const persistExecutionManifest = async (root: string, manifest: ExecutionManifest) => {
@@ -1853,11 +1896,9 @@ function App() {
     if (!session) return undefined
 
     const controller = new AbortController()
-    const provider = configuredProvider(cell)
     executionAbortRef.current = controller
     executionActiveCellRef.current = cell.id
     executionActiveLanguageRef.current = cell.language
-    executionActiveProviderRef.current = provider
     setExecutionActiveCell(cell.id)
     tracker.markRunning(cell.id)
     syncExecutionTracker(tracker)
@@ -1865,9 +1906,8 @@ function App() {
     setExecutionProblem('')
     setExecutionDiagnostics((current) => current.filter((diagnostic) => !diagnostic.code.startsWith('execution-run-')))
     try {
-      const result = await executionBroker.run(
+      const result = await kernelExecution.run(
         session.root,
-        provider,
         await executionRequestForCell(cell, session.root),
         controller.signal,
       )
@@ -1931,7 +1971,6 @@ function App() {
       if (executionActiveCellRef.current === cell.id) {
         executionActiveCellRef.current = undefined
         executionActiveLanguageRef.current = undefined
-        executionActiveProviderRef.current = undefined
         setExecutionActiveCell(undefined)
       }
     }
@@ -1947,7 +1986,7 @@ function App() {
       return
     }
     const cells = extractExecutableCells(projection.source).cells
-    const targets = executionTargets(command, cells)
+    let targets = executionTargets(command, cells)
     if (targets.length === 0) {
       setToast(command.kind === 'above' ? 'There are no executable cells above this cell' : 'No matching executable cells were found')
       return
@@ -1967,8 +2006,7 @@ function App() {
         const outcome = await cleanExecutePortableDocument({
           source: projection.source,
           root: session.root,
-          providers: configuredProvider,
-          broker: executionBroker,
+          execution: kernelExecution,
           existingManifests,
           presentation,
           requestFactory: executionRequestForCell,
@@ -1984,7 +2022,6 @@ function App() {
             const active = states.find((state) => state.status === 'running')
             executionActiveCellRef.current = active?.cellId
             executionActiveLanguageRef.current = active?.language
-            executionActiveProviderRef.current = active ? configuredProvider(cells.find((cell) => cell.id === active.cellId)!) : undefined
             setExecutionActiveCell(active?.cellId)
           },
         })
@@ -2040,10 +2077,18 @@ function App() {
         setDiagnostics(parsed.diagnostics)
         setExecutionDiagnostics((current) => current.filter((diagnostic) => !diagnostic.code.startsWith('execution-clean-')))
         setExecutionProblem('')
+        for (const language of ['python', 'r', 'julia'] as const) {
+          if (cells.some((cell) => cell.language === language)) kernelFreshRef.current[language] = false
+        }
         writeRecoverySnapshot(nextDraft, filename, materializedSource)
         setToast(`Clean run certified · ${cells.length} cell${cells.length === 1 ? '' : 's'}`)
         return
       }
+      const requestedLanguages = [...new Set(targets.map((cell) => cell.language))]
+      const setup = requestedLanguages.flatMap((language) => kernelFreshRef.current[language]
+        ? cells.filter((cell) => cell.language === language && isSetupCell(cell))
+        : [])
+      targets = [...setup, ...targets.filter((cell) => !setup.some((setupCell) => setupCell.id === cell.id))]
       let completed = 0
       for (const [index, cell] of targets.entries()) {
         tracker.markQueued(cell.id)
@@ -2051,6 +2096,10 @@ function App() {
         const result = await executeTrustedCell(cell, tracker, executionSequenceRef.current++)
         if (!result || result.status !== 'succeeded') break
         completed += 1
+        if (isSetupCell(cell)) {
+          const remainingSetup = setup.filter((candidate) => candidate.language === cell.language && !targets.slice(0, index + 1).some((done) => done.id === candidate.id))
+          if (remainingSetup.length === 0) kernelFreshRef.current[cell.language] = false
+        }
       }
       if (completed === targets.length && targets.length > 1) {
         setToast(`${targets.length} cells completed in document order`)
@@ -2064,7 +2113,6 @@ function App() {
       setExecutionPlanBusy(false)
       executionActiveCellRef.current = undefined
       executionActiveLanguageRef.current = undefined
-      executionActiveProviderRef.current = undefined
       setExecutionActiveCell(undefined)
     }
   }
@@ -2092,9 +2140,7 @@ function App() {
     const unavailableCells = targets.filter((cell) => !executionEnvironmentAvailable(cell, inventory))
     const unavailable = [...new Set(unavailableCells.map((cell) => cell.language))]
     if (unavailable.length) {
-      const details = unavailableCells.map((cell) => configuredProvider(cell) === 'kernel'
-        ? `No healthy ${runtimeName(cell.language)} Jupyter kernel is selected.`
-        : inventory.executables[cell.language].message).filter(Boolean).join(' ')
+      const details = unavailableCells.map((cell) => `No healthy ${runtimeName(cell.language)} Jupyter kernel is selected.`).join(' ')
       setSelectedEnvironmentLanguage(unavailable[0])
       setEnvironmentOpen(true)
       setExecutionProblem(details || `${unavailable.map(runtimeName).join(', ')} execution environment${unavailable.length === 1 ? ' is' : 's are'} unavailable.`)
@@ -2104,6 +2150,7 @@ function App() {
       const trust = await desktopHost.executionTrustStatus(session.root)
       if (!trust.trusted) {
         pendingExecutionCommandRef.current = command
+        setExecutionTrustPurpose('run')
         setExecutionTrustWarning(trust.warning)
         setExecutionTrustOpen(true)
         return
@@ -2133,6 +2180,150 @@ function App() {
     await requestExecution({ kind: 'cell', cellId: cell.id })
   }
 
+  const loadJuliaPackagesTrusted = async () => {
+    const session = desktopSessionRef.current
+    if (!session || juliaPackageBusy) return
+    setJuliaPackageBusy(true)
+    setJuliaPackageProblem('')
+    try {
+      setJuliaEnvironment(await desktopHost.listJuliaPackages(session.root))
+    } catch (error) {
+      setJuliaPackageProblem(normaliseHostFailure(error).message)
+    } finally {
+      setJuliaPackageBusy(false)
+    }
+  }
+
+  const openJuliaPackages = async () => {
+    const session = desktopSessionRef.current
+    setJuliaPackagesOpen(true)
+    setJuliaPackageProblem('')
+    if (!session) {
+      setJuliaPackageProblem('Julia packages are available after opening a desktop project.')
+      return
+    }
+    try {
+      const trust = await desktopHost.executionTrustStatus(session.root)
+      if (!trust.trusted) {
+        setExecutionTrustPurpose('packages')
+        setExecutionTrustWarning(trust.warning)
+        setExecutionTrustOpen(true)
+        return
+      }
+      await loadJuliaPackagesTrusted()
+    } catch (error) {
+      setJuliaPackageProblem(normaliseHostFailure(error).message)
+    }
+  }
+
+  const invalidateJuliaEnvironment = async () => {
+    const session = desktopSessionRef.current
+    if (!session) return
+    try {
+      await kernelExecution.restart(session.root, 'julia')
+      kernelFreshRef.current.julia = true
+    } catch {
+      // A package change remains valid when no Julia process or kernel exists yet.
+    }
+    const tracker = executionTrackerRef.current
+    if (tracker) {
+      tracker.environmentChanged('julia', await sha256(`julia-project-files:${Date.now()}:${Math.random()}`))
+      syncExecutionTracker(tracker)
+    }
+    setCleanRunCertification(undefined)
+  }
+
+  const mutateJuliaPackage = async (action: 'add' | 'remove', name: string) => {
+    const session = desktopSessionRef.current
+    if (!session || juliaPackageBusy) return
+    setJuliaPackageBusy(true)
+    setJuliaPackageProblem('')
+    try {
+      const environment = action === 'add'
+        ? await desktopHost.addJuliaPackage({ root: session.root, name })
+        : await desktopHost.removeJuliaPackage({ root: session.root, name })
+      setJuliaEnvironment(environment)
+      if (action === 'add') setJuliaPackageName('')
+      await invalidateJuliaEnvironment()
+      setToast(`${name} ${action === 'add' ? 'added to' : 'removed from'} the Julia project environment`)
+    } catch (error) {
+      setJuliaPackageProblem(normaliseHostFailure(error).message)
+    } finally {
+      setJuliaPackageBusy(false)
+    }
+  }
+
+  const formatJuliaCodeCell = async (_cellId: string, code: string) => {
+    const session = desktopSessionRef.current
+    if (!session) {
+      setToast('Julia formatting is available only in an opened desktop project')
+      return undefined
+    }
+    try {
+      const trust = await desktopHost.executionTrustStatus(session.root)
+      if (!trust.trusted) {
+        setExecutionTrustPurpose('format')
+        setExecutionTrustWarning(trust.warning)
+        setExecutionTrustOpen(true)
+        setToast('Trust this project to enable automatic Julia formatting')
+        return undefined
+      }
+      const result = await desktopHost.formatJuliaCode({ root: session.root, code })
+      return result.code
+    } catch (error) {
+      const message = normaliseHostFailure(error).message
+      setExecutionProblem(message)
+      setToast(message)
+      return undefined
+    }
+  }
+
+  const executeConsoleTrusted = async (language: ExecutionLanguage, code: string) => {
+    const session = desktopSessionRef.current
+    if (!session) throw new Error('The shared kernel console is available only in an opened desktop project.')
+    const sequence = ++executionSequenceRef.current
+    return kernelExecution.run(session.root, {
+      cellId: `console-${language}-${sequence}`,
+      language,
+      code,
+      workingDirectory: session.root,
+      attributes: { role: 'console' },
+      inputs: [],
+    })
+  }
+
+  const executeConsole = async (language: ExecutionLanguage, code: string) => {
+    const session = desktopSessionRef.current
+    if (!session) throw new Error('Open a desktop project before using the shared kernel console.')
+    if (!kernelSelections[language]) {
+      await discoverExecutionEnvironments()
+      if (!kernelSelections[language]) {
+        setSelectedEnvironmentLanguage(language)
+        setEnvironmentOpen(true)
+        throw new Error(`No healthy ${runtimeName(language)} Jupyter kernel is selected.`)
+      }
+    }
+    const trust = await desktopHost.executionTrustStatus(session.root)
+    if (trust.trusted) return executeConsoleTrusted(language, code)
+    return new Promise<NormalizedExecutionResult>((resolve, reject) => {
+      pendingConsoleRef.current?.reject(new Error('The previous console command was cancelled.'))
+      pendingConsoleRef.current = { language, code, resolve, reject }
+      setExecutionTrustPurpose('console')
+      setExecutionTrustWarning(trust.warning)
+      setExecutionTrustOpen(true)
+    })
+  }
+
+  const cancelExecutionTrust = () => {
+    if (executionTrustBusy) return
+    if (executionTrustPurpose === 'console') {
+      pendingConsoleRef.current?.reject(new Error('Console execution was cancelled.'))
+      pendingConsoleRef.current = undefined
+    }
+    if (executionTrustPurpose === 'kernel-setup') setKernelSetupLanguage(undefined)
+    setExecutionTrustOpen(false)
+  }
+
   const confirmExecutionTrust = async () => {
     const session = desktopSessionRef.current
     if (!session || executionTrustBusy) return
@@ -2141,6 +2332,31 @@ function App() {
       const trust = await desktopHost.trustProjectForSession(session.root, EXECUTION_TRUST_ACKNOWLEDGEMENT)
       if (!trust.trusted) throw new Error('The project was not trusted for execution.')
       setExecutionTrustOpen(false)
+      if (executionTrustPurpose === 'packages') {
+        await loadJuliaPackagesTrusted()
+        return
+      }
+      if (executionTrustPurpose === 'format') {
+        setToast('Project trusted · Julia cells will format automatically after edits')
+        return
+      }
+      if (executionTrustPurpose === 'kernel-setup') {
+        const language = kernelSetupLanguage
+        if (language) await setupKernelIntegrationTrusted(language)
+        return
+      }
+      if (executionTrustPurpose === 'console') {
+        const pending = pendingConsoleRef.current
+        pendingConsoleRef.current = undefined
+        if (pending) {
+          try {
+            pending.resolve(await executeConsoleTrusted(pending.language, pending.code))
+          } catch (error) {
+            pending.reject(error instanceof Error ? error : new Error(String(error)))
+          }
+        }
+        return
+      }
       const projection = cleanExecutionProjection(manuscriptSourceRef.current)
       if (!projection.ok) throw new Error('Execution needs a clean Final projection. Resolve overlapping review alternatives before running code.')
       const cells = extractExecutableCells(projection.source).cells
@@ -2150,6 +2366,10 @@ function App() {
       if (command) await runExecutionCommandTrusted(command)
     } catch (error) {
       const message = normaliseHostFailure(error).message
+      if (executionTrustPurpose === 'console') {
+        pendingConsoleRef.current?.reject(error instanceof Error ? error : new Error(message))
+        pendingConsoleRef.current = undefined
+      }
       setExecutionProblem(message)
       setToast(message)
     } finally {
@@ -2159,10 +2379,9 @@ function App() {
 
   const interruptExecution = async (requestedLanguage?: ExecutionLanguage) => {
     const language = requestedLanguage ?? executionActiveLanguageRef.current ?? primaryCell?.language ?? 'python'
-    const provider = executionActiveProviderRef.current ?? executionProviders[language]
     executionAbortRef.current?.abort()
     try {
-      await executionBroker.interrupt(provider, language)
+      await kernelExecution.interrupt(language)
     } catch (error) {
       setToast(normaliseHostFailure(error).message)
     }
@@ -2172,7 +2391,6 @@ function App() {
     const session = desktopSessionRef.current
     if (!session) return
     const language = requestedLanguage ?? executionActiveLanguageRef.current ?? primaryCell?.language ?? 'python'
-    const provider = executionActiveProviderRef.current ?? executionProviders[language]
     try {
       const trust = await desktopHost.executionTrustStatus(session.root)
       if (!trust.trusted) {
@@ -2180,8 +2398,11 @@ function App() {
         return
       }
       if (executionActiveLanguageRef.current === language) executionAbortRef.current?.abort()
-      await executionBroker.restart(session.root, provider, language)
-      setToast(`${runtimeName(language)} ${provider === 'kernel' ? 'kernel' : 'execution environment'} restarted`)
+      await kernelExecution.restart(session.root, language)
+      kernelFreshRef.current[language] = true
+      executionTrackerRef.current?.sessionRestarted(language)
+      if (executionTrackerRef.current) syncExecutionTracker(executionTrackerRef.current)
+      setToast(`${runtimeName(language)} kernel restarted`)
     } catch (error) {
       setToast(normaliseHostFailure(error).message)
     }
@@ -2189,12 +2410,14 @@ function App() {
 
   const terminateExecution = async (requestedLanguage?: ExecutionLanguage) => {
     const language = requestedLanguage ?? executionActiveLanguageRef.current ?? primaryCell?.language ?? 'python'
-    const provider = executionActiveProviderRef.current ?? executionProviders[language]
     try {
       if (executionActiveLanguageRef.current === language) executionAbortRef.current?.abort()
-      await executionBroker.terminate(provider, language)
+      await kernelExecution.terminate(language)
+      kernelFreshRef.current[language] = true
+      executionTrackerRef.current?.sessionRestarted(language)
+      if (executionTrackerRef.current) syncExecutionTracker(executionTrackerRef.current)
       updateDraftHistory({ cellStatus: draft.cellStatus === 'running' ? 'interrupted' : draft.cellStatus })
-      setToast(`${runtimeName(language)} ${provider === 'kernel' ? 'kernel' : 'execution process'} terminated`)
+      setToast(`${runtimeName(language)} kernel terminated`)
     } catch (error) {
       setToast(normaliseHostFailure(error).message)
     }
@@ -2501,7 +2724,7 @@ function App() {
     const nextName = file.name.replace(/\.(qmd|md)$/i, '')
     const cacheResult = readCitationCache(localStorage, `browser:${file.name}`)
     const executionTracker = await ExecutionFreshnessTracker.create(parsed.executableCells)
-    await resetExecutionProviderSessions()
+    await resetKernelSessions()
     replaceDesktopSession(null)
     executionAbortRef.current?.abort()
     executionAbortRef.current = null
@@ -2609,9 +2832,12 @@ function App() {
       : { lock: buildCitationLock([]), diagnostics: [] }
     const projectLock = buildCitationLock(projectCitations.filter((record) => record.source !== 'sample'), lockResult.lock)
     const displayName = mainPath.split('/').at(-1) ?? mainPath
-    await resetExecutionProviderSessions()
-    setExecutionProviders(executionProvidersFromProject(project.config.execution))
+    await resetKernelSessions()
     setSelectedKernelNames(executionKernelNamesFromProject(project.config.execution))
+    setSelectedEnvironmentPaths(Object.fromEntries((['python', 'r', 'julia'] as const).flatMap((language) => {
+      const environment = project.config.execution?.[language]?.environment
+      return environment ? [[language, environment]] : []
+    })))
     desktopSaveBlockedRef.current = false
     setSaveProblem('')
     executionAbortRef.current?.abort()
@@ -3293,13 +3519,22 @@ function App() {
       action: () => { setCommandOpen(false); openInsertBlock('published-value') },
     },
     {
-      id: 'code-cell',
-      label: 'Add reproducible output',
-      description: 'Create a hidden computation for a figure, table, or value',
-      keywords: 'execute python r julia source',
+      id: 'setup-cell',
+      label: 'Add setup cell',
+      description: 'Initialize reproducible state in a shared language kernel',
+      keywords: 'setup imports packages data state kernel reproducible',
+      icon: <span className="command-icon">⚙</span>,
+      disabled: !canEditManuscript,
+      action: () => { setCommandOpen(false); openInsertBlock('setup-cell') },
+    },
+    {
+      id: 'figure-cell',
+      label: 'Add reproducible figure',
+      description: 'Create a hidden computation whose figure is published',
+      keywords: 'execute python r julia source figure',
       icon: <span className="command-icon"><Icon name="code" size={17} /></span>,
       disabled: !canEditManuscript,
-      action: () => { setCommandOpen(false); openInsertBlock('code-cell') },
+      action: () => { setCommandOpen(false); openInsertBlock('figure-cell') },
     },
     {
       id: 'run-cell',
@@ -3613,7 +3848,10 @@ function App() {
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('table') }}><Icon name="table" size={15} /><span><strong>Table</strong><small>Editable rows and columns</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('equation-inline') }}><span className="toolbar-symbol">∑</span><span><strong>Equation</strong><small>Inline or display mathematics</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('published-value') }}><span className="toolbar-symbol">123</span><span><strong>Published value</strong><small>Statistic or model result in text</small></span></button>
-                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('code-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible output</strong><small>Hidden computation for a result</small></span></button>
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('setup-cell') }}><span className="toolbar-symbol">⚙</span><span><strong>Setup cell</strong><small>Packages, data, and shared state</small></span></button>
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('figure-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible figure</strong><small>Hidden computation, visible figure</small></span></button>
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('table-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible table</strong><small>Hidden computation, visible table</small></span></button>
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('values-cell') }}><span className="toolbar-symbol">123</span><span><strong>Published values</strong><small>Hidden statistics for manuscript text</small></span></button>
               </div>}
             </div>
             <span className="toolbar-divider" />
@@ -3668,6 +3906,7 @@ function App() {
                     </button>
                   ))}
                   <button className="subtle" onClick={() => void requestExecution({ kind: 'clean-all' })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && executableCells.some((cell) => !executionEnvironmentAvailable(cell)))}><Icon name="history" size={13} /> Clean run</button>
+                  {executableCells.some((cell) => cell.language === 'julia') && <button className="subtle" onClick={() => void openJuliaPackages()} disabled={!desktopSession || juliaPackageBusy}><Icon name="plus" size={12} /> Julia packages</button>}
                   <button className="subtle" onClick={() => void discoverExecutionEnvironments(true)} disabled={!desktopSession} aria-label="Execution environments and options"><Icon name="more" size={14} /> Environments</button>
                 </div>
                 {!desktopSession && <p className="execution-browser-note">Execution controls are disabled in the browser. Open this manuscript as a desktop project to run local code.</p>}
@@ -3729,6 +3968,10 @@ function App() {
               onCopyReference={copyPortableReference}
               citationLabels={structuredCitationLabels}
               codeCellStatuses={Object.fromEntries(executionCellStates.map((state) => [state.cellId, state.status] as const))}
+              codeCellActionsEnabled={Boolean(desktopSession) && !executionPlanBusy}
+              onRunCodeCell={(cellId) => void requestExecution({ kind: 'cell', cellId })}
+              onInterruptCodeCell={(language) => void interruptExecution(language)}
+              onFormatCodeCell={formatJuliaCodeCell}
               markupView={markupView}
               reviewAuthorId={reviewAuthorFilter === 'all' ? undefined : reviewAuthorFilter}
               activeReviewId={activeReviewId}
@@ -4162,12 +4405,12 @@ function App() {
       )}
 
       {executionTrustOpen && (
-        <div className="modal-backdrop execution-dialog-backdrop" onMouseDown={() => { if (!executionTrustBusy) setExecutionTrustOpen(false) }}>
+        <div className="modal-backdrop execution-dialog-backdrop" onMouseDown={cancelExecutionTrust}>
           <div className="execution-trust-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="execution-trust-title">
             <div className="execution-dialog-head">
               <span className="execution-shield"><Icon name="code" size={19} /></span>
-              <div><span className="eyebrow">Local project trust</span><h2 id="execution-trust-title">Run this project’s code?</h2></div>
-              <button className="icon-button" onClick={() => setExecutionTrustOpen(false)} disabled={executionTrustBusy} aria-label="Close execution trust dialog"><Icon name="close" /></button>
+              <div><span className="eyebrow">Local project trust</span><h2 id="execution-trust-title">{executionTrustPurpose === 'packages' ? 'Manage this project’s Julia packages?' : executionTrustPurpose === 'format' ? 'Format this project’s Julia code?' : executionTrustPurpose === 'console' ? 'Run code in the shared kernel console?' : executionTrustPurpose === 'kernel-setup' ? `Set up ${runtimeName(kernelSetupLanguage ?? selectedEnvironmentLanguage)} integration?` : 'Run this project’s code?'}</h2></div>
+              <button className="icon-button" onClick={cancelExecutionTrust} disabled={executionTrustBusy} aria-label="Close execution trust dialog"><Icon name="close" /></button>
             </div>
             <div className="execution-trust-body">
               <p>{executionTrustWarning || 'Project code can read and change files and use the network with your user permissions. Local execution is not a sandbox.'}</p>
@@ -4175,9 +4418,45 @@ function App() {
               <p className="execution-trust-note">Trust lasts only for this DraftMatter session. Opening a project never runs its code.</p>
             </div>
             <div className="execution-dialog-actions">
-              <button onClick={() => setExecutionTrustOpen(false)} disabled={executionTrustBusy}>Cancel</button>
-              <button className="primary-button" onClick={() => void confirmExecutionTrust()} disabled={executionTrustBusy}>{executionTrustBusy ? 'Trusting…' : 'Trust for this session and run'}</button>
+              <button onClick={cancelExecutionTrust} disabled={executionTrustBusy}>Cancel</button>
+              <button className="primary-button" onClick={() => void confirmExecutionTrust()} disabled={executionTrustBusy}>{executionTrustBusy ? 'Trusting…' : executionTrustPurpose === 'run' || executionTrustPurpose === 'console' ? 'Trust for this session and run' : executionTrustPurpose === 'kernel-setup' ? 'Trust and set up integration' : 'Trust for this session'}</button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {juliaPackagesOpen && (
+        <div className="modal-backdrop execution-dialog-backdrop" onMouseDown={() => { if (!juliaPackageBusy) setJuliaPackagesOpen(false) }}>
+          <div className="julia-packages-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="julia-packages-title">
+            <div className="execution-dialog-head">
+              <span className="execution-shield julia"><Icon name="code" size={19} /></span>
+              <div><span className="eyebrow">Project environment</span><h2 id="julia-packages-title">Julia packages</h2><p>Add and remove direct dependencies with Julia’s package manager. The open project is activated automatically for package changes, formatting, and execution.</p></div>
+              <button className="icon-button" onClick={() => setJuliaPackagesOpen(false)} disabled={juliaPackageBusy} aria-label="Close Julia packages"><Icon name="close" /></button>
+            </div>
+            <div className="julia-package-files" aria-label="Julia environment files">
+              <span className={juliaEnvironment?.projectFile ? 'available' : ''}><Icon name={juliaEnvironment?.projectFile ? 'check' : 'document'} size={13} /> Project.toml</span>
+              <span className={juliaEnvironment?.manifestFile ? 'available' : ''}><Icon name={juliaEnvironment?.manifestFile ? 'check' : 'document'} size={13} /> Manifest.toml</span>
+              <small>{juliaEnvironment?.projectFile && juliaEnvironment.manifestFile ? 'Ready in the project root' : 'Created automatically when the first package is added'}</small>
+            </div>
+            <form className="julia-package-add" onSubmit={(event) => { event.preventDefault(); if (juliaPackageName.trim()) void mutateJuliaPackage('add', juliaPackageName.trim()) }}>
+              <label><span>Package name</span><input value={juliaPackageName} onChange={(event) => setJuliaPackageName(event.target.value)} placeholder="DataFrames" spellCheck={false} autoComplete="off" aria-label="Julia package name" /></label>
+              <button className="primary-button" type="submit" disabled={juliaPackageBusy || !/^[A-Za-z][A-Za-z0-9_]*$/.test(juliaPackageName.trim())}>{juliaPackageBusy ? 'Working…' : 'Add package'}</button>
+            </form>
+            {!juliaEnvironment?.packages.some((packageItem) => packageItem.name === 'JuliaFormatter') && (
+              <div className="julia-formatter-callout"><span><strong>Format Julia cells automatically</strong><small>Add JuliaFormatter to format Julia source after edits. ⌘/Ctrl + Shift + F still runs an immediate pass.</small></span><button onClick={() => void mutateJuliaPackage('add', 'JuliaFormatter')} disabled={juliaPackageBusy}>Add JuliaFormatter</button></div>
+            )}
+            {juliaPackageProblem && <div className="execution-environment-help" role="alert">{juliaPackageProblem}</div>}
+            <div className="julia-package-list" aria-label="Direct Julia dependencies">
+              {juliaPackageBusy && !juliaEnvironment && <p>Reading the Julia environment…</p>}
+              {!juliaPackageBusy && juliaEnvironment && juliaEnvironment.packages.length === 0 && <p>No direct dependencies yet. Add a package to create the project environment.</p>}
+              {juliaEnvironment?.packages.map((packageItem) => (
+                <div key={packageItem.name}>
+                  <span><strong>{packageItem.name}</strong><small>{packageItem.version ?? 'version managed by Julia'} · {packageItem.kind}</small></span>
+                  <button onClick={() => void mutateJuliaPackage('remove', packageItem.name)} disabled={juliaPackageBusy} aria-label={`Remove Julia package ${packageItem.name}`}>Remove</button>
+                </div>
+              ))}
+            </div>
+            <div className="execution-dialog-actions"><button onClick={() => void loadJuliaPackagesTrusted()} disabled={juliaPackageBusy || !desktopSession}>Refresh</button><span /><button className="primary-button" onClick={() => setJuliaPackagesOpen(false)} disabled={juliaPackageBusy}>Done</button></div>
           </div>
         </div>
       )}
@@ -4187,7 +4466,7 @@ function App() {
           <div className="execution-environment-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="execution-environment-title">
             <div className="execution-dialog-head">
               <span className="execution-shield"><Icon name="code" size={19} /></span>
-              <div><span className="eyebrow">Execution environments</span><h2 id="execution-environment-title">Local runtimes</h2><p>DraftMatter discovers installed tools only when you ask. It never installs packages automatically.</p></div>
+              <div><span className="eyebrow">Execution environments</span><h2 id="execution-environment-title">Local runtimes</h2><p>DraftMatter discovers installed tools only when you ask and installs a kernel integration only after explicit confirmation.</p></div>
               <button className="icon-button" onClick={() => setEnvironmentOpen(false)} aria-label="Close execution environments"><Icon name="close" /></button>
             </div>
             <div className="execution-environment-list">
@@ -4201,21 +4480,9 @@ function App() {
                 </button>
               })}
             </div>
-            <div className="execution-provider-summary">
+            <div className="execution-environment-summary">
               <label>
-                <strong>Execution provider</strong>
-                <select
-                  aria-label="Execution provider"
-                  value={executionProviders[selectedEnvironmentLanguage]}
-                  onChange={(event) => void selectExecutionProvider(selectedEnvironmentLanguage, event.target.value as ExecutionProviderKind)}
-                >
-                  <option value="direct">Direct process</option>
-                  <option value="kernel" disabled={Boolean(runtimeInventory && selectedEnvironmentKernels.length === 0)}>Jupyter kernel</option>
-                </select>
-                <span>{executionProviders[selectedEnvironmentLanguage] === 'kernel' ? 'Stateful within this project session' : 'Fresh script process for each cell'}</span>
-              </label>
-              <label>
-                <strong>Jupyter environment</strong>
+                <strong>{runtimeName(selectedEnvironmentLanguage)} environment</strong>
                 <select
                   aria-label="Jupyter kernel"
                   value={selectedEnvironmentKernel?.name ?? ''}
@@ -4227,11 +4494,17 @@ function App() {
                     ? <option value="">{runtimeInventory ? 'No healthy kernel found' : 'Not checked'}</option>
                     : selectedEnvironmentKernels.map((kernel) => <option value={kernel.name} key={kernel.name}>{kernel.displayName}</option>)}
                 </select>
-                <span>{runtimeInventory ? `${selectedEnvironmentKernels.length} healthy ${runtimeName(selectedEnvironmentLanguage)} kernel${selectedEnvironmentKernels.length === 1 ? '' : 's'}` : 'Check local environments to choose a kernel'}</span>
+                <span>{selectedEnvironmentKernel
+                  ? `${selectedEnvironmentKernel.displayName} · ${selectedEnvironmentKernel.executable ?? selectedEnvironmentKernel.resourceDir} · shared Jupyter kernel, no notebook server`
+                  : selectedEnvironmentPaths[selectedEnvironmentLanguage]
+                    ? `Saved environment · ${selectedEnvironmentPaths[selectedEnvironmentLanguage]} · integration unavailable`
+                    : runtimeInventory ? `${selectedEnvironmentKernels.length} ready ${runtimeName(selectedEnvironmentLanguage)} environment${selectedEnvironmentKernels.length === 1 ? '' : 's'}` : 'Check local environments to choose one'}</span>
               </label>
             </div>
+            {selectedEnvironmentRuntime?.health === 'missing' && <div className="execution-environment-help" role="status">{runtimeInstallationGuidance(selectedEnvironmentLanguage)}</div>}
             {executionProblem && <div className="execution-environment-help" role="alert">{executionProblem}</div>}
             <div className="execution-dialog-actions environment-actions">
+              {selectedEnvironmentRuntime?.health === 'available' && <button onClick={() => void requestKernelIntegrationSetup(selectedEnvironmentLanguage)} disabled={kernelSetupBusy || runtimeDiscoveryState === 'discovering'}>{kernelSetupBusy && kernelSetupLanguage === selectedEnvironmentLanguage ? 'Setting up…' : selectedEnvironmentKernel ? 'Repair integration' : `Set up ${runtimeName(selectedEnvironmentLanguage)}`}</button>}
               <button onClick={() => void restartExecution(selectedEnvironmentLanguage)} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}>Restart {runtimeName(selectedEnvironmentLanguage)}</button>
               <button onClick={() => void terminateExecution(selectedEnvironmentLanguage)} disabled={!desktopSession}>Terminate {runtimeName(selectedEnvironmentLanguage)}</button>
               <span />
@@ -4569,6 +4842,24 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {kernelConsoleOpen && desktopSession && (
+        <KernelConsole
+          languages={['python', 'r', 'julia']}
+          onExecute={executeConsole}
+          onInterrupt={async (language) => { await interruptExecution(language) }}
+          onRestart={async (language) => { await restartExecution(language) }}
+          onPromoteSetup={(language, code) => {
+            const inserted = runStructuredCommand((editor) => editor.insertSetupCell(language, code), 'Add setup cell')
+            if (inserted) setToast(`${runtimeName(language)} setup cell added from the console`)
+          }}
+          onClose={() => setKernelConsoleOpen(false)}
+        />
+      )}
+
+      {desktopSession && !kernelConsoleOpen && (
+        <button className="kernel-console-toggle" onClick={() => setKernelConsoleOpen(true)} aria-label="Open shared kernel console"><Icon name="code" size={14} /> Console</button>
       )}
 
       {toast && <div className="toast" role="status"><Icon name="check" size={16} /> {toast}</div>}

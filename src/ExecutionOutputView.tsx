@@ -2,7 +2,7 @@ import { createElement, Fragment, type ReactNode } from 'react'
 import type { Root } from 'mdast'
 import remarkParse from 'remark-parse'
 import { unified } from 'unified'
-import type { JsonValue, NormalizedExecutionResult } from './executionProvider'
+import type { JsonValue, NormalizedExecutionResult } from './kernelExecution'
 import { renderExecutionOutputs } from './outputRenderer'
 
 interface MarkdownNode {

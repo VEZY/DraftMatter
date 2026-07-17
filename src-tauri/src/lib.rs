@@ -10,17 +10,16 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
-mod direct_execution;
+mod execution_artifacts;
 mod execution_manifests;
 mod execution_trust;
 mod export_adapter;
 mod git_adapter;
+mod julia_tools;
 mod jupyter_execution;
-use direct_execution::{
-    execute_direct_impl, fingerprint_execution_inputs_impl, inspect_execution_artifacts_impl,
-    interrupt_direct_impl, restart_direct_impl, terminate_direct_impl, DirectExecutionInput,
-    DirectExecutionRequest, DirectExecutionResult, DirectProcessRegistry,
-    ExecutionArtifactFingerprint,
+use execution_artifacts::{
+    fingerprint_execution_inputs_impl, inspect_execution_artifacts_impl,
+    ExecutionArtifactFingerprint, ExecutionInput,
 };
 use execution_manifests::{
     read_execution_manifests_impl, save_execution_manifest_impl, SaveExecutionManifestRequest,
@@ -45,12 +44,18 @@ use git_adapter::{
     GitHistoryEntry, GitInitializeResult, GitRemoteRequest, GitRemoteResult, GitRepositoryStatus,
     GitRestoreCheckpointRequest, GitStageRequest,
 };
+use julia_tools::{
+    add_julia_package_impl, format_julia_code_impl, list_julia_packages_impl,
+    remove_julia_package_impl, JuliaEnvironment, JuliaFormatRequest, JuliaFormatResult,
+    JuliaPackageRequest,
+};
 use jupyter_execution::{
     execute_kernel_impl, interrupt_kernel_impl, restart_kernel_impl, terminate_kernel_impl,
     KernelExecutionRequest, KernelExecutionResult, KernelProcessRegistry,
 };
 use runtime::{
-    discover_jupyter_kernels_impl, probe_runtime_executable_impl, JupyterKernelInventory,
+    discover_jupyter_kernels_impl, probe_runtime_executable_impl,
+    setup_kernel_integration_impl, JupyterKernelInventory, KernelIntegrationSetupResult,
     RuntimeExecutableProbe, RuntimeLanguage,
 };
 
@@ -83,21 +88,13 @@ pub struct ProjectConfig {
     pub execution: ProjectExecutionPreferences,
 }
 
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "lowercase")]
-pub enum ProjectExecutionProvider {
-    #[default]
-    Direct,
-    Kernel,
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ProjectExecutionLanguagePreferences {
-    #[serde(default)]
-    pub provider: ProjectExecutionProvider,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kernel: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub environment: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
@@ -152,6 +149,24 @@ fn validate_execution_preferences(
         {
             return Err(HostError::InvalidProject(
                 "Jupyter kernel names may contain only ASCII letters, numbers, dots, dashes, and underscores."
+                    .to_string(),
+            ));
+        }
+    }
+    for environment in [
+        preferences.python.environment.as_deref(),
+        preferences.r.environment.as_deref(),
+        preferences.julia.environment.as_deref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        if environment.is_empty()
+            || environment.len() > 1024
+            || environment.chars().any(char::is_control)
+        {
+            return Err(HostError::InvalidProject(
+                "Execution environment identifiers must be non-empty text without control characters."
                     .to_string(),
             ));
         }
@@ -2470,6 +2485,19 @@ fn discover_jupyter_kernels() -> JupyterKernelInventory {
 }
 
 #[tauri::command]
+async fn setup_kernel_integration(
+    root: String,
+    language: RuntimeLanguage,
+    trust: tauri::State<'_, ExecutionTrustStore>,
+) -> Result<KernelIntegrationSetupResult, HostError> {
+    let canonical = canonical_root(&root)?;
+    execution_trust::require_execution_trust(&canonical, trust.inner())?;
+    tauri::async_runtime::spawn_blocking(move || setup_kernel_integration_impl(&root, language))
+        .await
+        .map_err(|error| HostError::Integration(format!("The kernel setup task failed: {error}")))?
+}
+
+#[tauri::command]
 fn execution_trust_status(
     root: String,
     state: tauri::State<'_, ExecutionTrustStore>,
@@ -2498,7 +2526,7 @@ fn revoke_project_trust(
 fn fingerprint_execution_inputs(
     root: String,
     paths: Vec<String>,
-) -> Result<Vec<DirectExecutionInput>, HostError> {
+) -> Result<Vec<ExecutionInput>, HostError> {
     fingerprint_execution_inputs_impl(&root, paths)
 }
 
@@ -2508,21 +2536,6 @@ fn inspect_execution_artifacts(
     paths: Vec<String>,
 ) -> Result<Vec<ExecutionArtifactFingerprint>, HostError> {
     inspect_execution_artifacts_impl(&root, paths)
-}
-
-#[tauri::command]
-async fn execute_direct(
-    request: DirectExecutionRequest,
-    trust: tauri::State<'_, ExecutionTrustStore>,
-    processes: tauri::State<'_, DirectProcessRegistry>,
-) -> Result<DirectExecutionResult, HostError> {
-    let trust = trust.inner().clone();
-    let processes = processes.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || execute_direct_impl(request, &trust, &processes))
-        .await
-        .map_err(|error| {
-            HostError::Integration(format!("The direct runner task failed: {error}"))
-        })?
 }
 
 #[tauri::command]
@@ -2538,30 +2551,6 @@ async fn execute_kernel(
         .map_err(|error| {
             HostError::Integration(format!("The Jupyter runner task failed: {error}"))
         })?
-}
-
-#[tauri::command]
-fn interrupt_direct(
-    language: RuntimeLanguage,
-    processes: tauri::State<'_, DirectProcessRegistry>,
-) -> Result<bool, HostError> {
-    interrupt_direct_impl(language, &processes)
-}
-
-#[tauri::command]
-fn restart_direct(
-    language: RuntimeLanguage,
-    processes: tauri::State<'_, DirectProcessRegistry>,
-) -> Result<bool, HostError> {
-    restart_direct_impl(language, &processes)
-}
-
-#[tauri::command]
-fn terminate_direct(
-    language: RuntimeLanguage,
-    processes: tauri::State<'_, DirectProcessRegistry>,
-) -> Result<bool, HostError> {
-    terminate_direct_impl(language, &processes)
 }
 
 #[tauri::command]
@@ -2613,6 +2602,58 @@ fn save_execution_manifest(
     request: SaveExecutionManifestRequest,
 ) -> Result<DocumentSnapshot, HostError> {
     save_execution_manifest_impl(request)
+}
+
+#[tauri::command]
+async fn list_julia_packages(
+    root: String,
+    trust: tauri::State<'_, ExecutionTrustStore>,
+) -> Result<JuliaEnvironment, HostError> {
+    let trust = trust.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || list_julia_packages_impl(&root, &trust))
+        .await
+        .map_err(|error| {
+            HostError::Integration(format!("The Julia package task failed: {error}"))
+        })?
+}
+
+#[tauri::command]
+async fn add_julia_package(
+    request: JuliaPackageRequest,
+    trust: tauri::State<'_, ExecutionTrustStore>,
+) -> Result<JuliaEnvironment, HostError> {
+    let trust = trust.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || add_julia_package_impl(request, &trust))
+        .await
+        .map_err(|error| {
+            HostError::Integration(format!("The Julia package task failed: {error}"))
+        })?
+}
+
+#[tauri::command]
+async fn remove_julia_package(
+    request: JuliaPackageRequest,
+    trust: tauri::State<'_, ExecutionTrustStore>,
+) -> Result<JuliaEnvironment, HostError> {
+    let trust = trust.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || remove_julia_package_impl(request, &trust))
+        .await
+        .map_err(|error| {
+            HostError::Integration(format!("The Julia package task failed: {error}"))
+        })?
+}
+
+#[tauri::command]
+async fn format_julia_code(
+    request: JuliaFormatRequest,
+    trust: tauri::State<'_, ExecutionTrustStore>,
+) -> Result<JuliaFormatResult, HostError> {
+    let trust = trust.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || format_julia_code_impl(request, &trust))
+        .await
+        .map_err(|error| {
+            HostError::Integration(format!("The Julia formatter task failed: {error}"))
+        })?
 }
 
 #[tauri::command]
@@ -2737,7 +2778,6 @@ async fn render_external_export_to_file(
 pub fn run() {
     tauri::Builder::default()
         .manage(ExecutionTrustStore::default())
-        .manage(DirectProcessRegistry::default())
         .manage(KernelProcessRegistry::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
@@ -2766,21 +2806,22 @@ pub fn run() {
             open_citation_link,
             probe_runtime_executable,
             discover_jupyter_kernels,
+            setup_kernel_integration,
             execution_trust_status,
             trust_project_for_session,
             revoke_project_trust,
             fingerprint_execution_inputs,
             inspect_execution_artifacts,
-            execute_direct,
             execute_kernel,
-            interrupt_direct,
-            restart_direct,
-            terminate_direct,
             interrupt_kernel,
             restart_kernel,
             terminate_kernel,
             read_execution_manifests,
             save_execution_manifest,
+            list_julia_packages,
+            add_julia_package,
+            remove_julia_package,
+            format_julia_code,
             git_status,
             git_initialize,
             git_diff,
@@ -3189,12 +3230,12 @@ mod tests {
         create_project(root.to_string_lossy().into_owned(), "Execution".into()).unwrap();
         let preferences = ProjectExecutionPreferences {
             python: ProjectExecutionLanguagePreferences {
-                provider: ProjectExecutionProvider::Kernel,
                 kernel: Some("python-research-3".to_string()),
+                environment: Some(".venv".to_string()),
             },
             r: ProjectExecutionLanguagePreferences {
-                provider: ProjectExecutionProvider::Direct,
                 kernel: Some("ir-4.5".to_string()),
+                environment: None,
             },
             julia: ProjectExecutionLanguagePreferences::default(),
         };
@@ -3215,8 +3256,8 @@ mod tests {
             root.to_str().unwrap(),
             ProjectExecutionPreferences {
                 python: ProjectExecutionLanguagePreferences {
-                    provider: ProjectExecutionProvider::Kernel,
                     kernel: Some("../outside".to_string()),
+                    environment: None,
                 },
                 ..ProjectExecutionPreferences::default()
             },

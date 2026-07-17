@@ -1,6 +1,6 @@
 import type { ExecutableCell } from './executionCells'
-import { extractExecutableCells } from './executionCells'
-import type { JsonValue, MimeOutput, NormalizedExecutionResult } from './executionProvider'
+import { extractExecutableCells, isSetupCell } from './executionCells'
+import type { JsonValue, MimeOutput, NormalizedExecutionResult } from './kernelExecution'
 import { retainedPublishedValueDirectives } from './publishedValues'
 import { sanitizeExecutionHtml } from './outputRenderer'
 import { parseLosslessPortableSource } from './portableSource'
@@ -160,6 +160,7 @@ export function materializeExecutionOutput(request: MaterializeOutputRequest): M
   }
   const cell = cellById(request.source, request.cellId)
   if (!cell) return { ...diagnostic('output-cell-missing', `Executable cell ${request.cellId} was not found in the portable source.`), source: request.source }
+  if (isSetupCell(cell)) return { ok: true, source: request.source, diagnostics: [] }
   const produced = new Set(request.result.artifacts.map((artifact) => artifact.path))
   const missing = declaredArtifacts(cell).filter((path) => !produced.has(path))
   if (missing.length) {

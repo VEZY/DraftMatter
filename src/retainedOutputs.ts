@@ -1,5 +1,4 @@
 import type { ExecutableCell, ExecutionLanguage } from './executionCells'
-import type { ExecutionProviderKind } from './executionProvider'
 import type { ExecutionCellFreshness, ExecutionFreshnessStatus } from './executionFreshness'
 import { parseLosslessPortableSource } from './portableSource'
 import { normalizeProjectRelativePath } from './projectPaths'
@@ -21,7 +20,6 @@ export interface RetainedOutputParseResult {
 export interface ExecutionAvailabilityView {
   cellId: string
   language: ExecutionLanguage
-  provider: ExecutionProviderKind
   runtimeHealth: RuntimeHealth | 'not-checked'
   executionEnabled: boolean
   outputAvailable: boolean
@@ -82,10 +80,8 @@ export function parseRetainedOutputs(source: string): RetainedOutputParseResult 
 function runtimeHealth(
   inventory: RuntimeInventory | undefined,
   language: ExecutionLanguage,
-  provider: ExecutionProviderKind,
 ) {
   if (!inventory) return 'not-checked' as const
-  if (provider === 'direct') return inventory.executables[language].health
   return healthyKernelsFor(inventory, language).length > 0
     ? 'available' as const
     : inventory.jupyter.health === 'unhealthy' ? 'unhealthy' as const : 'missing' as const
@@ -113,7 +109,6 @@ function unavailableMessage(language: ExecutionLanguage, freshness: ExecutionFre
 export function buildExecutionAvailability(options: {
   cells: ExecutableCell[]
   states: ExecutionCellFreshness[]
-  providers: Record<ExecutionLanguage, ExecutionProviderKind> | ((cell: ExecutableCell) => ExecutionProviderKind)
   inventory?: RuntimeInventory
   retainedOutputs?: RetainedOutputBlock[]
   cachedResultCells?: ReadonlySet<string>
@@ -122,8 +117,7 @@ export function buildExecutionAvailability(options: {
   const retainedByCell = new Map((options.retainedOutputs ?? []).map((output) => [output.cellId, output]))
   return options.cells.map<ExecutionAvailabilityView>((cell) => {
     const state = stateByCell.get(cell.id) ?? { cellId: cell.id, language: cell.language, status: 'never-run' as const }
-    const provider = typeof options.providers === 'function' ? options.providers(cell) : options.providers[cell.language]
-    const health = runtimeHealth(options.inventory, cell.language, provider)
+    const health = runtimeHealth(options.inventory, cell.language)
     const retained = retainedByCell.get(cell.id)
     const outputAvailable = state.status !== 'output-missing'
       && (Boolean(retained?.markdown) || Boolean(options.cachedResultCells?.has(cell.id)))
@@ -138,7 +132,6 @@ export function buildExecutionAvailability(options: {
       return {
         cellId: cell.id,
         language: cell.language,
-        provider,
         runtimeHealth: health,
         executionEnabled: true,
         outputAvailable,
@@ -153,7 +146,6 @@ export function buildExecutionAvailability(options: {
     return {
       cellId: cell.id,
       language: cell.language,
-      provider,
       runtimeHealth: health,
       executionEnabled: false,
       outputAvailable,

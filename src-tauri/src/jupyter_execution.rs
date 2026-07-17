@@ -1,12 +1,12 @@
-use crate::direct_execution::{
+use crate::execution_artifacts::{
     collect_artifacts, create_run_directory, declared_artifacts, prepare_artifact_backups,
-    restore_artifacts, valid_cell_id, verify_inputs, DirectExecutionArtifact,
-    DirectExecutionEnvironment, DirectExecutionInput,
+    restore_artifacts, valid_cell_id, verify_inputs, ExecutionArtifact, ExecutionEnvironment,
+    ExecutionInput,
 };
 use crate::execution_trust::{require_execution_trust, ExecutionTrustStore};
 use crate::runtime::{
-    discover_jupyter_kernels_impl, resolve_runtime_executable, JupyterKernelProbe, RuntimeHealth,
-    RuntimeLanguage,
+    configure_project_environment, discover_jupyter_kernels_impl, resolve_runtime_executable,
+    JupyterKernelProbe, RuntimeHealth, RuntimeLanguage,
 };
 use crate::{canonical_root, now_millis, HostError};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -40,7 +40,7 @@ pub struct KernelExecutionRequest {
     #[serde(default)]
     pub attributes: HashMap<String, serde_json::Value>,
     #[serde(default)]
-    pub inputs: Vec<DirectExecutionInput>,
+    pub inputs: Vec<ExecutionInput>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -79,10 +79,12 @@ pub enum KernelExecutionStatus {
 pub struct KernelExecutionResult {
     pub status: KernelExecutionStatus,
     pub messages: Vec<KernelExecutionMessage>,
-    pub artifacts: Vec<DirectExecutionArtifact>,
-    pub environment: DirectExecutionEnvironment,
-    pub provider_run_id: String,
+    pub artifacts: Vec<ExecutionArtifact>,
+    pub environment: ExecutionEnvironment,
+    pub kernel_run_id: String,
     pub execution_count: Option<u64>,
+    pub session_generation: u64,
+    pub execution_sequence: u64,
 }
 
 #[derive(Debug, Deserialize)]
@@ -90,7 +92,7 @@ pub struct KernelExecutionResult {
 struct BridgeReady {
     ok: bool,
     port: Option<u16>,
-    environment: Option<DirectExecutionEnvironment>,
+    environment: Option<ExecutionEnvironment>,
     session_id: Option<String>,
     error: Option<String>,
     #[serde(default)]
@@ -105,8 +107,10 @@ struct BridgeResponse {
     #[serde(default)]
     messages: Vec<KernelExecutionMessage>,
     execution_count: Option<u64>,
-    provider_run_id: Option<String>,
-    environment: Option<DirectExecutionEnvironment>,
+    kernel_run_id: Option<String>,
+    session_generation: Option<u64>,
+    execution_sequence: Option<u64>,
+    environment: Option<ExecutionEnvironment>,
     error: Option<String>,
     #[serde(default)]
     traceback: Vec<String>,
@@ -119,7 +123,7 @@ struct KernelSession {
     secret: String,
     session_id: String,
     child: Mutex<Child>,
-    environment: Mutex<DirectExecutionEnvironment>,
+    environment: Mutex<ExecutionEnvironment>,
     interrupted: AtomicBool,
 }
 
@@ -278,23 +282,30 @@ fn start_session(
 ) -> Result<Arc<KernelSession>, HostError> {
     let controller = resolve_jupyter_controller(kernel)?;
     let secret = Uuid::new_v4().to_string();
-    let mut child = Command::new(&controller)
+    let language = kernel.language.unwrap_or(RuntimeLanguage::Python);
+    let mut command = Command::new(&controller);
+    command
         .arg("-u")
         .arg("-c")
         .arg(BRIDGE_SOURCE)
         .arg(&kernel.name)
         .arg(root)
         .arg(&secret)
+        .arg(if language == RuntimeLanguage::Julia {
+            root.as_os_str()
+        } else {
+            std::ffi::OsStr::new("")
+        })
         .current_dir(root)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| {
-            integration(format!(
-                "Could not start the Jupyter protocol controller: {error}"
-            ))
-        })?;
+        .stderr(Stdio::null());
+    configure_project_environment(&mut command, language, root);
+    let mut child = command.spawn().map_err(|error| {
+        integration(format!(
+            "Could not start the Jupyter protocol controller: {error}"
+        ))
+    })?;
     let stdout = child
         .stdout
         .take()
@@ -543,12 +554,18 @@ pub fn execute_kernel_impl(
         .lock()
         .map_err(|_| registry_error())?
         .clone();
+    let session_generation = response.session_generation.ok_or_else(|| {
+        integration("The Jupyter bridge omitted the shared-session generation.")
+    })?;
+    let execution_sequence = response.execution_sequence.ok_or_else(|| {
+        integration("The Jupyter bridge omitted the session execution sequence.")
+    })?;
     Ok(KernelExecutionResult {
         status,
         messages: response.messages,
         artifacts: produced,
         environment,
-        provider_run_id: response.provider_run_id.unwrap_or_else(|| {
+        kernel_run_id: response.kernel_run_id.unwrap_or_else(|| {
             format!(
                 "kernel:{}:{}:{}",
                 session.session_id,
@@ -557,6 +574,8 @@ pub fn execute_kernel_impl(
             )
         }),
         execution_count: response.execution_count,
+        session_generation,
+        execution_sequence,
     })
 }
 
@@ -660,6 +679,16 @@ mod tests {
     }
 
     #[test]
+    fn bridge_injects_explicit_publish_helpers_for_every_supported_language() {
+        assert!(BRIDGE_SOURCE.contains("def publish(name, value, *, unit=None, digits=None)"));
+        assert!(BRIDGE_SOURCE.contains("publish <- function(name, value, unit = NULL, digits = NULL)"));
+        assert!(BRIDGE_SOURCE.contains("macro publish(variable, options...)"));
+        assert!(BRIDGE_SOURCE.contains("application/vnd.draftmatter.published-value+json"));
+        assert!(!BRIDGE_SOURCE.contains("NotebookApp"));
+        assert!(!BRIDGE_SOURCE.contains("ServerApp"));
+    }
+
+    #[test]
     fn executes_through_an_installed_python_kernel_and_preserves_session_state() {
         let inventory = discover_jupyter_kernels_impl();
         let Some(kernel) = inventory.kernels.iter().find(|kernel| {
@@ -688,6 +717,7 @@ path = Path("figures/kernel-result.txt")
 path.parent.mkdir(parents=True, exist_ok=True)
 path.write_text("kernel artifact", encoding="utf-8")
 print("kernel-ready")
+publish("mean_height", 42, unit="cm", digits=1)
 "#
             .to_string(),
             attributes: HashMap::from([(
@@ -703,6 +733,18 @@ print("kernel-ready")
             matches!(message, KernelExecutionMessage::Stream { text, .. } if text.contains("kernel-ready"))
         }));
         assert_eq!(first_result.artifacts.len(), 1);
+        assert_eq!(first_result.session_generation, 1);
+        assert_eq!(first_result.execution_sequence, 1);
+        assert!(first_result.messages.iter().any(|message| {
+            matches!(message, KernelExecutionMessage::Display { data, .. }
+                if data.get("application/vnd.draftmatter.published-value+json") == Some(&serde_json::json!({
+                    "version": 1,
+                    "name": "mean_height",
+                    "value": 42,
+                    "unit": "cm",
+                    "formatting": {"digits": 1}
+                })))
+        }));
 
         let second_result = execute_kernel_impl(
             KernelExecutionRequest {
@@ -721,6 +763,8 @@ print("kernel-ready")
         assert!(second_result.messages.iter().any(|message| {
             matches!(message, KernelExecutionMessage::Stream { text, .. } if text.trim() == "42")
         }));
+        assert_eq!(second_result.session_generation, 1);
+        assert_eq!(second_result.execution_sequence, 2);
 
         assert!(restart_kernel_impl(RuntimeLanguage::Python, &registry).unwrap());
         let restarted_result = execute_kernel_impl(
@@ -740,6 +784,8 @@ print("kernel-ready")
         assert!(restarted_result.messages.iter().any(|message| {
             matches!(message, KernelExecutionMessage::Stream { text, .. } if text.trim() == "False")
         }));
+        assert_eq!(restarted_result.session_generation, 2);
+        assert_eq!(restarted_result.execution_sequence, 1);
         assert!(terminate_kernel_impl(RuntimeLanguage::Python, &registry).unwrap());
     }
 }

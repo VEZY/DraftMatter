@@ -46,6 +46,6 @@ describe('focused authoring workspace', () => {
     expect(container.querySelectorAll('.format-toolbar > button[aria-label^="Insert "]')).toHaveLength(0)
     await act(async () => container.querySelector<HTMLButtonElement>('.toolbar-insert-button')!.click())
     const labels = [...container.querySelectorAll('.toolbar-insert-menu strong')].map((item) => item.textContent)
-    expect(labels).toEqual(['Figure', 'Table', 'Equation', 'Published value', 'Reproducible output'])
+    expect(labels).toEqual(['Figure', 'Table', 'Equation', 'Published value', 'Setup cell', 'Reproducible figure', 'Reproducible table', 'Published values'])
   })
 })
