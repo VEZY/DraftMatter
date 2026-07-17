@@ -516,7 +516,7 @@ function App() {
   const [draftRevision, setDraftRevision] = useState(0)
   const [projectBusy, setProjectBusy] = useState(false)
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
-  const [newProjectRoot, setNewProjectRoot] = useState('')
+  const [newProjectParent, setNewProjectParent] = useState('')
   const [newProjectName, setNewProjectName] = useState('')
   const [pendingProject, setPendingProject] = useState<{ project: ProjectSnapshot; announce: boolean } | null>(null)
   const [runtimeInventory, setRuntimeInventory] = useState<RuntimeInventory>()
@@ -3030,11 +3030,10 @@ function App() {
     if (!desktopHost.available || projectBusy) return
     setProjectBusy(true)
     try {
-      const root = await desktopHost.pickProjectFolder('Choose an empty folder for the new project')
-      if (!root) return
-      const suggestedName = root.split(/[\\/]/).filter(Boolean).at(-1)?.replaceAll(/[-_]+/g, ' ') ?? 'Untitled research project'
-      setNewProjectRoot(root)
-      setNewProjectName(suggestedName)
+      const parent = await desktopHost.pickProjectFolder('Choose where to create the new project')
+      if (!parent) return
+      setNewProjectParent(parent)
+      setNewProjectName('')
       setProjectMenuOpen(false)
       setCreateProjectOpen(true)
     } catch (error) {
@@ -3046,10 +3045,10 @@ function App() {
 
   const confirmCreateDesktopProject = async () => {
     const name = newProjectName.trim()
-    if (!name || !newProjectRoot || projectBusy) return
+    if (!name || !newProjectParent || projectBusy) return
     setProjectBusy(true)
     try {
-      const project = await desktopHost.createProject(newProjectRoot, name)
+      const project = await desktopHost.createProject(newProjectParent, name)
       await applyDesktopProject(project)
       setCreateProjectOpen(false)
     } catch (error) {
@@ -3717,7 +3716,7 @@ function App() {
                   {desktopHost.available ? (
                     <>
                       <button onClick={() => void openDesktopProject()} disabled={projectBusy}><Icon name="folder" size={16} /><span><strong>{projectBusy ? 'Opening project…' : 'Open project folder…'}</strong><small>Manuscript, figures, tables, and references</small></span></button>
-                      <button onClick={() => void beginCreateDesktopProject()} disabled={projectBusy}><Icon name="plus" size={16} /><span><strong>Create project…</strong><small>Start safely in an empty folder</small></span></button>
+                      <button onClick={() => void beginCreateDesktopProject()} disabled={projectBusy}><Icon name="plus" size={16} /><span><strong>Create project…</strong><small>Create a named folder in a location you choose</small></span></button>
                     </>
                   ) : (
                     <button onClick={() => fileInputRef.current?.click()}><Icon name="document" size={16} /><span><strong>Open manuscript…</strong><small>DraftMatter manuscript, up to 5 MB</small></span></button>
@@ -4676,11 +4675,11 @@ function App() {
           <form className="create-project-dialog" onMouseDown={(event) => event.stopPropagation()} onSubmit={(event) => { event.preventDefault(); void confirmCreateDesktopProject() }} role="dialog" aria-modal="true" aria-labelledby="create-project-title">
             <div className="create-project-head">
               <span className="project-file-icon"><Icon name="folder" size={18} /></span>
-              <div><span className="eyebrow">New local project</span><h2 id="create-project-title">Name this research project</h2><p>DraftMatter will create <strong>paper.qmd</strong> and private recovery metadata in the selected empty folder.</p></div>
+              <div><span className="eyebrow">New local project</span><h2 id="create-project-title">Name this research project</h2><p>DraftMatter will create a new folder based on the project name, then add <strong>paper.qmd</strong> and private recovery metadata inside it.</p></div>
               <button className="icon-button" type="button" onClick={() => setCreateProjectOpen(false)} aria-label="Close create project dialog"><Icon name="close" /></button>
             </div>
-            <label className="create-project-field"><span>Project name</span><input autoFocus value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="My research project" /></label>
-            <div className="create-project-location"><Icon name="folder" size={15} /><span title={newProjectRoot}>{newProjectRoot}</span></div>
+            <label className="create-project-field"><span>Project name</span><input autoFocus maxLength={240} value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="My research project" /></label>
+            <div className="create-project-location"><Icon name="folder" size={15} /><span title={newProjectParent}>New project folder inside: {newProjectParent}</span></div>
             <div className="create-project-actions"><button type="button" onClick={() => setCreateProjectOpen(false)}>Cancel</button><button className="primary-button" type="submit" disabled={!newProjectName.trim() || projectBusy}>{projectBusy ? 'Creating…' : 'Create project'}</button></div>
           </form>
         </div>

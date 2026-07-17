@@ -2276,17 +2276,70 @@ fn open_project(root: String) -> Result<ProjectSnapshot, HostError> {
     open_project_impl(&root)
 }
 
-#[tauri::command]
-fn create_project(root: String, name: String) -> Result<ProjectSnapshot, HostError> {
-    let root_path = PathBuf::from(&root);
-    if root_path.exists() && fs::read_dir(&root_path)?.next().is_some() {
-        return Err(HostError::InvalidProject(format!(
-            "Choose an empty folder for a new DraftMatter project: {}",
-            root_path.display()
-        )));
+fn normalized_project_name(raw: &str) -> Result<String, HostError> {
+    let name = raw.trim();
+    if name.is_empty() {
+        return Err(HostError::InvalidProject(
+            "Enter a name for the new DraftMatter project.".to_string(),
+        ));
     }
-    fs::create_dir_all(&root_path)?;
-    let canonical = canonical_root(&root)?;
+    if name.chars().count() > 240 || name.chars().any(char::is_control) {
+        return Err(HostError::InvalidProject(
+            "Project names must be at most 240 characters and cannot contain control characters."
+                .to_string(),
+        ));
+    }
+    Ok(name.to_string())
+}
+
+fn windows_reserved_folder_name(name: &str) -> bool {
+    let stem = name.split('.').next().unwrap_or_default().to_uppercase();
+    matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CLOCK$")
+        || stem
+            .strip_prefix("COM")
+            .or_else(|| stem.strip_prefix("LPT"))
+            .is_some_and(|suffix| {
+                matches!(
+                    suffix,
+                    "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" | "¹" | "²" | "³"
+                )
+            })
+}
+
+fn portable_project_folder_name(name: &str) -> Result<String, HostError> {
+    const MAX_FOLDER_BYTES: usize = 160;
+    let mut folder = String::new();
+    for character in name.chars() {
+        let replacement = if character.is_control() || "<>:\"/\\|?*".contains(character) {
+            '-'
+        } else {
+            character
+        };
+        if replacement == '-' && folder.ends_with('-') {
+            continue;
+        }
+        if folder.len() + replacement.len_utf8() > MAX_FOLDER_BYTES {
+            break;
+        }
+        folder.push(replacement);
+    }
+    let mut folder = folder
+        .trim_matches(|character| matches!(character, ' ' | '.'))
+        .to_string();
+    if folder.is_empty() || matches!(folder.as_str(), "." | "..") {
+        return Err(HostError::InvalidProject(
+            "The project name cannot be converted to a portable folder name.".to_string(),
+        ));
+    }
+    if windows_reserved_folder_name(&folder) {
+        folder.push_str(" project");
+    }
+    Ok(folder)
+}
+
+fn initialize_project_root(root_path: &Path, raw_name: &str) -> Result<ProjectSnapshot, HostError> {
+    let name = normalized_project_name(raw_name)?;
+    let canonical = fs::canonicalize(root_path)?;
     let main_document = "paper.qmd".to_string();
     let config = ProjectConfig {
         schema_version: PROJECT_SCHEMA,
@@ -2300,13 +2353,50 @@ fn create_project(root: String, name: String) -> Result<ProjectSnapshot, HostErr
     persist_config(&canonical, &config)?;
     let document = canonical.join(&main_document);
     if !document.exists() {
-        let title = config.name.replace('"', "\\\"");
+        let title = config.name.replace('\\', "\\\\").replace('"', "\\\"");
         let source = format!(
             "---\ntitle: \"{title}\"\nformat: html\n---\n\n## Abstract\n\n\n\n## Introduction\n\n\n\n## Methods\n\n\n\n## Results\n\n\n\n## Conclusion\n"
         );
         write_atomic(&document, source.as_bytes(), false)?;
     }
-    open_project_impl(&root)
+    open_project_impl(canonical.to_string_lossy().as_ref())
+}
+
+#[cfg(test)]
+fn create_project_at_root(root_path: &Path, name: &str) -> Result<ProjectSnapshot, HostError> {
+    if root_path.exists() && fs::read_dir(root_path)?.next().is_some() {
+        return Err(HostError::InvalidProject(format!(
+            "Choose an empty folder for a new DraftMatter project: {}",
+            root_path.display()
+        )));
+    }
+    fs::create_dir_all(root_path)?;
+    initialize_project_root(root_path, name)
+}
+
+#[tauri::command]
+fn create_project(parent: String, name: String) -> Result<ProjectSnapshot, HostError> {
+    let parent_path = canonical_root(&parent)?;
+    let normalized_name = normalized_project_name(&name)?;
+    let folder_name = portable_project_folder_name(&normalized_name)?;
+    let root_path = parent_path.join(&folder_name);
+    fs::create_dir(&root_path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            HostError::InvalidProject(format!(
+                "A folder named {folder_name:?} already exists in {}. Choose another project name or location.",
+                parent_path.display()
+            ))
+        } else {
+            HostError::Io(error.to_string())
+        }
+    })?;
+    match initialize_project_root(&root_path, &normalized_name) {
+        Ok(snapshot) => Ok(snapshot),
+        Err(error) => {
+            let _ = fs::remove_dir_all(&root_path);
+            Err(error)
+        }
+    }
 }
 
 #[tauri::command]
@@ -3196,22 +3286,34 @@ mod tests {
     #[test]
     fn creates_and_discovers_a_project_without_running_content() {
         let temporary = tempdir().unwrap();
-        let root = temporary.path().join("canopy-study");
-        let snapshot =
-            create_project(root.to_string_lossy().into_owned(), "Canopy study".into()).unwrap();
+        fs::write(temporary.path().join("another-download.txt"), "keep me").unwrap();
+        let snapshot = create_project(
+            temporary.path().to_string_lossy().into_owned(),
+            "Canopy study".into(),
+        )
+        .unwrap();
+        let root = temporary.path().join("Canopy study");
+        assert_eq!(
+            snapshot.root,
+            fs::canonicalize(&root).unwrap().to_string_lossy()
+        );
         assert_eq!(snapshot.config.main_document, "paper.qmd");
         assert_eq!(snapshot.config.citation_style, "draftmatter-author-date");
         assert_eq!(snapshot.config.citation_locale, "en-US");
         assert_eq!(snapshot.documents.len(), 1);
         assert_eq!(snapshot.documents[0].path, "paper.qmd");
         assert!(root.join(".draftmatter/project.json").is_file());
+        assert_eq!(
+            fs::read_to_string(temporary.path().join("another-download.txt")).unwrap(),
+            "keep me"
+        );
     }
 
     #[test]
     fn persists_valid_citation_preferences_and_rejects_unknown_values() {
         let temporary = tempdir().unwrap();
         let root = temporary.path().join("citation-preferences");
-        create_project(root.to_string_lossy().into_owned(), "Citations".into()).unwrap();
+        create_project_at_root(&root, "Citations").unwrap();
 
         let updated =
             set_citation_preferences_impl(root.to_str().unwrap(), "draftmatter-numeric", "fr-FR")
@@ -3232,7 +3334,7 @@ mod tests {
     fn persists_valid_execution_preferences_and_rejects_unsafe_kernel_names() {
         let temporary = tempdir().unwrap();
         let root = temporary.path().join("execution-preferences");
-        create_project(root.to_string_lossy().into_owned(), "Execution".into()).unwrap();
+        create_project_at_root(&root, "Execution").unwrap();
         let preferences = ProjectExecutionPreferences {
             python: ProjectExecutionLanguagePreferences {
                 kernel: Some("python-research-3".to_string()),
@@ -3278,7 +3380,9 @@ mod tests {
     #[test]
     fn refuses_to_create_a_project_over_existing_files() {
         let temporary = tempdir().unwrap();
-        fs::write(temporary.path().join("notes.txt"), "keep me").unwrap();
+        let existing = temporary.path().join("Unsafe");
+        fs::create_dir(&existing).unwrap();
+        fs::write(existing.join("notes.txt"), "keep me").unwrap();
         let error = create_project(
             temporary.path().to_string_lossy().into_owned(),
             "Unsafe".into(),
@@ -3286,16 +3390,36 @@ mod tests {
         .unwrap_err();
         assert!(matches!(error, HostError::InvalidProject(_)));
         assert_eq!(
-            fs::read_to_string(temporary.path().join("notes.txt")).unwrap(),
+            fs::read_to_string(existing.join("notes.txt")).unwrap(),
             "keep me"
         );
+    }
+
+    #[test]
+    fn derives_a_portable_child_folder_without_changing_the_project_name() {
+        let temporary = tempdir().unwrap();
+        let snapshot = create_project(
+            temporary.path().to_string_lossy().into_owned(),
+            "  Canopy: water / 2026  ".into(),
+        )
+        .unwrap();
+
+        assert_eq!(snapshot.config.name, "Canopy: water / 2026");
+        assert_eq!(
+            Path::new(&snapshot.root)
+                .file_name()
+                .and_then(OsStr::to_str),
+            Some("Canopy- water - 2026")
+        );
+        assert_eq!(portable_project_folder_name("CON").unwrap(), "CON project");
+        assert!(portable_project_folder_name("...").is_err());
     }
 
     #[test]
     fn saves_with_expected_hash_and_preserves_a_recovery() {
         let temporary = tempdir().unwrap();
         let root = temporary.path().join("project");
-        create_project(root.to_string_lossy().into_owned(), "Test".into()).unwrap();
+        create_project_at_root(&root, "Test").unwrap();
         let before = read_document_impl(root.to_str().unwrap(), "paper.qmd").unwrap();
         let result = save_document_impl(SaveDocumentRequest {
             root: root.to_string_lossy().into_owned(),
@@ -3316,7 +3440,7 @@ mod tests {
     fn reads_only_bibliography_text_inside_the_project() {
         let temporary = tempdir().unwrap();
         let root = temporary.path().join("project");
-        create_project(root.to_string_lossy().into_owned(), "Test".into()).unwrap();
+        create_project_at_root(&root, "Test").unwrap();
         fs::write(
             root.join("references.bib"),
             "@article{vezy2024, title={Portable research}}",
@@ -3353,7 +3477,7 @@ mod tests {
     fn persists_only_valid_citation_locks_atomically_and_detects_conflicts() {
         let temporary = tempdir().unwrap();
         let root = temporary.path().join("project");
-        create_project(root.to_string_lossy().into_owned(), "Test".into()).unwrap();
+        create_project_at_root(&root, "Test").unwrap();
         assert_eq!(
             read_citation_lock_impl(root.to_str().unwrap()).unwrap(),
             None
@@ -3400,7 +3524,7 @@ mod tests {
     fn rejects_a_save_after_an_external_change() {
         let temporary = tempdir().unwrap();
         let root = temporary.path().join("project");
-        create_project(root.to_string_lossy().into_owned(), "Test".into()).unwrap();
+        create_project_at_root(&root, "Test").unwrap();
         let before = read_document_impl(root.to_str().unwrap(), "paper.qmd").unwrap();
         fs::write(root.join("paper.qmd"), "external edit").unwrap();
         let error = save_document_impl(SaveDocumentRequest {
@@ -3421,7 +3545,7 @@ mod tests {
     fn reports_external_edits_renames_and_deletions() {
         let temporary = tempdir().unwrap();
         let root = temporary.path().join("project");
-        create_project(root.to_string_lossy().into_owned(), "Test".into()).unwrap();
+        create_project_at_root(&root, "Test").unwrap();
         let before = read_document_impl(root.to_str().unwrap(), "paper.qmd").unwrap();
 
         fs::write(root.join("paper.qmd"), "external edit").unwrap();
@@ -3461,7 +3585,7 @@ mod tests {
     fn interrupted_save_keeps_the_document_and_a_valid_recovery() {
         let temporary = tempdir().unwrap();
         let root = temporary.path().join("project");
-        create_project(root.to_string_lossy().into_owned(), "Test".into()).unwrap();
+        create_project_at_root(&root, "Test").unwrap();
         let before = read_document_impl(root.to_str().unwrap(), "paper.qmd").unwrap();
 
         let error = save_document_impl_with_fault(
@@ -3500,7 +3624,7 @@ mod tests {
     fn disk_recovery_history_is_bounded_and_every_entry_is_valid() {
         let temporary = tempdir().unwrap();
         let root = temporary.path().join("project");
-        create_project(root.to_string_lossy().into_owned(), "Test".into()).unwrap();
+        create_project_at_root(&root, "Test").unwrap();
 
         for revision in 0..12 {
             let before = read_document_impl(root.to_str().unwrap(), "paper.qmd").unwrap();

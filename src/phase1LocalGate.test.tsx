@@ -7,7 +7,8 @@ import App from './App'
 import { desktopHost, type ProjectSnapshot } from './desktopHost'
 import { readRecoverySnapshots } from './storage'
 
-const projectRoot = '/research/phase-1-gate'
+const projectParent = '/research'
+const projectRoot = '/research/Portable research article'
 const originalSource = `---
 title: "Phase 1 article"
 ---
@@ -58,7 +59,7 @@ describe('DM-P1-GATE local project workflow', () => {
     previousAvailability = desktopHost.available
     desktopHost.available = true
 
-    vi.spyOn(desktopHost, 'pickProjectFolder').mockResolvedValue(projectRoot)
+    vi.spyOn(desktopHost, 'pickProjectFolder').mockResolvedValue(projectParent)
     vi.spyOn(desktopHost, 'createProject').mockImplementation(async (_root, name) => ({
       ...project,
       config: { ...project.config, name },
@@ -145,7 +146,8 @@ describe('DM-P1-GATE local project workflow', () => {
     await act(async () => createDialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
     await flush(30)
 
-    expect(desktopHost.createProject).toHaveBeenCalledWith(projectRoot, 'Portable research article')
+    expect(desktopHost.pickProjectFolder).toHaveBeenCalledWith('Choose where to create the new project')
+    expect(desktopHost.createProject).toHaveBeenCalledWith(projectParent, 'Portable research article')
     expect(container.querySelector('.structured-manuscript-editor h1')?.textContent).toBe('Phase 1 article')
     expect(localStorage.getItem('draftmatter.last-project-root.v1')).toBe(projectRoot)
 

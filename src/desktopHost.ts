@@ -441,8 +441,8 @@ export function createDesktopHost(
     openProject(root: string) {
       return invokeBridge<ProjectSnapshot>('open_project', { root })
     },
-    createProject(root: string, name: string) {
-      return invokeBridge<ProjectSnapshot>('create_project', { root, name })
+    createProject(parent: string, name: string) {
+      return invokeBridge<ProjectSnapshot>('create_project', { parent, name })
     },
     readDocument(root: string, path: string) {
       return invokeBridge<DocumentSnapshot>('read_document', { root, path })
