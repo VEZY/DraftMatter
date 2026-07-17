@@ -4,30 +4,46 @@ use crate::execution_artifacts::{
     ExecutionInput,
 };
 use crate::execution_trust::{require_execution_trust, ExecutionTrustStore};
+use crate::jupyter_publishing::publishing_helper;
 use crate::runtime::{
-    configure_project_environment, discover_jupyter_kernels_impl, resolve_runtime_executable,
-    JupyterKernelProbe, RuntimeHealth, RuntimeLanguage,
+    configure_project_environment, discover_jupyter_kernels_impl, JupyterKernelProbe,
+    RuntimeHealth, RuntimeLanguage,
 };
 use crate::{canonical_root, now_millis, HostError};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::collections::HashMap;
-use std::env;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
+use jupyter_protocol::{
+    connection_info::Transport, ClearOutput, ConnectionInfo, ExecuteReply, ExecuteRequest,
+    ExecutionCount, ExecutionState, InterruptRequest, JupyterKernelspec, JupyterMessage,
+    JupyterMessageContent, KernelInfoReply, KernelInfoRequest, Media, ReplyStatus, ShutdownRequest,
+    Stdio,
+};
+use jupyter_zmq_client::{
+    create_client_control_connection, create_client_iopub_connection,
+    create_client_shell_connection_with_identity, peek_ports_with_listeners,
+    peer_identity_for_session, ClientControlConnection, ClientIoPubConnection,
+    ClientShellConnection,
+};
+use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, HashMap};
+use std::ffi::OsStr;
+use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::process::{Child, Command, Stdio as ProcessStdio};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
+use tokio::sync::mpsc as async_mpsc;
 use uuid::Uuid;
 
-const BRIDGE_SOURCE: &str = include_str!("jupyter_bridge.py");
 const MAX_CODE_BYTES: usize = 2 * 1024 * 1024;
-const MAX_BRIDGE_RESPONSE_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_KERNEL_RESPONSE_BYTES: usize = 16 * 1024 * 1024;
 const STARTUP_TIMEOUT: Duration = Duration::from_secs(25);
+const SESSION_START_TIMEOUT: Duration = Duration::from_secs(55);
 const LIFECYCLE_TIMEOUT: Duration = Duration::from_secs(35);
 const EXECUTION_TIMEOUT: Duration = Duration::from_secs(330);
+
+fn is_false(value: &bool) -> bool {
+    !*value
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -56,6 +72,10 @@ pub enum KernelExecutionMessage {
         data: serde_json::Map<String, serde_json::Value>,
         #[serde(default)]
         metadata: serde_json::Map<String, serde_json::Value>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        display_id: Option<String>,
+        #[serde(default, skip_serializing_if = "is_false")]
+        update: bool,
     },
     Error {
         sequence: u64,
@@ -87,44 +107,53 @@ pub struct KernelExecutionResult {
     pub execution_sequence: u64,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BridgeReady {
-    ok: bool,
-    port: Option<u16>,
-    environment: Option<ExecutionEnvironment>,
-    session_id: Option<String>,
-    error: Option<String>,
-    #[serde(default)]
-    traceback: Vec<String>,
+#[derive(Clone)]
+struct KernelLaunchConfig {
+    root: PathBuf,
+    language: RuntimeLanguage,
+    kernel: JupyterKernelProbe,
+    kernelspec: JupyterKernelspec,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct BridgeResponse {
-    ok: bool,
-    status: Option<String>,
-    #[serde(default)]
+struct NativeExecution {
+    status: KernelExecutionStatus,
     messages: Vec<KernelExecutionMessage>,
     execution_count: Option<u64>,
-    kernel_run_id: Option<String>,
-    session_generation: Option<u64>,
-    execution_sequence: Option<u64>,
-    environment: Option<ExecutionEnvironment>,
-    error: Option<String>,
-    #[serde(default)]
-    traceback: Vec<String>,
+    kernel_run_id: String,
+    environment: ExecutionEnvironment,
+    session_generation: u64,
+    execution_sequence: u64,
+    shutdown: bool,
+}
+
+enum KernelCommand {
+    Execute {
+        code: String,
+        response: mpsc::SyncSender<Result<NativeExecution, String>>,
+    },
+    Interrupt {
+        response: mpsc::SyncSender<Result<bool, String>>,
+    },
+    Restart {
+        response: mpsc::SyncSender<Result<ExecutionEnvironment, String>>,
+    },
+    Shutdown {
+        response: mpsc::SyncSender<Result<(), String>>,
+    },
+}
+
+struct KernelReady {
+    environment: ExecutionEnvironment,
+    session_id: String,
 }
 
 struct KernelSession {
     root: PathBuf,
     kernel_name: String,
-    port: u16,
-    secret: String,
     session_id: String,
-    child: Mutex<Child>,
+    sender: async_mpsc::UnboundedSender<KernelCommand>,
+    worker: Mutex<Option<thread::JoinHandle<()>>>,
     environment: Mutex<ExecutionEnvironment>,
-    interrupted: AtomicBool,
 }
 
 #[derive(Default)]
@@ -156,14 +185,8 @@ fn registry_error() -> HostError {
     integration("The Jupyter-kernel registry is unavailable.")
 }
 
-fn bridge_failure(error: Option<String>, traceback: &[String]) -> HostError {
-    let message =
-        error.unwrap_or_else(|| "The Jupyter bridge returned an unspecified error.".to_string());
-    if traceback.is_empty() {
-        integration(message)
-    } else {
-        integration(format!("{message}\n{}", traceback.join("\n")))
-    }
+fn worker_error(error: String) -> HostError {
+    integration(error)
 }
 
 fn validate_kernel(
@@ -188,232 +211,706 @@ fn validate_kernel(
     Ok(kernel.clone())
 }
 
-fn supports_jupyter_client(executable: &Path) -> bool {
-    let Ok(mut child) = Command::new(executable)
-        .args(["-c", "import jupyter_client"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-    else {
-        return false;
-    };
-    let started = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => return status.success(),
-            Ok(None) if started.elapsed() < Duration::from_secs(5) => {
-                thread::sleep(Duration::from_millis(20));
-            }
-            _ => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return false;
-            }
-        }
-    }
-}
-
-fn resolve_jupyter_controller(kernel: &JupyterKernelProbe) -> Result<PathBuf, HostError> {
-    let mut candidates = Vec::new();
-    if let Some(configured) = env::var_os("DRAFTMATTER_JUPYTER_PYTHON") {
-        candidates.push(PathBuf::from(configured));
-    }
-    if kernel.language == Some(RuntimeLanguage::Python) {
-        if let Some(executable) = &kernel.executable {
-            candidates.push(PathBuf::from(executable));
-        }
-    }
-    for candidate in discover_jupyter_kernels_impl()
-        .kernels
-        .into_iter()
-        .filter(|candidate| {
-            candidate.language == Some(RuntimeLanguage::Python)
-                && candidate.health == RuntimeHealth::Available
-        })
-        .filter_map(|candidate| candidate.executable.map(PathBuf::from))
+fn load_kernelspec(kernel: &JupyterKernelProbe) -> Result<JupyterKernelspec, HostError> {
+    let path = Path::new(&kernel.resource_dir).join("kernel.json");
+    let bytes = fs::read(&path).map_err(|error| {
+        integration(format!(
+            "Could not read the selected Jupyter kernelspec {}: {error}",
+            path.display()
+        ))
+    })?;
+    let spec: JupyterKernelspec = serde_json::from_slice(&bytes).map_err(|error| {
+        integration(format!(
+            "Could not parse the selected Jupyter kernelspec {}: {error}",
+            path.display()
+        ))
+    })?;
+    if spec.argv.is_empty()
+        || !spec
+            .argv
+            .iter()
+            .any(|argument| argument == "{connection_file}")
     {
-        if !candidates.contains(&candidate) {
-            candidates.push(candidate);
-        }
+        return Err(integration(
+            "The selected Jupyter kernelspec needs a non-empty argv and a {connection_file} placeholder.",
+        ));
     }
-    if let Some(executable) = resolve_runtime_executable(RuntimeLanguage::Python) {
-        if !candidates.contains(&executable) {
-            candidates.push(executable);
-        }
-    }
-    candidates
-        .into_iter()
-        .find(|candidate| supports_jupyter_client(candidate))
-        .ok_or_else(|| {
-            integration(
-                "Starting an interactive kernel requires a Python environment with jupyter_client. Select a kernel installed from such an environment or configure DRAFTMATTER_JUPYTER_PYTHON.",
-            )
-        })
+    Ok(spec)
 }
 
-fn read_startup_line(stdout: impl Read + Send + 'static) -> Result<String, HostError> {
-    let (sender, receiver) = mpsc::channel();
-    thread::spawn(move || {
-        let mut line = String::new();
-        let result = BufReader::new(stdout)
-            .take(MAX_BRIDGE_RESPONSE_BYTES + 1)
-            .read_line(&mut line)
-            .map(|_| line);
-        let _ = sender.send(result);
-    });
-    match receiver.recv_timeout(STARTUP_TIMEOUT) {
-        Ok(Ok(line)) if line.len() as u64 <= MAX_BRIDGE_RESPONSE_BYTES => Ok(line),
-        Ok(Ok(_)) => Err(integration(
-            "The Jupyter bridge startup response exceeded 16 MB.",
-        )),
-        Ok(Err(error)) => Err(integration(format!(
-            "Could not read the Jupyter bridge startup response: {error}"
-        ))),
-        Err(_) => Err(integration(
-            "The Jupyter bridge did not start within 25 seconds.",
-        )),
+fn runtime_directory(root: &Path) -> Result<PathBuf, String> {
+    let directory = root.join(".draftmatter").join("runtime");
+    fs::create_dir_all(&directory).map_err(|error| {
+        format!("Could not create DraftMatter's kernel runtime directory: {error}")
+    })?;
+    Ok(directory)
+}
+
+fn write_connection_file(path: &Path, connection: &ConnectionInfo) -> Result<(), String> {
+    let bytes = serde_json::to_vec(connection)
+        .map_err(|error| format!("Could not serialize Jupyter connection details: {error}"))?;
+    fs::write(path, bytes)
+        .map_err(|error| format!("Could not write the Jupyter connection file: {error}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+            .map_err(|error| format!("Could not secure the Jupyter connection file: {error}"))?;
     }
+    Ok(())
+}
+
+fn kernel_command(config: &KernelLaunchConfig, connection_path: &Path) -> Result<Command, String> {
+    let executable = config
+        .kernelspec
+        .argv
+        .first()
+        .ok_or_else(|| "The selected Jupyter kernelspec has no executable.".to_string())?;
+    let mut command = Command::new(executable);
+    for argument in &config.kernelspec.argv[1..] {
+        command.arg(if argument == "{connection_file}" {
+            connection_path.as_os_str()
+        } else {
+            OsStr::new(argument)
+        });
+    }
+    if let Some(environment) = &config.kernelspec.env {
+        command.envs(environment);
+    }
+    configure_project_environment(&mut command, config.language, &config.root);
+    command
+        .current_dir(&config.root)
+        .stdin(ProcessStdio::null())
+        .stdout(ProcessStdio::null())
+        .stderr(ProcessStdio::null());
+    Ok(command)
+}
+
+fn cleanup_failed_launch(child: &mut Child, connection_path: &Path) {
+    let _ = child.kill();
+    let _ = child.wait();
+    let _ = fs::remove_file(connection_path);
+}
+
+fn parent_matches(message: &JupyterMessage, parent_id: &str) -> bool {
+    message
+        .parent_header
+        .as_ref()
+        .map(|header| header.msg_id.as_str())
+        == Some(parent_id)
+}
+
+fn media_map(media: &Media) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    serde_json::to_value(media)
+        .map_err(|error| format!("Could not normalize a kernel MIME bundle: {error}"))?
+        .as_object()
+        .cloned()
+        .ok_or_else(|| "The kernel returned a MIME bundle that was not an object.".to_string())
+}
+
+fn execution_count(value: ExecutionCount) -> Option<u64> {
+    u64::try_from(value.value()).ok()
+}
+
+fn push_reply_error(messages: &mut Vec<KernelExecutionMessage>, reply: &ExecuteReply) {
+    let Some(error) = &reply.error else {
+        return;
+    };
+    if messages.iter().any(|message| {
+        matches!(message, KernelExecutionMessage::Error { name, message, .. }
+            if name == &error.ename && message == &error.evalue)
+    }) {
+        return;
+    }
+    messages.push(KernelExecutionMessage::Error {
+        sequence: messages.len() as u64,
+        name: error.ename.clone(),
+        message: error.evalue.clone(),
+        traceback: error.traceback.clone(),
+    });
+}
+
+struct NativeKernel {
+    config: KernelLaunchConfig,
+    child: Child,
+    connection_path: PathBuf,
+    shell: ClientShellConnection,
+    iopub: ClientIoPubConnection,
+    control: ClientControlConnection,
+    environment: ExecutionEnvironment,
+    session_id: String,
+    generation: u64,
+    execution_sequence: u64,
+    stopped: bool,
+}
+
+impl NativeKernel {
+    async fn launch(
+        config: KernelLaunchConfig,
+        generation: u64,
+        commands: &mut async_mpsc::UnboundedReceiver<KernelCommand>,
+    ) -> Result<Self, String> {
+        let ip = std::net::IpAddr::V4(std::net::Ipv4Addr::LOCALHOST);
+        let (ports, listeners) = peek_ports_with_listeners(ip, 5)
+            .await
+            .map_err(|error| format!("Could not reserve ports for the Jupyter kernel: {error}"))?;
+        let session_id = Uuid::new_v4().to_string();
+        let connection = ConnectionInfo {
+            ip: ip.to_string(),
+            transport: Transport::TCP,
+            stdin_port: ports[0],
+            control_port: ports[1],
+            hb_port: ports[2],
+            shell_port: ports[3],
+            iopub_port: ports[4],
+            key: Uuid::new_v4().to_string(),
+            signature_scheme: "hmac-sha256".to_string(),
+            kernel_name: Some(config.kernel.name.clone()),
+        };
+        let connection_path =
+            runtime_directory(&config.root)?.join(format!("kernel-{}.json", Uuid::new_v4()));
+        write_connection_file(&connection_path, &connection)?;
+        let mut command = kernel_command(&config, &connection_path)?;
+        let mut child = match command.spawn() {
+            Ok(child) => child,
+            Err(error) => {
+                let _ = fs::remove_file(&connection_path);
+                return Err(format!(
+                    "Could not start the selected Jupyter kernel: {error}"
+                ));
+            }
+        };
+        drop(listeners);
+
+        let iopub = match create_client_iopub_connection(&connection, "", &session_id).await {
+            Ok(connection) => connection,
+            Err(error) => {
+                cleanup_failed_launch(&mut child, &connection_path);
+                return Err(format!("Could not open the Jupyter IOPub channel: {error}"));
+            }
+        };
+        let identity = match peer_identity_for_session(&session_id) {
+            Ok(identity) => identity,
+            Err(error) => {
+                cleanup_failed_launch(&mut child, &connection_path);
+                return Err(format!(
+                    "Could not create the Jupyter client identity: {error}"
+                ));
+            }
+        };
+        let shell =
+            match create_client_shell_connection_with_identity(&connection, &session_id, identity)
+                .await
+            {
+                Ok(connection) => connection,
+                Err(error) => {
+                    cleanup_failed_launch(&mut child, &connection_path);
+                    return Err(format!("Could not open the Jupyter shell channel: {error}"));
+                }
+            };
+        let control = match create_client_control_connection(&connection, &session_id).await {
+            Ok(connection) => connection,
+            Err(error) => {
+                cleanup_failed_launch(&mut child, &connection_path);
+                return Err(format!(
+                    "Could not open the Jupyter control channel: {error}"
+                ));
+            }
+        };
+
+        let mut kernel = Self {
+            config,
+            child,
+            connection_path,
+            shell,
+            iopub,
+            control,
+            environment: ExecutionEnvironment {
+                identity: String::new(),
+                version: None,
+                details: BTreeMap::new(),
+            },
+            session_id,
+            generation,
+            execution_sequence: 0,
+            stopped: false,
+        };
+        let info = kernel.kernel_info().await?;
+        kernel.environment = kernel.environment_from_info(&info);
+        let helper = publishing_helper(kernel.config.language).to_string();
+        let helper_result = kernel
+            .execute_protocol(helper, false, commands, false, STARTUP_TIMEOUT)
+            .await?;
+        if helper_result.status != KernelExecutionStatus::Ok {
+            let message = helper_result
+                .messages
+                .iter()
+                .find_map(|message| match message {
+                    KernelExecutionMessage::Error { message, .. } => Some(message.clone()),
+                    _ => None,
+                })
+                .unwrap_or_else(|| "the kernel rejected the helper definition".to_string());
+            kernel.stop_now().await;
+            return Err(format!(
+                "Could not inject DraftMatter's publishing helper into the selected kernel: {message}"
+            ));
+        }
+        Ok(kernel)
+    }
+
+    fn environment_from_info(&self, info: &KernelInfoReply) -> ExecutionEnvironment {
+        let mut details = BTreeMap::from([
+            ("mode".to_string(), "interactive-kernel".to_string()),
+            ("kernel".to_string(), self.config.kernel.name.clone()),
+            (
+                "implementation".to_string(),
+                if info.implementation.is_empty() {
+                    "jupyter".to_string()
+                } else {
+                    info.implementation.clone()
+                },
+            ),
+            ("language".to_string(), info.language_info.name.clone()),
+            ("client".to_string(), "bundled-native-zmq".to_string()),
+        ]);
+        if self.config.language == RuntimeLanguage::Julia {
+            details.insert(
+                "project".to_string(),
+                self.config.root.to_string_lossy().into_owned(),
+            );
+        }
+        ExecutionEnvironment {
+            identity: self.config.kernel.name.clone(),
+            version: (!info.language_info.version.is_empty())
+                .then(|| info.language_info.version.clone()),
+            details,
+        }
+    }
+
+    async fn kernel_info(&mut self) -> Result<KernelInfoReply, String> {
+        let request: JupyterMessage = KernelInfoRequest::default().into();
+        let request_id = request.header.msg_id.clone();
+        self.shell
+            .send(request)
+            .await
+            .map_err(|error| format!("Could not request Jupyter kernel information: {error}"))?;
+        tokio::time::timeout(STARTUP_TIMEOUT, async {
+            loop {
+                let message = self.shell.read().await.map_err(|error| {
+                    format!("Could not read Jupyter kernel information: {error}")
+                })?;
+                if !parent_matches(&message, &request_id) {
+                    continue;
+                }
+                if let JupyterMessageContent::KernelInfoReply(reply) = message.content {
+                    if reply.status == ReplyStatus::Error {
+                        let message = reply
+                            .error
+                            .as_ref()
+                            .map(|error| error.evalue.clone())
+                            .unwrap_or_else(|| {
+                                "the kernel rejected kernel_info_request".to_string()
+                            });
+                        return Err(format!(
+                            "The Jupyter kernel did not become ready: {message}"
+                        ));
+                    }
+                    return Ok(*reply);
+                }
+            }
+        })
+        .await
+        .map_err(|_| "The Jupyter kernel did not become ready within 25 seconds.".to_string())?
+    }
+
+    async fn execute_protocol(
+        &mut self,
+        code: String,
+        store_history: bool,
+        commands: &mut async_mpsc::UnboundedReceiver<KernelCommand>,
+        count_sequence: bool,
+        timeout: Duration,
+    ) -> Result<NativeExecution, String> {
+        if count_sequence {
+            self.execution_sequence += 1;
+        }
+        let request: JupyterMessage = ExecuteRequest {
+            code,
+            silent: false,
+            store_history,
+            user_expressions: None,
+            allow_stdin: false,
+            stop_on_error: false,
+        }
+        .into();
+        let request_id = request.header.msg_id.clone();
+        self.shell
+            .send(request)
+            .await
+            .map_err(|error| format!("Could not send code to the Jupyter kernel: {error}"))?;
+
+        let mut messages = Vec::new();
+        let mut sequence = 0_u64;
+        let mut count = None;
+        let mut shell_status = None;
+        let mut shell_complete = false;
+        let mut idle = false;
+        let mut clear_on_next = false;
+        let mut interrupted = false;
+        let mut shutdown = false;
+
+        let execution = tokio::time::timeout(timeout, async {
+            while !shell_complete || !idle {
+                tokio::select! {
+                    iopub = self.iopub.read(), if !idle => {
+                        let message = iopub.map_err(|error| format!("Could not read Jupyter kernel output: {error}"))?;
+                        if !parent_matches(&message, &request_id) {
+                            continue;
+                        }
+                        match message.content {
+                            JupyterMessageContent::Status(status) if status.execution_state == ExecutionState::Idle => idle = true,
+                            JupyterMessageContent::ClearOutput(ClearOutput { wait }) => {
+                                if wait { clear_on_next = true; } else { messages.clear(); }
+                            }
+                            JupyterMessageContent::StreamContent(stream) => {
+                                if clear_on_next { messages.clear(); clear_on_next = false; }
+                                messages.push(KernelExecutionMessage::Stream {
+                                    sequence,
+                                    name: match stream.name { Stdio::Stderr => "stderr", Stdio::Stdout => "stdout" }.to_string(),
+                                    text: stream.text,
+                                });
+                                sequence += 1;
+                            }
+                            JupyterMessageContent::DisplayData(display) => {
+                                if clear_on_next { messages.clear(); clear_on_next = false; }
+                                messages.push(KernelExecutionMessage::Display {
+                                    sequence,
+                                    data: media_map(&display.data)?,
+                                    metadata: display.metadata,
+                                    display_id: display.transient.and_then(|value| value.display_id),
+                                    update: false,
+                                });
+                                sequence += 1;
+                            }
+                            JupyterMessageContent::UpdateDisplayData(display) => {
+                                if clear_on_next { messages.clear(); clear_on_next = false; }
+                                messages.push(KernelExecutionMessage::Display {
+                                    sequence,
+                                    data: media_map(&display.data)?,
+                                    metadata: display.metadata,
+                                    display_id: display.transient.display_id,
+                                    update: true,
+                                });
+                                sequence += 1;
+                            }
+                            JupyterMessageContent::ExecuteResult(result) => {
+                                if clear_on_next { messages.clear(); clear_on_next = false; }
+                                count = execution_count(result.execution_count);
+                                messages.push(KernelExecutionMessage::Display {
+                                    sequence,
+                                    data: media_map(&result.data)?,
+                                    metadata: result.metadata,
+                                    display_id: result.transient.and_then(|value| value.display_id),
+                                    update: false,
+                                });
+                                sequence += 1;
+                            }
+                            JupyterMessageContent::ExecuteInput(input) => {
+                                count = execution_count(input.execution_count);
+                            }
+                            JupyterMessageContent::ErrorOutput(error) => {
+                                if clear_on_next { messages.clear(); clear_on_next = false; }
+                                messages.push(KernelExecutionMessage::Error {
+                                    sequence,
+                                    name: error.ename,
+                                    message: error.evalue,
+                                    traceback: error.traceback,
+                                });
+                                sequence += 1;
+                            }
+                            _ => {}
+                        }
+                    }
+                    shell = self.shell.read(), if !shell_complete => {
+                        let message = shell.map_err(|error| format!("Could not read the Jupyter execution reply: {error}"))?;
+                        if !parent_matches(&message, &request_id) {
+                            continue;
+                        }
+                        if let JupyterMessageContent::ExecuteReply(reply) = message.content {
+                            count = execution_count(reply.execution_count).or(count);
+                            shell_status = Some(reply.status.clone());
+                            push_reply_error(&mut messages, &reply);
+                            shell_complete = true;
+                        }
+                    }
+                    command = commands.recv() => {
+                        let Some(command) = command else {
+                            self.stop_now().await;
+                            shutdown = true;
+                            interrupted = true;
+                            break;
+                        };
+                        match command {
+                            KernelCommand::Interrupt { response } => {
+                                let result = self.interrupt_now().await;
+                                if result.is_ok() { interrupted = true; }
+                                let _ = response.send(result.map(|_| true));
+                            }
+                            KernelCommand::Shutdown { response } => {
+                                self.stop_now().await;
+                                shutdown = true;
+                                interrupted = true;
+                                let _ = response.send(Ok(()));
+                                break;
+                            }
+                            KernelCommand::Restart { response } => {
+                                let _ = response.send(Err("Wait for the active kernel execution to settle before restarting it.".to_string()));
+                            }
+                            KernelCommand::Execute { response, .. } => {
+                                let _ = response.send(Err("This language kernel is already executing a cell.".to_string()));
+                            }
+                        }
+                    }
+                }
+            }
+            Ok::<(), String>(())
+        })
+        .await;
+
+        match execution {
+            Ok(result) => result?,
+            Err(_) => {
+                return Err(
+                    "The Jupyter kernel did not become idle within five minutes.".to_string(),
+                )
+            }
+        }
+        if serde_json::to_vec(&messages)
+            .map_err(|error| format!("Could not measure normalized kernel output: {error}"))?
+            .len()
+            > MAX_KERNEL_RESPONSE_BYTES
+        {
+            return Err("The Jupyter kernel response exceeded the 16 MB safety limit.".to_string());
+        }
+        let status = if interrupted {
+            KernelExecutionStatus::Interrupted
+        } else if shell_status == Some(ReplyStatus::Ok)
+            && !messages
+                .iter()
+                .any(|message| matches!(message, KernelExecutionMessage::Error { .. }))
+        {
+            KernelExecutionStatus::Ok
+        } else {
+            KernelExecutionStatus::Error
+        };
+        Ok(NativeExecution {
+            status,
+            messages,
+            execution_count: count,
+            kernel_run_id: format!("kernel:{}:{}", self.session_id, request_id),
+            environment: self.environment.clone(),
+            session_generation: self.generation,
+            execution_sequence: self.execution_sequence,
+            shutdown,
+        })
+    }
+
+    async fn interrupt_now(&mut self) -> Result<(), String> {
+        let message_interrupt = self
+            .config
+            .kernelspec
+            .interrupt_mode
+            .as_deref()
+            .is_some_and(|mode| mode.eq_ignore_ascii_case("message"));
+        #[cfg(unix)]
+        if !message_interrupt {
+            let result = unsafe { libc::kill(self.child.id() as i32, libc::SIGINT) };
+            if result == 0 {
+                return Ok(());
+            }
+            return Err(format!(
+                "Could not interrupt the Jupyter kernel process: {}",
+                std::io::Error::last_os_error()
+            ));
+        }
+        #[cfg(not(unix))]
+        let _ = message_interrupt;
+        let request: JupyterMessage = InterruptRequest::default().into();
+        tokio::time::timeout(Duration::from_secs(5), self.control.send(request))
+            .await
+            .map_err(|_| "The Jupyter interrupt request timed out.".to_string())?
+            .map_err(|error| format!("Could not send the Jupyter interrupt request: {error}"))
+    }
+
+    async fn stop_now(&mut self) {
+        if self.stopped {
+            return;
+        }
+        let request: JupyterMessage = ShutdownRequest { restart: false }.into();
+        let _ = tokio::time::timeout(Duration::from_secs(2), self.control.send(request)).await;
+        let started = Instant::now();
+        loop {
+            match self.child.try_wait() {
+                Ok(Some(_)) => break,
+                Ok(None) if started.elapsed() < Duration::from_secs(2) => {
+                    tokio::time::sleep(Duration::from_millis(25)).await;
+                }
+                _ => {
+                    let _ = self.child.kill();
+                    let _ = self.child.wait();
+                    break;
+                }
+            }
+        }
+        let _ = fs::remove_file(&self.connection_path);
+        self.stopped = true;
+    }
+}
+
+impl Drop for NativeKernel {
+    fn drop(&mut self) {
+        if !self.stopped {
+            let _ = self.child.kill();
+            let _ = self.child.wait();
+        }
+        let _ = fs::remove_file(&self.connection_path);
+    }
+}
+
+fn kernel_worker(
+    config: KernelLaunchConfig,
+    mut commands: async_mpsc::UnboundedReceiver<KernelCommand>,
+    startup: mpsc::SyncSender<Result<KernelReady, String>>,
+) {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            let _ = startup.send(Err(format!(
+                "Could not initialize DraftMatter's bundled Jupyter client: {error}"
+            )));
+            return;
+        }
+    };
+    runtime.block_on(async move {
+        let mut generation = 1_u64;
+        let mut kernel = match NativeKernel::launch(config.clone(), generation, &mut commands).await
+        {
+            Ok(kernel) => kernel,
+            Err(error) => {
+                let _ = startup.send(Err(error));
+                return;
+            }
+        };
+        let _ = startup.send(Ok(KernelReady {
+            environment: kernel.environment.clone(),
+            session_id: kernel.session_id.clone(),
+        }));
+
+        while let Some(command) = commands.recv().await {
+            match command {
+                KernelCommand::Execute { code, response } => {
+                    let result = kernel
+                        .execute_protocol(code, true, &mut commands, true, EXECUTION_TIMEOUT)
+                        .await;
+                    let shutdown = result
+                        .as_ref()
+                        .map(|result| result.shutdown)
+                        .unwrap_or(false);
+                    let _ = response.send(result);
+                    if shutdown {
+                        return;
+                    }
+                }
+                KernelCommand::Interrupt { response } => {
+                    let result = kernel.interrupt_now().await.map(|_| true);
+                    let _ = response.send(result);
+                }
+                KernelCommand::Restart { response } => {
+                    kernel.stop_now().await;
+                    generation += 1;
+                    match NativeKernel::launch(config.clone(), generation, &mut commands).await {
+                        Ok(restarted) => {
+                            kernel = restarted;
+                            let _ = response.send(Ok(kernel.environment.clone()));
+                        }
+                        Err(error) => {
+                            let _ = response.send(Err(error));
+                            return;
+                        }
+                    }
+                }
+                KernelCommand::Shutdown { response } => {
+                    kernel.stop_now().await;
+                    let _ = response.send(Ok(()));
+                    return;
+                }
+            }
+        }
+        kernel.stop_now().await;
+    });
 }
 
 fn start_session(
     root: &Path,
     kernel: &JupyterKernelProbe,
 ) -> Result<Arc<KernelSession>, HostError> {
-    let controller = resolve_jupyter_controller(kernel)?;
-    let secret = Uuid::new_v4().to_string();
     let language = kernel.language.unwrap_or(RuntimeLanguage::Python);
-    let mut command = Command::new(&controller);
-    command
-        .arg("-u")
-        .arg("-c")
-        .arg(BRIDGE_SOURCE)
-        .arg(&kernel.name)
-        .arg(root)
-        .arg(&secret)
-        .arg(if language == RuntimeLanguage::Julia {
-            root.as_os_str()
-        } else {
-            std::ffi::OsStr::new("")
-        })
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null());
-    configure_project_environment(&mut command, language, root);
-    let mut child = command.spawn().map_err(|error| {
-        integration(format!(
-            "Could not start the Jupyter protocol controller: {error}"
-        ))
-    })?;
-    let stdout = child
-        .stdout
-        .take()
-        .ok_or_else(|| integration("The Jupyter bridge did not expose its startup channel."))?;
-    let line = match read_startup_line(stdout) {
-        Ok(line) => line,
-        Err(error) => {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Err(error);
-        }
+    let config = KernelLaunchConfig {
+        root: root.to_path_buf(),
+        language,
+        kernel: kernel.clone(),
+        kernelspec: load_kernelspec(kernel)?,
     };
-    let ready: BridgeReady = serde_json::from_str(&line).map_err(|error| {
-        let _ = child.kill();
-        let _ = child.wait();
-        integration(format!(
-            "The Jupyter bridge returned an invalid startup response: {error}"
-        ))
-    })?;
-    if !ready.ok {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(bridge_failure(ready.error, &ready.traceback));
-    }
-    let (Some(port), Some(mut environment)) = (ready.port, ready.environment) else {
-        let _ = child.kill();
-        let _ = child.wait();
-        return Err(integration(
-            "The Jupyter bridge did not report complete startup details.",
-        ));
-    };
-    environment.details.insert(
-        "controller".to_string(),
-        controller.to_string_lossy().into_owned(),
-    );
+    let (sender, receiver) = async_mpsc::unbounded_channel();
+    let (startup_sender, startup_receiver) = mpsc::sync_channel(1);
+    let worker = thread::Builder::new()
+        .name(format!("draftmatter-{}-kernel", kernel.name))
+        .spawn(move || kernel_worker(config, receiver, startup_sender))
+        .map_err(|error| {
+            integration(format!(
+                "Could not start the Jupyter client worker: {error}"
+            ))
+        })?;
+    let ready = startup_receiver
+        .recv_timeout(SESSION_START_TIMEOUT)
+        .map_err(|_| integration("The Jupyter kernel did not start within 55 seconds."))?
+        .map_err(worker_error)?;
     Ok(Arc::new(KernelSession {
         root: root.to_path_buf(),
         kernel_name: kernel.name.clone(),
-        port,
-        secret,
-        session_id: ready
-            .session_id
-            .unwrap_or_else(|| Uuid::new_v4().to_string()),
-        child: Mutex::new(child),
-        environment: Mutex::new(environment),
-        interrupted: AtomicBool::new(false),
+        session_id: ready.session_id,
+        sender,
+        worker: Mutex::new(Some(worker)),
+        environment: Mutex::new(ready.environment),
     }))
 }
 
-fn command_value(session: &KernelSession, kind: &str, code: Option<&str>) -> serde_json::Value {
-    serde_json::json!({
-        "secret": session.secret,
-        "kind": kind,
-        "code": code,
-    })
-}
-
-fn send_command<T: DeserializeOwned>(
+fn request_worker<T>(
     session: &KernelSession,
-    command: serde_json::Value,
     timeout: Duration,
+    command: impl FnOnce(mpsc::SyncSender<Result<T, String>>) -> KernelCommand,
 ) -> Result<T, HostError> {
-    let address = SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::LOCALHOST, session.port));
-    let mut stream =
-        TcpStream::connect_timeout(&address, Duration::from_secs(3)).map_err(|error| {
-            integration(format!("Could not connect to the Jupyter bridge: {error}"))
-        })?;
-    stream.set_read_timeout(Some(timeout))?;
-    stream.set_write_timeout(Some(Duration::from_secs(10)))?;
-    let mut payload = serde_json::to_vec(&command).map_err(|error| {
-        integration(format!("Could not serialize the Jupyter command: {error}"))
-    })?;
-    payload.push(b'\n');
-    stream.write_all(&payload)?;
-    stream.flush()?;
-    let mut bytes = Vec::new();
-    BufReader::new(stream)
-        .take(MAX_BRIDGE_RESPONSE_BYTES + 1)
-        .read_until(b'\n', &mut bytes)?;
-    if bytes.len() as u64 > MAX_BRIDGE_RESPONSE_BYTES {
-        return Err(integration(
-            "The Jupyter bridge response exceeded the 16 MB safety limit.",
-        ));
-    }
-    serde_json::from_slice(&bytes)
-        .map_err(|error| integration(format!("The Jupyter bridge returned invalid JSON: {error}")))
+    let (response_sender, response_receiver) = mpsc::sync_channel(1);
+    session
+        .sender
+        .send(command(response_sender))
+        .map_err(|_| integration("The selected Jupyter kernel session is no longer running."))?;
+    response_receiver
+        .recv_timeout(timeout)
+        .map_err(|_| integration("The Jupyter kernel command timed out."))?
+        .map_err(worker_error)
 }
 
 fn terminate_session(session: &KernelSession) {
-    let _: Result<BridgeResponse, _> = send_command(
-        session,
-        command_value(session, "shutdown", None),
-        Duration::from_secs(5),
-    );
-    if let Ok(mut child) = session.child.lock() {
-        let started = Instant::now();
-        loop {
-            match child.try_wait() {
-                Ok(Some(_)) => break,
-                Ok(None) if started.elapsed() < Duration::from_secs(2) => {
-                    thread::sleep(Duration::from_millis(20))
-                }
-                _ => {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    break;
-                }
-            }
+    let _: Result<(), _> = request_worker(session, Duration::from_secs(8), |response| {
+        KernelCommand::Shutdown { response }
+    });
+    if let Ok(mut worker) = session.worker.lock() {
+        if let Some(worker) = worker.take() {
+            let _ = worker.join();
         }
     }
 }
@@ -495,11 +992,13 @@ pub fn execute_kernel_impl(
             return Err(error);
         }
     };
-    session.interrupted.store(false, Ordering::SeqCst);
-    let mut response: BridgeResponse = match send_command(
+    let mut response = match request_worker(
         &session,
-        command_value(&session, "execute", Some(&request.code)),
-        EXECUTION_TIMEOUT,
+        EXECUTION_TIMEOUT + Duration::from_secs(5),
+        |response| KernelCommand::Execute {
+            code: request.code,
+            response,
+        },
     ) {
         Ok(response) => response,
         Err(error) => {
@@ -510,72 +1009,43 @@ pub fn execute_kernel_impl(
             return Err(error);
         }
     };
-    if !response.ok {
-        restore_artifacts(&backups)?;
-        return Err(bridge_failure(response.error, &response.traceback));
-    }
-    if let Some(environment) = response.environment.take() {
-        *session.environment.lock().map_err(|_| registry_error())? = environment;
-    }
-    let interrupted = session.interrupted.load(Ordering::SeqCst);
-    let mut status = if interrupted {
-        KernelExecutionStatus::Interrupted
-    } else if response.status.as_deref() == Some("ok") {
-        KernelExecutionStatus::Ok
-    } else {
-        KernelExecutionStatus::Error
-    };
-    if interrupted {
-        response
-            .messages
-            .retain(|message| !matches!(message, KernelExecutionMessage::Error { .. }));
-    }
+    *session.environment.lock().map_err(|_| registry_error())? = response.environment.clone();
     let mut produced = Vec::new();
-    if status == KernelExecutionStatus::Ok {
+    if response.status == KernelExecutionStatus::Ok {
         match collect_artifacts(&artifacts) {
             Ok(artifacts) => produced = artifacts,
             Err(error) => {
-                let sequence = response.messages.len() as u64;
                 response.messages.push(KernelExecutionMessage::Error {
-                    sequence,
+                    sequence: response.messages.len() as u64,
                     name: error.name,
                     message: error.message,
                     traceback: error.traceback,
                 });
-                status = KernelExecutionStatus::Error;
+                response.status = KernelExecutionStatus::Error;
             }
         }
     }
-    if status != KernelExecutionStatus::Ok {
+    if response.status != KernelExecutionStatus::Ok {
         restore_artifacts(&backups)?;
     }
-    let environment = session
-        .environment
-        .lock()
-        .map_err(|_| registry_error())?
-        .clone();
-    let session_generation = response.session_generation.ok_or_else(|| {
-        integration("The Jupyter bridge omitted the shared-session generation.")
-    })?;
-    let execution_sequence = response.execution_sequence.ok_or_else(|| {
-        integration("The Jupyter bridge omitted the session execution sequence.")
-    })?;
     Ok(KernelExecutionResult {
-        status,
+        status: response.status,
         messages: response.messages,
         artifacts: produced,
-        environment,
-        kernel_run_id: response.kernel_run_id.unwrap_or_else(|| {
+        environment: response.environment,
+        kernel_run_id: if response.kernel_run_id.is_empty() {
             format!(
                 "kernel:{}:{}:{}",
                 session.session_id,
                 now_millis(),
                 request.cell_id
             )
-        }),
+        } else {
+            response.kernel_run_id
+        },
         execution_count: response.execution_count,
-        session_generation,
-        execution_sequence,
+        session_generation: response.session_generation,
+        execution_sequence: response.execution_sequence,
     })
 }
 
@@ -593,16 +1063,9 @@ pub fn interrupt_kernel_impl(
     let Some(session) = session else {
         return Ok(false);
     };
-    session.interrupted.store(true, Ordering::SeqCst);
-    let response: BridgeResponse = send_command(
-        &session,
-        command_value(&session, "interrupt", None),
-        LIFECYCLE_TIMEOUT,
-    )?;
-    if !response.ok {
-        return Err(bridge_failure(response.error, &response.traceback));
-    }
-    Ok(true)
+    request_worker(&session, LIFECYCLE_TIMEOUT, |response| {
+        KernelCommand::Interrupt { response }
+    })
 }
 
 pub fn restart_kernel_impl(
@@ -619,18 +1082,10 @@ pub fn restart_kernel_impl(
     let Some(session) = session else {
         return Ok(false);
     };
-    let mut response: BridgeResponse = send_command(
-        &session,
-        command_value(&session, "restart", None),
-        LIFECYCLE_TIMEOUT,
-    )?;
-    if !response.ok {
-        return Err(bridge_failure(response.error, &response.traceback));
-    }
-    if let Some(environment) = response.environment.take() {
-        *session.environment.lock().map_err(|_| registry_error())? = environment;
-    }
-    session.interrupted.store(false, Ordering::SeqCst);
+    let environment = request_worker(&session, LIFECYCLE_TIMEOUT, |response| {
+        KernelCommand::Restart { response }
+    })?;
+    *session.environment.lock().map_err(|_| registry_error())? = environment;
     Ok(true)
 }
 
@@ -651,6 +1106,7 @@ mod tests {
     use crate::execution_trust::{
         trust_project_for_session_impl, ExecutionTrustStore, TRUST_ACKNOWLEDGEMENT,
     };
+    use crate::jupyter_publishing::PUBLISHED_VALUE_MIME;
     use std::fs;
     use tempfile::tempdir;
 
@@ -663,6 +1119,8 @@ mod tests {
                 serde_json::Value::String("42".to_string()),
             )]),
             metadata: serde_json::Map::new(),
+            display_id: None,
+            update: false,
         };
         assert_eq!(
             serde_json::to_value(message).unwrap(),
@@ -679,13 +1137,23 @@ mod tests {
     }
 
     #[test]
-    fn bridge_injects_explicit_publish_helpers_for_every_supported_language() {
-        assert!(BRIDGE_SOURCE.contains("def publish(name, value, *, unit=None, digits=None)"));
-        assert!(BRIDGE_SOURCE.contains("publish <- function(name, value, unit = NULL, digits = NULL)"));
-        assert!(BRIDGE_SOURCE.contains("macro publish(variable, options...)"));
-        assert!(BRIDGE_SOURCE.contains("application/vnd.draftmatter.published-value+json"));
-        assert!(!BRIDGE_SOURCE.contains("NotebookApp"));
-        assert!(!BRIDGE_SOURCE.contains("ServerApp"));
+    fn kernel_specs_must_accept_a_connection_file() {
+        let temporary = tempdir().unwrap();
+        fs::write(
+            temporary.path().join("kernel.json"),
+            r#"{"argv":["python"],"display_name":"Broken","language":"python"}"#,
+        )
+        .unwrap();
+        let probe = JupyterKernelProbe {
+            name: "broken".to_string(),
+            display_name: "Broken".to_string(),
+            language: Some(RuntimeLanguage::Python),
+            health: RuntimeHealth::Available,
+            resource_dir: temporary.path().to_string_lossy().into_owned(),
+            executable: Some("python".to_string()),
+            message: None,
+        };
+        assert!(load_kernelspec(&probe).is_err());
     }
 
     #[test]
@@ -697,9 +1165,6 @@ mod tests {
         }) else {
             return;
         };
-        if resolve_jupyter_controller(kernel).is_err() {
-            return;
-        }
         let project = tempdir().unwrap();
         let root = fs::canonicalize(project.path()).unwrap();
         let trust = ExecutionTrustStore::default();
@@ -737,13 +1202,13 @@ publish("mean_height", 42, unit="cm", digits=1)
         assert_eq!(first_result.execution_sequence, 1);
         assert!(first_result.messages.iter().any(|message| {
             matches!(message, KernelExecutionMessage::Display { data, .. }
-                if data.get("application/vnd.draftmatter.published-value+json") == Some(&serde_json::json!({
-                    "version": 1,
-                    "name": "mean_height",
-                    "value": 42,
-                    "unit": "cm",
-                    "formatting": {"digits": 1}
-                })))
+            if data.get(PUBLISHED_VALUE_MIME) == Some(&serde_json::json!({
+                "version": 1,
+                "name": "mean_height",
+                "value": 42,
+                "unit": "cm",
+                "formatting": {"digits": 1}
+            })))
         }));
 
         let second_result = execute_kernel_impl(
@@ -786,6 +1251,49 @@ publish("mean_height", 42, unit="cm", digits=1)
         }));
         assert_eq!(restarted_result.session_generation, 2);
         assert_eq!(restarted_result.execution_sequence, 1);
+
+        let interrupted_registry = registry.clone();
+        let interrupted_trust = trust.clone();
+        let interrupted_root = root.to_string_lossy().into_owned();
+        let interrupted_kernel = kernel.name.clone();
+        let running = thread::spawn(move || {
+            execute_kernel_impl(
+                KernelExecutionRequest {
+                    root: interrupted_root,
+                    cell_id: "kernel-interrupt".to_string(),
+                    language: RuntimeLanguage::Python,
+                    kernel_name: interrupted_kernel,
+                    code: "import time; time.sleep(30)".to_string(),
+                    attributes: HashMap::new(),
+                    inputs: Vec::new(),
+                },
+                &interrupted_trust,
+                &interrupted_registry,
+            )
+        });
+        thread::sleep(Duration::from_millis(500));
+        assert!(interrupt_kernel_impl(RuntimeLanguage::Python, &registry).unwrap());
+        let interrupted = running.join().unwrap().unwrap();
+        assert_eq!(interrupted.status, KernelExecutionStatus::Interrupted);
+
+        let alive = execute_kernel_impl(
+            KernelExecutionRequest {
+                root: root.to_string_lossy().into_owned(),
+                cell_id: "kernel-after-interrupt".to_string(),
+                language: RuntimeLanguage::Python,
+                kernel_name: kernel.name.clone(),
+                code: "print('still-alive')".to_string(),
+                attributes: HashMap::new(),
+                inputs: Vec::new(),
+            },
+            &trust,
+            &registry,
+        )
+        .unwrap();
+        assert_eq!(alive.status, KernelExecutionStatus::Ok);
+        assert!(alive.messages.iter().any(|message| {
+            matches!(message, KernelExecutionMessage::Stream { text, .. } if text.trim() == "still-alive")
+        }));
         assert!(terminate_kernel_impl(RuntimeLanguage::Python, &registry).unwrap());
     }
 }

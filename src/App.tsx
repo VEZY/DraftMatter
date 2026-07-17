@@ -62,6 +62,7 @@ import { authorInitials, readUserSettings, renameLocalAuthor, saveUserSettings }
 import { parsePublicationMetadata, updatePublicationAuthorDetails, type PublicationAuthor } from './publicationMetadata'
 import { copyPlainText } from './clipboard'
 import { parseRetainedPublishedValues } from './publishedValues'
+import { publicationFreshnessProblem } from './publicationFreshness'
 import { countWords, measurePortableManuscript } from './manuscriptMetrics'
 import { ReviewTimestamp } from './ReviewTimestamp'
 import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
@@ -445,6 +446,7 @@ function App() {
   const [citationIntakeSelected, setCitationIntakeSelected] = useState<string[]>([])
   const [citationDropActive, setCitationDropActive] = useState(false)
   const [exportOpen, setExportOpen] = useState(false)
+  const [requireFreshPublication, setRequireFreshPublication] = useState(true)
   const [pendingFileExport, setPendingFileExport] = useState<GeneratedFileExport>()
   const [fileExportBusy, setFileExportBusy] = useState(false)
   const [fileExportProblem, setFileExportProblem] = useState('')
@@ -1299,6 +1301,10 @@ function App() {
   const unavailableSelectedKernelName = selectedKernelNames[selectedEnvironmentLanguage] && !selectedEnvironmentKernel
     ? selectedKernelNames[selectedEnvironmentLanguage]
     : undefined
+  const configuredConsoleLanguages = (['python', 'r', 'julia'] as const).filter((language) =>
+    Boolean(selectedKernelNames[language]) || executableCells.some((cell) => cell.language === language),
+  )
+  if (!configuredConsoleLanguages.length) configuredConsoleLanguages.push(selectedEnvironmentLanguage)
 
   useEffect(() => {
     for (const language of ['python', 'r', 'julia'] as const) {
@@ -2575,6 +2581,11 @@ function App() {
     })
   }
 
+  const freshPublicationProblem = (source: string) => {
+    if (!requireFreshPublication) return undefined
+    return publicationFreshnessProblem(source, executionCellStates)
+  }
+
   const exportPublication = async (kind: 'html' | 'pdf') => {
     const projection = projectCurrentManuscriptSource(manuscriptSource, draft, structuredMode, 'final')
     if (!projection.ok) {
@@ -2584,6 +2595,12 @@ function App() {
       ])
       setExportOpen(false)
       setToast('Publication export blocked · resolve the overlapping alternatives')
+      return
+    }
+    const freshnessProblem = freshPublicationProblem(projection.source)
+    if (freshnessProblem) {
+      setExportOpen(false)
+      setToast(`Publication export blocked · ${freshnessProblem}`)
       return
     }
     try {
@@ -2618,6 +2635,12 @@ function App() {
       setToast('DOCX export blocked · resolve the overlapping alternatives')
       return
     }
+    const freshnessProblem = freshPublicationProblem(projection.source)
+    if (freshnessProblem) {
+      setExportOpen(false)
+      setToast(`DOCX export blocked · ${freshnessProblem}`)
+      return
+    }
     try {
       const result = renderDocxExport(projection.source, {
         citationLabels: publicationCitationLabels,
@@ -2649,6 +2672,12 @@ function App() {
     if (!projection.ok) {
       setExportOpen(false)
       setToast('External export blocked · resolve the overlapping alternatives')
+      return
+    }
+    const freshnessProblem = freshPublicationProblem(projection.source)
+    if (freshnessProblem) {
+      setExportOpen(false)
+      setToast(`External export blocked · ${freshnessProblem}`)
       return
     }
     setExternalExportSource(projectComputationsForPublication(projection.source))
@@ -3667,6 +3696,7 @@ function App() {
             {exportOpen && (
               <div className="popover export-menu">
                 <span className="export-menu-heading">Publish</span>
+                <label className="export-freshness-policy"><input type="checkbox" checked={requireFreshPublication} onChange={(event) => setRequireFreshPublication(event.target.checked)} /><span><strong>Require current computed values</strong><small>Block publication when a referenced value is missing or stale</small></span></label>
                 <button onClick={() => exportPublication('html')}><span><strong>Web page</strong><small>Clean, styled, and self-contained</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => exportPublication('pdf')}><span><strong>PDF</strong><small>Print-ready manuscript</small></span><Icon name="arrowRight" /></button>
                 <button onClick={exportDocx}><span><strong>Word document</strong><small>Clean editable manuscript</small></span><Icon name="arrowRight" /></button>
@@ -4846,7 +4876,7 @@ function App() {
 
       {kernelConsoleOpen && desktopSession && (
         <KernelConsole
-          languages={['python', 'r', 'julia']}
+          languages={configuredConsoleLanguages}
           onExecute={executeConsole}
           onInterrupt={async (language) => { await interruptExecution(language) }}
           onRestart={async (language) => { await restartExecution(language) }}

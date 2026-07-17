@@ -94,6 +94,8 @@ export interface KernelDisplayMessage {
   sequence: number
   data: Record<string, JsonValue>
   metadata?: Record<string, JsonValue>
+  displayId?: string
+  update?: boolean
 }
 
 export interface KernelErrorMessage {
@@ -168,10 +170,18 @@ function kernelErrors(messages: KernelExecutionMessage[]) {
 }
 
 function kernelMime(messages: KernelExecutionMessage[]) {
-  return messages
-    .filter((message): message is KernelDisplayMessage => message.kind === 'display')
-    .sort((left, right) => left.sequence - right.sequence)
-    .map(({ data, metadata = {} }) => ({ data, metadata }))
+  const displays: Array<{ data: Record<string, JsonValue>; metadata: Record<string, JsonValue>; displayId?: string }> = []
+  for (const message of messages
+    .filter((candidate): candidate is KernelDisplayMessage => candidate.kind === 'display')
+    .sort((left, right) => left.sequence - right.sequence)) {
+    const next = { data: message.data, metadata: message.metadata ?? {}, ...(message.displayId ? { displayId: message.displayId } : {}) }
+    const target = message.update && message.displayId
+      ? displays.findIndex((display) => display.displayId === message.displayId)
+      : -1
+    if (target >= 0) displays[target] = next
+    else displays.push(next)
+  }
+  return displays.map(({ data, metadata }) => ({ data, metadata }))
 }
 
 export function createKernelExecutionManager(transport: KernelLifecycleTransport, clock: Clock = () => new Date()): KernelExecutionManager {

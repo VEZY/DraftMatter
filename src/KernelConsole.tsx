@@ -65,6 +65,22 @@ export function KernelConsole({
   const canRun = Boolean(input.trim()) && statuses[active] !== 'busy' && statuses[active] !== 'starting'
   const latestCode = useMemo(() => histories[active].at(-1), [active, histories])
 
+  const copyVisibleOutput = async () => {
+    const text = currentEntries.map((entry) => {
+      const streams = entry.result?.streams.map((stream) => stream.text).join('') ?? ''
+      const mime = entry.result ? textualMime(entry.result).join('\n') : ''
+      const errors = entry.result?.errors.map((error) => `${error.name}: ${error.message}`).join('\n') ?? entry.error ?? ''
+      return [`> ${entry.code}`, streams, mime, errors].filter(Boolean).join('\n')
+    }).join('\n\n')
+    if (text && globalThis.navigator?.clipboard) {
+      try {
+        await globalThis.navigator.clipboard.writeText(text)
+      } catch {
+        // The output remains selectable when clipboard permission is unavailable.
+      }
+    }
+  }
+
   const run = async () => {
     const code = input.trimEnd()
     if (!code.trim() || !canRun) return
@@ -140,6 +156,7 @@ export function KernelConsole({
       <div>
         <span><kbd>⌘/Ctrl</kbd><kbd>↵</kbd> Run · Enter adds a line</span>
         <button onClick={() => { if (latestCode) onPromoteSetup(active, latestCode) }} disabled={!latestCode}>Make setup cell</button>
+        <button onClick={() => void copyVisibleOutput()} disabled={!currentEntries.length}>Copy</button>
         <button onClick={() => setEntries((current) => ({ ...current, [active]: [] }))}>Clear</button>
         <button onClick={async () => { await onInterrupt(active); setStatuses((current) => ({ ...current, [active]: 'interrupted' })) }} disabled={statuses[active] !== 'busy'}>Interrupt</button>
         <button onClick={async () => {

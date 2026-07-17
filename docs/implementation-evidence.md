@@ -67,15 +67,15 @@ The implementation tree was last audited on 2026-07-16 from a clean
 | Task | Automated or reproducible evidence | Implementation commit |
 | --- | --- | --- |
 | DM-P3-01 | `src/executionCells.test.ts` and `src/fixtures/execution/adversarial-cells.qmd` prove AST-aware extraction, adversarial fence handling, and stable cell IDs. | `a90f58d` |
-| DM-P3-02 | `src/runtimeDiscovery.test.ts`, `src/executionProvider.test.ts`, and Rust runtime tests cover independent Python/R/Julia executable and kernel discovery without project-open side effects. | `65a1476` |
-| DM-P3-03 | `src/kernelExecutionTransport.test.ts`, `src/directExecutionTransport.test.ts`, and Rust Jupyter/direct-provider tests assert normalized status, streams, errors, MIME, artifacts, hashes, and fingerprints. | `3f4560e` |
-| DM-P3-04 | `src/executionLifecycle.test.ts`, `src/executionApp.test.tsx`, and `src/executionWorkspaceApp.test.tsx` cover explicit run/run-above/language-run-all, interrupt, restart, terminate, ordering, and isolation. | `137a91b` |
+| DM-P3-02 | `src/runtimeDiscovery.test.ts`, `src/desktopHost.test.ts`, and Rust runtime tests cover independent Python/R/Julia discovery, project-persisted kernel environments, and explicit integration setup without project-open side effects. | `807192f` |
+| DM-P3-03 | `src/kernelExecution.ts`, `src/kernelExecutionTransport.test.ts`, and Rust native Jupyter-client tests assert one normalized Jupyter-only contract for status, streams, errors, MIME, artifacts, hashes, session generation, and execution sequence. | `807192f` + native-client follow-up |
+| DM-P3-04 | `src/executionLifecycle.test.ts`, `src/cleanExecution.test.ts`, `src/KernelConsole.test.tsx`, and `src/executionWorkspaceApp.test.tsx` cover shared sessions, setup-first execution, console reuse, interrupt, restart, terminate, ordering, and isolation. | `807192f` |
 | DM-P3-05 | `src/outputRenderer.test.tsx` and `src/executionBrowserApp.test.tsx` cover image, HTML, Markdown, text, table, and error MIME while blocking malicious HTML from privileged APIs. | `43fcae9` |
 | DM-P3-06 | `src/outputMaterializer.test.ts` proves ordinary artifact/output-block materialization is byte-stable, idempotent, confined to reserved markers, and diagnostic on missing artifacts. | `d4cd7e8` |
 | DM-P3-07 | `src/executionFreshness.test.ts`, `src/executionLifecycle.test.ts`, and `src/cleanExecution.test.ts` cover code/input/environment/artifact invalidation and restoration by clean run-all. | `7190509` |
 | DM-P3-08 | `src/retainedOutputs.test.tsx`, `src/outputRenderer.test.tsx`, and `src/executionWorkspaceApp.test.tsx` cover current/stale/missing retained outputs independently from runtime availability. | `a75b38a` |
 | DM-P3-09 | `src/executionTrust.test.ts`, `src/executionBrowserApp.test.tsx`, Rust trust tests, and `src/sharedEditor/browserBoundary.test.ts` prove explicit trust and a browser build without execution capability. | `ed8827e` |
-| DM-P3-GATE | `src/cleanExecution.test.ts`, `src/fixtures/execution/phase3-clean-restart.qmd`, provider conformance tests, and retained-output tests certify clean cross-language reproduction and unavailable-runtime reopen. | `7f4d388` |
+| DM-P3-GATE | `src/cleanExecution.test.ts`, `src/fixtures/execution/phase3-clean-restart.qmd`, shared-kernel lifecycle tests, and retained-output tests certify clean cross-language reproduction and unavailable-runtime reopen. | `807192f` |
 
 ### DM-P4 — Comments and tracked suggestions
 

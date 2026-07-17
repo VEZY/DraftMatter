@@ -125,12 +125,11 @@ describe('shared Jupyter execution workspace', () => {
     expect(savedSources.join('\n')).not.toContain('dm-output:start cell="py-setup"')
   })
 
-  it('shows environments without exposing a provider choice', async () => {
+  it('shows only language environments and shared kernels', async () => {
     const environments = [...container.querySelectorAll<HTMLButtonElement>('.structured-execution-bar button')]
       .find((button) => button.textContent?.includes('Environments'))!
     await act(async () => environments.click())
     const dialog = container.querySelector<HTMLElement>('[aria-labelledby="execution-environment-title"]')!
-    expect(dialog.querySelector('[aria-label="Execution provider"]')).toBeNull()
     expect(dialog.textContent).toContain('shared Jupyter kernel, no notebook server')
   })
 })

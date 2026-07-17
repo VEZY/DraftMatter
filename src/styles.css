@@ -3279,6 +3279,11 @@ button:disabled {
 .export-menu button + button { border-top: 1px solid #eef0ee; }
 .export-menu button:hover { background: #f7f9f7; }
 .export-menu button > span { display: flex; flex-direction: column; }
+.export-freshness-policy { align-items: flex-start; border-bottom: 1px solid #edf0ee; color: #53615a; display: flex; gap: 8px; margin: 0 7px 3px; padding: 7px 5px 9px; }
+.export-freshness-policy input { accent-color: var(--sage); margin: 2px 0 0; }
+.export-freshness-policy span { display: flex; flex-direction: column; gap: 2px; }
+.export-freshness-policy strong { font-size: 9px; }
+.export-freshness-policy small { color: #7d8983; font-size: 8px; font-weight: 500; line-height: 1.35; }
 .export-menu strong { color: #46514b; font-size: 10px; }
 .export-menu small { color: #929a96; font-size: 8px; margin-top: 3px; }
 .export-menu svg { color: #919a95; }

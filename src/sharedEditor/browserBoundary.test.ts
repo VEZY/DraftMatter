@@ -8,7 +8,7 @@ const sources = import.meta.glob('/src/**/*.{ts,tsx}', {
 }) as Record<string, string>
 const entry = '/src/sharedEditor/index.ts'
 const localImport = /(?:from\s+|import\s*\()(['"])(\.{1,2}\/[^'"]+)\1/g
-const bannedSpecifier = /(?:^|\/)(?:desktopHost|directExecutionTransport|executionProvider|executionTrust|GitHistoryPanel|ExternalExportDialog)(?:\.|$)|@tauri-apps|(?:^|\/)(?:node:)?(?:fs|child_process|net)(?:\/|$)/
+const bannedSpecifier = /(?:^|\/)(?:desktopHost|kernelExecutionTransport|executionTrust|GitHistoryPanel|ExternalExportDialog)(?:\.|$)|@tauri-apps|(?:^|\/)(?:node:)?(?:fs|child_process|net)(?:\/|$)/
 const bannedSource = /@tauri-apps|node:(?:fs|child_process|net)|from\s+['"](?:fs|child_process|net)['"]|\b(?:window\.__TAURI__|invoke\s*\()/
 
 function normalizePath(path: string) {

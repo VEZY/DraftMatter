@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import type { NormalizedExecutionResult } from './kernelExecution'
 import {
   PUBLISHED_VALUE_MIME,
+  isPublishedValueName,
   parseRetainedPublishedValues,
   publishedValueMarkup,
   publishedValuesFromExecution,
@@ -94,9 +95,9 @@ describe('native published manuscript values', () => {
     expect(replacePublishedValueMarkup('Estimate: {{missing}}', {})).toBe('Estimate: value unavailable')
   })
 
-  it('does not treat ordinary stdout or the removed legacy syntax as publication data', () => {
+  it('does not treat ordinary stdout or reserved names as publication data', () => {
     const published = publishedValuesFromExecution(result([]))
     expect(published).toEqual({ records: [], diagnostics: [] })
-    expect(replacePublishedValueMarkup('{{dm:value:estimate}}', {})).toBe('{{dm:value:estimate}}')
+    expect(isPublishedValueName('dm:reserved')).toBe(false)
   })
 })

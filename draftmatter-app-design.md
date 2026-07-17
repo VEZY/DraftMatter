@@ -20,6 +20,146 @@ The recommended working name is **DraftMatter**: “draft” describes the autho
 
 The working licence decision is **MIT for the desktop application, reusable document/review libraries, CLI/export tooling, and public collaboration code**. The realistic local MVP is a macOS-first desktop app delivered in roughly 16–20 weeks by one experienced full-time engineer, or around 10–12 weeks with two engineers and focused product/design support. Git and local track changes belong in this open-source MVP. A paid managed collaboration service is the next product milestone and should be allowed for in the architecture from the beginning; it adds roughly 8–12 weeks for browser editing, identity, permissions, synchronization, billing integration, and production operations. Cloud execution and lossless Word round-tripping remain outside both milestones.
 
+## Agent-executable implementation contract
+
+This section is the canonical execution and status register for coding agents. The rest of this document supplies product behavior, architecture, constraints, and rationale. If a checklist item conflicts with a detailed requirement elsewhere, the detailed requirement wins and this register must be corrected in the same change.
+
+### Goal
+
+Deliver the **open-source local MVP** described in this brief. The goal is complete only when:
+
+1. every task in phases DM-P0 through DM-P5 is checked;
+2. every local acceptance criterion in this document is checked with evidence;
+3. the full verification suite passes from a clean checkout;
+4. a representative article-sized project can be opened, edited, reviewed, executed, checkpointed, exported, closed, and reopened without losing source, citations, outputs, or review state.
+
+DM-P6 is a separate post-MVP goal for paid online collaboration. It must influence interfaces and data models from the beginning, but it does not block completion of the local MVP.
+
+### Status and evidence rules
+
+- `[ ]` means incomplete or not yet verified. Partially implemented work remains unchecked.
+- `[x]` means implemented and verified. A checked task or acceptance criterion must have an entry in the completion log below.
+- Never mark a task complete from visual resemblance, a mocked interaction, or source inspection alone when the task requires persistence, execution, round-tripping, or integration behavior.
+- Verification evidence must name the automated test, fixture, command, or reproducible manual scenario that proves the task. “Implemented” is not evidence.
+- A task is complete only on every operating system claimed by that task. Platform-specific exceptions must remain unchecked or be split into explicit follow-up tasks.
+- Preserve unrelated user changes. Prefer one coherent task or tightly coupled task group per commit, and include the task ID in the commit message.
+- After completing a task, update its checkbox and append its evidence and commit to the completion log in the same commit.
+- If implementation reveals that a task is underspecified, update this register before or together with the code; do not silently choose a materially different product behavior.
+- This register starts **unverified**. Existing code may satisfy some tasks, but an agent must audit and test it before checking them.
+
+### Required verification commands
+
+Run every command that applies to the current repository. Add missing test targets as the corresponding subsystem is introduced.
+
+```text
+npm run check
+npm test
+npm run build
+cargo test --manifest-path src-tauri/Cargo.toml     # once the Tauri host exists
+```
+
+Before a release candidate, also run the repository's Playwright/end-to-end suite, golden Markdown round-trip suite, exporter fixtures, licence audit, and platform packaging checks. A task-specific check may be narrower during development, but its milestone gate requires the complete relevant suite.
+
+### DM-P0 — Portable format and editor-risk spike
+
+- [ ] **DM-P0-01 — Representative fixture corpus.** Add at least 30 `.md`/`.qmd` fixtures covering YAML, headings, lists, citations, equations, footnotes, raw blocks, executable fences, output markers, comments, identical/nested/crossing review anchors, and unknown syntax. **Check:** fixtures are enumerated by an automated test and no fixture is silently skipped.
+- [ ] **DM-P0-02 — Deterministic parse/serialize round-trip.** Parse, serialize, reopen, and serialize every fixture without semantic loss or byte changes to preserved raw nodes. **Check:** a golden test compares repeated serialization and reports a focused diff.
+- [ ] **DM-P0-03 — Semantic prototype nodes.** Implement rendered citation, code-cell, output, review-anchor, and raw-Markdown nodes with stable IDs. **Check:** editor transaction tests create, edit, save, and reopen each node type.
+- [ ] **DM-P0-04 — Portable review records.** Parse and serialize versioned authors, proposals, threads, decisions, and point/range anchors in DraftMatter Review Markup. **Check:** identical, nested, and crossing proposals round-trip independently.
+- [ ] **DM-P0-05 — Original and Final projector.** Produce clean projections that remove every `.dm-anchor` and `.draftmatter-reviews` structure. **Check:** golden Original and resolved-Final outputs contain no reserved review markup; unresolved overlap fails closed with an actionable conflict list.
+- [ ] **DM-P0-06 — First rendered vertical slice.** Demonstrate one semantic citation, one mocked code result, one comment, one replacement, and two overlapping alternatives without exposing Markdown during normal use. **Check:** an end-to-end interaction test and visual snapshot cover the complete slice.
+- [ ] **DM-P0-GATE — Phase 0 exit gate.** All 30 fixtures pass deterministic round-trip and clean-projection tests; unsupported constructs are visibly preserved as raw nodes. **Depends:** DM-P0-01 through DM-P0-06.
+
+### DM-P1 — Manuscript foundation
+
+- [ ] **DM-P1-01 — Cross-platform desktop shell.** Add the Tauri 2 host, typed privileged commands, and Windows/macOS/Linux development and packaging configuration. **Check:** the app starts without a generic shell-command bridge and platform builds are exercised in CI.
+- [ ] **DM-P1-02 — Local project lifecycle.** Open an existing project folder, create a project, discover `.md`/`.qmd` and bibliography files, persist project configuration, and reopen the last project safely. **Check:** integration tests use temporary project directories and never execute document code.
+- [ ] **DM-P1-03 — Rendered structured editing.** Support headings, paragraphs, lists, links, emphasis, quotations, equations, tables, images, captions, footnotes, citations, cross-references, code cells, and preserved raw blocks. **Check:** keyboard and transaction tests edit each supported node without revealing source punctuation in normal mode.
+- [ ] **DM-P1-04 — Deterministic autosave and recovery.** Implement debounced atomic save, undo/redo, crash recovery, and bounded recovery history. **Check:** fault-injection tests interrupt writes and prove that either the old or new valid document survives.
+- [ ] **DM-P1-05 — External file changes.** Detect edits, renames, and deletions made outside DraftMatter; reload safe changes and surface conflicts without overwriting either version. **Check:** file-watcher integration tests cover clean reload and dirty-buffer conflict paths.
+- [ ] **DM-P1-06 — Outline and source inspector.** Provide document navigation and a read-only/editable escape hatch for unsupported raw syntax. **Check:** outline navigation follows structural edits and raw bytes survive inspector round-trips.
+- [ ] **DM-P1-07 — Accessibility baseline.** Provide keyboard access, visible focus, semantic labels, reduced-motion behavior, and usable contrast for the editor and project lifecycle. **Check:** automated accessibility scan plus a documented keyboard-only smoke test.
+- [ ] **DM-P1-GATE — Phase 1 exit gate.** A researcher can create or open a short structured article, edit it without seeing Markdown, close it, and reopen identical portable source with recovery available. **Depends:** DM-P1-01 through DM-P1-07.
+
+### DM-P2 — Citations and bibliography
+
+- [ ] **DM-P2-01 — Local bibliography ingestion.** Parse BibTeX, BibLaTeX-compatible records within the supported subset, CSL JSON, RIS/RefMan, and EndNote tagged text into normalized citation records with provenance. **Check:** fixtures cover braces, quoted fields, Unicode, multi-record RIS and EndNote payloads, missing fields, duplicate keys, and malformed input.
+- [ ] **DM-P2-02 — Zotero local integration.** Detect Zotero's local API, search records, retain Zotero item identity, and degrade cleanly when Zotero is closed or its API is disabled. **Check:** mocked API integration tests cover available, unavailable, and version-change paths.
+- [ ] **DM-P2-03 — Crossref scholarly search.** Search Crossref from the citation picker with debouncing, cancellation, structured author/year/title extraction, bibliographic-query fallback, local reranking, and rate-limit-safe caching. **Check:** mocked provider tests cover structured, ambiguous, empty, stale-response, offline, and HTTP 429 paths; the query `vezy et al. 2020 DynACof` ranks DOI `10.1016/j.envsoft.2019.104609` first.
+- [ ] **DM-P2-04 — Paste/drop citation intake.** Provide one visible paste/drop box accepting DOI text/URLs, BibTeX/BibLaTeX, CSL JSON, RIS/RefMan, EndNote tagged text, and supported files; sniff content, preview one or many records, report per-record errors, and never discard the original payload on failure. **Check:** keyboard paste and drag/drop tests cover each format, multiple records, duplicates, malformed input, oversized files, DOI resolution failure, and offline metadata imports.
+- [ ] **DM-P2-05 — Unified citation picker.** Search attached files, Zotero, and Crossref in grouped results; expose paste/drop and an explicit Google Scholar handoff; insert one or several works; and edit locators, prefix/suffix text, and author suppression. **Check:** end-to-end tests complete local, Zotero, Crossref, and Scholar-export/paste flows entirely by keyboard except for the external Scholar interaction.
+- [ ] **DM-P2-06 — Portable acquisition transaction.** On acceptance—never merely on result display—resolve DOI metadata to CSL JSON when available, assign a stable collision-safe citekey, retain provider identity, materialize a deterministic record in the configured project bibliography, and update the citation lock/cache atomically. **Check:** failure injection proves that bibliography, lock, and manuscript either all advance to one valid state or remain unchanged; repeated acquisition is idempotent by DOI/provider identity.
+- [ ] **DM-P2-07 — Live CSL rendering.** Render in-text citations and bibliography with the configured style and locale. **Check:** golden outputs cover representative author counts, disambiguation, locators, and locales.
+- [ ] **DM-P2-08 — Citation lock, cache, and diagnostics.** Persist citekey-to-source mappings and cited CSL snapshots; report missing, duplicate, aliased, renamed, or unavailable records without merging automatically; and reopen cited works when Zotero or remote providers are unavailable. **Check:** rename, duplicate, offline-Crossref, and offline-Zotero fixtures retain the same readable citation and bibliography entry with actionable diagnostics.
+- [ ] **DM-P2-GATE — Phase 2 exit gate.** Find and cite the DynACof paper from Crossref, cite another record pasted or dropped in every supported interchange family, insert and edit a Zotero citation, close Zotero and disconnect the network, reopen the app, and export the same configured bibliography style. **Depends:** DM-P2-01 through DM-P2-08.
+
+### DM-P3 — Execution, figures, and tables
+
+- [ ] **DM-P3-01 — AST-based executable-cell extraction.** Extract executable fences and attributes without matching fences inside review payloads, raw regions, or literal examples. **Check:** adversarial Markdown fixtures prove correct extraction and stable cell IDs.
+- [ ] **DM-P3-02 — Runtime and kernel integration.** Discover Python, R, and Julia environments and Jupyter kernels independently, record health, never install or run anything on project open, and offer an explicit trust-gated setup/repair action for `ipykernel`, `IRkernel`, or `IJulia`. **Check:** mocked discovery covers every combination of present runtime, missing runtime, missing integration, failed startup, and healthy kernel.
+- [ ] **DM-P3-03 — Shared-kernel result contract.** Implement one normalized Jupyter result contract containing streams, errors, rich MIME metadata, artifacts, hashes, environment fingerprints, session generation, and execution sequence. **Check:** protocol and integration tests prove that same-language cells share state while different languages remain isolated.
+- [ ] **DM-P3-04 — Execution lifecycle and console.** Implement explicit run, run above, language run-all, interrupt, restart, terminate, fresh clean-run, setup-first execution, and the bottom console over the same kernels. **Check:** integration tests verify ordering, cancellation, restart invalidation, interactive dirty state, console-to-setup promotion, kernel isolation by language, and no implicit execution.
+- [ ] **DM-P3-05 — Output rendering and isolation.** Render supported image, HTML, Markdown, text, table, and error outputs; sanitize or isolate HTML from privileged APIs. **Check:** MIME fixtures include malicious HTML and prove it cannot access the desktop bridge.
+- [ ] **DM-P3-06 — Artifact materialization.** Write ordinary figure/table artifacts and idempotent output blocks without modifying author text outside reserved markers. **Check:** repeated materialization is byte-stable and missing declared artifacts fail clearly.
+- [ ] **DM-P3-07 — Freshness and provenance.** Track current, stale, running, failed, interrupted, and environment-changed states using code, input, environment, and artifact hashes. **Check:** edits invalidate the correct same-language suffix and clean run-all restores certification.
+- [ ] **DM-P3-08 — Missing runtime with retained output.** Keep existing images, tables, values, and MIME results visible when their runtime is absent; show quiet provenance, disable only execution, and distinguish current/stale from unavailable/missing output. **Check:** fixtures cover current+unavailable, stale+unavailable, missing-output+unavailable, and independent language availability.
+- [ ] **DM-P3-09 — Trust boundary.** Require explicit project trust before first execution and expose only typed execution commands to the UI. **Check:** opening an untrusted project cannot start a process, and browser collaborators have no execution capability.
+- [ ] **DM-P3-GATE — Phase 3 exit gate.** A clean restart reproduces at least one figure and table across Python, R, and Julia through selected shared Jupyter kernels; retained outputs remain readable when those runtimes are subsequently unavailable. **Depends:** DM-P3-01 through DM-P3-09.
+
+### DM-P4 — Comments and tracked suggestions
+
+- [ ] **DM-P4-01 — Comment threads.** Create range/point comments, replies, resolve/reopen/delete actions, attribution, and aligned review balloons. **Check:** persistence tests survive restart and moderate external edits.
+- [ ] **DM-P4-02 — Suggestion capture.** Convert grouped insertion, deletion, and replacement transactions into attributed proposal records without changing accepted base text. **Check:** typing, paste, delete, and replace scenarios create one deterministic proposal each.
+- [ ] **DM-P4-03 — Conflict graph.** Derive identical, nested, crossing, and alternative-range conflicts without storing a second source of truth. **Check:** interval fixtures enumerate the expected conflict components.
+- [ ] **DM-P4-04 — Atomic decisions.** Accept, reject, and rebase proposals exactly once; preserve intersecting work as Needs rebase or an explicit decision conflict. **Check:** concurrent and repeated-decision tests never silently discard or double-apply content.
+- [ ] **DM-P4-05 — Markup views and navigation.** Implement Simple Markup, All Markup, Original, Final, author filters, and next/previous change navigation. **Check:** visual and interaction tests verify the same underlying proposal set in every view.
+- [ ] **DM-P4-06 — Re-anchoring and unplaced queue.** Recover anchors using positions plus quote context and surface ambiguous/orphaned reviews for manual placement. **Check:** external-edit fixtures cover successful, ambiguous, and failed recovery.
+- [ ] **DM-P4-07 — Review export.** Generate Original, resolved Final, and a separate review report without leaking review structures into publication outputs. **Check:** golden exports assert the absence of every reserved `.dm-*` structure.
+- [ ] **DM-P4-GATE — Phase 4 exit gate.** Two authors' identical and crossing proposals survive restart and external edits; accepting one changes the base once and retains affected alternatives as Needs rebase. **Depends:** DM-P4-01 through DM-P4-07.
+
+### DM-P5 — Export, Git, and release hardening
+
+- [ ] **DM-P5-01 — Native HTML export.** Render the clean semantic projection with citations, equations, cross-references, figures, tables, and safe styling. **Check:** golden HTML fixtures pass structural and visual comparison.
+- [ ] **DM-P5-02 — PDF and DOCX export.** Produce browser-printed PDF and clean DOCX with actionable diagnostics; do not claim Word tracked-change round-trip. **Check:** rendered page inspection and document-structure tests cover a representative article.
+- [ ] **DM-P5-03 — Optional Pandoc/Quarto adapters.** Detect separately installed tools and pass only clean projected source; neither tool executes DraftMatter cells. **Check:** adapter tests prove review data and executable side effects cannot leak into the external call.
+- [ ] **DM-P5-04 — Git status and semantic diff.** Detect repositories, show file status, and provide rendered prose/review diffs plus source diffs. **Check:** repository fixtures cover modified, added, deleted, renamed, binary, and conflicted files.
+- [ ] **DM-P5-05 — Explicit checkpoints.** Stage selected files and create named local commits without automatic commits or destructive history operations. **Check:** integration tests inspect the resulting tree and commit while preserving unrelated changes.
+- [ ] **DM-P5-06 — Guarded branches and remotes.** Create/switch branches safely and fetch, pull, or push only after explicit user actions; surface conflicts without discarding work. **Check:** local bare-remote fixtures cover success, divergence, authentication failure, and merge conflict.
+- [ ] **DM-P5-07 — Performance and resilience.** Keep a 50–100 page manuscript responsive, recover from crashes, and handle destructive edge cases without data loss. **Check:** recorded performance budgets, stress tests, and crash-recovery scenarios meet documented thresholds.
+- [ ] **DM-P5-08 — Release compliance.** Generate third-party notices and an SBOM, enforce the licence allowlist, package supported platforms, and document runtime diagnostics. **Check:** CI fails on unknown/disallowed licences and validates signed/notarized artifacts where applicable.
+- [ ] **DM-P5-GATE — Local MVP release gate.** Dogfood an article-sized project end to end, export clean HTML/PDF/DOCX/Markdown, reopen it intact, and create an explicit Git checkpoint. All local acceptance criteria are checked. **Depends:** DM-P5-01 through DM-P5-08 and every earlier phase gate.
+
+### DM-P6 — Paid online collaboration beta
+
+- [ ] **DM-P6-01 — Browser-safe shared editor package.** Reuse the rendered editor/reviewer without filesystem, process, Git, or execution privileges. **Check:** capability tests prove privileged APIs are absent from browser builds.
+- [ ] **DM-P6-02 — Yjs synchronization.** Synchronize document structure, anchors, authors, proposals, threads, decisions, presence, and offline edits. **Check:** multi-client and reconnect tests converge deterministically without losing attribution.
+- [ ] **DM-P6-03 — Transactional review decisions.** Detect incompatible simultaneous accept/reject/rebase decisions using base revisions or state vectors. **Check:** offline concurrent-decision scenarios surface explicit conflicts rather than last-write-wins text.
+- [ ] **DM-P6-04 — Authenticated workspace service.** Implement roles, invitations, revocation, guest review, tenant isolation, rate limits, and activity audit. **Check:** authorization tests prove cross-tenant enumeration and access are impossible.
+- [ ] **DM-P6-05 — Durable and affordable operations.** Persist compact updates and snapshots, apply object-storage lifecycle policies, scale inactive infrastructure down, and verify backup/restore. **Check:** load/cost model, restore drill, retention/deletion test, and operational dashboards exist before charging users.
+- [ ] **DM-P6-06 — Deterministic local checkpoint.** Serialize live collaborative state into portable Markdown/review records and return it to the owner-controlled working tree without automatic Git actions. **Check:** two clients produce the same checkpoint bytes and the owner explicitly commits them.
+- [ ] **DM-P6-GATE — Collaboration beta gate.** Two editors create overlapping alternatives while one is offline, reconnect, explicitly resolve any decision conflict, retain attribution and threads, and create a deterministic owner-controlled checkpoint. Security, revocation, deletion, backup restoration, and monitoring checks pass. **Depends:** DM-P6-01 through DM-P6-06.
+
+### Global definition of done for a checked task
+
+A task may be checked only when all applicable statements are true:
+
+- behavior matches this brief and handles the named failure paths;
+- automated tests fail before the implementation and pass afterward, or a documented reason explains why automation is not practical;
+- type checking, unit/integration tests, and production build pass;
+- user-visible behavior has been exercised in the rendered app, including keyboard and accessibility impact where relevant;
+- persistence or projection changes include deterministic round-trip/golden coverage;
+- privileged operations remain typed, narrow, explicit, and non-destructive;
+- documentation and diagnostics are updated;
+- the change is committed with its task ID and no unrelated user changes.
+
+### Completion log
+
+Add one row for every checked task or acceptance criterion. Do not remove old evidence; if a regression invalidates it, uncheck the item and add a new row explaining why.
+
+| Task ID | Evidence (tests, fixture, or reproducible scenario) | Commit | Verified on |
+| --- | --- | --- | --- |
+| _None verified by this planning edit_ | — | — | — |
+
 ## Product thesis
 
 Researchers should be able to write a sentence, insert a formatted citation, run the code that produces the next figure, and respond to a coauthor’s proposed rewrite without changing applications or surrendering the manuscript to a proprietary file format.
@@ -78,6 +218,12 @@ Use the interaction vocabulary researchers already know from Word:
 - **Simple Markup**, **All Markup**, **Original**, and **Final** views;
 - next/previous change navigation.
 
+### 6. Keep the managed service affordable
+
+DraftMatter should keep recurring server costs low so the managed collaboration service can remain affordable. Prefer client-side computation, local caching, compact synchronization, object storage, and infrastructure that scales down when inactive. Server-side processing is appropriate when it materially improves security, reliability, collaboration, or user experience, but it should avoid unnecessary always-on compute, duplicate document processing, and excessive storage or bandwidth.
+
+This is a cost-conscious constraint rather than a client-only rule. Authentication, authorization, durable synchronization, backups, notifications, billing, and other shared trust or coordination responsibilities remain server-side where required. New server-side document-processing capabilities should have an explicit operational or product justification when the same outcome could reasonably be produced on the user's device.
+
 ## Product scope
 
 ### Open-source product and paid service
@@ -109,16 +255,24 @@ Basic local track changes should **not** be paid-only. It is a defining local ca
 
 ### Citations and bibliography
 
-- Attach one or more `.bib`, `.bibtex`, or CSL JSON files to a project.
+- Attach one or more `.bib`, `.bibtex`, CSL JSON, `.ris`, or EndNote `.enw` files to a project.
 - Search the connected Zotero desktop library through its local API.
+- Search Crossref from the same picker for works not yet present locally; show local, Zotero, and online results in clearly labelled groups.
+- Paste a DOI, DOI URL, BibTeX/BibLaTeX, CSL JSON, RIS/RefMan, or EndNote tagged export directly into the picker, or drop a supported citation file onto it.
+- Open a prefilled Google Scholar search as an explicit browser handoff, then accept Scholar's BibTeX/EndNote export through the same paste/drop path or find an item saved by Zotero Connector.
 - Insert a citation by typing `@` or using an **Insert citation** command.
 - Select several works, add page/section locators, suppress the author, and add prefix/suffix text.
 - Render citations and the bibliography in the selected CSL style in real time.
 - Hover/click a citation to see title, authors, year, DOI/URL, attachment link, and Zotero link.
+- Persist every accepted remote or pasted record into the portable project bibliography before writing its citekey into the manuscript; search previews remain transient.
 - Cache cited records locally so the manuscript remains readable when Zotero is closed.
 - Detect missing, duplicate, or renamed citation keys before export.
 
-Zotero’s desktop client exposes API v3 on `localhost:23119`, with similar resources to the web API, which makes a local-first integration practical. Zotero 8 also introduced native citation keys; Better BibTeX remains a valuable optional adapter for established key-generation and auto-export workflows. See the [Zotero API documentation](https://www.zotero.org/support/dev/web_api/v3/basics), [Zotero 8 history](https://www.zotero.org/support/8.0_changelog), and [Better BibTeX documentation](https://retorque.re/zotero-better-bibtex/).
+Crossref is the default remote search provider because its public REST API requires no account, supports bibliographic and structured field queries, and returns publisher-deposited metadata. When a selected result has a DOI, resolve the canonical record through `doi.org` content negotiation with `Accept: application/vnd.citationstyles.csl+json`; this also works across participating DOI registration agencies such as DataCite. OpenAlex is an optional secondary provider behind the same interface for broader discovery and citation relationships, but it must not be required for the local MVP or silently consume a paid quota. See the [Crossref REST API](https://www.crossref.org/documentation/retrieve-metadata/rest-api/), [Crossref DOI content negotiation](https://www.crossref.org/documentation/retrieve-metadata/content-negotiation/), and [OpenAlex API authentication and pricing](https://developers.openalex.org/api-reference/authentication).
+
+Do not scrape Google Scholar or treat it as an API. Google explicitly provides interactive citation exports but not bulk programmatic access. DraftMatter should open Scholar in the user's browser with a prefilled query and make the return path nearly frictionless through paste/drop and Zotero Connector. When an authoritative publisher page is available, prefer its metadata over Scholar's extracted metadata. See [Google Scholar search help](https://scholar.google.com/intl/us/scholar/help.html), [Zotero Connector](https://www.zotero.org/support/connector), and [Zotero guidance for adding items](https://www.zotero.org/support/adding_items_to_zotero).
+
+Zotero’s desktop client exposes API v3 on `localhost:23119`, with similar resources to the web API, which makes a local-first integration practical. Zotero 8 also introduced native citation keys; Better BibTeX remains a valuable optional adapter for established key-generation and auto-export workflows. See the [Zotero API documentation](https://www.zotero.org/support/dev/web_api/v3/basics), [Zotero 8 history](https://www.zotero.org/support/8.0_changelog), [Better BibTeX documentation](https://retorque.re/zotero-better-bibtex/), and [Better BibTeX automatic export](https://retorque.re/zotero-better-bibtex/preferences/automatic-export/).
 
 ### Word-like review
 
@@ -167,6 +321,8 @@ The paid workspace should provide:
 
 Use **Yjs** as the shared CRDT layer and its ProseMirror binding for live document changes. Use a self-hosted **Hocuspocus** WebSocket collaboration service, PostgreSQL for accounts/projects/metadata, and object storage for project snapshots and generated artifacts. Yjs and Hocuspocus are MIT licensed, and PostgreSQL uses its permissive PostgreSQL License; see [Yjs](https://github.com/yjs/yjs), [Hocuspocus](https://github.com/ueberdosis/hocuspocus), and the [PostgreSQL licence](https://www.postgresql.org/about/licence/).
 
+Keep this hosted path deliberately thin: editing, Markdown parsing and serialization, review projection, citation formatting, export preparation, CRDT merging, and offline caching should run in the client whenever practical. The service should focus on authenticated synchronization, authorization, durable updates and snapshots, workspace metadata, notifications, billing, backups, and operational safeguards. Optimize for compact incremental updates, lifecycle policies for inactive data, and infrastructure that can scale down; do not assume that short-lived serverless functions are cheaper than a small persistent service for long-lived WebSocket sessions.
+
 The live CRDT and Git serve different purposes:
 
 - Yjs is the low-latency shared editing state;
@@ -182,14 +338,14 @@ While a document is live, accepted content and anchor nodes live in the shared P
 - Insert an executable cell and choose Python, R, or Julia.
 - Show code in a compact, syntax-highlighted editor that can collapse to a one-line provenance bar.
 - Run cell, run cells above, run all cells of one language, interrupt, or restart a language session.
-- Choose interactive kernel execution or direct script/artifact execution per project/cell.
+- Run every cell through the project’s selected shared Jupyter kernel; users choose languages and environments, never an execution implementation.
 - Render images, SVG, HTML tables, Markdown, plain text, errors, and progress directly under the cell.
 - Promote an output to a semantic figure or table with caption, label, alt text, and cross-reference.
 - Save figures/tables as ordinary project artifacts and optionally materialize their references as normal Markdown or sanitized HTML.
 - Show a stale badge when code, inputs, environment, or an earlier same-language cell has changed.
 - Keep code visible to authors but allow a reading/review mode that shows only outputs and a small **View code** affordance.
 
-Python, R, and Julia use one DraftMatter execution abstraction with two implementations. Interactive mode uses the Jupyter messaging protocol and installed kernels: `ipykernel`, `IRkernel`, and `IJulia`. Direct mode runs `python`, `Rscript`, or `julia` and verifies explicitly declared output files. See the [Jupyter messaging specification](https://jupyter-client.readthedocs.io/en/latest/messaging.html), [IRkernel](https://irkernel.github.io/installation/), and [IJulia](https://github.com/JuliaLang/IJulia.jl).
+Python, R, and Julia each use one long-lived Jupyter kernel per open project: `ipykernel`, `IRkernel`, and `IJulia`. DraftMatter starts and owns those processes through the Jupyter messaging protocol without JupyterLab, Jupyter Notebook, a notebook document, or a notebook server. See the [Jupyter messaging specification](https://jupyter-client.readthedocs.io/en/latest/messaging.html), [IRkernel](https://irkernel.github.io/installation/), and [IJulia](https://github.com/JuliaLang/IJulia.jl).
 
 ### Export
 
@@ -229,9 +385,11 @@ MVP DOCX export does **not** promise native Word tracked changes or comment roun
 ### Cite while writing
 
 1. Type `@` in prose.
-2. Search local `.bib` sources and Zotero results in a single picker.
-3. Select one or more records, optionally enter a page locator, and confirm.
-4. The formatted citation appears immediately; its stable semantic data remains editable.
+2. Search local bibliography and Zotero results immediately; after a short debounce, add grouped Crossref results without replacing or reordering the local groups unexpectedly.
+3. If the work is not found, paste a DOI or exported citation, drop a citation file, or open a prefilled Google Scholar search and return through paste/drop or Zotero Connector.
+4. Preview the normalized metadata, resolve any duplicate/citekey warning, select one or more records, optionally enter a page locator, and confirm.
+5. DraftMatter atomically materializes newly acquired records in the configured project bibliography, updates the citation lock/cache, and inserts the citekeys.
+6. The formatted citation appears immediately; its stable semantic data and acquisition provenance remain editable and inspectable.
 
 ### Build a figure
 
@@ -444,35 +602,92 @@ Normalize all bibliography sources into an internal CSL-JSON-shaped record while
 
 ```text
 CitationRecord
-├── source: bib | zotero-local | zotero-web | better-bibtex
-├── source_id: path+key or Zotero library+item key
+├── source: bib | csl-json | ris | endnote | zotero-local | crossref | openalex
+├── source_id: path+key, Zotero library+item key, DOI, or provider work ID
 ├── citekey: stable key written to Markdown
 ├── version: source modification/library version
 ├── csl: normalized title/authors/date/container/DOI/etc.
+├── acquired_via: project | zotero | online-search | paste | drop
 └── aliases: previous keys and deduplication identifiers
 ```
 
 Important behaviors:
 
 - The Markdown citekey is human-readable and stable.
-- The Zotero item key remains the durable source identity.
+- DOI is the preferred durable identity for DOI-backed records; the Zotero item key or provider work ID remains the durable source identity otherwise.
 - A lock file maps citekey to source identity/version and detects renames.
 - DOI, ISBN, PMID, title, and creator/year matching can suggest duplicates but never merge automatically.
+- Merely displaying a search result never mutates the project. Accepting it creates one atomic acquisition transaction covering the project bibliography, lock/cache, and manuscript citation node.
+- Store the preferred writable acquisition target in project configuration. If several bibliographies are attached and none is selected, ask once which should receive acquired records; if none is writable/configured, create `references.bib` and add it to project/front-matter configuration through a visible, undoable project transaction before inserting the citation.
+- Stage bibliography and lock changes through temporary files plus a recoverable transaction record; use atomic replacement and idempotent recovery so a crash cannot leave a citekey pointing at an absent record.
 - Live formatting uses the same CSL style/locale as export.
 - A shared CSL processor supplies live/native rendering; optional Pandoc/Quarto export is tested against the same style, locale, and citation data.
 
+### Citation provider boundary
+
+Local files, Zotero, Crossref, and future providers implement one read-only search contract:
+
+```text
+search(query, limit, cancellation) -> CitationCandidate[]
+
+CitationCandidate
+├── provider + provider_id + provider_version
+├── title + creators + issued + container + type
+├── DOI/ISBN/PMID/URL when available
+├── provider_score + normalized local score
+└── incomplete_fields + provenance
+```
+
+The UI owns grouping and stable presentation order; providers do not write project state. Candidate acceptance passes through one normalizer and acquisition transaction, so searching Crossref, pasting BibTeX, and selecting a Zotero item produce the same internal record and portability guarantees.
+
+### Crossref query and ranking behavior
+
+Run Crossref requests through a narrowly scoped Tauri host command rather than arbitrary webview networking. Identify DraftMatter with a truthful `User-Agent` and application-maintainer `mailto` rather than silently exposing the user's email, debounce typing by roughly 300 ms, cancel superseded requests, cache normalized query results for the session, limit ordinary picker requests to approximately 20 records, and apply exponential backoff to HTTP 429/5xx responses. Never send manuscript prose or any data beyond the explicit citation query.
+
+Parse only high-confidence structure from the query:
+
+1. Recognize an exact DOI/DOI URL first and resolve it directly.
+2. Normalize whitespace, treat `et al.` as citation syntax rather than a search term, and extract an unambiguous four-digit publication year.
+3. For input shaped like `author et al. year title terms`, call Crossref with `query.author`, `query.title`, and a publication-year filter. Thus `vezy et al. 2020 DynACof` searches author `vezy`, title `DynACof`, and the 2020 publication interval.
+4. When that shape is not reliable, send the unchanged text through `query.bibliographic`; if a structured request returns no usable result, retry once with the bibliographic query.
+5. Rerank the returned candidates locally using normalized DOI equality, year equality, creator-family match, title token/phrase similarity, provider score, and completeness. Do not accept automatically: the user always chooses the work.
+
+The structured DynACof request is equivalent to:
+
+```text
+GET https://api.crossref.org/works
+    ?query.author=vezy
+    &query.title=DynACof
+    &filter=from-pub-date:2020-01-01,until-pub-date:2020-12-31
+    &rows=20
+    &select=DOI,title,author,published,container-title,type,URL,score
+    &mailto=<DraftMatter-maintainer-contact>
+```
+
+Crossref is the default and MVP-gating remote provider. Keep the provider interface capable of an optional OpenAlex fallback for broader/no-DOI discovery, but do not ship a shared secret, make OpenAlex availability a prerequisite, or mix its quota/error state with Crossref health.
+
+### Paste/drop citation box
+
+Place a persistent, keyboard-reachable intake box inside the citation picker with the prompt **Paste DOI, BibTeX, RIS/EndNote, or CSL JSON — or drop a citation file**. The entire picker may highlight as a drop target, but dropping must open a preview rather than immediately mutate the bibliography.
+
+Classify pasted or dropped content in this order:
+
+1. exact DOI or `doi.org` URL;
+2. CSL JSON object/array;
+3. BibTeX/BibLaTeX beginning with a valid `@type` entry;
+4. RIS/RefMan containing a `TY  -` record marker;
+5. EndNote tagged text containing a `%0` reference-type marker and `%A`/`%T` fields;
+6. supported file by extension and then content sniffing: `.bib`, `.bibtex`, `.json`, `.ris`, `.enw`, or plain text containing one of the above formats.
+
+For DOI input, resolve canonical CSL JSON online and retain the DOI text with an explicit retry action if resolution fails. For metadata-bearing input, parse completely offline. Show a preview for every detected record with title, creators, year, container, DOI/identifier, generated citekey, source format, warnings, and duplicate suggestions. Multi-record payloads support select all/none; malformed records do not prevent valid siblings from being selected. Preserve the original payload until the preview is accepted or dismissed, cap file size and record count with an explicit diagnostic, sanitize displayed text, and never execute or render imported HTML.
+
+The Scholar handoff is deliberately simple: open `https://scholar.google.com/scholar?q=<encoded explicit query>` in the system browser, explain **Cite → BibTeX/EndNote, then paste or drop here**, and provide **Refresh Zotero results** for users who saved through Zotero Connector. DraftMatter does not fetch or parse Scholar result pages.
+
 ## Execution model
 
-### Execution provider boundary
+### Execution normalization boundary
 
-Quarto is not part of the execution model. DraftMatter parses the Markdown AST, extracts executable fenced blocks into semantic code-cell nodes, sends their code to an execution provider, captures structured results, and renders/materializes those results itself.
-
-Support two providers behind one interface:
-
-1. **Kernel provider** — interactive, stateful execution through the Jupyter messaging protocol.
-2. **Script/artifact provider** — clean batch execution through `python`, `Rscript`, or `julia`, with declared output files and captured stdout/stderr.
-
-Both return the same normalized result contract: cell ID, execution status, stdout/stderr, errors, MIME bundle, artifact paths/hashes, environment fingerprint, timestamps, and provenance. Quarto/Pandoc exporters consume the resulting document like any other exporter and never execute cells themselves.
+Quarto is not part of the execution model. DraftMatter parses the Markdown AST, extracts executable fenced blocks into semantic code-cell nodes, sends their code directly to the selected language kernel, captures structured Jupyter results, and renders/materializes those results itself. The normalized result records cell ID, execution status, stdout/stderr, errors, MIME bundles, artifact paths/hashes, environment fingerprint, session generation, execution sequence, timestamps, and provenance. Quarto/Pandoc exporters consume the resulting clean document like any other exporter and never execute cells themselves.
 
 An executable fence can use a small DraftMatter-owned attribute vocabulary:
 
@@ -499,21 +714,31 @@ paper project
 
 Cells in the same language share state and execute in document order. Languages do not share memory. Cross-language handoff must use explicit files or artifacts in the project directory. This limitation should be visible, not hidden.
 
-The app may start kernels directly through `jupyter_client` or an equivalent protocol implementation; Jupyter Server and a notebook document are not required. The protocol already associates execution requests with stdout, stderr, errors, `display_data`, and rich MIME results. See the [Jupyter messaging specification](https://jupyter-client.readthedocs.io/en/latest/messaging.html).
+The desktop app bundles a native Rust Jupyter client (`jupyter-zmq-client` plus `jupyter-protocol`) and starts the selected kernelspec directly over signed ZeroMQ channels. It does not depend on Python to control R or Julia, and it does not require Jupyter Server or a notebook document. The protocol already associates execution requests with stdout, stderr, errors, `display_data`, updates, and rich MIME results. See the [Jupyter messaging specification](https://jupyter-client.readthedocs.io/en/latest/messaging.html).
 
-### Direct script/artifact topology
+### Setup cells and the shared kernel console
 
-For deterministic or minimal-dependency execution, cells declare artifacts and run through the selected language executable:
+A first-class setup cell uses an explicit `role="setup"` source attribute. In a fresh or restarted language session, setup cells run in document order before the requested ordinary cell. They may initialize packages, functions, data, models, and constants, but never materialize output or appear in HTML, PDF, or Word. Adding, editing, removing, or reordering setup state invalidates same-language downstream results.
 
-````markdown
-```julia {#fig-canopy .execute produces="figures/generated/canopy.svg"}
-using CairoMakie
-# build fig
-save("figures/generated/canopy.svg", fig)
+The lower application chrome opens a docked, vertically resizable kernel console. Its Python, R, and Julia tabs send multiline commands to exactly the same per-language sessions as document cells; there is no separate raw REPL or operating-system shell. The console shows lifecycle state, history, stdout/stderr, errors, and rich textual previews, with clear/interrupt/restart controls. Manual commands mark the session interactive. A clean run restarts the kernels and cannot reuse console history. A console command can be promoted into a setup cell so exploratory state becomes reproducible.
+
+### Published values in manuscript text
+
+DraftMatter injects a language-native helper into every new or restarted kernel. Only an explicit helper call publishes a manuscript scalar:
+
+```python
+publish("mean_height", mean_height, unit="cm", digits=1)
 ```
-````
 
-DraftMatter writes a temporary script or concatenates same-language cells in document order, sets the project working directory/environment, runs the executable, captures stdout/stderr and exit status, verifies declared outputs, and records their hashes. This provider does not attempt to infer figures from printed text: code must save declared files explicitly. Cross-language dependencies remain explicit files.
+```r
+publish("mean_height", mean_height, unit = "cm", digits = 1)
+```
+
+```julia
+@publish mean_height unit="cm" digits=1
+```
+
+The prose markup is language-independent: `{{mean_height}}`. The helper emits a DraftMatter MIME record containing the stable name, scalar value, optional unit and formatting, and run provenance. Retained records survive restart; duplicates are diagnostic; missing or stale values remain visibly unavailable and can block a freshness-required export. Exports contain only the rendered value, never computation source or helper instructions. Console publications are previews only and never satisfy manuscript freshness.
 
 ### Execution states
 
@@ -536,7 +761,7 @@ Perfect dependency inference is not credible for arbitrary Python, R, or Julia. 
 
 - editing a cell marks it and all following cells in the same language stale;
 - changing the selected environment marks all cells for that language stale;
-- **Run all** restarts kernels or launches fresh batch scripts and executes cells top-to-bottom by default;
+- **Run all** restarts the relevant kernels, runs setup cells first, and executes ordinary cells top-to-bottom by default;
 - cached output is a preview optimization, never proof of reproducibility;
 - a clean-run badge is granted only after a successful fresh-environment run-all cycle;
 - users may declare input files to strengthen cache invalidation.
@@ -545,7 +770,7 @@ A future DAG mode can require explicit inputs/outputs and compute stronger cache
 
 ### Outputs
 
-Store normalized result metadata; preserve original Jupyter MIME bundles when the kernel provider is used and file-backed payloads/artifacts for both providers. MVP renderers:
+Store normalized result metadata, preserve original Jupyter MIME bundles, and retain file-backed payloads/artifacts. MVP renderers:
 
 - `image/png`, `image/jpeg`, and `image/svg+xml`;
 - `text/html` through a sanitizer and restricted iframe when needed;
@@ -572,11 +797,25 @@ Generated regions are replaced idempotently by cell ID; author text outside the 
 
 Do not permit arbitrary output HTML to access the privileged desktop bridge.
 
+### Missing runtimes and retained outputs
+
+Python, R, and Julia availability is independent for each language and is also independent from whether a previously generated output can be displayed. If a required runtime, kernel, executable, or selected environment is unavailable, DraftMatter must continue to render every valid materialized figure, table, value, and cached MIME result already present in the project. Runtime discovery must never replace or hide a readable output.
+
+For authors, show a quiet provenance message next to the output or in the collapsed code-cell bar, for example **Python unavailable — showing output generated 12 June 2026**. The message should include the last successful environment, timestamp, and artifact or run hash when known. Disable execution actions for that language and provide copyable setup or environment-selection guidance when the user asks to run the cell. In reading and review modes, reduce this diagnostic to a subtle information indicator so it does not compete with the manuscript.
+
+Runtime availability and output freshness are orthogonal states:
+
+- **Current + runtime unavailable** means the recorded output is current but cannot presently be regenerated.
+- **Stale + runtime unavailable** means the existing output remains visible but may not reflect the current code or inputs.
+- **Output missing + runtime unavailable** shows an explicit placeholder explaining that no generated artifact is available; it must not fabricate, silently omit, or imply a successful result.
+
+Opening a project never installs a runtime, mutates an environment, or runs code. Missing-runtime diagnostics are informational until the user explicitly chooses an environment or installation workflow.
+
 ### Trust and safety
 
 Opening a project never runs code. Before the first execution, show a clear trust dialog explaining that code has the user’s filesystem and network permissions. Provide interrupt, restart, and terminate controls. A local kernel is **not a security sandbox**.
 
-Cloud/container execution, filesystem allowlists, CPU/memory quotas, and untrusted review attachments belong to a later execution provider interface.
+Cloud/container execution, filesystem allowlists, CPU/memory quotas, and untrusted review attachments belong to a later isolated service boundary and do not add another local execution path.
 
 ## Core architecture
 
@@ -590,11 +829,9 @@ flowchart LR
     REVFILES["Review persistence<br/>embedded section + optional archive"]
     CITE["Citation service<br/>CSL records + locks"]
     SOURCES["BibTeX + Zotero local API"]
-    EXEC["Execution manager<br/>providers + normalized results"]
-    JUP["Jupyter kernel provider<br/>no server required"]
+    EXEC["Shared-kernel manager<br/>sessions + normalized results"]
+    JUP["Jupyter messaging client<br/>no server required"]
     KERNELS["Python / R / Julia kernels"]
-    SCRIPT["Script/artifact provider"]
-    RUNTIMES["python / Rscript / julia"]
     ARTIFACTS["Generated artifacts<br/>figures, tables, manifests"]
     PROJECT["Review projector<br/>Original / Final clean source"]
     EXPORT["Pluggable export<br/>native HTML/PDF + optional Pandoc/Quarto"]
@@ -617,8 +854,6 @@ flowchart LR
     DOC <--> EXEC
     EXEC <--> JUP
     JUP <--> KERNELS
-    EXEC <--> SCRIPT
-    SCRIPT <--> RUNTIMES
     EXEC <--> ARTIFACTS
     ARTIFACTS --> DOC
     MD --> PROJECT
@@ -640,14 +875,14 @@ flowchart LR
 
 1. **Webview UI process** — rich editor, review decorations, citation picker, code-cell UI, rendered outputs.
 2. **Tauri/Rust host** — safe filesystem access, file watching, process lifecycle, project configuration, secrets, export commands, and desktop integration.
-3. **Local execution broker** — extracts semantic cells, selects the Jupyter-kernel or direct-script provider, manages processes, and normalizes MIME results/artifacts.
-4. **Language runtimes** — user-selected Python, R, and Julia kernels or direct executables.
+3. **Local shared-kernel manager** — extracts semantic cells, owns one Jupyter session per configured language, routes messages, injects publishing helpers, and normalizes MIME results/artifacts.
+4. **Language runtimes** — user-selected Python, R, and Julia environments exposed through `ipykernel`, `IRkernel`, or `IJulia`.
 5. **Git adapter** — narrowly scoped status, diff, stage, commit, branch, fetch, pull, and push operations against the user’s separately installed Git executable.
 6. **Review pre-render projector** — parses DraftMatter anchors/records, validates overlap choices and audit state, then emits clean Original or resolved Final source before code extraction or any renderer.
 7. **Export adapters** — native HTML, browser-printed PDF, DOCX adapter, and optional Quarto/Pandoc compatibility backends.
 8. **Paid collaboration service** — authenticated WebSocket synchronization, roles, durable CRDT updates, snapshots, project metadata, and a browser editor/reviewer.
 
-The UI must never receive a generic “run any shell command” capability. Expose narrowly scoped host commands such as `open_project`, `save_document`, `list_kernels`, `run_cell`, `interrupt_kernel`, `render_document`, `git_status`, and `git_create_commit`. Remote collaboration must not expand the browser’s filesystem or process privileges.
+The UI must never receive a generic “run any shell command” or unrestricted HTTP capability. Expose narrowly scoped host commands such as `open_project`, `save_document`, `search_crossref`, `resolve_doi_metadata`, `open_scholar_search`, `list_kernels`, `run_cell`, `interrupt_kernel`, `render_document`, `git_status`, and `git_create_commit`. Permit citation commands to contact only configured scholarly-provider/DOI hosts, redact secrets from logs, and return typed size-limited responses. Remote collaboration must not expand the browser’s filesystem, process, or network privileges.
 
 ## Recommended technology stack
 
@@ -661,8 +896,8 @@ The UI must never receive a generic “run any shell command” capability. Expo
 | Review engine | Custom ProseMirror transaction/decorations plugin + interval/conflict graph | Own multi-author overlap, rebasing, and atomic decision semantics. |
 | Review persistence | DraftMatter Review Markup using attributed empty spans and hidden fenced divs | Keeps anchors, authors, proposals, threads, and decisions inside Git-readable `.md`/`.qmd`. |
 | Markdown bridge | Milkdown/Remark plugins, DraftMatter review parser/projector, and custom Pandoc/Quarto nodes | Deterministic serialization, clean export projections, and raw-node preservation. |
-| Citations | Zotero API v3 + BibTeX parser + CSL JSON cache + permissively licensed CSL processor | Local-first Zotero access and standards-compatible native/optional export. |
-| Execution | Provider-based local broker: Jupyter kernels plus direct script/artifact runners | Rich interactive capture and reproducible file-based execution without Quarto. |
+| Citations | Zotero API v3 + Crossref REST/DOI content negotiation + BibTeX/BibLaTeX, CSL JSON, RIS/RefMan, and EndNote tagged-text parsers + CSL JSON cache + permissively licensed CSL processor | One local/online picker, portable paste/drop acquisition, stable provenance, and standards-compatible native/optional export without scraping Scholar. |
+| Execution | App-owned Jupyter messaging client with one shared kernel per language/project | Stateful authoring, clean setup-first reproduction, rich MIME capture, and no notebook server or Quarto runtime. |
 | Output contract | Jupyter-style MIME bundles + file artifacts + per-cell run manifests | One normalized representation for Python, R, Julia, live rendering, caching, and export. |
 | Native export | App-owned Markdown/HTML renderer + browser-printed PDF | Makes HTML/PDF and executable figures independent of Quarto/Pandoc. |
 | Optional export | Pandoc/Quarto and dedicated DOCX adapters | Compatibility and journal workflows without making them runtime dependencies. |
@@ -685,9 +920,10 @@ For the developer preview, require existing installations and provide diagnostic
 - optional Quarto/Pandoc detected or missing;
 - Zotero running/local API disabled;
 - available Jupyter kernels;
-- selected Python/R/Julia kernel and direct-executable health.
+- selected Python/R/Julia environment and kernel-integration health;
+- retained-output availability for every cell whose runtime is missing, including the last successful run timestamp and artifact hash.
 
-For a public MVP, bundle the app host and execution broker, but do not silently install research language packages. Offer an environment chooser and copyable setup instructions. Later, add explicit managed-environment creation as a separate workflow.
+For a public MVP, bundle the app host plus the Jupyter client/messaging support required on every operating system. Do not bundle or silently install research-language runtimes or user dependencies. Offer an environment chooser that remembers the environment name/path per project; when confirmed by the user, install or repair only `ipykernel`, `IRkernel`, or `IJulia` and manage the kernelspec internally. Distinguish a missing runtime, missing integration, failed startup, and missing user dependency. Later, add explicit managed-environment creation as a separate workflow.
 
 For collaboration, deploy the WebSocket service, API, database, and object storage independently of the desktop release. Use short-lived collaboration tokens, encryption in transit, encrypted storage, routine backups, tenant-scoped authorization checks, rate limits, and an audit log. Authentication and billing vendors carry commercial terms and privacy/data-processing obligations even when their SDKs are permissively licensed; choose them during the paid-beta security review.
 
@@ -752,7 +988,7 @@ The working project licence is MIT. Every public source distribution should incl
 | Git | GPLv2 | Use the separately installed system executable initially. If bundled, comply with GPL distribution duties. [Source](https://git-scm.com/about) |
 | Zotero Desktop | AGPLv3 | Consume its public local API; do not copy, embed, or modify Zotero code/assets in DraftMatter without AGPL review. Hosting or modifying AGPL code can trigger source obligations. [Source](https://raw.githubusercontent.com/zotero/zotero/master/COPYING) |
 | Better BibTeX | MIT | Optional supported integration is acceptable; preserve notices if code is distributed. [Source](https://github.com/retorquere/zotero-better-bibtex) |
-| `jupyter_client` | BSD-3-Clause | **Use** in the execution broker; preserve notices. [Source](https://github.com/jupyter/jupyter_client) |
+| `jupyter-zmq-client` / `jupyter-protocol` | BSD-3-Clause | **Use** as the bundled native kernel client and typed messaging contract; preserve notices and audit the pure-Rust ZeroMQ dependency tree. [Source](https://github.com/runtimed/runtimed) |
 | IJulia | MIT | **Use** as an external/user-environment kernel; preserve notices if bundled. [Source](https://github.com/JuliaLang/IJulia.jl) |
 | IRkernel | Repository contains MIT terms but automated classification is inconsistent | Inspect the exact pinned release and its dependency tree before distribution rather than relying on a registry label. [Source](https://github.com/IRkernel/IRkernel) |
 | CSL style repository | CC BY-SA 3.0 | If styles are redistributed, retain creator/contributor metadata, attribute and link the CSL project, and satisfy share-alike. Prefer on-demand caching or a deliberately curated, fully attributed bundle. [Source](https://github.com/citation-style-language/styles) |
@@ -801,6 +1037,8 @@ This is only a collision screen from public web results, not legal advice or tra
 
 ## MVP roadmap
 
+This roadmap provides scheduling context and additional detail. Implementation status is tracked only in the **Agent-executable implementation contract** above.
+
 ### Phase 0 — de-risk the format and editor (weeks 1–2)
 
 Deliver one technical spike, not a broad UI:
@@ -827,26 +1065,30 @@ Exit test: a researcher can write and reopen a short structured article without 
 
 ### Phase 2 — citations (weeks 6–7)
 
-- BibTeX/CSL ingestion and normalized citation store.
+- BibTeX/BibLaTeX, CSL JSON, RIS/RefMan, and EndNote tagged-text ingestion and normalized citation store.
 - Zotero local API discovery/search and offline cache.
-- Citation picker, locators, multi-cite editing, formatted bibliography.
+- Debounced Crossref search with structured citation-query parsing, DOI-to-CSL resolution, typed host networking, and provider failure handling.
+- Citation picker with grouped project/Zotero/online results, persistent paste/drop intake, Google Scholar browser handoff, locators, multi-cite editing, and formatted bibliography.
+- Atomic materialization of accepted remote/pasted records into the configured portable bibliography plus citation lock/cache.
 - Citation lock and missing/duplicate diagnostics.
 - Pandoc/Quarto citation export verification.
 
-Exit test: insert and edit Zotero and BibTeX citations, close Zotero, reopen the app, and export the same bibliography style.
+Exit test: use `vezy et al. 2020 DynACof` to find and cite DOI `10.1016/j.envsoft.2019.104609`; cite records from pasted DOI, BibTeX, CSL JSON, RIS, and EndNote tagged text plus a dropped citation file; complete the Scholar-export handoff; insert and edit a Zotero citation; then close Zotero, disconnect the network, reopen the app, and export the same bibliography style and records.
 
 ### Phase 3 — execution and figures (weeks 8–11)
 
 - Markdown-AST code-cell extraction and stable cell IDs.
-- Kernel/direct-executable discovery and per-language environment selection.
-- Python, R, and Julia kernel lifecycle plus direct script/artifact runners.
-- Run/interrupt/restart/run-all.
+- Python, R, and Julia environment/kernel discovery, selection, and explicit integration setup.
+- One persistent Jupyter session per configured language and project.
+- Run/interrupt/restart/run-all plus setup-first clean execution.
+- First-class setup cells and the bottom shared-kernel console.
+- Native published scalar values resolved through `{{name}}` markup.
 - Normalized MIME/output contract, artifact store, and per-cell run manifests.
 - Idempotent Markdown/HTML materialization between reserved output markers.
 - Figure/table promotion, captions, labels, alt text, cross-references.
 - stale/current/clean-run state and run manifest.
 
-Exit test: a project containing one figure and table across Python, R, and Julia runs without Quarto, renders outputs inline, writes ordinary project artifacts, materializes portable Markdown/HTML references, and reproduces them after a clean restart. At least one fixture uses direct script/artifact mode.
+Exit test: a project containing setup, published-value, figure, and table cells across Python, R, and Julia runs without Quarto or a notebook server, shares same-language state, renders outputs inline, writes ordinary project artifacts, materializes portable Markdown/HTML references, and reproduces them after a clean restart that ignores console history.
 
 ### Phase 4 — comments and tracked suggestions (weeks 12–15)
 
@@ -893,30 +1135,32 @@ Exit test: two editors create overlapping alternatives while one is offline, rec
 
 The first release is successful if all of the following are true:
 
-- The default writing surface is rendered and editable; ordinary users never need Markdown syntax.
-- A `.md`/`.qmd` project remains renderable through the open-source DraftMatter projector/native HTML pipeline; optional Quarto/Pandoc compatibility remains available.
-- BibTeX and Zotero citations insert through one picker and render in a chosen CSL style.
-- Python, R, and Julia cells can each produce inline figures/tables and ordinary disk artifacts without Quarto, through installed Jupyter kernels or direct executables.
-- Generated figures and tables can be materialized as idempotent normal Markdown/HTML output blocks without rewriting surrounding author text.
-- The app shows current/stale/failed execution state and can clean-run the manuscript.
-- Comments and attributed suggestions render like document review markup and survive restart.
-- Open proposals serialize deterministically as independent anchors plus documented in-file records; accept/reject resolves them exactly once and records the decision.
-- Two authors can create identical, nested, or crossing proposals without corrupting either proposal or the accepted base.
-- Accepting one overlapping alternative preserves intersecting work as **Needs rebase** or a decision conflict; it never silently discards it.
-- Original/resolved-Final HTML, PDF, DOCX, and clean Markdown exports contain no `.dm-anchor` spans or `.draftmatter-reviews` data section.
-- Opening a project never executes code.
-- Unsupported Markdown is preserved or explicitly flagged, never silently lost.
-- Existing repositories are detected; users can inspect a rendered/source diff and create an explicit local Git checkpoint without using a terminal.
-- Git fetch/pull/push never happens silently, and conflicts never discard local work.
+- [ ] **AC-L01 — Rendered writing.** The default writing surface is rendered and editable; ordinary users never need Markdown syntax.
+- [ ] **AC-L02 — Portable project.** A `.md`/`.qmd` project remains renderable through the open-source DraftMatter projector/native HTML pipeline; optional Quarto/Pandoc compatibility remains available.
+- [ ] **AC-L03 — Citations.** Project bibliography, Zotero, and Crossref results insert through one picker and render in a chosen CSL style; DOI, BibTeX/BibLaTeX, CSL JSON, RIS/RefMan, and EndNote tagged-text paste/drop plus the Google Scholar export handoff materialize portable, deduplicated project records before citation insertion.
+- [ ] **AC-L04 — Multi-language execution.** Python, R, and Julia cells can each produce inline figures/tables, explicitly published manuscript values, and ordinary disk artifacts without Quarto or a notebook server, through selected shared Jupyter kernels.
+- [ ] **AC-L05 — Materialized outputs.** Generated figures and tables can be materialized as idempotent normal Markdown/HTML output blocks without rewriting surrounding author text.
+- [ ] **AC-L06 — Execution state.** The app shows current/stale/failed execution state and can clean-run the manuscript.
+- [ ] **AC-L07 — Retained outputs.** If Python, R, Julia, a kernel, or a selected environment is unavailable, previously generated figures, tables, and values remain visible with a quiet **runtime unavailable — showing last generated output** provenance message.
+- [ ] **AC-L08 — Orthogonal availability and freshness.** A stale retained output stays visible, while a missing output shows an explicit placeholder and is never presented as a successful result.
+- [ ] **AC-L09 — Persistent review UI.** Comments and attributed suggestions render like document review markup and survive restart.
+- [ ] **AC-L10 — Deterministic review persistence.** Open proposals serialize deterministically as independent anchors plus documented in-file records; accept/reject resolves them exactly once and records the decision.
+- [ ] **AC-L11 — Overlapping proposals.** Two authors can create identical, nested, or crossing proposals without corrupting either proposal or the accepted base.
+- [ ] **AC-L12 — Safe overlap decisions.** Accepting one overlapping alternative preserves intersecting work as **Needs rebase** or a decision conflict; it never silently discards it.
+- [ ] **AC-L13 — Clean exports.** Original/resolved-Final HTML, PDF, DOCX, and clean Markdown exports contain no `.dm-anchor` spans or `.draftmatter-reviews` data section.
+- [ ] **AC-L14 — No implicit execution.** Opening a project never executes code.
+- [ ] **AC-L15 — Unknown-syntax safety.** Unsupported Markdown is preserved or explicitly flagged, never silently lost.
+- [ ] **AC-L16 — Local Git checkpoints.** Existing repositories are detected; users can inspect a rendered/source diff and create an explicit local Git checkpoint without using a terminal.
+- [ ] **AC-L17 — Non-destructive remotes.** Git fetch/pull/push never happens silently, and conflicts never discard local work.
 
 The paid collaboration beta adds these acceptance criteria:
 
-- Invited users can co-edit, comment, and suggest changes in real time from desktop or browser according to their roles.
-- Offline/reconnecting edits converge without losing review attribution.
-- Overlapping online alternatives remain independently reviewable, and incompatible simultaneous decisions surface as conflicts rather than silently overwriting text.
-- A live project can be serialized into deterministic portable review anchors/records plus its decision audit, then committed to Git explicitly.
-- Browser collaborators cannot execute project code or access a desktop author’s filesystem.
-- Tenant isolation, revocation, recovery history, deletion, backup restoration, and basic service monitoring are tested before charging customers.
+- [ ] **AC-C01 — Role-aware collaboration.** Invited users can co-edit, comment, and suggest changes in real time from desktop or browser according to their roles.
+- [ ] **AC-C02 — Offline convergence.** Offline/reconnecting edits converge without losing review attribution.
+- [ ] **AC-C03 — Concurrent review safety.** Overlapping online alternatives remain independently reviewable, and incompatible simultaneous decisions surface as conflicts rather than silently overwriting text.
+- [ ] **AC-C04 — Portable collaboration checkpoint.** A live project can be serialized into deterministic portable review anchors/records plus its decision audit, then committed to Git explicitly.
+- [ ] **AC-C05 — Browser privilege boundary.** Browser collaborators cannot execute project code or access a desktop author’s filesystem.
+- [ ] **AC-C06 — Service readiness.** Tenant isolation, revocation, recovery history, deletion, backup restoration, and basic service monitoring are tested before charging customers.
 
 ## Principal risks and mitigations
 
@@ -973,7 +1217,14 @@ Do not begin with kernel installation, the collaboration backend, or full export
 - [IJulia](https://github.com/JuliaLang/IJulia.jl)
 - [IRkernel installation](https://irkernel.github.io/installation/)
 - [Zotero Web/Local API v3](https://www.zotero.org/support/dev/web_api/v3/basics)
+- [Zotero Connector](https://www.zotero.org/support/connector)
+- [Zotero guidance for adding items](https://www.zotero.org/support/adding_items_to_zotero)
 - [Better BibTeX](https://retorque.re/zotero-better-bibtex/)
+- [Better BibTeX automatic export](https://retorque.re/zotero-better-bibtex/preferences/automatic-export/)
+- [Crossref REST API](https://www.crossref.org/documentation/retrieve-metadata/rest-api/)
+- [Crossref DOI content negotiation](https://www.crossref.org/documentation/retrieve-metadata/content-negotiation/)
+- [OpenAlex API authentication and pricing](https://developers.openalex.org/api-reference/authentication)
+- [Google Scholar search and citation-export help](https://scholar.google.com/intl/us/scholar/help.html)
 - [Quarto citations](https://quarto.org/docs/authoring/citations.html)
 - [Quarto Divs and Spans](https://quarto.org/docs/authoring/markdown-basics.html#divs-and-spans)
 - [Quarto computation caching](https://quarto.org/docs/computations/caching.html)

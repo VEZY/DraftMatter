@@ -17,6 +17,7 @@ mod export_adapter;
 mod git_adapter;
 mod julia_tools;
 mod jupyter_execution;
+mod jupyter_publishing;
 use execution_artifacts::{
     fingerprint_execution_inputs_impl, inspect_execution_artifacts_impl,
     ExecutionArtifactFingerprint, ExecutionInput,
@@ -90,6 +91,7 @@ pub struct ProjectConfig {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+#[serde(deny_unknown_fields)]
 pub struct ProjectExecutionLanguagePreferences {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kernel: Option<String>,

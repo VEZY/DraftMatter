@@ -48,10 +48,10 @@ export interface PublishedValuesFromExecution {
 
 const nameSource = '[A-Za-z][A-Za-z0-9_.:-]{0,127}'
 const namePattern = new RegExp(`^${nameSource}$`)
-const markupPattern = new RegExp(`\\{\\{((?!dm:value:)${nameSource})\\}\\}`, 'g')
+const markupPattern = new RegExp(`\\{\\{((?!dm:)${nameSource})\\}\\}`, 'g')
 
 export function isPublishedValueName(value: string) {
-  return namePattern.test(value) && !value.startsWith('dm:value:')
+  return namePattern.test(value) && !value.startsWith('dm:')
 }
 
 function diagnostic(code: string, message: string): PublishedValueDiagnostic {
@@ -223,4 +223,8 @@ export function replacePublishedValueMarkup(source: string, values: Record<strin
 export function publishedValueMarkup(name: string) {
   if (!isPublishedValueName(name)) throw new Error('Published value names must start with a letter and use only letters, numbers, dots, colons, underscores, or hyphens.')
   return `{{${name}}}`
+}
+
+export function publishedValueNamesInMarkup(source: string) {
+  return [...new Set([...source.matchAll(markupPattern)].map((match) => match[1]))]
 }
