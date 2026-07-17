@@ -39,7 +39,7 @@ import { ExecutionOutputView } from './ExecutionOutputView'
 import { materializeExecutionOutput } from './outputMaterializer'
 import { buildExecutionAvailability, parseRetainedOutputs } from './retainedOutputs'
 import { RuntimeProvenance } from './RuntimeProvenance'
-import { discoverRuntimeInventory, healthyKernelsFor, type JupyterKernelProbe, type RuntimeInventory, type RuntimeLanguage } from './runtimeDiscovery'
+import { discoverRuntimeInventory, healthyKernelsFor, runtimeExecutableForKernelSetup, type JupyterKernelProbe, type RuntimeInventory, type RuntimeLanguage } from './runtimeDiscovery'
 import { PortableReviewItems } from './PortableReviewItems'
 import { AlignedReviewRail } from './AlignedReviewRail'
 import { GitHistoryPanel } from './GitHistoryPanel'
@@ -1309,6 +1309,11 @@ function App() {
   const selectedEnvironmentKernels = runtimeInventory ? healthyKernelsFor(runtimeInventory, selectedEnvironmentLanguage) : []
   const selectedEnvironmentKernel = selectedKernelForLanguage(selectedEnvironmentLanguage)
   const selectedEnvironmentRuntime = runtimeInventory?.executables[selectedEnvironmentLanguage]
+  const selectedEnvironmentSetupExecutable = runtimeExecutableForKernelSetup(
+    selectedEnvironmentKernel,
+    selectedEnvironmentPaths[selectedEnvironmentLanguage],
+    selectedEnvironmentRuntime,
+  )
   const unavailableSelectedKernelName = selectedKernelNames[selectedEnvironmentLanguage] && !selectedEnvironmentKernel
     ? selectedKernelNames[selectedEnvironmentLanguage]
     : undefined
@@ -1816,7 +1821,11 @@ function App() {
     setKernelSetupBusy(true)
     setExecutionProblem('')
     try {
-      const environment = selectedKernelForLanguage(language)?.executable ?? runtimeInventory?.executables[language]?.executable
+      const environment = runtimeExecutableForKernelSetup(
+        selectedKernelForLanguage(language),
+        selectedEnvironmentPaths[language],
+        runtimeInventory?.executables[language],
+      )
       const setup = await desktopHost.setupKernelIntegration(session.root, language, environment)
       const inventory = await discoverRuntimeInventory(desktopHost)
       if (desktopSessionRef.current?.root !== session.root) return
@@ -1854,7 +1863,12 @@ function App() {
     const runtime = runtimeInventory?.executables[language]
     if (!session) return
     setSelectedEnvironmentLanguage(language)
-    if (runtime?.health !== 'available') {
+    const environment = runtimeExecutableForKernelSetup(
+      selectedKernelForLanguage(language),
+      selectedEnvironmentPaths[language],
+      runtime,
+    )
+    if (!environment) {
       setExecutionProblem(`${runtimeName(language)} itself is missing. Install the runtime for your operating system, then choose Detect again; DraftMatter installs only the kernel integration package.`)
       return
     }
@@ -4593,10 +4607,10 @@ function App() {
                     : runtimeInventory ? `${selectedEnvironmentKernels.length} ready ${runtimeName(selectedEnvironmentLanguage)} environment${selectedEnvironmentKernels.length === 1 ? '' : 's'}` : 'Check local environments to choose one'}</span>
               </label>
             </div>
-            {selectedEnvironmentRuntime?.health === 'missing' && <div className="execution-environment-help" role="status">{runtimeInstallationGuidance(selectedEnvironmentLanguage)}</div>}
+            {!selectedEnvironmentSetupExecutable && selectedEnvironmentRuntime?.health === 'missing' && <div className="execution-environment-help" role="status">{runtimeInstallationGuidance(selectedEnvironmentLanguage)}</div>}
             {executionProblem && <div className="execution-environment-help" role="alert">{executionProblem}</div>}
             <div className="execution-dialog-actions environment-actions">
-              {selectedEnvironmentRuntime?.health === 'available' && <button onClick={() => void requestKernelIntegrationSetup(selectedEnvironmentLanguage)} disabled={kernelSetupBusy || runtimeDiscoveryState === 'discovering'}>{kernelSetupBusy && kernelSetupLanguage === selectedEnvironmentLanguage ? 'Setting up…' : selectedEnvironmentKernel ? 'Repair integration' : `Set up ${runtimeName(selectedEnvironmentLanguage)}`}</button>}
+              {selectedEnvironmentSetupExecutable && <button onClick={() => void requestKernelIntegrationSetup(selectedEnvironmentLanguage)} disabled={kernelSetupBusy || runtimeDiscoveryState === 'discovering'}>{kernelSetupBusy && kernelSetupLanguage === selectedEnvironmentLanguage ? 'Setting up…' : selectedEnvironmentKernel ? 'Repair integration' : `Set up ${runtimeName(selectedEnvironmentLanguage)}`}</button>}
               <button onClick={() => void restartExecution(selectedEnvironmentLanguage)} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}>Restart {runtimeName(selectedEnvironmentLanguage)}</button>
               <button onClick={() => void terminateExecution(selectedEnvironmentLanguage)} disabled={!desktopSession}>Terminate {runtimeName(selectedEnvironmentLanguage)}</button>
               <span />

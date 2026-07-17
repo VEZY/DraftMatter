@@ -80,3 +80,11 @@ export function createRuntimeDiscovery(probe: RuntimeDiscoveryProbe, clock?: () 
 export function healthyKernelsFor(inventory: RuntimeInventory, language: RuntimeLanguage) {
   return inventory.jupyter.kernels.filter((kernel) => kernel.language === language && kernel.health === 'available')
 }
+
+export function runtimeExecutableForKernelSetup(
+  kernel: JupyterKernelProbe | undefined,
+  savedEnvironment: string | undefined,
+  runtime: RuntimeExecutableProbe | undefined,
+) {
+  return kernel?.executable ?? savedEnvironment ?? (runtime?.health === 'available' ? runtime.executable : undefined)
+}

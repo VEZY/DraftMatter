@@ -3,6 +3,7 @@ import {
   createRuntimeDiscovery,
   discoverRuntimeInventory,
   healthyKernelsFor,
+  runtimeExecutableForKernelSetup,
   type JupyterKernelInventory,
   type RuntimeDiscoveryProbe,
   type RuntimeHealth,
@@ -93,5 +94,16 @@ describe('runtime discovery', () => {
     })
 
     expect(healthyKernelsFor(inventory, 'python').map((kernel) => kernel.name)).toEqual(['py'])
+  })
+
+  it('repairs the selected or saved environment before considering a PATH runtime', () => {
+    const runtime = { language: 'python' as const, health: 'available' as const, executable: '/usr/bin/python' }
+    expect(runtimeExecutableForKernelSetup(
+      { name: 'research', displayName: 'Research', language: 'python', health: 'available', resourceDir: '/kernels/research', executable: '/envs/research/bin/python' },
+      '/envs/saved/bin/python',
+      runtime,
+    )).toBe('/envs/research/bin/python')
+    expect(runtimeExecutableForKernelSetup(undefined, '/envs/saved/bin/python', runtime)).toBe('/envs/saved/bin/python')
+    expect(runtimeExecutableForKernelSetup(undefined, undefined, runtime)).toBe('/usr/bin/python')
   })
 })

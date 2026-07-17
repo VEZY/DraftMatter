@@ -24,7 +24,7 @@ The implementation tree was last audited on 2026-07-16 from a clean
 ### Shared Jupyter-kernel audit
 
 The Jupyter-only execution and published-value work was audited on 2026-07-17.
-`npm run check` passed; `npm test` passed 117 files / 570 tests; and
+`npm run check` passed; `npm test` passed 117 files / 571 tests; and
 `cargo test --manifest-path src-tauri/Cargo.toml --no-fail-fast` passed 65 native
 host tests. An explicit temporary `ipykernel` integration run additionally
 verified shared state, rich artifacts and private published-value MIME,
