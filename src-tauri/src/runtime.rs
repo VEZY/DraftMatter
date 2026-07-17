@@ -1,4 +1,4 @@
-use crate::{canonical_root, HostError};
+use crate::{canonical_root, HostError, TaskProgressReporter};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -16,6 +16,7 @@ const MAX_PROBE_OUTPUT_BYTES: u64 = 64 * 1024;
 const MAX_KERNEL_SPEC_BYTES: u64 = 128 * 1024;
 const MAX_KERNEL_SPECS: usize = 128;
 const MAX_SETUP_DIAGNOSTIC_CHARS: usize = 8 * 1024;
+pub(crate) const JULIA_PROJECT_ARGUMENT: &str = "--project=.";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "lowercase")]
@@ -508,13 +509,25 @@ pub fn discover_jupyter_kernels_impl() -> JupyterKernelInventory {
 fn setup_failure(language: RuntimeLanguage, stderr: &[u8], stdout: &[u8]) -> HostError {
     let output = if stderr.is_empty() { stdout } else { stderr };
     let text = String::from_utf8_lossy(output);
-    let diagnostic = text
+    let lines = text.lines().collect::<Vec<_>>();
+    let diagnostic = lines
+        .iter()
+        .find(|line| line.trim_start().starts_with("ERROR:"))
+        .copied()
+        .or_else(|| {
+            lines.iter().rev().find_map(|line| {
+                let trimmed = line.trim();
+                (!trimmed.is_empty()
+                    && !trimmed.starts_with('@')
+                    && !trimmed.starts_with('[')
+                    && trimmed != "Stacktrace:"
+                    && !trimmed.starts_with("in expression starting at"))
+                .then_some(trimmed)
+            })
+        })
+        .unwrap_or("The setup process exited without a diagnostic.")
         .chars()
-        .rev()
         .take(MAX_SETUP_DIAGNOSTIC_CHARS)
-        .collect::<String>()
-        .chars()
-        .rev()
         .collect::<String>();
     HostError::Integration(format!(
         "Could not set up the {} kernel integration. {}",
@@ -523,11 +536,37 @@ fn setup_failure(language: RuntimeLanguage, stderr: &[u8], stdout: &[u8]) -> Hos
     ))
 }
 
+fn read_setup_stream(
+    mut reader: impl Read,
+    stream: &'static str,
+    progress: Option<TaskProgressReporter>,
+) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    let mut buffer = [0_u8; 8192];
+    loop {
+        let Ok(read) = reader.read(&mut buffer) else {
+            break;
+        };
+        if read == 0 {
+            break;
+        }
+        if let Some(report) = &progress {
+            report(stream, &String::from_utf8_lossy(&buffer[..read]));
+        }
+        bytes.extend_from_slice(&buffer[..read]);
+        if bytes.len() > MAX_SETUP_DIAGNOSTIC_CHARS {
+            bytes.drain(..bytes.len() - MAX_SETUP_DIAGNOSTIC_CHARS);
+        }
+    }
+    bytes
+}
+
 fn run_setup_command(
     executable: &Path,
     arguments: &[OsString],
     root: &Path,
     language: RuntimeLanguage,
+    progress: Option<TaskProgressReporter>,
 ) -> Result<(), HostError> {
     let mut command = Command::new(executable);
     command
@@ -537,16 +576,50 @@ fn run_setup_command(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     configure_project_environment(&mut command, language, root);
-    let output = command.output().map_err(|error| {
+    if let Some(report) = &progress {
+        report(
+            "status",
+            &format!("Starting {} setup…\n", runtime_name(language)),
+        );
+    }
+    let mut child = command.spawn().map_err(|error| {
         HostError::Integration(format!(
             "Could not start {} kernel setup: {error}",
             runtime_name(language)
         ))
     })?;
-    if output.status.success() {
+    let stdout = child.stdout.take().ok_or_else(|| {
+        HostError::Integration("The setup process did not expose stdout.".to_string())
+    })?;
+    let stderr = child.stderr.take().ok_or_else(|| {
+        HostError::Integration("The setup process did not expose stderr.".to_string())
+    })?;
+    let stdout_progress = progress.clone();
+    let stderr_progress = progress.clone();
+    let stdout_reader = thread::spawn(move || read_setup_stream(stdout, "stdout", stdout_progress));
+    let stderr_reader = thread::spawn(move || read_setup_stream(stderr, "stderr", stderr_progress));
+    let status = child.wait().map_err(|error| {
+        HostError::Integration(format!(
+            "Could not wait for {} kernel setup: {error}",
+            runtime_name(language)
+        ))
+    })?;
+    let stdout = stdout_reader.join().unwrap_or_default();
+    let stderr = stderr_reader.join().unwrap_or_default();
+    if let Some(report) = &progress {
+        report(
+            "status",
+            if status.success() {
+                "Setup command finished successfully.\n"
+            } else {
+                "Setup command exited with an error.\n"
+            },
+        );
+    }
+    if status.success() {
         Ok(())
     } else {
-        Err(setup_failure(language, &output.stderr, &output.stdout))
+        Err(setup_failure(language, &stderr, &stdout))
     }
 }
 
@@ -611,10 +684,22 @@ fn setup_runtime_executable(
     Ok(executable)
 }
 
-pub fn setup_kernel_integration_impl(
+fn julia_setup_expression(root: &Path, display_name: &str) -> String {
+    let project = root
+        .to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"");
+    format!(
+        "using Pkg; project = \"{}\"; Pkg.activate(project); project_file = Base.active_project(); isfile(project_file) || write(project_file, \"[deps]\\n\"); Pkg.instantiate(); Pkg.resolve(); Pkg.add(\"IJulia\"); using IJulia; IJulia.installkernel(\"{}\", \"--project=.\"; env=Dict(\"JULIA_PROJECT\" => project))",
+        project, display_name
+    )
+}
+
+pub fn setup_kernel_integration_with_progress_impl(
     raw_root: &str,
     language: RuntimeLanguage,
     selected_environment: Option<&str>,
+    progress: Option<TaskProgressReporter>,
 ) -> Result<KernelIntegrationSetupResult, HostError> {
     let root = canonical_root(raw_root)?;
     let executable = setup_runtime_executable(language, selected_environment)?;
@@ -632,6 +717,7 @@ pub fn setup_kernel_integration_impl(
                 ],
                 &root,
                 language,
+                progress.clone(),
             )?;
             run_setup_command(
                 &executable,
@@ -647,6 +733,7 @@ pub fn setup_kernel_integration_impl(
                 ],
                 &root,
                 language,
+                progress.clone(),
             )?;
         }
         RuntimeLanguage::R => {
@@ -663,25 +750,23 @@ pub fn setup_kernel_integration_impl(
                 ],
                 &root,
                 language,
+                progress.clone(),
             )?;
         }
         RuntimeLanguage::Julia => {
-            let project = root.to_string_lossy().replace('\\', "\\\\").replace('"', "\\\"");
-            let expression = format!(
-                "using Pkg; Pkg.add(\"IJulia\"); using IJulia; IJulia.installkernel(\"{}\"; env=Dict(\"JULIA_PROJECT\" => \"{}\"))",
-                display_name, project
-            );
+            let expression = julia_setup_expression(&root, &display_name);
             run_setup_command(
                 &executable,
                 &[
                     OsString::from("--startup-file=no"),
                     OsString::from("--history-file=no"),
-                    OsString::from(format!("--project={}", root.to_string_lossy())),
+                    OsString::from(JULIA_PROJECT_ARGUMENT),
                     OsString::from("-e"),
                     OsString::from(expression),
                 ],
                 &root,
                 language,
+                progress.clone(),
             )?;
         }
     }
@@ -824,5 +909,28 @@ mod tests {
         assert_eq!(inventory.health, RuntimeHealth::Unhealthy);
         assert_eq!(inventory.kernels[0].name, "broken");
         assert_eq!(inventory.kernels[0].health, RuntimeHealth::Unhealthy);
+    }
+
+    #[test]
+    fn setup_errors_prefer_the_runtime_diagnostic_over_a_stack_frame() {
+        let error = setup_failure(
+            RuntimeLanguage::Julia,
+            b"ERROR: IJulia could not be installed\nStacktrace:\n [1] error(s::String)\n @ Base ./client.jl:550\n",
+            b"",
+        )
+        .to_string();
+
+        assert!(error.contains("IJulia could not be installed"));
+        assert!(!error.contains("client.jl:550"));
+    }
+
+    #[test]
+    fn julia_setup_never_switches_back_to_the_global_environment() {
+        let expression = julia_setup_expression(Path::new("/research/project"), "Julia · DraftMatter");
+
+        assert!(expression.contains("Pkg.activate(project)"));
+        assert!(!expression.contains("Pkg.activate();"));
+        assert!(expression.contains("Pkg.add(\"IJulia\")"));
+        assert!(expression.contains("installkernel(\"Julia · DraftMatter\", \"--project=.\""));
     }
 }

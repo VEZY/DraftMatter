@@ -510,6 +510,20 @@ describe('full structured manuscript editor', () => {
     expect(changed).not.toHaveBeenCalled()
   })
 
+  it('shows language-aware publication help on an unavailable inline value', async () => {
+    const source = `Estimate: {{mean_height}}.\n\n\`\`\`julia {#summary .execute output="values"}\nheight = 12.4\n@publish mean_height unit="cm" digits=1\n\`\`\`\n`
+    await act(async () => root.render(<StructuredManuscriptEditor source={source} onChange={vi.fn()} />))
+
+    const published = container.querySelector<HTMLElement>('[data-dm-node="published-value"]')!
+    expect(published.dataset.status).toBe('missing')
+    expect(published.dataset.language).toBe('julia')
+    expect(published.dataset.publishHint).toContain('Julia values cell')
+    expect(published.dataset.publishHint).toContain('@publish mean_height unit="cm" digits=1')
+    expect(published.getAttribute('tabindex')).toBe('0')
+    expect(published.getAttribute('aria-description')).toContain('{{mean_height}} is unavailable')
+    expect(published.hasAttribute('aria-label')).toBe(false)
+  })
+
   it('colors every supported cell language with an editable CodeMirror mode', async () => {
     const languageSource = `# Languages
 

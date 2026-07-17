@@ -56,7 +56,7 @@ describe('desktop host adapter', () => {
     await host.openCitationLink('doi', '10.1016/j.envsoft.2019.104609')
     await host.probeRuntime('julia')
     await host.discoverJupyterKernels()
-    await host.setupKernelIntegration('/research/canopy', 'python', '/envs/python/bin/python')
+    await host.setupKernelIntegration('/research/canopy', 'python', '/envs/python/bin/python', 'setup-1')
     await host.executionTrustStatus('/research/canopy')
     await host.trustProjectForSession('/research/canopy', 'run-project-code-with-user-permissions')
     await host.revokeProjectTrust('/research/canopy')
@@ -70,9 +70,9 @@ describe('desktop host adapter', () => {
     await host.terminateKernel('julia')
     await host.readExecutionManifests('/research/canopy')
     await host.saveExecutionManifest({ root: '/research/canopy', cellId: 'cell-1', content: '{"schemaVersion":2}', expectedHash: null })
-    await host.listJuliaPackages('/research/canopy')
-    await host.addJuliaPackage({ root: '/research/canopy', name: 'JuliaFormatter' })
-    await host.removeJuliaPackage({ root: '/research/canopy', name: 'DataFrames' })
+    await host.listJuliaPackages('/research/canopy', 'packages-list-1')
+    await host.addJuliaPackage({ root: '/research/canopy', name: 'JuliaFormatter' }, 'packages-add-1')
+    await host.removeJuliaPackage({ root: '/research/canopy', name: 'DataFrames' }, 'packages-remove-1')
     await host.formatJuliaCode({ root: '/research/canopy', code: 'x=1' })
     await host.gitStatus('/research/canopy')
     await host.gitInitialize('/research/canopy')
@@ -121,7 +121,7 @@ describe('desktop host adapter', () => {
       ['open_citation_link', { kind: 'doi', value: '10.1016/j.envsoft.2019.104609' }],
       ['probe_runtime_executable', { language: 'julia' }],
       ['discover_jupyter_kernels', undefined],
-      ['setup_kernel_integration', { root: '/research/canopy', language: 'python', environment: '/envs/python/bin/python' }],
+      ['setup_kernel_integration', { root: '/research/canopy', language: 'python', environment: '/envs/python/bin/python', taskId: 'setup-1' }],
       ['execution_trust_status', { root: '/research/canopy' }],
       ['trust_project_for_session', { root: '/research/canopy', acknowledgement: 'run-project-code-with-user-permissions' }],
       ['revoke_project_trust', { root: '/research/canopy' }],
@@ -133,9 +133,9 @@ describe('desktop host adapter', () => {
       ['terminate_kernel', { language: 'julia' }],
       ['read_execution_manifests', { root: '/research/canopy' }],
       ['save_execution_manifest', { request: { root: '/research/canopy', cellId: 'cell-1', content: '{"schemaVersion":2}', expectedHash: null } }],
-      ['list_julia_packages', { root: '/research/canopy' }],
-      ['add_julia_package', { request: { root: '/research/canopy', name: 'JuliaFormatter' } }],
-      ['remove_julia_package', { request: { root: '/research/canopy', name: 'DataFrames' } }],
+      ['list_julia_packages', { root: '/research/canopy', taskId: 'packages-list-1' }],
+      ['add_julia_package', { request: { root: '/research/canopy', name: 'JuliaFormatter' }, taskId: 'packages-add-1' }],
+      ['remove_julia_package', { request: { root: '/research/canopy', name: 'DataFrames' }, taskId: 'packages-remove-1' }],
       ['format_julia_code', { request: { root: '/research/canopy', code: 'x=1' } }],
       ['git_status', { root: '/research/canopy' }],
       ['git_initialize', { root: '/research/canopy' }],

@@ -5,8 +5,10 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4, TcpStream};
 use std::path::{Component, Path, PathBuf};
+use std::sync::Arc;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
+use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
@@ -46,9 +48,9 @@ use git_adapter::{
     GitRestoreCheckpointRequest, GitStageRequest,
 };
 use julia_tools::{
-    add_julia_package_impl, format_julia_code_impl, list_julia_packages_impl,
-    remove_julia_package_impl, JuliaEnvironment, JuliaFormatRequest, JuliaFormatResult,
-    JuliaPackageRequest,
+    add_julia_package_with_progress_impl, format_julia_code_impl,
+    list_julia_packages_with_progress_impl, remove_julia_package_with_progress_impl,
+    JuliaEnvironment, JuliaFormatRequest, JuliaFormatResult, JuliaPackageRequest,
 };
 use jupyter_execution::{
     execute_kernel_impl, interrupt_kernel_impl, restart_kernel_impl, terminate_kernel_impl,
@@ -56,9 +58,45 @@ use jupyter_execution::{
 };
 use runtime::{
     discover_jupyter_kernels_impl, probe_runtime_executable_impl,
-    setup_kernel_integration_impl, JupyterKernelInventory, KernelIntegrationSetupResult,
-    RuntimeExecutableProbe, RuntimeLanguage,
+    setup_kernel_integration_with_progress_impl, JupyterKernelInventory,
+    KernelIntegrationSetupResult, RuntimeExecutableProbe, RuntimeLanguage,
 };
+
+pub(crate) type TaskProgressReporter = Arc<dyn Fn(&str, &str) + Send + Sync>;
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TaskProgressEvent {
+    task_id: String,
+    stream: String,
+    message: String,
+}
+
+fn task_progress_reporter(
+    app: tauri::AppHandle,
+    task_id: Option<String>,
+) -> Option<TaskProgressReporter> {
+    task_id.map(|task_id| {
+        Arc::new(move |stream: &str, message: &str| {
+            let _ = app.emit(
+                "draftmatter-task-progress",
+                TaskProgressEvent {
+                    task_id: task_id.clone(),
+                    stream: stream.to_string(),
+                    message: message.to_string(),
+                },
+            );
+        }) as TaskProgressReporter
+    })
+}
+
+fn runtime_name_for_progress(language: RuntimeLanguage) -> &'static str {
+    match language {
+        RuntimeLanguage::Python => "Python",
+        RuntimeLanguage::R => "R",
+        RuntimeLanguage::Julia => "Julia",
+    }
+}
 
 const PROJECT_SCHEMA: u32 = 1;
 const MAX_RECOVERY_FILES: usize = 8;
@@ -2578,15 +2616,32 @@ fn discover_jupyter_kernels() -> JupyterKernelInventory {
 
 #[tauri::command]
 async fn setup_kernel_integration(
+    app: tauri::AppHandle,
     root: String,
     language: RuntimeLanguage,
     environment: Option<String>,
+    task_id: Option<String>,
     trust: tauri::State<'_, ExecutionTrustStore>,
 ) -> Result<KernelIntegrationSetupResult, HostError> {
     let canonical = canonical_root(&root)?;
     execution_trust::require_execution_trust(&canonical, trust.inner())?;
+    let progress = task_progress_reporter(app, task_id);
+    if let Some(report) = &progress {
+        report(
+            "status",
+            &format!(
+                "Preparing the {} environment…\n",
+                runtime_name_for_progress(language)
+            ),
+        );
+    }
     tauri::async_runtime::spawn_blocking(move || {
-        setup_kernel_integration_impl(&root, language, environment.as_deref())
+        setup_kernel_integration_with_progress_impl(
+            &root,
+            language,
+            environment.as_deref(),
+            progress,
+        )
     })
     .await
     .map_err(|error| HostError::Integration(format!("The kernel setup task failed: {error}")))?
@@ -2701,41 +2756,50 @@ fn save_execution_manifest(
 
 #[tauri::command]
 async fn list_julia_packages(
+    app: tauri::AppHandle,
     root: String,
+    task_id: Option<String>,
     trust: tauri::State<'_, ExecutionTrustStore>,
 ) -> Result<JuliaEnvironment, HostError> {
     let trust = trust.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || list_julia_packages_impl(&root, &trust))
-        .await
-        .map_err(|error| {
-            HostError::Integration(format!("The Julia package task failed: {error}"))
-        })?
+    let progress = task_progress_reporter(app, task_id);
+    tauri::async_runtime::spawn_blocking(move || {
+        list_julia_packages_with_progress_impl(&root, &trust, progress)
+    })
+    .await
+    .map_err(|error| HostError::Integration(format!("The Julia package task failed: {error}")))?
 }
 
 #[tauri::command]
 async fn add_julia_package(
+    app: tauri::AppHandle,
     request: JuliaPackageRequest,
+    task_id: Option<String>,
     trust: tauri::State<'_, ExecutionTrustStore>,
 ) -> Result<JuliaEnvironment, HostError> {
     let trust = trust.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || add_julia_package_impl(request, &trust))
-        .await
-        .map_err(|error| {
-            HostError::Integration(format!("The Julia package task failed: {error}"))
-        })?
+    let progress = task_progress_reporter(app, task_id);
+    tauri::async_runtime::spawn_blocking(move || {
+        add_julia_package_with_progress_impl(request, &trust, progress)
+    })
+    .await
+    .map_err(|error| HostError::Integration(format!("The Julia package task failed: {error}")))?
 }
 
 #[tauri::command]
 async fn remove_julia_package(
+    app: tauri::AppHandle,
     request: JuliaPackageRequest,
+    task_id: Option<String>,
     trust: tauri::State<'_, ExecutionTrustStore>,
 ) -> Result<JuliaEnvironment, HostError> {
     let trust = trust.inner().clone();
-    tauri::async_runtime::spawn_blocking(move || remove_julia_package_impl(request, &trust))
-        .await
-        .map_err(|error| {
-            HostError::Integration(format!("The Julia package task failed: {error}"))
-        })?
+    let progress = task_progress_reporter(app, task_id);
+    tauri::async_runtime::spawn_blocking(move || {
+        remove_julia_package_with_progress_impl(request, &trust, progress)
+    })
+    .await
+    .map_err(|error| HostError::Integration(format!("The Julia package task failed: {error}")))?
 }
 
 #[tauri::command]

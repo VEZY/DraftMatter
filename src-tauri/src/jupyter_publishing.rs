@@ -64,12 +64,16 @@ publish <- function(name, value, unit = NULL, digits = NULL) {
 "#;
 
 const JULIA_HELPER: &str = r#"
+const _DRAFTMATTER_PUBLISHED_VALUE_MIME = MIME"application/vnd.draftmatter.published-value+json"()
+
 struct _DraftMatterPublishedValue
     payload::String
 end
 
 Base.show(io::IO, ::MIME"application/vnd.draftmatter.published-value+json", value::_DraftMatterPublishedValue) = print(io, value.payload)
 Base.show(io::IO, ::MIME"text/plain", ::_DraftMatterPublishedValue) = nothing
+
+IJulia.register_jsonmime(_DRAFTMATTER_PUBLISHED_VALUE_MIME)
 
 _draftmatter_json_string(value) = "\"" * replace(String(value), "\\" => "\\\\", "\"" => "\\\"", "\n" => "\\n", "\r" => "\\r", "\t" => "\\t") * "\""
 
@@ -93,6 +97,8 @@ function _draftmatter_publish(name::AbstractString, value; unit=nothing, digits=
     display(_DraftMatterPublishedValue(payload))
     return value
 end
+
+publish(name::AbstractString, value; unit=nothing, digits=nothing) = _draftmatter_publish(name, value; unit, digits)
 
 macro publish(variable, options...)
     variable isa Symbol || error("@publish expects a variable name, for example @publish mean_height unit=\"cm\" digits=1")
@@ -130,6 +136,10 @@ mod tests {
         }
         assert!(publishing_helper(RuntimeLanguage::Python).contains("def publish"));
         assert!(publishing_helper(RuntimeLanguage::R).contains("publish <- function"));
+        assert!(publishing_helper(RuntimeLanguage::Julia)
+            .contains("publish(name::AbstractString, value;"));
         assert!(publishing_helper(RuntimeLanguage::Julia).contains("macro publish"));
+        assert!(publishing_helper(RuntimeLanguage::Julia)
+            .contains("IJulia.register_jsonmime(_DRAFTMATTER_PUBLISHED_VALUE_MIME)"));
     }
 }

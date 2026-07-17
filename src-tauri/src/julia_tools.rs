@@ -1,8 +1,10 @@
 use crate::execution_trust::{require_execution_trust, ExecutionTrustStore};
-use crate::runtime::{configure_project_environment, resolve_runtime_executable, RuntimeLanguage};
-use crate::{canonical_root, HostError};
+use crate::runtime::{
+    configure_project_environment, resolve_runtime_executable, RuntimeLanguage,
+    JULIA_PROJECT_ARGUMENT,
+};
+use crate::{canonical_root, HostError, TaskProgressReporter};
 use serde::{Deserialize, Serialize};
-use std::ffi::OsString;
 use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -19,10 +21,14 @@ const LIST_PACKAGES_SCRIPT: &str = r#"
 # DRAFTMATTER_LIST_PACKAGES
 using Pkg
 Pkg.activate(ARGS[1])
-for dependency in sort!(collect(values(Pkg.dependencies())); by = item -> lowercase(item.name))
+project_file = Base.active_project()
+isfile(project_file) || write(project_file, "[deps]\n")
+Pkg.instantiate()
+Pkg.resolve()
+for (uuid, dependency) in sort!(collect(Pkg.dependencies()); by = item -> lowercase(last(item).name))
     dependency.is_direct_dep || continue
     version = isnothing(dependency.version) ? "" : string(dependency.version)
-    kind = dependency.is_stdlib ? "stdlib" : "package"
+    kind = Pkg.Types.is_stdlib(uuid) ? "stdlib" : "package"
     println("DRAFTMATTER_PACKAGE\t", dependency.name, "\t", version, "\t", kind)
 end
 "#;
@@ -33,10 +39,10 @@ using Pkg
 Pkg.activate(ARGS[1])
 Pkg.add(PackageSpec(name = ARGS[2]))
 Pkg.resolve()
-for dependency in sort!(collect(values(Pkg.dependencies())); by = item -> lowercase(item.name))
+for (uuid, dependency) in sort!(collect(Pkg.dependencies()); by = item -> lowercase(last(item).name))
     dependency.is_direct_dep || continue
     version = isnothing(dependency.version) ? "" : string(dependency.version)
-    kind = dependency.is_stdlib ? "stdlib" : "package"
+    kind = Pkg.Types.is_stdlib(uuid) ? "stdlib" : "package"
     println("DRAFTMATTER_PACKAGE\t", dependency.name, "\t", version, "\t", kind)
 end
 "#;
@@ -47,10 +53,10 @@ using Pkg
 Pkg.activate(ARGS[1])
 Pkg.rm(PackageSpec(name = ARGS[2]))
 Pkg.resolve()
-for dependency in sort!(collect(values(Pkg.dependencies())); by = item -> lowercase(item.name))
+for (uuid, dependency) in sort!(collect(Pkg.dependencies()); by = item -> lowercase(last(item).name))
     dependency.is_direct_dep || continue
     version = isnothing(dependency.version) ? "" : string(dependency.version)
-    kind = dependency.is_stdlib ? "stdlib" : "package"
+    kind = Pkg.Types.is_stdlib(uuid) ? "stdlib" : "package"
     println("DRAFTMATTER_PACKAGE\t", dependency.name, "\t", version, "\t", kind)
 end
 "#;
@@ -118,7 +124,12 @@ fn valid_package_name(name: &str) -> bool {
         && characters.all(|character| character.is_ascii_alphanumeric() || character == '_')
 }
 
-fn drain_bounded(mut reader: impl Read, limit: usize) -> Vec<u8> {
+fn drain_bounded(
+    mut reader: impl Read,
+    limit: usize,
+    stream: &'static str,
+    progress: Option<TaskProgressReporter>,
+) -> Vec<u8> {
     let mut retained = Vec::new();
     let mut buffer = [0_u8; 8192];
     loop {
@@ -127,6 +138,9 @@ fn drain_bounded(mut reader: impl Read, limit: usize) -> Vec<u8> {
         };
         if read == 0 {
             break;
+        }
+        if let Some(report) = &progress {
+            report(stream, &String::from_utf8_lossy(&buffer[..read]));
         }
         let remaining = limit.saturating_sub(retained.len());
         retained.extend_from_slice(&buffer[..read.min(remaining)]);
@@ -142,15 +156,14 @@ fn run_julia(
     input: Option<&[u8]>,
     timeout: Duration,
     output_limit: usize,
+    progress: Option<TaskProgressReporter>,
 ) -> Result<ProcessOutput, HostError> {
-    let mut project_argument = OsString::from("--project=");
-    project_argument.push(root.as_os_str());
     let mut command = Command::new(executable);
     command
         .arg("--startup-file=no")
         .arg("--history-file=no")
         .arg("--color=no")
-        .arg(project_argument)
+        .arg(JULIA_PROJECT_ARGUMENT)
         .arg("-e")
         .arg(script)
         .arg(root)
@@ -164,6 +177,12 @@ fn run_julia(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
     configure_project_environment(&mut command, RuntimeLanguage::Julia, root);
+    if let Some(report) = &progress {
+        report(
+            "status",
+            &format!("Starting julia --project=. in {}\n", root.display()),
+        );
+    }
     let mut child = command
         .spawn()
         .map_err(|error| HostError::Integration(format!("Could not start Julia: {error}")))?;
@@ -183,8 +202,12 @@ fn run_julia(
     let stderr = child.stderr.take().ok_or_else(|| {
         HostError::Integration("Julia did not expose its error output stream.".to_string())
     })?;
-    let stdout_reader = thread::spawn(move || drain_bounded(stdout, output_limit));
-    let stderr_reader = thread::spawn(move || drain_bounded(stderr, output_limit));
+    let stdout_progress = progress.clone();
+    let stderr_progress = progress.clone();
+    let stdout_reader =
+        thread::spawn(move || drain_bounded(stdout, output_limit, "stdout", stdout_progress));
+    let stderr_reader =
+        thread::spawn(move || drain_bounded(stderr, output_limit, "stderr", stderr_progress));
     let started = Instant::now();
     let status = loop {
         match child.try_wait() {
@@ -207,6 +230,16 @@ fn run_julia(
     };
     let stdout = stdout_reader.join().unwrap_or_default();
     let stderr = stderr_reader.join().unwrap_or_default();
+    if let Some(report) = &progress {
+        report(
+            "status",
+            if status.success() {
+                "Julia finished successfully.\n"
+            } else {
+                "Julia exited with an error.\n"
+            },
+        );
+    }
     Ok(ProcessOutput {
         success: status.success(),
         stdout,
@@ -216,13 +249,36 @@ fn run_julia(
 
 fn process_error(output: &ProcessOutput, formatter: bool) -> HostError {
     let stderr = String::from_utf8_lossy(&output.stderr);
-    let detail = stderr
-        .lines()
-        .rev()
-        .find(|line| !line.trim().is_empty())
-        .unwrap_or("Julia exited without an error message.")
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let diagnostic_source = if stderr.trim().is_empty() {
+        stdout.as_ref()
+    } else {
+        stderr.as_ref()
+    };
+    let lines = diagnostic_source.lines().collect::<Vec<_>>();
+    let detail_line = lines
+        .iter()
+        .find(|line| line.trim_start().starts_with("ERROR:"))
+        .copied()
+        .or_else(|| {
+            lines.iter().rev().find_map(|line| {
+                let trimmed = line.trim();
+                (!trimmed.is_empty()
+                    && !trimmed.starts_with('@')
+                    && !trimmed.starts_with('[')
+                    && trimmed != "Stacktrace:"
+                    && !trimmed.starts_with("in expression starting at"))
+                .then_some(trimmed)
+            })
+        })
+        .unwrap_or("Julia exited without an error message.");
+    let detail = detail_line
+        .trim()
+        .strip_prefix("ERROR:")
+        .unwrap_or(detail_line.trim())
+        .trim()
         .chars()
-        .take(800)
+        .take(1_200)
         .collect::<String>();
     if formatter && (stderr.contains("JuliaFormatter") || stderr.contains("Package")) {
         HostError::Integration(format!(
@@ -270,6 +326,7 @@ fn julia_environment_with_executable(
     root: &Path,
     executable: &Path,
     action: PackageAction<'_>,
+    progress: Option<TaskProgressReporter>,
 ) -> Result<JuliaEnvironment, HostError> {
     let (script, arguments) = match action {
         PackageAction::List => (LIST_PACKAGES_SCRIPT, Vec::new()),
@@ -286,6 +343,7 @@ fn julia_environment_with_executable(
             None,
             PACKAGE_TIMEOUT,
             MAX_PACKAGE_OUTPUT_BYTES,
+            progress,
         )?,
     )
 }
@@ -305,17 +363,19 @@ fn julia_executable() -> Result<PathBuf, HostError> {
     })
 }
 
-pub fn list_julia_packages_impl(
+pub fn list_julia_packages_with_progress_impl(
     raw_root: &str,
     trust: &ExecutionTrustStore,
+    progress: Option<TaskProgressReporter>,
 ) -> Result<JuliaEnvironment, HostError> {
     let root = trusted_root(raw_root, trust)?;
-    julia_environment_with_executable(&root, &julia_executable()?, PackageAction::List)
+    julia_environment_with_executable(&root, &julia_executable()?, PackageAction::List, progress)
 }
 
-pub fn add_julia_package_impl(
+pub fn add_julia_package_with_progress_impl(
     request: JuliaPackageRequest,
     trust: &ExecutionTrustStore,
+    progress: Option<TaskProgressReporter>,
 ) -> Result<JuliaEnvironment, HostError> {
     let root = trusted_root(&request.root, trust)?;
     if !valid_package_name(&request.name) {
@@ -328,12 +388,14 @@ pub fn add_julia_package_impl(
         &root,
         &julia_executable()?,
         PackageAction::Add(&request.name),
+        progress,
     )
 }
 
-pub fn remove_julia_package_impl(
+pub fn remove_julia_package_with_progress_impl(
     request: JuliaPackageRequest,
     trust: &ExecutionTrustStore,
+    progress: Option<TaskProgressReporter>,
 ) -> Result<JuliaEnvironment, HostError> {
     let root = trusted_root(&request.root, trust)?;
     if !valid_package_name(&request.name) {
@@ -346,6 +408,7 @@ pub fn remove_julia_package_impl(
         &root,
         &julia_executable()?,
         PackageAction::Remove(&request.name),
+        progress,
     )
 }
 
@@ -362,6 +425,7 @@ fn format_julia_code_with_executable(
         Some(code.as_bytes()),
         FORMAT_TIMEOUT,
         MAX_FORMAT_BYTES,
+        None,
     )?;
     if !output.success {
         return Err(process_error(&output, true));
@@ -406,6 +470,13 @@ project=""
 for argument in "$@"; do
   case "$argument" in --project=*) project="${argument#--project=}" ;; esac
 done
+[ "$project" = "." ] || { printf 'ERROR: Julia was not started with --project=.\n' >&2; exit 23; }
+project_environment=$(cd "$JULIA_PROJECT" && pwd -P)
+working_project=$(pwd -P)
+[ "$project_environment" = "$working_project" ] || { printf 'ERROR: JULIA_PROJECT did not point to the working project.\n' >&2; exit 24; }
+case "$*" in
+  *dependency.is_stdlib*) printf 'ERROR: package inventory used the removed PackageInfo.is_stdlib field.\n' >&2; exit 25 ;;
+esac
 case "$*" in
   *DRAFTMATTER_ADD_PACKAGE*)
     touch "$project/Project.toml" "$project/Manifest.toml"
@@ -415,6 +486,7 @@ case "$*" in
     printf 'DRAFTMATTER_PACKAGE\tDataFrames\t1.7.0\tpackage\n'
     ;;
   *DRAFTMATTER_LIST_PACKAGES*)
+    touch "$project/Project.toml" "$project/Manifest.toml"
     printf 'DRAFTMATTER_PACKAGE\tStatistics\t1.11.0\tstdlib\nDRAFTMATTER_PACKAGE\tDataFrames\t1.7.0\tpackage\n'
     ;;
   *DRAFTMATTER_FORMAT_JULIA*)
@@ -430,12 +502,16 @@ esac
 
     #[cfg(unix)]
     #[test]
-    fn lists_packages_and_reports_project_files() {
+    fn listing_instantiates_and_reports_project_files() {
         let temporary = tempdir().unwrap();
         let executable = fake_julia(temporary.path());
-        let environment =
-            julia_environment_with_executable(temporary.path(), &executable, PackageAction::List)
-                .unwrap();
+        let environment = julia_environment_with_executable(
+            temporary.path(),
+            &executable,
+            PackageAction::List,
+            None,
+        )
+        .unwrap();
 
         assert_eq!(
             environment
@@ -445,8 +521,8 @@ esac
                 .collect::<Vec<_>>(),
             vec!["DataFrames", "Statistics"]
         );
-        assert!(!environment.project_file);
-        assert!(!environment.manifest_file);
+        assert!(environment.project_file);
+        assert!(environment.manifest_file);
     }
 
     #[cfg(unix)]
@@ -458,6 +534,7 @@ esac
             temporary.path(),
             &executable,
             PackageAction::Add("JuliaFormatter"),
+            None,
         )
         .unwrap();
 
@@ -486,5 +563,35 @@ esac
         assert!(!valid_package_name("Pkg.add(\"Bad\")"));
         assert!(!valid_package_name("../Bad"));
         assert!(!valid_package_name(""));
+    }
+
+    #[test]
+    fn package_inventory_classifies_stdlibs_by_uuid_across_pkg_versions() {
+        for script in [
+            LIST_PACKAGES_SCRIPT,
+            ADD_PACKAGE_SCRIPT,
+            REMOVE_PACKAGE_SCRIPT,
+        ] {
+            assert!(!script.contains("dependency.is_stdlib"));
+            assert!(script.contains("Pkg.Types.is_stdlib(uuid)"));
+            assert!(script.contains("collect(Pkg.dependencies())"));
+        }
+    }
+
+    #[test]
+    fn package_errors_prefer_the_julia_diagnostic_over_a_stack_frame() {
+        let error = process_error(
+            &ProcessOutput {
+                success: false,
+                stdout: Vec::new(),
+                stderr: b"ERROR: Unsatisfiable requirements detected for package DataFrames\nStacktrace:\n [1] pkgerror(msg::String)\n @ Base ./client.jl:550\n".to_vec(),
+            },
+            false,
+        )
+        .to_string();
+
+        assert!(error.contains("Unsatisfiable requirements detected for package DataFrames"));
+        assert!(!error.contains("client.jl:550"));
+        assert!(!error.contains("request: ERROR:"));
     }
 }

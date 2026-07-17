@@ -530,9 +530,9 @@ export function createDesktopHost(
     discoverJupyterKernels() {
       return invokeBridge<JupyterKernelInventory>('discover_jupyter_kernels')
     },
-    setupKernelIntegration(root: string, language: RuntimeLanguage, environment?: string) {
+    setupKernelIntegration(root: string, language: RuntimeLanguage, environment?: string, taskId?: string) {
       return available
-        ? invokeBridge<KernelIntegrationSetupResult>('setup_kernel_integration', { root, language, ...(environment ? { environment } : {}) })
+        ? invokeBridge<KernelIntegrationSetupResult>('setup_kernel_integration', { root, language, ...(environment ? { environment } : {}), ...(taskId ? { taskId } : {}) })
         : executionUnavailable()
     },
     executionTrustStatus(root: string) {
@@ -586,19 +586,19 @@ export function createDesktopHost(
     saveExecutionManifest(request: SaveExecutionManifestRequest) {
       return invokeBridge<DocumentSnapshot>('save_execution_manifest', { request })
     },
-    listJuliaPackages(root: string) {
+    listJuliaPackages(root: string, taskId?: string) {
       return available
-        ? invokeBridge<JuliaEnvironment>('list_julia_packages', { root })
+        ? invokeBridge<JuliaEnvironment>('list_julia_packages', { root, ...(taskId ? { taskId } : {}) })
         : executionUnavailable()
     },
-    addJuliaPackage(request: JuliaPackageRequest) {
+    addJuliaPackage(request: JuliaPackageRequest, taskId?: string) {
       return available
-        ? invokeBridge<JuliaEnvironment>('add_julia_package', { request })
+        ? invokeBridge<JuliaEnvironment>('add_julia_package', { request, ...(taskId ? { taskId } : {}) })
         : executionUnavailable()
     },
-    removeJuliaPackage(request: JuliaPackageRequest) {
+    removeJuliaPackage(request: JuliaPackageRequest, taskId?: string) {
       return available
-        ? invokeBridge<JuliaEnvironment>('remove_julia_package', { request })
+        ? invokeBridge<JuliaEnvironment>('remove_julia_package', { request, ...(taskId ? { taskId } : {}) })
         : executionUnavailable()
     },
     formatJuliaCode(request: JuliaFormatRequest) {

@@ -1,6 +1,7 @@
 import { Schema, type MarkSpec, type NodeSpec } from 'prosemirror-model'
 import { bulletList, listItem, orderedList } from 'prosemirror-schema-list'
 import { tableNodes } from 'prosemirror-tables'
+import { publishedValueUnavailableHint } from './publishedValueHints'
 
 const identified = { id: { default: null } }
 
@@ -195,23 +196,34 @@ const nodes: Record<string, NodeSpec> = {
       rendered: { default: 'Value unavailable' },
       cellId: { default: null },
       status: { default: 'missing' },
+      language: { default: null },
     },
     inline: true,
     group: 'inline',
     atom: true,
     selectable: true,
     parseDOM: [{ tag: 'span[data-dm-node="published-value"]' }],
-    toDOM: (node) => ['span', {
-      'data-dm-node': 'published-value',
-      'data-dm-id': node.attrs.id ?? '',
-      'data-name': node.attrs.name,
-      'data-status': node.attrs.status,
-      title: node.attrs.status === 'current'
-        ? `Published value ${node.attrs.name}${node.attrs.cellId ? ` · ${node.attrs.cellId}` : ''}`
-        : node.attrs.status === 'missing'
-          ? `Published value ${node.attrs.name} is unavailable`
-          : `Published value ${node.attrs.name} needs to be refreshed${node.attrs.cellId ? ` · ${node.attrs.cellId}` : ''}`,
-    }, node.attrs.rendered],
+    toDOM: (node) => {
+      const missing = node.attrs.status === 'missing'
+      const hint = missing ? publishedValueUnavailableHint(node.attrs.name, node.attrs.language ?? undefined) : ''
+      return ['span', {
+        'data-dm-node': 'published-value',
+        'data-dm-id': node.attrs.id ?? '',
+        'data-name': node.attrs.name,
+        'data-status': node.attrs.status,
+        ...(node.attrs.language ? { 'data-language': node.attrs.language } : {}),
+        ...(missing ? {
+          'data-publish-hint': hint,
+          'aria-description': hint.replaceAll('\n', ' '),
+          tabindex: '0',
+        } : {}),
+        ...(!missing ? {
+          title: node.attrs.status === 'current'
+            ? `Published value ${node.attrs.name}${node.attrs.cellId ? ` · ${node.attrs.cellId}` : ''}`
+            : `Published value ${node.attrs.name} needs to be refreshed${node.attrs.cellId ? ` · ${node.attrs.cellId}` : ''}`,
+        } : {}),
+      }, node.attrs.rendered]
+    },
     leafText: (node) => node.attrs.rendered,
   },
   citation: {

@@ -208,7 +208,7 @@ describe('generic structured manuscript bridge', () => {
       version: 1, name: 'mean_area', value: 18.4, unit: 'cm²', formatting: { digits: 1 }, rendered: '18.4 cm²',
       provenance: { cellId: 'summary', language: 'python', runHash: 'sha256:run', codeHash: 'sha256:code', environmentFingerprint: 'sha256:env', sessionGeneration: 1, executionSequence: 1, retainedOutputHashes: ['sha256:run'] },
     }))
-    const source = `Estimate: {{mean_area}}. Missing: {{confidence_interval}}.\n\n<!-- dm-output:start cell="summary" run="sha256:run" -->\n<!-- dm-published-value data="${retained}" -->\n<!-- dm-output:end -->\n`
+    const source = `Estimate: {{mean_area}}. Missing: {{confidence_interval}}.\n\n\`\`\`julia {#interval .execute output="values"}\n@publish confidence_interval digits=2\n\`\`\`\n\n<!-- dm-output:start cell="summary" run="sha256:run" -->\n<!-- dm-published-value data="${retained}" -->\n<!-- dm-output:end -->\n`
     const parsed = parseStructuredManuscript(source)
     const values: Array<Record<string, unknown>> = []
     parsed.document.descendants((node) => {
@@ -218,7 +218,7 @@ describe('generic structured manuscript bridge', () => {
 
     expect(values).toEqual([
       expect.objectContaining({ name: 'mean_area', rendered: '18.4 cm²', cellId: 'summary', status: 'current' }),
-      expect.objectContaining({ name: 'confidence_interval', rendered: 'Value unavailable', status: 'missing' }),
+      expect.objectContaining({ name: 'confidence_interval', rendered: 'Value unavailable', status: 'missing', language: 'julia' }),
     ])
     expect(parsed.document.textContent).toContain('Estimate: 18.4 cm². Missing: Value unavailable.')
     expect(serializeStructuredManuscript(parsed.document, parsed.metadata)).toBe(source)

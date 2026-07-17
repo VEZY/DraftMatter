@@ -4,7 +4,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
-import { desktopHost, type ProjectSnapshot } from './desktopHost'
+import { desktopHost, type JuliaEnvironment, type ProjectSnapshot } from './desktopHost'
 
 const rootPath = '/research/shared-kernel-execution'
 const source = `---
@@ -12,6 +12,8 @@ title: Shared kernel execution
 ---
 
 # Analysis
+
+Published result: {{a}}.
 
 \`\`\`python {#py-setup .execute role="setup"}
 baseline = 40
@@ -25,8 +27,9 @@ print(baseline + 2)
 print(42)
 \`\`\`
 
-\`\`\`julia {#jl-report .execute output="text"}
-println(42)
+\`\`\`julia {#jl-report .execute output="values"}
+a = 42
+@publish a
 \`\`\`
 `
 
@@ -75,10 +78,24 @@ describe('shared Jupyter execution workspace', () => {
       ],
     })
     vi.spyOn(desktopHost, 'executionTrustStatus').mockResolvedValue({ trusted: true, scope: 'session', warning: 'trusted' })
+    vi.spyOn(desktopHost, 'trustProjectForSession').mockResolvedValue({ trusted: true, scope: 'session', warning: 'trusted' })
+    vi.spyOn(desktopHost, 'listJuliaPackages').mockResolvedValue({
+      packages: [], projectFile: true, manifestFile: true,
+    })
+    vi.spyOn(desktopHost, 'addJuliaPackage').mockResolvedValue({
+      packages: [{ name: 'DataFrames', version: '1.7.0', kind: 'package' }], projectFile: true, manifestFile: true,
+    })
+    vi.spyOn(desktopHost, 'removeJuliaPackage').mockResolvedValue({ packages: [], projectFile: true, manifestFile: true })
+    vi.spyOn(desktopHost, 'setupKernelIntegration').mockRejectedValue(new Error('Setup should not run when every detected environment is ready.'))
     vi.spyOn(desktopHost, 'fingerprintExecutionInputs').mockResolvedValue([])
     vi.spyOn(desktopHost, 'executeKernel').mockImplementation(async (request) => ({
       status: 'ok',
-      messages: request.attributes.role === 'setup' ? [] : [{ kind: 'stream', sequence: 0, name: 'stdout', text: `kernel:${request.cellId}\n` }],
+      messages: request.attributes.role === 'setup' ? [] : request.cellId === 'jl-report'
+        ? [{
+            kind: 'display', sequence: 0,
+            data: { 'application/vnd.draftmatter.published-value+json': { version: 1, name: 'a', value: 42, formatting: {} } },
+          }]
+        : [{ kind: 'stream', sequence: 0, name: 'stdout', text: `kernel:${request.cellId}\n` }],
       artifacts: [], environment: { identity: request.kernelName, version: 'fixture' },
       kernelRunId: `kernel-${request.cellId}`, executionCount: ++executionSequence, sessionGeneration: 1, executionSequence,
     }))
@@ -111,8 +128,87 @@ describe('shared Jupyter execution workspace', () => {
       ['py-setup', 'python-fixture'], ['py-value', 'python-fixture'],
     ])
     expect(container.textContent).toContain('kernel:py-value')
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel console"]')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel terminal"]')!.click())
     expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('ready')
+  })
+
+  it('retains a one-letter Julia publication in the opened document', async () => {
+    const published = container.querySelector<HTMLElement>('[data-dm-node="published-value"][data-name="a"]')!
+    expect(published.dataset.status).toBe('missing')
+
+    const juliaCell = container.querySelector<HTMLElement>('.structured-code-cell[data-dm-id="jl-report"]')!
+    await act(async () => juliaCell.querySelector<HTMLButtonElement>('.structured-code-run')!.click())
+    await settle()
+
+    const resolved = container.querySelector<HTMLElement>('[data-dm-node="published-value"][data-name="a"]')!
+    expect(resolved.dataset.status).toBe('current')
+    expect(resolved.textContent).toBe('42')
+    await settle(950)
+    expect(vi.mocked(desktopHost.saveDocument).mock.calls.map(([request]) => request.content).join('\n')).toContain('dm-published-value')
+  })
+
+  it('checks detected project languages automatically and restores remembered trust', async () => {
+    await act(async () => appRoot.unmount())
+    localStorage.setItem('draftmatter.trusted-project-roots.v1', JSON.stringify([rootPath]))
+    vi.mocked(desktopHost.executionTrustStatus).mockReset().mockResolvedValue({ trusted: false, scope: 'session', warning: 'not trusted in the new host session' })
+    vi.mocked(desktopHost.trustProjectForSession).mockClear()
+    vi.mocked(desktopHost.listJuliaPackages).mockClear()
+    appRoot = createRoot(container)
+    await act(async () => appRoot.render(<App />))
+    await settle(420)
+
+    expect(desktopHost.trustProjectForSession).toHaveBeenCalledWith(rootPath, 'run-project-code-with-user-permissions')
+    expect(desktopHost.listJuliaPackages).toHaveBeenCalledWith(rootPath, expect.any(String))
+    expect(desktopHost.setupKernelIntegration).not.toHaveBeenCalled()
+    expect(container.querySelector('[aria-labelledby="execution-trust-title"]')).toBeNull()
+  })
+
+  it('moves Julia package work into a visible non-blocking activity window', async () => {
+    await settle(420)
+    let resolveAdd: (environment: JuliaEnvironment) => void = () => undefined
+    vi.mocked(desktopHost.addJuliaPackage).mockImplementationOnce(() => new Promise((resolve) => { resolveAdd = resolve }))
+    const packages = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('Julia packages'))!
+    await act(async () => packages.click())
+    await settle(30)
+
+    const dialog = container.querySelector<HTMLElement>('[aria-labelledby="julia-packages-title"]')!
+    const input = dialog.querySelector<HTMLInputElement>('[aria-label="Julia package name"]')!
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
+    await act(async () => {
+      setter.call(input, 'DataFrames')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click())
+    await settle(30)
+
+    expect(container.querySelector('[aria-labelledby="julia-packages-title"]')).toBeNull()
+    const activity = container.querySelector<HTMLElement>('.setup-activity-window')!
+    expect(activity.textContent).toContain('Adding DataFrames')
+    expect(activity.textContent).toContain('editor remains usable')
+    expect(activity.textContent).toContain('julia --project=.')
+    expect(desktopHost.addJuliaPackage).toHaveBeenCalledWith({ root: rootPath, name: 'DataFrames' }, expect.any(String))
+
+    await act(async () => resolveAdd({
+      packages: [
+        { name: 'DataFrames', version: '1.7.0', kind: 'package' },
+        { name: 'JuliaFormatter', version: '2.10.1', kind: 'package' },
+      ],
+      projectFile: true,
+      manifestFile: true,
+    }))
+    await settle(120)
+    const refreshedDialog = container.querySelector<HTMLElement>('[aria-labelledby="julia-packages-title"]')!
+    expect(refreshedDialog).toBeTruthy()
+    expect(refreshedDialog.textContent).toContain('JuliaFormatter')
+    expect([...refreshedDialog.querySelectorAll('button')].some((button) => button.textContent === 'Add JuliaFormatter')).toBe(false)
+    expect(container.querySelector('.setup-activity-window')?.textContent).toContain('Ready')
+
+    const openTerminal = [...container.querySelectorAll<HTMLButtonElement>('.setup-activity-window button')]
+      .find((button) => button.textContent?.includes('Open Julia terminal'))!
+    await act(async () => openTerminal.click())
+    expect(container.querySelector('[aria-label="Shared kernel terminal"]')?.textContent).toContain('Julia REPL · shared document kernel')
+    expect(container.querySelector('[aria-label="Shared kernel terminal"]')?.textContent).toContain('julia --project=.')
   })
 
   it('clean-runs setup first, restarts every language kernel, and never materializes setup output', async () => {
@@ -135,10 +231,10 @@ describe('shared Jupyter execution workspace', () => {
     expect(dialog.textContent).toContain('shared Jupyter kernel, no notebook server')
   })
 
-  it('keeps console history and shared kernel status when the bottom panel closes', async () => {
-    const open = container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel console"]')!
+  it('keeps terminal history and shared kernel status when the bottom panel closes', async () => {
+    const open = container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel terminal"]')!
     await act(async () => open.click())
-    const input = container.querySelector<HTMLTextAreaElement>('[aria-label="Python kernel input"]')!
+    const input = container.querySelector<HTMLTextAreaElement>('[aria-label="Python terminal input"]')!
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
     await act(async () => {
       setter.call(input, 'shared_value = 42')
@@ -149,7 +245,7 @@ describe('shared Jupyter execution workspace', () => {
     expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('ready')
     expect(container.textContent).toContain('Interactive · clean run will restart this kernel')
 
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close kernel console"]')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close kernel terminal"]')!.click())
     const reopen = container.querySelector<HTMLButtonElement>('[aria-label*="interactive state present"]')!
     expect(reopen).toBeTruthy()
     await act(async () => reopen.click())

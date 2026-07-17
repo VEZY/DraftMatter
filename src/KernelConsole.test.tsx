@@ -2,7 +2,7 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { KernelConsole } from './KernelConsole'
+import { juliaTerminalCode, juliaTerminalPrompt, KernelConsole, stripTerminalControlSequences } from './KernelConsole'
 import type { NormalizedExecutionResult } from './kernelExecution'
 
 const statuses = { python: 'not-started', r: 'not-started', julia: 'not-started' } as const
@@ -47,6 +47,18 @@ describe('KernelConsole', () => {
 
   afterEach(() => {
     document.body.innerHTML = ''
+  })
+
+  it('maps Julia REPL modes to commands executed inside the shared kernel', () => {
+    expect(juliaTerminalPrompt('pkg', 'DraftMatter')).toBe('(DraftMatter) pkg>')
+    expect(juliaTerminalCode('pkg', 'status')).toBe('import Pkg; Pkg.REPLMode.pkgstr("status")')
+    expect(juliaTerminalCode('shell', 'echo "$HOME"')).toBe('Base.repl_cmd(Core.eval(Main, :(Base.cmd_gen($(Base.shell_parse("echo \\"\\$HOME\\"")[1])))), stdout)')
+    expect(juliaTerminalCode('help', 'DataFrame')).toBe('import REPL; REPL.helpmode(stdout, "DataFrame", Main)')
+  })
+
+  it('removes ANSI styling emitted by Julia Pkg before rendering it', () => {
+    expect(stripTerminalControlSequences('\u001b[32m\u001b[1mStatus\u001b[22m\u001b[39m `Project.toml`'))
+      .toBe('Status `Project.toml`')
   })
 
   it('runs multiline code in the active shared kernel and previews published values', async () => {
@@ -105,6 +117,8 @@ describe('KernelConsole', () => {
         onClose={vi.fn()}
       />)
     })
+    expect(host.textContent).toContain('julia --project=.')
+    expect(host.textContent).toContain('same live session as document cells')
     const input = host.querySelector('textarea')!
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
     await act(async () => {
@@ -116,6 +130,56 @@ describe('KernelConsole', () => {
     const setup = [...host.querySelectorAll('button')].find((button) => button.textContent === 'Make setup cell')!
     await act(async () => setup.click())
     expect(promote).toHaveBeenCalledWith('julia', 'using Statistics')
+    await act(async () => root.unmount())
+  })
+
+  it('switches into Julia Pkg mode with ] and returns with Backspace', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    const execute = vi.fn(async () => ({
+      ...result,
+      language: 'julia' as const,
+      streams: [{ sequence: 0, name: 'stdout' as const, text: '\u001b[32m\u001b[1mStatus\u001b[22m\u001b[39m `Project.toml`\n' }],
+    }))
+    const root = createRoot(host)
+    await act(async () => {
+      root.render(<KernelConsole
+        languages={['julia']}
+        projectLabel="draftmatter"
+        statuses={statuses}
+        restartEpochs={restartEpochs}
+        onExecute={execute}
+        onInterrupt={vi.fn()}
+        onRestart={vi.fn()}
+        onStatusChange={vi.fn()}
+        onDirtyChange={vi.fn()}
+        onPromoteSetup={vi.fn()}
+        onClose={vi.fn()}
+      />)
+    })
+
+    const input = host.querySelector('textarea')!
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
+    await act(async () => {
+      setter.call(input, ']')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    expect(host.textContent).toContain('(draftmatter) pkg>')
+    expect(input.placeholder).toBe('Type a Pkg command…')
+
+    await act(async () => {
+      setter.call(input, 'status')
+      input.dispatchEvent(new Event('input', { bubbles: true }))
+      input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+      await new Promise((resolve) => setTimeout(resolve, 0))
+    })
+    expect(execute).toHaveBeenCalledWith('julia', 'import Pkg; Pkg.REPLMode.pkgstr("status")')
+    expect(host.textContent).toContain('(draftmatter) pkg>status')
+    expect(host.textContent).toContain('Status `Project.toml`')
+    expect(host.textContent).not.toContain('\u001b')
+
+    await act(async () => input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Backspace', bubbles: true })))
+    expect(host.querySelector('.kernel-terminal-command')?.textContent).toContain('julia>')
     await act(async () => root.unmount())
   })
 })

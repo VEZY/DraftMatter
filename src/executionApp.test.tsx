@@ -35,6 +35,7 @@ describe('rendered local execution workflow', () => {
     vi.spyOn(desktopHost, 'readExecutionManifests').mockResolvedValue([])
     vi.spyOn(desktopHost, 'saveCitationLock').mockResolvedValue({ path: '.draftmatter/citations.lock.json', content: '{"schemaVersion":1,"entries":[]}\n', hash: 'lock-old', modifiedMs: 1 })
     vi.spyOn(desktopHost, 'setCitationPreferences').mockResolvedValue(project)
+    vi.spyOn(desktopHost, 'setExecutionPreferences').mockResolvedValue(project)
     vi.spyOn(desktopHost, 'documentStatus').mockResolvedValue({ kind: 'current', hash: 'document-old', modifiedMs: 1 })
     vi.spyOn(desktopHost, 'probeRuntime').mockImplementation(async (language) => language === 'python'
       ? { language, health: 'available', executable: '/usr/bin/python3', version: 'Python 3.12.4' }
@@ -78,26 +79,34 @@ describe('rendered local execution workflow', () => {
     container.remove()
   })
 
-  it('discovers explicitly, requires session trust, executes, and materializes the successful result', async () => {
-    const run = container.querySelector<HTMLButtonElement>('.run-button')!
+  it('prepares detected code after one project-trust prompt, then executes and materializes the result', async () => {
     await act(async () => {
-      run.click()
-      await new Promise((resolve) => window.setTimeout(resolve, 0))
+      await new Promise((resolve) => window.setTimeout(resolve, 350))
     })
 
-    expect(desktopHost.probeRuntime).toHaveBeenCalledTimes(3)
     expect(desktopHost.executeKernel).not.toHaveBeenCalled()
     const trustDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="execution-trust-title"]')!
     expect(trustDialog.textContent).toContain('Local execution is not a sandbox')
+    expect(trustDialog.textContent).toContain('Trust and prepare this project')
 
     await act(async () => {
-      [...trustDialog.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Trust for this session'))!.click()
+      [...trustDialog.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Trust project and continue'))!.click()
     })
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 80))
     })
 
     expect(desktopHost.trustProjectForSession).toHaveBeenCalledWith(rootPath, 'run-project-code-with-user-permissions')
+    expect(JSON.parse(localStorage.getItem('draftmatter.trusted-project-roots.v1') ?? '[]')).toContain(rootPath)
+    expect(desktopHost.probeRuntime).toHaveBeenCalledTimes(3)
+    expect(desktopHost.setExecutionPreferences).toHaveBeenCalled()
+
+    const run = container.querySelector<HTMLButtonElement>('.run-button')!
+    await act(async () => run.click())
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 80))
+    })
+
     expect(desktopHost.executeKernel).toHaveBeenCalledWith(expect.objectContaining({
       root: rootPath,
       cellId: 'fig-canopy',
@@ -131,5 +140,5 @@ describe('rendered local execution workflow', () => {
     })
     expect(container.querySelector('.cell-status')?.textContent).toBe('Stale')
     expect(container.textContent).toContain('A generated artifact changed outside DraftMatter.')
-  })
+  }, 10_000)
 })

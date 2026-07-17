@@ -7,7 +7,7 @@ use crate::execution_trust::{require_execution_trust, ExecutionTrustStore};
 use crate::jupyter_publishing::publishing_helper;
 use crate::runtime::{
     configure_project_environment, discover_jupyter_kernels_impl, JupyterKernelProbe,
-    RuntimeHealth, RuntimeLanguage,
+    RuntimeHealth, RuntimeLanguage, JULIA_PROJECT_ARGUMENT,
 };
 use crate::{canonical_root, now_millis, HostError};
 use jupyter_protocol::{
@@ -272,7 +272,24 @@ fn kernel_command(config: &KernelLaunchConfig, connection_path: &Path) -> Result
         .first()
         .ok_or_else(|| "The selected Jupyter kernelspec has no executable.".to_string())?;
     let mut command = Command::new(executable);
+    if config.language == RuntimeLanguage::Julia {
+        command.arg(JULIA_PROJECT_ARGUMENT);
+    }
+    let mut skip_project_value = false;
     for argument in &config.kernelspec.argv[1..] {
+        if config.language == RuntimeLanguage::Julia {
+            if skip_project_value {
+                skip_project_value = false;
+                continue;
+            }
+            if argument == "--project" {
+                skip_project_value = true;
+                continue;
+            }
+            if argument.starts_with("--project=") {
+                continue;
+            }
+        }
         command.arg(if argument == "{connection_file}" {
             connection_path.as_os_str()
         } else {
@@ -1169,6 +1186,50 @@ mod tests {
             message: None,
         };
         assert!(load_kernelspec(&probe).is_err());
+    }
+
+    #[test]
+    fn julia_kernel_launch_forces_the_open_project() {
+        let temporary = tempdir().unwrap();
+        let root = fs::canonicalize(temporary.path()).unwrap();
+        let kernelspec = serde_json::from_str::<JupyterKernelspec>(
+            r#"{"argv":["julia","--project=@.","-i","--project","/global","{connection_file}"],"display_name":"Julia fixture","language":"julia"}"#,
+        )
+        .unwrap();
+        let config = KernelLaunchConfig {
+            root: root.clone(),
+            language: RuntimeLanguage::Julia,
+            kernel: JupyterKernelProbe {
+                name: "julia-fixture".to_string(),
+                display_name: "Julia fixture".to_string(),
+                language: Some(RuntimeLanguage::Julia),
+                health: RuntimeHealth::Available,
+                resource_dir: root.to_string_lossy().into_owned(),
+                executable: Some("julia".to_string()),
+                message: None,
+            },
+            kernelspec,
+        };
+        let command = kernel_command(&config, &root.join("connection.json")).unwrap();
+        let arguments = command
+            .get_args()
+            .map(|argument| argument.to_string_lossy().into_owned())
+            .collect::<Vec<_>>();
+        let julia_project = command
+            .get_envs()
+            .find(|(name, _)| *name == OsStr::new("JULIA_PROJECT"))
+            .and_then(|(_, value)| value);
+
+        assert_eq!(arguments.first().map(String::as_str), Some("--project=."));
+        assert_eq!(
+            arguments
+                .iter()
+                .filter(|argument| argument.starts_with("--project"))
+                .count(),
+            1
+        );
+        assert_eq!(julia_project, Some(root.as_os_str()));
+        assert_eq!(command.get_current_dir(), Some(root.as_path()));
     }
 
     #[test]

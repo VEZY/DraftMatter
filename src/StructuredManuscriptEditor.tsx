@@ -19,6 +19,7 @@ import { redoCommand as collaborativeRedo, undoCommand as collaborativeUndo, ySy
 import { serializeCitationCluster } from './citation'
 import { formatCrossReferenceTarget, isCrossReferenceTarget } from './crossReference'
 import { parseRetainedPublishedValues } from './publishedValues'
+import { inferPublishedValueLanguage } from './publishedValueHints'
 import { renderEquation } from './equationRenderer'
 import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
@@ -27,7 +28,7 @@ import { reanchorPortableReviews } from './reviewReanchor'
 import { captureReviewSuggestion, type ReviewSuggestionIntent } from './reviewSuggestionCapture'
 import { parseStructuredManuscript, serializeStructuredManuscript, type StructuredManuscriptMetadata } from './structuredManuscript'
 import type { ExecutionFreshnessStatus } from './executionFreshness'
-import type { ExecutionLanguage } from './executionCells'
+import { extractExecutableCells, type ExecutionLanguage } from './executionCells'
 import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
 import { motionAwareScrollBehavior } from './accessibility'
 import {
@@ -2632,12 +2633,15 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       const normalized = name.trim()
       if (!view || readOnlyRef.current || !/^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/.test(normalized)) return false
       const parsed = parseRetainedPublishedValues(sourceRef.current).values[normalized]
+      const language = parsed?.provenance.language
+        ?? inferPublishedValueLanguage(normalized, extractExecutableCells(sourceRef.current).cells)
       view.dispatch(view.state.tr.replaceSelectionWith(manuscriptSchema.nodes.published_value.createChecked({
         id: randomId('published-value'),
         name: normalized,
         rendered: parsed?.rendered ?? 'Value unavailable',
         cellId: parsed?.provenance.cellId ?? null,
         status: parsed ? 'current' : 'missing',
+        language: language ?? null,
       })))
       view.focus()
       return true

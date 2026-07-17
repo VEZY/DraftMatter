@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
+import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, searchCitations } from './bibliography'
 import { desktopHost, normaliseHostFailure, resolveMainDocument, type JuliaEnvironment, type ProjectExecutionPreferences, type ProjectSnapshot, type ZoteroAttachment } from './desktopHost'
 import { parsePortableDocument, parseReviewMarkup } from './sharedEditor'
@@ -74,9 +75,53 @@ const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
 const CITATIONS_KEY = 'draftmatter.citations.v1'
 const LAST_PROJECT_ROOT_KEY = 'draftmatter.last-project-root.v1'
+const TRUSTED_PROJECT_ROOTS_KEY = 'draftmatter.trusted-project-roots.v1'
 const ZOTERO_VERSION_KEY = 'draftmatter.zotero-version.v1'
 const PRIMARY_EXECUTION_CELL = 'fig-canopy'
 const LEGACY_SAMPLE_CODE = 'weeks = [0, 2, 4, 6, 8, 10, 12]\ncontrol = [0, 8, 21, 39, 58, 76, 91]\ndrought = [0, 7, 19, 33, 47, 60, 72]\nplot_response(weeks, control, drought)'
+
+type SetupActivityStatus = 'running' | 'succeeded' | 'failed'
+
+interface SetupActivity {
+  id: string
+  title: string
+  status: SetupActivityStatus
+  output: string
+  language?: ExecutionLanguage
+}
+
+interface TaskProgressEvent {
+  taskId: string
+  stream: 'stdout' | 'stderr' | 'status'
+  message: string
+}
+
+function trustedProjectRoots(storage: Storage) {
+  try {
+    const value = JSON.parse(storage.getItem(TRUSTED_PROJECT_ROOTS_KEY) ?? '[]')
+    return new Set(Array.isArray(value) ? value.filter((root): root is string => typeof root === 'string') : [])
+  } catch {
+    return new Set<string>()
+  }
+}
+
+function rememberProjectTrust(storage: Storage, root: string) {
+  const roots = trustedProjectRoots(storage)
+  roots.add(root)
+  storage.setItem(TRUSTED_PROJECT_ROOTS_KEY, JSON.stringify([...roots].slice(-256)))
+}
+
+function forgetProjectTrust(storage: Storage, root: string) {
+  const roots = trustedProjectRoots(storage)
+  roots.delete(root)
+  storage.setItem(TRUSTED_PROJECT_ROOTS_KEY, JSON.stringify([...roots]))
+}
+
+function cleanTaskOutput(value: string) {
+  return value
+    .replaceAll(/\u001b\[[0-?]*[ -/]*[@-~]/g, '')
+    .replaceAll(/^DRAFTMATTER_PACKAGE\t.*(?:\r?\n|$)/gm, '')
+}
 
 interface CommandPaletteEntry {
   id: string
@@ -548,10 +593,12 @@ function App() {
   const [kernelConsoleStatuses, setKernelConsoleStatuses] = useState<KernelConsoleStatuses>(initialKernelConsoleStatuses)
   const [kernelConsoleRestartEpochs, setKernelConsoleRestartEpochs] = useState<KernelConsoleRestartEpochs>(initialKernelConsoleRestartEpochs)
   const [kernelConsoleDirty, setKernelConsoleDirty] = useState(false)
+  const [kernelConsolePreferredLanguage, setKernelConsolePreferredLanguage] = useState<ExecutionLanguage>()
+  const [kernelConsolePreferredLanguageEpoch, setKernelConsolePreferredLanguageEpoch] = useState(0)
   const [executionTrustOpen, setExecutionTrustOpen] = useState(false)
   const [executionTrustWarning, setExecutionTrustWarning] = useState('')
   const [executionTrustBusy, setExecutionTrustBusy] = useState(false)
-  const [executionTrustPurpose, setExecutionTrustPurpose] = useState<'run' | 'packages' | 'format' | 'console' | 'kernel-setup'>('run')
+  const [executionTrustPurpose, setExecutionTrustPurpose] = useState<'run' | 'packages' | 'format' | 'console' | 'kernel-setup' | 'project-open'>('run')
   const [kernelSetupLanguage, setKernelSetupLanguage] = useState<ExecutionLanguage>()
   const [kernelSetupBusy, setKernelSetupBusy] = useState(false)
   const [juliaPackagesOpen, setJuliaPackagesOpen] = useState(false)
@@ -559,6 +606,8 @@ function App() {
   const [juliaPackageName, setJuliaPackageName] = useState('')
   const [juliaPackageBusy, setJuliaPackageBusy] = useState(false)
   const [juliaPackageProblem, setJuliaPackageProblem] = useState('')
+  const [setupActivity, setSetupActivity] = useState<SetupActivity>()
+  const [setupActivityOpen, setSetupActivityOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bibliographyInputRef = useRef<HTMLInputElement>(null)
   const structuredEditorRef = useRef<StructuredManuscriptEditorHandle>(null)
@@ -593,9 +642,66 @@ function App() {
   const executionPlanBusyRef = useRef(false)
   const pendingExecutionCommandRef = useRef<ExecutionCommand | undefined>(undefined)
   const pendingConsoleRef = useRef<{ language: ExecutionLanguage; code: string; resolve: (result: NormalizedExecutionResult) => void; reject: (error: Error) => void } | undefined>(undefined)
+  const setupActivityIdRef = useRef<string | undefined>(undefined)
+  const setupActivityOutputRef = useRef<HTMLPreElement>(null)
+  const automaticSetupSignatureRef = useRef('')
+  const pendingSetupLanguagesRef = useRef<ExecutionLanguage[]>([])
+  const automaticSetupRunningRef = useRef(false)
   const executionActiveCellRef = useRef<string | undefined>(undefined)
   const executionActiveLanguageRef = useRef<ExecutionLanguage | undefined>(undefined)
   const crossrefSessionRef = useRef<CrossrefSearchSession | null>(null)
+
+  const startSetupActivity = (title: string, message: string, language?: ExecutionLanguage) => {
+    const id = globalThis.crypto?.randomUUID?.() ?? `setup-${Date.now()}-${Math.random().toString(16).slice(2)}`
+    setupActivityIdRef.current = id
+    const command = language === 'julia' ? '$ julia --project=.\n' : ''
+    setSetupActivity({ id, title, status: 'running', output: `${command}${message.trim()}\n`, language })
+    setSetupActivityOpen(true)
+    return id
+  }
+
+  const openKernelTerminal = (language?: ExecutionLanguage) => {
+    if (language) setKernelConsolePreferredLanguage(language)
+    setKernelConsolePreferredLanguageEpoch((current) => current + 1)
+    setSetupActivityOpen(false)
+    setJuliaPackagesOpen(false)
+    setEnvironmentOpen(false)
+    setKernelConsoleOpen(true)
+  }
+
+  const appendSetupActivity = (id: string, message: string) => {
+    const cleaned = cleanTaskOutput(message)
+    if (!cleaned) return
+    setSetupActivity((current) => {
+      if (!current || current.id !== id) return current
+      const output = `${current.output}${cleaned}`
+      return { ...current, output: output.slice(-80_000) }
+    })
+  }
+
+  const finishSetupActivity = (id: string, status: Exclude<SetupActivityStatus, 'running'>, message: string) => {
+    setSetupActivity((current) => {
+      if (!current || current.id !== id) return current
+      const output = `${current.output}${message.trim()}\n`
+      return { ...current, status, output: output.slice(-80_000) }
+    })
+  }
+
+  useEffect(() => {
+    if (!isTauri()) return
+    let unlisten: UnlistenFn | undefined
+    void listen<TaskProgressEvent>('draftmatter-task-progress', (event) => {
+      if (event.payload.taskId !== setupActivityIdRef.current) return
+      appendSetupActivity(event.payload.taskId, event.payload.message)
+    }).then((dispose) => { unlisten = dispose }).catch(() => undefined)
+    return () => unlisten?.()
+  }, [])
+
+  useEffect(() => {
+    const output = setupActivityOutputRef.current
+    if (output) output.scrollTop = output.scrollHeight
+  }, [setupActivity?.output, setupActivityOpen])
+
   const activeCollaborationCapabilities = collaborationRole ? workspaceRoleCapabilities(collaborationRole) : null
   const canEditManuscript = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.edit)
   const canCommentReview = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.comment)
@@ -778,6 +884,10 @@ function App() {
   }
 
   const replaceDesktopSession = (next: DesktopSession | null) => {
+    if (desktopSessionRef.current?.root !== next?.root) {
+      setJuliaEnvironment(undefined)
+      setJuliaPackageProblem('')
+    }
     desktopSessionRef.current = next
     setDesktopSession(next)
   }
@@ -1815,20 +1925,29 @@ function App() {
     }
   }
 
-  const setupKernelIntegrationTrusted = async (language: ExecutionLanguage) => {
+  const setupKernelIntegrationTrusted = async (language: ExecutionLanguage, inventoryOverride = runtimeInventory) => {
     const session = desktopSessionRef.current
     if (!session || kernelSetupBusy) return
+    setEnvironmentOpen(false)
     setKernelSetupBusy(true)
     setExecutionProblem('')
+    const taskId = startSetupActivity(
+      `Setting up ${runtimeName(language)}`,
+      `DraftMatter is preparing ${runtimeName(language)} for this project. The application remains usable while setup runs.`,
+      language,
+    )
     try {
       const environment = runtimeExecutableForKernelSetup(
-        selectedKernelForLanguage(language),
+        selectedKernelForLanguage(language, inventoryOverride),
         selectedEnvironmentPaths[language],
-        runtimeInventory?.executables[language],
+        inventoryOverride?.executables[language],
       )
-      const setup = await desktopHost.setupKernelIntegration(session.root, language, environment)
+      const setup = await desktopHost.setupKernelIntegration(session.root, language, environment, taskId)
       const inventory = await discoverRuntimeInventory(desktopHost)
-      if (desktopSessionRef.current?.root !== session.root) return
+      if (desktopSessionRef.current?.root !== session.root) {
+        finishSetupActivity(taskId, 'failed', 'The project changed before setup finished; its result was not applied.')
+        return undefined
+      }
       setRuntimeInventory({ ...inventory, jupyter: setup.inventory })
       setRuntimeDiscoveryState('ready')
       const selected = setup.kernelName
@@ -1848,11 +1967,16 @@ function App() {
       setSelectedKernelNames(next)
       await persistExecutionPreferences(next)
       setKernelSetupLanguage(undefined)
+      finishSetupActivity(taskId, 'succeeded', `${runtimeName(language)} is ready to run code in this project.`)
       setToast(`${runtimeName(language)} kernel integration is ready · ${selected.displayName}`)
+      return inventory
     } catch (error) {
       const message = normaliseHostFailure(error).message
+      finishSetupActivity(taskId, 'failed', message)
       setExecutionProblem(message)
+      setEnvironmentOpen(true)
       setToast(`${runtimeName(language)} setup needs attention`)
+      return undefined
     } finally {
       setKernelSetupBusy(false)
     }
@@ -1888,6 +2012,102 @@ function App() {
       setToast(message)
     }
   }
+
+  const prepareTrustedProjectLanguages = async (languages: ExecutionLanguage[]) => {
+    const session = desktopSessionRef.current
+    if (!session || automaticSetupRunningRef.current || languages.length === 0) return
+    automaticSetupRunningRef.current = true
+    try {
+      let inventory = await discoverExecutionEnvironments()
+      if (!inventory || desktopSessionRef.current?.root !== session.root) return
+
+      for (const language of languages) {
+        let ready = healthyKernelsFor(inventory, language).length > 0
+        if (language === 'julia' && inventory.executables.julia.health === 'available') {
+          const taskId = startSetupActivity(
+            'Checking the Julia project',
+            'Inspecting Project.toml, Manifest.toml, and the active Julia environment…',
+            'julia',
+          )
+          try {
+            const environment = await desktopHost.listJuliaPackages(session.root, taskId)
+            if (desktopSessionRef.current?.root !== session.root) {
+              finishSetupActivity(taskId, 'failed', 'The project changed before the Julia environment check finished.')
+              return
+            }
+            setJuliaEnvironment(environment)
+            ready = ready && environment.projectFile && environment.manifestFile
+            finishSetupActivity(taskId, 'succeeded', ready
+              ? 'The Julia project and kernel integration are ready.'
+              : 'The Julia project needs one-time setup; DraftMatter will prepare it now.')
+          } catch (error) {
+            const message = normaliseHostFailure(error).message
+            finishSetupActivity(taskId, 'failed', message)
+            ready = false
+          }
+        }
+        if (ready) continue
+
+        const runtime = inventory.executables[language]
+        if (runtime.health !== 'available' || !runtime.executable) {
+          setSelectedEnvironmentLanguage(language)
+          setExecutionProblem(runtimeInstallationGuidance(language))
+          setEnvironmentOpen(true)
+          return
+        }
+        setSelectedEnvironmentLanguage(language)
+        const updated = await setupKernelIntegrationTrusted(language, inventory)
+        if (!updated) {
+          setEnvironmentOpen(true)
+          return
+        }
+        inventory = updated
+      }
+      const detectedKernels = Object.fromEntries((['python', 'r', 'julia'] as const).flatMap((language) => {
+        const kernel = kernelSelections[language]
+        return kernel ? [[language, kernel.name]] : []
+      }))
+      if (await persistExecutionPreferences(detectedKernels)) setExecutionProblem('')
+      setToast(`${languages.map(runtimeName).join(', ')} ${languages.length === 1 ? 'environment is' : 'environments are'} ready`)
+    } finally {
+      automaticSetupRunningRef.current = false
+    }
+  }
+
+  const ensureProjectLanguageSetup = async (languages: ExecutionLanguage[]) => {
+    const session = desktopSessionRef.current
+    if (!session || languages.length === 0) return
+    try {
+      let trust = await desktopHost.executionTrustStatus(session.root)
+      if (!trust.trusted && trustedProjectRoots(localStorage).has(session.root)) {
+        trust = await desktopHost.trustProjectForSession(session.root, EXECUTION_TRUST_ACKNOWLEDGEMENT)
+      }
+      if (!trust.trusted) {
+        pendingSetupLanguagesRef.current = languages
+        setExecutionTrustPurpose('project-open')
+        setExecutionTrustWarning(`${trust.warning} DraftMatter detected ${languages.map(runtimeName).join(', ')} code and can prepare the required project environments now.`)
+        setExecutionTrustOpen(true)
+        return
+      }
+      await prepareTrustedProjectLanguages(languages)
+    } catch (error) {
+      const message = normaliseHostFailure(error).message
+      setExecutionProblem(message)
+      setToast(message)
+    }
+  }
+
+  const executableLanguageSignature = [...new Set(executableCells.map((cell) => cell.language))].sort().join(',')
+  useEffect(() => {
+    const root = desktopSession?.root
+    if (!root || !executableLanguageSignature) return
+    const signature = `${root}\u0000${executableLanguageSignature}`
+    if (automaticSetupSignatureRef.current === signature) return
+    automaticSetupSignatureRef.current = signature
+    const languages = executableLanguageSignature.split(',') as ExecutionLanguage[]
+    const timeout = window.setTimeout(() => void ensureProjectLanguageSetup(languages), 250)
+    return () => window.clearTimeout(timeout)
+  }, [desktopSession?.root, executableLanguageSignature])
 
   const resetKernelSessions = async () => {
     executionAbortRef.current?.abort()
@@ -2255,22 +2475,38 @@ function App() {
   const loadJuliaPackagesTrusted = async () => {
     const session = desktopSessionRef.current
     if (!session || juliaPackageBusy) return
+    setJuliaPackagesOpen(false)
     setJuliaPackageBusy(true)
     setJuliaPackageProblem('')
+    setJuliaEnvironment(undefined)
+    const taskId = startSetupActivity(
+      'Inspecting the Julia environment',
+      'Starting Julia and reading the active project environment…',
+      'julia',
+    )
     try {
-      setJuliaEnvironment(await desktopHost.listJuliaPackages(session.root))
+      const environment = await desktopHost.listJuliaPackages(session.root, taskId)
+      if (desktopSessionRef.current?.root !== session.root) {
+        finishSetupActivity(taskId, 'failed', 'The project changed before the Julia environment check finished.')
+        return
+      }
+      setJuliaEnvironment(environment)
+      finishSetupActivity(taskId, 'succeeded', 'The Julia project environment is ready.')
     } catch (error) {
-      setJuliaPackageProblem(normaliseHostFailure(error).message)
+      const message = normaliseHostFailure(error).message
+      finishSetupActivity(taskId, 'failed', message)
+      setJuliaPackageProblem(message)
     } finally {
       setJuliaPackageBusy(false)
+      if (desktopSessionRef.current?.root === session.root) setJuliaPackagesOpen(true)
     }
   }
 
   const openJuliaPackages = async () => {
     const session = desktopSessionRef.current
-    setJuliaPackagesOpen(true)
     setJuliaPackageProblem('')
     if (!session) {
+      setJuliaPackagesOpen(true)
       setJuliaPackageProblem('Julia packages are available after opening a desktop project.')
       return
     }
@@ -2288,9 +2524,10 @@ function App() {
     }
   }
 
-  const invalidateJuliaEnvironment = async () => {
+  const invalidateJuliaEnvironment = async (taskId?: string) => {
     const session = desktopSessionRef.current
     if (!session) return
+    if (taskId) appendSetupActivity(taskId, 'Restarting the shared Julia kernel so the package change is active…\n')
     try {
       await kernelExecution.restart(session.root, 'julia')
       kernelFreshRef.current.julia = true
@@ -2308,20 +2545,35 @@ function App() {
   const mutateJuliaPackage = async (action: 'add' | 'remove', name: string) => {
     const session = desktopSessionRef.current
     if (!session || juliaPackageBusy) return
+    setJuliaPackagesOpen(false)
     setJuliaPackageBusy(true)
     setJuliaPackageProblem('')
+    setJuliaEnvironment(undefined)
+    const taskId = startSetupActivity(
+      `${action === 'add' ? 'Adding' : 'Removing'} ${name}`,
+      `${action === 'add' ? 'Installing' : 'Removing'} ${name} in the active Julia project…`,
+      'julia',
+    )
     try {
       const environment = action === 'add'
-        ? await desktopHost.addJuliaPackage({ root: session.root, name })
-        : await desktopHost.removeJuliaPackage({ root: session.root, name })
+        ? await desktopHost.addJuliaPackage({ root: session.root, name }, taskId)
+        : await desktopHost.removeJuliaPackage({ root: session.root, name }, taskId)
+      if (desktopSessionRef.current?.root !== session.root) {
+        finishSetupActivity(taskId, 'failed', 'The project changed before the Julia package task finished.')
+        return
+      }
       setJuliaEnvironment(environment)
       if (action === 'add') setJuliaPackageName('')
-      await invalidateJuliaEnvironment()
+      await invalidateJuliaEnvironment(taskId)
+      finishSetupActivity(taskId, 'succeeded', `${name} was ${action === 'add' ? 'installed' : 'removed'} successfully.`)
       setToast(`${name} ${action === 'add' ? 'added to' : 'removed from'} the Julia project environment`)
     } catch (error) {
-      setJuliaPackageProblem(normaliseHostFailure(error).message)
+      const message = normaliseHostFailure(error).message
+      finishSetupActivity(taskId, 'failed', message)
+      setJuliaPackageProblem(message)
     } finally {
       setJuliaPackageBusy(false)
+      if (desktopSessionRef.current?.root === session.root) setJuliaPackagesOpen(true)
     }
   }
 
@@ -2352,7 +2604,7 @@ function App() {
 
   const executeConsoleTrusted = async (language: ExecutionLanguage, code: string) => {
     const session = desktopSessionRef.current
-    if (!session) throw new Error('The shared kernel console is available only in an opened desktop project.')
+    if (!session) throw new Error('The shared kernel terminal is available only in an opened desktop project.')
     const sequence = ++executionSequenceRef.current
     return kernelExecution.run(session.root, {
       cellId: `console-${language}-${sequence}`,
@@ -2366,7 +2618,7 @@ function App() {
 
   const executeConsole = async (language: ExecutionLanguage, code: string) => {
     const session = desktopSessionRef.current
-    if (!session) throw new Error('Open a desktop project before using the shared kernel console.')
+    if (!session) throw new Error('Open a desktop project before using the shared kernel terminal.')
     if (!kernelSelections[language]) {
       await discoverExecutionEnvironments()
       if (!kernelSelections[language]) {
@@ -2378,7 +2630,7 @@ function App() {
     const trust = await desktopHost.executionTrustStatus(session.root)
     if (trust.trusted) return executeConsoleTrusted(language, code)
     return new Promise<NormalizedExecutionResult>((resolve, reject) => {
-      pendingConsoleRef.current?.reject(new Error('The previous console command was cancelled.'))
+      pendingConsoleRef.current?.reject(new Error('The previous terminal command was cancelled.'))
       pendingConsoleRef.current = { language, code, resolve, reject }
       setExecutionTrustPurpose('console')
       setExecutionTrustWarning(trust.warning)
@@ -2389,10 +2641,11 @@ function App() {
   const cancelExecutionTrust = () => {
     if (executionTrustBusy) return
     if (executionTrustPurpose === 'console') {
-      pendingConsoleRef.current?.reject(new Error('Console execution was cancelled.'))
+      pendingConsoleRef.current?.reject(new Error('Terminal execution was cancelled.'))
       pendingConsoleRef.current = undefined
     }
     if (executionTrustPurpose === 'kernel-setup') setKernelSetupLanguage(undefined)
+    if (executionTrustPurpose === 'project-open') pendingSetupLanguagesRef.current = []
     setExecutionTrustOpen(false)
   }
 
@@ -2403,7 +2656,14 @@ function App() {
     try {
       const trust = await desktopHost.trustProjectForSession(session.root, EXECUTION_TRUST_ACKNOWLEDGEMENT)
       if (!trust.trusted) throw new Error('The project was not trusted for execution.')
+      rememberProjectTrust(localStorage, session.root)
       setExecutionTrustOpen(false)
+      if (executionTrustPurpose === 'project-open') {
+        const languages = pendingSetupLanguagesRef.current
+        pendingSetupLanguagesRef.current = []
+        await prepareTrustedProjectLanguages(languages)
+        return
+      }
       if (executionTrustPurpose === 'packages') {
         await loadJuliaPackagesTrusted()
         return
@@ -2446,6 +2706,19 @@ function App() {
       setToast(message)
     } finally {
       setExecutionTrustBusy(false)
+    }
+  }
+
+  const forgetCurrentProjectTrust = async () => {
+    const session = desktopSessionRef.current
+    if (!session) return
+    try {
+      await desktopHost.revokeProjectTrust(session.root)
+      forgetProjectTrust(localStorage, session.root)
+      pendingSetupLanguagesRef.current = []
+      setToast('Project trust forgotten · DraftMatter will ask before the next setup or execution')
+    } catch (error) {
+      setToast(normaliseHostFailure(error).message)
     }
   }
 
@@ -2882,6 +3155,8 @@ function App() {
   }
 
   const applyDesktopProject = async (project: ProjectSnapshot, announce = true, selectedPath?: string) => {
+    automaticSetupSignatureRef.current = ''
+    pendingSetupLanguagesRef.current = []
     const mainPath = resolveMainDocument(project, selectedPath)
     if (!mainPath) {
       if (project.documents.length > 1 && !selectedPath) {
@@ -4509,22 +4784,45 @@ function App() {
         </div>
       )}
 
+      {setupActivity && setupActivityOpen && (
+        <section className="setup-activity-window" data-status={setupActivity.status} aria-labelledby="setup-activity-title">
+          <div className="setup-activity-head">
+            <span className="setup-activity-indicator" aria-hidden="true" />
+            <span><strong id="setup-activity-title">{setupActivity.title}</strong><small>{setupActivity.status === 'running' ? 'Project process · live output · editor remains usable' : setupActivity.status === 'succeeded' ? 'Process completed successfully' : 'Process needs attention'}</small></span>
+            <button className="icon-button" onClick={() => setSetupActivityOpen(false)} aria-label="Hide setup activity"><Icon name="close" size={14} /></button>
+          </div>
+          <pre ref={setupActivityOutputRef} className="setup-activity-output" role="log" aria-live="polite">{setupActivity.output}</pre>
+          <div className="setup-activity-footer">
+            <span>{setupActivity.status === 'running' ? 'Working…' : setupActivity.status === 'succeeded' ? 'Ready' : 'Setup stopped'}</span>
+            {setupActivity.language && setupActivity.status !== 'running' && <button onClick={() => openKernelTerminal(setupActivity.language)}>Open {runtimeName(setupActivity.language)} terminal</button>}
+            <button onClick={() => setSetupActivityOpen(false)}>{setupActivity.status === 'running' ? 'Hide' : 'Done'}</button>
+          </div>
+        </section>
+      )}
+
+      {setupActivity && !setupActivityOpen && (
+        <button className="setup-activity-pill" data-status={setupActivity.status} onClick={() => setSetupActivityOpen(true)} aria-label={`Show ${setupActivity.title} activity`}>
+          <span className="setup-activity-indicator" aria-hidden="true" />
+          <span><strong>{setupActivity.title}</strong><small>{setupActivity.status === 'running' ? 'Working…' : setupActivity.status === 'succeeded' ? 'Ready' : 'Needs attention'}</small></span>
+        </button>
+      )}
+
       {executionTrustOpen && (
         <div className="modal-backdrop execution-dialog-backdrop" onMouseDown={cancelExecutionTrust}>
           <div className="execution-trust-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="execution-trust-title">
             <div className="execution-dialog-head">
               <span className="execution-shield"><Icon name="code" size={19} /></span>
-              <div><span className="eyebrow">Local project trust</span><h2 id="execution-trust-title">{executionTrustPurpose === 'packages' ? 'Manage this project’s Julia packages?' : executionTrustPurpose === 'format' ? 'Format this project’s Julia code?' : executionTrustPurpose === 'console' ? 'Run code in the shared kernel console?' : executionTrustPurpose === 'kernel-setup' ? `Set up ${runtimeName(kernelSetupLanguage ?? selectedEnvironmentLanguage)} integration?` : 'Run this project’s code?'}</h2></div>
+              <div><span className="eyebrow">Local project trust</span><h2 id="execution-trust-title">{executionTrustPurpose === 'project-open' ? 'Trust and prepare this project?' : executionTrustPurpose === 'packages' ? 'Manage this project’s Julia packages?' : executionTrustPurpose === 'format' ? 'Format this project’s Julia code?' : executionTrustPurpose === 'console' ? 'Run code in the shared kernel terminal?' : executionTrustPurpose === 'kernel-setup' ? `Set up ${runtimeName(kernelSetupLanguage ?? selectedEnvironmentLanguage)} integration?` : 'Run this project’s code?'}</h2></div>
               <button className="icon-button" onClick={cancelExecutionTrust} disabled={executionTrustBusy} aria-label="Close execution trust dialog"><Icon name="close" /></button>
             </div>
             <div className="execution-trust-body">
               <p>{executionTrustWarning || 'Project code can read and change files and use the network with your user permissions. Local execution is not a sandbox.'}</p>
               <div className="execution-project-root"><Icon name="folder" size={15} /><span>{desktopSession?.root}</span></div>
-              <p className="execution-trust-note">Trust lasts only for this DraftMatter session. Opening a project never runs its code.</p>
+              <p className="execution-trust-note">DraftMatter remembers this choice on this device. On later opens it may check or repair detected language environments, but manuscript cells run only when you ask. You can forget trust from Local runtimes.</p>
             </div>
             <div className="execution-dialog-actions">
               <button onClick={cancelExecutionTrust} disabled={executionTrustBusy}>Cancel</button>
-              <button className="primary-button" onClick={() => void confirmExecutionTrust()} disabled={executionTrustBusy}>{executionTrustBusy ? 'Trusting…' : executionTrustPurpose === 'run' || executionTrustPurpose === 'console' ? 'Trust for this session and run' : executionTrustPurpose === 'kernel-setup' ? 'Trust and set up integration' : 'Trust for this session'}</button>
+              <button className="primary-button" onClick={() => void confirmExecutionTrust()} disabled={executionTrustBusy}>{executionTrustBusy ? 'Trusting…' : executionTrustPurpose === 'project-open' ? 'Trust project and continue' : executionTrustPurpose === 'run' || executionTrustPurpose === 'console' ? 'Trust project and run' : executionTrustPurpose === 'kernel-setup' ? 'Trust project and set up' : 'Trust project'}</button>
             </div>
           </div>
         </div>
@@ -4547,7 +4845,7 @@ function App() {
               <label><span>Package name</span><input value={juliaPackageName} onChange={(event) => setJuliaPackageName(event.target.value)} placeholder="DataFrames" spellCheck={false} autoComplete="off" aria-label="Julia package name" /></label>
               <button className="primary-button" type="submit" disabled={juliaPackageBusy || !/^[A-Za-z][A-Za-z0-9_]*$/.test(juliaPackageName.trim())}>{juliaPackageBusy ? 'Working…' : 'Add package'}</button>
             </form>
-            {!juliaEnvironment?.packages.some((packageItem) => packageItem.name === 'JuliaFormatter') && (
+            {juliaEnvironment && !juliaEnvironment.packages.some((packageItem) => packageItem.name === 'JuliaFormatter') && (
               <div className="julia-formatter-callout"><span><strong>Format Julia cells automatically</strong><small>Add JuliaFormatter to format Julia source after edits. ⌘/Ctrl + Shift + F still runs an immediate pass.</small></span><button onClick={() => void mutateJuliaPackage('add', 'JuliaFormatter')} disabled={juliaPackageBusy}>Add JuliaFormatter</button></div>
             )}
             {juliaPackageProblem && <div className="execution-environment-help" role="alert">{juliaPackageProblem}</div>}
@@ -4571,7 +4869,7 @@ function App() {
           <div className="execution-environment-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="execution-environment-title">
             <div className="execution-dialog-head">
               <span className="execution-shield"><Icon name="code" size={19} /></span>
-              <div><span className="eyebrow">Execution environments</span><h2 id="execution-environment-title">Local runtimes</h2><p>DraftMatter discovers installed tools only when you ask and installs a kernel integration only after explicit confirmation.</p></div>
+              <div><span className="eyebrow">Execution environments</span><h2 id="execution-environment-title">Local runtimes</h2><p>DraftMatter detects the languages used by the manuscript, activates this project’s environment, and prepares missing integration after one project-trust confirmation.</p></div>
               <button className="icon-button" onClick={() => setEnvironmentOpen(false)} aria-label="Close execution environments"><Icon name="close" /></button>
             </div>
             <div className="execution-environment-list">
@@ -4609,6 +4907,7 @@ function App() {
             {!selectedEnvironmentSetupExecutable && selectedEnvironmentRuntime?.health === 'missing' && <div className="execution-environment-help" role="status">{runtimeInstallationGuidance(selectedEnvironmentLanguage)}</div>}
             {executionProblem && <div className="execution-environment-help" role="alert">{executionProblem}</div>}
             <div className="execution-dialog-actions environment-actions">
+              {desktopSession && <button onClick={() => void forgetCurrentProjectTrust()} disabled={kernelSetupBusy}>Forget project trust</button>}
               {selectedEnvironmentSetupExecutable && <button onClick={() => void requestKernelIntegrationSetup(selectedEnvironmentLanguage)} disabled={kernelSetupBusy || runtimeDiscoveryState === 'discovering'}>{kernelSetupBusy && kernelSetupLanguage === selectedEnvironmentLanguage ? 'Setting up…' : selectedEnvironmentKernel ? 'Repair integration' : `Set up ${runtimeName(selectedEnvironmentLanguage)}`}</button>}
               <button onClick={() => void restartExecution(selectedEnvironmentLanguage)} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}>Restart {runtimeName(selectedEnvironmentLanguage)}</button>
               <button onClick={() => void terminateExecution(selectedEnvironmentLanguage)} disabled={!desktopSession}>Terminate {runtimeName(selectedEnvironmentLanguage)}</button>
@@ -4954,6 +5253,9 @@ function App() {
           <KernelConsole
             key={desktopSession.root}
             languages={configuredConsoleLanguages}
+            projectLabel={desktopSession.root.split(/[\\/]/).filter(Boolean).at(-1) ?? 'project'}
+            preferredLanguage={kernelConsolePreferredLanguage}
+            preferredLanguageEpoch={kernelConsolePreferredLanguageEpoch}
             statuses={kernelConsoleStatuses}
             restartEpochs={kernelConsoleRestartEpochs}
             onStatusChange={updateKernelConsoleStatus}
@@ -4963,7 +5265,7 @@ function App() {
             onRestart={async (language) => { await restartExecution(language) }}
             onPromoteSetup={(language, code) => {
               const inserted = runStructuredCommand((editor) => editor.insertSetupCell(language, code), 'Add setup cell')
-              if (inserted) setToast(`${runtimeName(language)} setup cell added from the console`)
+              if (inserted) setToast(`${runtimeName(language)} setup cell added from the terminal`)
             }}
             onClose={() => setKernelConsoleOpen(false)}
           />
@@ -4971,7 +5273,7 @@ function App() {
       )}
 
       {desktopSession && !kernelConsoleOpen && (
-        <button className={`kernel-console-toggle ${kernelConsoleDirty ? 'dirty' : ''}`} onClick={() => setKernelConsoleOpen(true)} aria-label={`Open shared kernel console${kernelConsoleDirty ? ', interactive state present' : ''}`}><Icon name="code" size={14} /> Console{kernelConsoleDirty && <i title="Interactive state present" />}</button>
+        <button className={`kernel-console-toggle ${kernelConsoleDirty ? 'dirty' : ''}`} onClick={() => openKernelTerminal(primaryCell?.language ?? selectedEnvironmentLanguage)} aria-label={`Open shared kernel terminal${kernelConsoleDirty ? ', interactive state present' : ''}`}><Icon name="code" size={14} /> Terminal{kernelConsoleDirty && <i title="Interactive state present" />}</button>
       )}
 
       {toast && <div className="toast" role="status"><Icon name="check" size={16} /> {toast}</div>}
