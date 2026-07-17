@@ -10,20 +10,20 @@ export type InsertBlockRequest =
   | { kind: 'equation-display'; tex: string; label?: string }
   | { kind: 'cross-reference'; target: string }
   | { kind: 'footnote'; label: string; content: string }
-  | { kind: 'code-cell'; language: 'python' | 'r' | 'julia' }
+  | { kind: 'code-cell'; language: 'python' | 'r' | 'julia'; output: 'figure' | 'table' | 'values' }
   | { kind: 'computed-value'; key: string }
 
 export type InsertBlockKind = InsertBlockRequest['kind']
 
 const details: Record<InsertBlockKind, { eyebrow: string; title: string; description: string }> = {
-  section: { eyebrow: 'Document structure', title: 'Add section', description: 'Create a portable heading at the current block position.' },
-  figure: { eyebrow: 'Visual evidence', title: 'Insert figure', description: 'Reference an image inside the project and keep its description portable.' },
-  table: { eyebrow: 'Structured data', title: 'Insert table', description: 'Create an editable table with ordinary Markdown cells.' },
-  'equation-inline': { eyebrow: 'Mathematics', title: 'Insert inline equation', description: 'Enter TeX without dollar-sign delimiters.' },
-  'equation-display': { eyebrow: 'Mathematics', title: 'Insert display equation', description: 'Create a centered equation with an optional cross-reference label.' },
-  'cross-reference': { eyebrow: 'Document link', title: 'Insert cross-reference', description: 'Link to a portable figure, table, equation, or section label.' },
-  footnote: { eyebrow: 'Supporting note', title: 'Insert footnote', description: 'Create a reference here and its portable definition below.' },
-  'code-cell': { eyebrow: 'Reproducible analysis', title: 'Insert code cell', description: 'Choose a language now; execution remains explicit and trusted.' },
+  section: { eyebrow: 'Document structure', title: 'Add section', description: 'Create a new heading at the current position.' },
+  figure: { eyebrow: 'Visual evidence', title: 'Insert figure', description: 'Add an image, an accessible description, and an optional caption.' },
+  table: { eyebrow: 'Structured data', title: 'Insert table', description: 'Create a table whose cells can be edited directly.' },
+  'equation-inline': { eyebrow: 'Mathematics', title: 'Insert inline equation', description: 'Enter the equation without surrounding delimiters.' },
+  'equation-display': { eyebrow: 'Mathematics', title: 'Insert display equation', description: 'Create a centered equation that can be referenced elsewhere.' },
+  'cross-reference': { eyebrow: 'Document link', title: 'Insert cross-reference', description: 'Link to a figure, table, equation, or section.' },
+  footnote: { eyebrow: 'Supporting note', title: 'Insert footnote', description: 'Add supporting text at the current position.' },
+  'code-cell': { eyebrow: 'Reproducible result', title: 'Add reproducible output', description: 'Create a hidden computation that produces a figure, table, or named value.' },
   'computed-value': { eyebrow: 'Reproducible result', title: 'Insert computed value', description: 'Place a named result from a computation directly in the sentence.' },
 }
 
@@ -55,6 +55,7 @@ export function InsertBlockDialog({
   const [target, setTarget] = useState('')
   const [content, setContent] = useState('')
   const [language, setLanguage] = useState<'python' | 'r' | 'julia'>('python')
+  const [computedOutput, setComputedOutput] = useState<'figure' | 'table' | 'values'>('figure')
   const [computedKey, setComputedKey] = useState(computedValues[0]?.key ?? '')
   const [problem, setProblem] = useState('')
 
@@ -81,7 +82,7 @@ export function InsertBlockDialog({
     else if (kind === 'cross-reference') request = { kind, target: target.trim().replace(/^@/, '') }
     else if (kind === 'footnote') request = { kind, label: label.trim().replace(/^\[\^|\]$/g, ''), content: content.trim() }
     else if (kind === 'computed-value') request = { kind, key: computedKey.trim() }
-    else request = { kind, language }
+    else request = { kind, language, output: computedOutput }
     if (onInsert(request)) onClose()
     else setProblem('The item could not be inserted at the current editor position. Place the cursor in the manuscript and try again.')
   }
@@ -125,7 +126,7 @@ export function InsertBlockDialog({
             {labelField('Footnote label', 'method-note', 'Letters, numbers, dots, colons, underscores, and hyphens are supported.')}
             <label><span>Footnote text</span><textarea autoFocus value={content} onChange={(event) => setContent(event.target.value)} rows={4} placeholder="Supporting detail…" /></label>
           </>}
-          {kind === 'code-cell' && <label><span>Language</span><select autoFocus value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>DraftMatter keeps each language in an independent execution environment.</small></label>}
+          {kind === 'code-cell' && <div className="insert-block-grid"><label><span>Produces</span><select autoFocus value={computedOutput} onChange={(event) => setComputedOutput(event.target.value as typeof computedOutput)}><option value="figure">Figure</option><option value="table">Table</option><option value="values">In-text values</option></select><small>Only this result appears in the manuscript.</small></label><label><span>Language</span><select value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>The saved source stays hidden until you choose to edit it.</small></label></div>}
           {kind === 'computed-value' && <label><span>Result name</span><input autoFocus value={computedKey} onChange={(event) => setComputedKey(event.target.value)} list="computed-value-options" placeholder="mean_height" spellCheck={false} /><datalist id="computed-value-options">{computedValues.map((value) => <option key={value.key} value={value.key}>{value.value}</option>)}</datalist><small>{computedValues.length ? 'Choose a retained result or enter the name that its computation will produce.' : 'Enter the name emitted by a computation. It will show “Value unavailable” until that computation has run.'}</small></label>}
           {problem && <div className="insert-block-problem" role="alert">{problem}</div>}
         </div>

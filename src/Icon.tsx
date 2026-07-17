@@ -5,7 +5,7 @@ type IconName =
   | 'play' | 'check' | 'x' | 'more' | 'plus' | 'download' | 'code' | 'quote'
   | 'link' | 'image' | 'table' | 'undo' | 'redo' | 'eye' | 'clock' | 'branch'
   | 'panelLeft' | 'panelRight' | 'spark' | 'close' | 'arrowRight' | 'command'
-  | 'folder' | 'users'
+  | 'folder' | 'users' | 'focus'
 
 const paths: Record<IconName, React.ReactNode> = {
   document: <><path d="M6 2.75h8l4 4v14.5H6z"/><path d="M14 2.75v4h4M9 11h6M9 15h6"/></>,
@@ -39,6 +39,7 @@ const paths: Record<IconName, React.ReactNode> = {
   command: <path d="M9 6.5A2.5 2.5 0 1 0 6.5 9H17.5A2.5 2.5 0 1 0 15 6.5V17.5A2.5 2.5 0 1 0 17.5 15H6.5A2.5 2.5 0 1 0 9 17.5z"/>,
   folder: <path d="M3 6.5h7l2 2h9v10H3z"/>,
   users: <><circle cx="9" cy="8" r="3"/><path d="M3.5 19v-1.5A4.5 4.5 0 0 1 8 13h2a4.5 4.5 0 0 1 4.5 4.5V19M15 5.5a3 3 0 0 1 0 5.5M16.5 13.5a4 4 0 0 1 4 4V19"/></>,
+  focus: <><path d="M8 4H4v4M16 4h4v4M20 16v4h-4M4 16v4h4"/><path d="M9 9h6v6H9z"/></>,
 }
 
 export function Icon({ name, size = 18, ...props }: { name: IconName; size?: number } & SVGProps<SVGSVGElement>) {

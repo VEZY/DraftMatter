@@ -117,7 +117,7 @@ export interface StructuredManuscriptEditorHandle {
   wrapOrderedList: () => boolean
   undo: () => boolean
   redo: () => boolean
-  insertCodeCell: (language: 'python' | 'r' | 'julia') => boolean
+  insertCodeCell: (language: 'python' | 'r' | 'julia', output?: 'figure' | 'table' | 'values') => boolean
   insertComputedValue: (key: string) => boolean
   insertEquation: (tex: string, display?: boolean, label?: string) => boolean
   insertCrossReference: (target: string) => boolean
@@ -2408,17 +2408,24 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     wrapOrderedList: () => run(wrapInList(manuscriptSchema.nodes.ordered_list, { id: randomId('list'), order: 1 })),
     undo: () => run(collaborationRef.current ? collaborativeUndo : historyUndo),
     redo: () => run(collaborationRef.current ? collaborativeRedo : historyRedo),
-    insertCodeCell: (language) => {
+    insertCodeCell: (language, output = 'figure') => {
       const view = viewRef.current
       if (!view || readOnlyRef.current) return false
       const id = randomId(`cell-${language}`)
+      const valueTemplate = output === 'values'
+        ? language === 'python'
+          ? '# After computing a result, publish it like this:\n# print("DRAFTMATTER_VALUE mean_height=12.4 cm")'
+          : language === 'r'
+            ? '# After computing a result, publish it like this:\n# cat("DRAFTMATTER_VALUE mean_height=12.4 cm\\n")'
+            : '# After computing a result, publish it like this:\n# println("DRAFTMATTER_VALUE mean_height=12.4 cm")'
+        : ''
       insertBlock(view, manuscriptSchema.nodes.code_cell.createChecked({
         id,
         language,
-        code: '',
-        outputKind: null,
+        code: valueTemplate,
+        outputKind: output,
         status: 'stale',
-        attributes: { execute: true },
+        attributes: { execute: true, output },
       }))
       view.focus()
       return true

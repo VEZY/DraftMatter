@@ -407,13 +407,16 @@ function App() {
     canUndo,
     canRedo,
   } = useDraftHistory(initialDraftState)
-  const [markupView, setMarkupView] = useState<MarkupView>('all')
+  const [markupView, setMarkupView] = useState<MarkupView>('simple')
   const [suggestionMode, setSuggestionMode] = useState(false)
   const [reviewAuthorFilter, setReviewAuthorFilter] = useState('all')
   const [activeReviewId, setActiveReviewId] = useState<string>()
   const [activeNav, setActiveNav] = useState<'manuscript' | 'review' | 'sources' | 'history'>('manuscript')
-  const [rightPanelOpen, setRightPanelOpen] = useState(true)
+  const [rightPanelOpen, setRightPanelOpen] = useState(false)
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
+  const [focusMode, setFocusMode] = useState(false)
+  const [insertMenuOpen, setInsertMenuOpen] = useState(false)
+  const [executionWorkspaceOpen, setExecutionWorkspaceOpen] = useState(false)
   const [outlineOptionsOpen, setOutlineOptionsOpen] = useState(false)
   const [outlineQuery, setOutlineQuery] = useState('')
   const [outlineMaxDepth, setOutlineMaxDepth] = useState(6)
@@ -1189,6 +1192,17 @@ function App() {
   }, [commandOpen])
 
   useEffect(() => {
+    if (!focusMode) return
+    const exitFocus = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return
+      event.preventDefault()
+      setFocusMode(false)
+    }
+    globalThis.addEventListener('keydown', exitFocus)
+    return () => globalThis.removeEventListener('keydown', exitFocus)
+  }, [focusMode])
+
+  useEffect(() => {
     if (!toast) return
     const timeout = window.setTimeout(() => setToast(''), 2600)
     return () => window.clearTimeout(timeout)
@@ -1263,6 +1277,7 @@ function App() {
     cachedResultCells: new Set(Object.keys(executionResults)),
   })
   const executionView = primaryCell ? executionViews.find((view) => view.cellId === primaryCell.id) : undefined
+  const executionSummaryStatus = executionActiveCell ? 'running' : executionView?.freshness ?? 'never-run'
   const selectedEnvironmentKernels = runtimeInventory ? healthyKernelsFor(runtimeInventory, selectedEnvironmentLanguage) : []
   const selectedEnvironmentKernel = selectedKernelForLanguage(selectedEnvironmentLanguage)
   const unavailableSelectedKernelName = selectedKernelNames[selectedEnvironmentLanguage] && !selectedEnvironmentKernel
@@ -1624,8 +1639,8 @@ function App() {
       if (inserted) setToast(`Computed value inserted · ${request.key}`)
       return inserted
     }
-    const inserted = runStructuredCommand((editor) => editor.insertCodeCell(request.language), `Insert ${request.language === 'r' ? 'R' : request.language} code cell`)
-    if (inserted) setToast(`${request.language === 'r' ? 'R' : request.language} code cell inserted`)
+    const inserted = runStructuredCommand((editor) => editor.insertCodeCell(request.language, request.output), 'Add reproducible output')
+    if (inserted) setToast(`Reproducible ${request.output === 'values' ? 'values' : request.output} added · source stays hidden`)
     return inserted
   }
 
@@ -2418,6 +2433,7 @@ function App() {
   }
 
   const showReviewPanel = () => {
+    setFocusMode(false)
     setActiveNav('review')
     setRightPanelOpen(true)
   }
@@ -3169,6 +3185,14 @@ function App() {
 
   const commandEntries: CommandPaletteEntry[] = [
     {
+      id: 'focus-mode',
+      label: focusMode ? 'Leave focus mode' : 'Enter focus mode',
+      description: focusMode ? 'Restore navigation and project controls' : 'Show only the manuscript and essential writing tools',
+      keywords: 'focus zen concentrate distraction writing',
+      icon: <span className="command-icon"><Icon name="focus" size={17} /></span>,
+      action: () => { setCommandOpen(false); setFocusMode((enabled) => !enabled) },
+    },
+    {
       id: 'citation',
       label: 'Insert citation',
       description: 'Search Zotero and project bibliography',
@@ -3190,7 +3214,7 @@ function App() {
     {
       id: 'authors',
       label: 'Manage manuscript authors',
-      description: 'Edit portable publication names in frontmatter',
+      description: 'Edit names, ORCID identifiers, and affiliations',
       keywords: 'author coauthor metadata yaml publication byline',
       icon: <span className="command-icon"><Icon name="users" size={17} /></span>,
       disabled: !canEditManuscript,
@@ -3208,7 +3232,7 @@ function App() {
     {
       id: 'inline-equation',
       label: 'Insert inline equation',
-      description: 'Rendered TeX kept as portable Markdown math',
+      description: 'Place a rendered equation in the sentence',
       keywords: 'math latex tex formula',
       icon: <span className="command-icon">∑</span>,
       disabled: !canEditManuscript,
@@ -3217,7 +3241,7 @@ function App() {
     {
       id: 'display-equation',
       label: 'Insert display equation',
-      description: 'Add an optional portable equation label',
+      description: 'Add a centered equation that can be referenced',
       keywords: 'math latex tex formula block',
       icon: <span className="command-icon">∫</span>,
       disabled: !canEditManuscript,
@@ -3253,7 +3277,7 @@ function App() {
     {
       id: 'figure',
       label: 'Insert figure',
-      description: 'Use a project-relative image with alt text',
+      description: 'Add an image, description, and caption',
       keywords: 'image picture graphic caption',
       icon: <span className="command-icon"><Icon name="image" size={17} /></span>,
       disabled: !canEditManuscript,
@@ -3289,8 +3313,8 @@ function App() {
     },
     {
       id: 'source',
-      label: 'Inspect portable source',
-      description: 'Compare reviewed and clean projections',
+      label: 'View manuscript source',
+      description: 'Advanced: inspect the underlying document',
       keywords: 'markdown qmd original final projection raw',
       icon: <span className="command-icon"><Icon name="code" size={17} /></span>,
       action: () => { setCommandOpen(false); openSourceInspector() },
@@ -3325,10 +3349,11 @@ function App() {
   const outlineFiltered = Boolean(normalizedOutlineQuery) || outlineMaxDepth < 6
 
   return (
-    <div className="app-shell">
+    <div className={`app-shell ${focusMode ? 'focus-mode' : ''}`}>
+      {focusMode && <button className="focus-mode-exit" onClick={() => setFocusMode(false)} aria-label="Leave focus mode"><Icon name="focus" size={15} /> Leave focus</button>}
       <header className="topbar">
         <div className="brand-block">
-          <button className="icon-button mobile-panel-button" aria-label="Toggle left panel" onClick={() => setLeftPanelOpen((open) => !open)}>
+          <button className="icon-button panel-toggle" aria-label={leftPanelOpen ? 'Hide manuscript outline' : 'Show manuscript outline'} aria-pressed={leftPanelOpen} onClick={() => setLeftPanelOpen((open) => !open)}>
             <Icon name="panelLeft" />
           </button>
           <div className="wordmark" aria-label="DraftMatter home">
@@ -3351,11 +3376,11 @@ function App() {
                 <div className="project-menu-actions">
                   {desktopHost.available ? (
                     <>
-                      <button onClick={() => void openDesktopProject()} disabled={projectBusy}><Icon name="folder" size={16} /><span><strong>{projectBusy ? 'Opening project…' : 'Open project folder…'}</strong><small>Local Markdown, Quarto, and bibliography files</small></span></button>
+                      <button onClick={() => void openDesktopProject()} disabled={projectBusy}><Icon name="folder" size={16} /><span><strong>{projectBusy ? 'Opening project…' : 'Open project folder…'}</strong><small>Manuscript, figures, tables, and references</small></span></button>
                       <button onClick={() => void beginCreateDesktopProject()} disabled={projectBusy}><Icon name="plus" size={16} /><span><strong>Create project…</strong><small>Start safely in an empty folder</small></span></button>
                     </>
                   ) : (
-                    <button onClick={() => fileInputRef.current?.click()}><Icon name="document" size={16} /><span><strong>Open manuscript…</strong><small>Markdown or Quarto, up to 5 MB</small></span></button>
+                    <button onClick={() => fileInputRef.current?.click()}><Icon name="document" size={16} /><span><strong>Open manuscript…</strong><small>DraftMatter manuscript, up to 5 MB</small></span></button>
                   )}
                   <button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={16} /><span><strong>Attach bibliography…</strong><small>BibTeX, CSL JSON, RIS, or EndNote · {citations.length} indexed</small></span></button>
                   <button onClick={createSnapshot}><Icon name="clock" size={16} /><span><strong>Save recovery snapshot</strong><small>Keep a private safety copy on this device</small></span></button>
@@ -3391,6 +3416,7 @@ function App() {
             <Icon name="search" />
             <span className="shortcut"><Icon name="command" size={12} />K</span>
           </button>
+          <button className="icon-button focus-mode-toggle" onClick={() => setFocusMode(true)} aria-label="Enter focus mode" title="Focus mode"><Icon name="focus" size={17} /></button>
           <span className="topbar-divider" />
           <button className={`review-toggle ${activeNav === 'review' ? 'active' : ''}`} onClick={showReviewPanel} aria-label={`Review, ${totalOpenReviewCount} open item${totalOpenReviewCount === 1 ? '' : 's'}`}>
             <Icon name="message" size={16} />
@@ -3405,14 +3431,18 @@ function App() {
             </button>
             {exportOpen && (
               <div className="popover export-menu">
-                <button onClick={() => exportPublication('html')}><span><strong>Native HTML</strong><small>Semantic, styled, and script-free</small></span><Icon name="arrowRight" /></button>
-                <button onClick={() => exportPublication('pdf')}><span><strong>Print / PDF</strong><small>Browser print with clean page styling</small></span><Icon name="arrowRight" /></button>
-                <button onClick={exportDocx}><span><strong>Clean DOCX</strong><small>Native Word document, no tracked-change claim</small></span><Icon name="arrowRight" /></button>
-                <button onClick={openExternalExport}><span><strong>Pandoc / Quarto…</strong><small>Optional separately installed renderer</small></span><Icon name="arrowRight" /></button>
-                <button onClick={() => download('final')}><span><strong>Clean final</strong><small>Resolved manuscript, no review data</small></span><Icon name="arrowRight" /></button>
-                <button onClick={() => download('original')}><span><strong>Clean original</strong><small>Accepted base before open suggestions</small></span><Icon name="arrowRight" /></button>
-                <button onClick={() => download('report')}><span><strong>Review report</strong><small>Separate Markdown summary, comments, and decisions</small></span><Icon name="arrowRight" /></button>
-                <button onClick={() => download('reviewed')}><span><strong>Portable source</strong><small>QMD with anchors and review records</small></span><Icon name="arrowRight" /></button>
+                <span className="export-menu-heading">Publish</span>
+                <button onClick={() => exportPublication('html')}><span><strong>Web page</strong><small>Clean, styled, and self-contained</small></span><Icon name="arrowRight" /></button>
+                <button onClick={() => exportPublication('pdf')}><span><strong>PDF</strong><small>Print-ready manuscript</small></span><Icon name="arrowRight" /></button>
+                <button onClick={exportDocx}><span><strong>Word document</strong><small>Clean editable manuscript</small></span><Icon name="arrowRight" /></button>
+                <span className="export-menu-heading">Share and archive</span>
+                <button onClick={() => download('final')}><span><strong>Manuscript copy</strong><small>Resolved text without review notes</small></span><Icon name="arrowRight" /></button>
+                <button onClick={() => download('report')}><span><strong>Review report</strong><small>Separate summary of comments and decisions</small></span><Icon name="arrowRight" /></button>
+                <details className="export-advanced"><summary>Advanced options</summary><div>
+                  <button onClick={() => download('original')}><span><strong>Original text</strong><small>Accepted text before open suggestions</small></span><Icon name="arrowRight" /></button>
+                  <button onClick={() => download('reviewed')}><span><strong>Project source</strong><small>Complete editable manuscript and review data</small></span><Icon name="arrowRight" /></button>
+                  <button onClick={openExternalExport}><span><strong>Other renderers…</strong><small>Use an optional system publishing tool</small></span><Icon name="arrowRight" /></button>
+                </div></details>
               </div>
             )}
           </div>
@@ -3576,11 +3606,16 @@ function App() {
             <button aria-label="Italic" onClick={() => runStructuredCommand((editor) => editor.toggleItalic(), 'Italic')} disabled={!canEditManuscript}><em>I</em></button>
             <button aria-label="Add link" onClick={addStructuredLink} disabled={!canEditManuscript}><Icon name="link" size={16} /></button>
             <span className="toolbar-divider" />
-            <button aria-label="Block quote" onClick={() => runStructuredCommand((editor) => editor.wrapBlockquote(), 'Block quote')} disabled={!canEditManuscript}><Icon name="quote" size={17} /></button>
-            <button aria-label="Insert image" onClick={() => openInsertBlock('figure')} disabled={!canEditManuscript}><Icon name="image" size={17} /></button>
-            <button aria-label="Insert table" onClick={() => openInsertBlock('table')} disabled={!canEditManuscript}><Icon name="table" size={17} /></button>
-            <button aria-label="Insert equation" onClick={() => openInsertBlock('equation-inline')} disabled={!canEditManuscript}><span className="toolbar-symbol">∑</span></button>
-            <button aria-label="Insert code cell" onClick={() => openInsertBlock('code-cell')} disabled={!canEditManuscript}><Icon name="code" size={17} /></button>
+            <div className="toolbar-insert-wrap">
+              <button className="toolbar-insert-button" aria-label="Insert" aria-expanded={insertMenuOpen} onClick={() => setInsertMenuOpen((open) => !open)} disabled={!canEditManuscript}><Icon name="plus" size={15} /><span>Insert</span><Icon name="chevronDown" size={12} /></button>
+              {insertMenuOpen && <div className="toolbar-insert-menu popover">
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('figure') }}><Icon name="image" size={15} /><span><strong>Figure</strong><small>Image and caption</small></span></button>
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('table') }}><Icon name="table" size={15} /><span><strong>Table</strong><small>Editable rows and columns</small></span></button>
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('equation-inline') }}><span className="toolbar-symbol">∑</span><span><strong>Equation</strong><small>Inline or display mathematics</small></span></button>
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('computed-value') }}><span className="toolbar-symbol">123</span><span><strong>Computed value</strong><small>Statistic or model result in text</small></span></button>
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('code-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible output</strong><small>Hidden computation for a result</small></span></button>
+              </div>}
+            </div>
             <span className="toolbar-divider" />
             <button
               className={`toolbar-track-changes ${suggestionMode ? 'active' : ''}`}
@@ -3598,7 +3633,7 @@ function App() {
           {structuredMode ? (
           <article className="manuscript structured-manuscript" aria-label="Editable manuscript">
             <div className="paper-meta-row">
-              <div className="paper-meta">PORTABLE RESEARCH MANUSCRIPT · MARKDOWN / QUARTO</div>
+              <div className="paper-meta">RESEARCH MANUSCRIPT</div>
               <button
                 className="publication-authors-trigger"
                 onClick={openPublicationAuthors}
@@ -3619,9 +3654,14 @@ function App() {
               <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" readOnly={!canEditManuscript} />
             )}
             {primaryCell && (
-              <section className="structured-execution-workspace" aria-label="Executable cells">
+              <section className={`structured-execution-workspace ${executionWorkspaceOpen ? 'open' : 'collapsed'}`} aria-label="Reproducible outputs">
+                <div className="execution-summary-bar">
+                  <span><Icon name="spark" size={15} /><strong>Reproducibility</strong><small>{executableCells.length} output{executableCells.length === 1 ? '' : 's'} · {cellStatusLabel(executionSummaryStatus)}</small></span>
+                  <button className="subtle" onClick={() => setExecutionWorkspaceOpen((open) => !open)} aria-expanded={executionWorkspaceOpen}>{executionWorkspaceOpen ? 'Hide details' : 'Manage'}</button>
+                </div>
+                <div className="execution-workspace-details" hidden={!executionWorkspaceOpen}>
                 <div className="structured-execution-bar">
-                  <span><Icon name="code" size={15} /><strong>Execution workspace</strong><small>{executableCells.length} explicit cell{executableCells.length === 1 ? '' : 's'} · Python, R, and Julia stay isolated</small></span>
+                  <span><small>Update figures, tables, and values from their saved computations.</small></span>
                   {[...new Set(executableCells.map((cell) => cell.language))].map((language) => (
                     <button className="subtle" key={language} onClick={() => void requestExecution({ kind: 'language', language })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && executableCells.filter((cell) => cell.language === language).some((cell) => !executionEnvironmentAvailable(cell)))}>
                       <Icon name="play" size={12} /> Run {runtimeName(language)}
@@ -3662,6 +3702,7 @@ function App() {
                   })}
                 </div>
                 {cleanRunCertification && <p className="clean-run-certification"><Icon name="check" size={13} /> Clean run certified · {cleanRunCertification.resultHashes.length} outputs from one ordered run</p>}
+                </div>
               </section>
             )}
             {structuredReviewProjection && (
@@ -3742,7 +3783,7 @@ function App() {
           </article>
           ) : (
           <article className="manuscript" aria-label="Editable manuscript">
-            <div className="paper-meta">PORTABLE RESEARCH MANUSCRIPT · MARKDOWN / QUARTO</div>
+            <div className="paper-meta">RESEARCH MANUSCRIPT</div>
             <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" readOnly={!canEditManuscript} />
             <div className="authors" aria-label="Publication authors">
               {publicationAuthors.map((author, index) => <span key={`${author}-${index}`}><Avatar initials={authorInitials(author)} tone={index % 2 ? 'blue' : 'sage'} small label={author} /> {author}</span>)}
@@ -3910,13 +3951,15 @@ function App() {
           </div>
         </main>
 
-        {rightPanelOpen && (
-          <aside className="review-panel" aria-label="Review feedback">
+          <aside className="review-panel" aria-label="Review feedback" hidden={!rightPanelOpen}>
             <div className="review-panel-header">
               <div><span className="eyebrow">Review</span><h2>Open feedback <span>{openReviewCount}</span></h2></div>
               <button className="icon-button subtle" onClick={() => setRightPanelOpen(false)} aria-label="Close review panel"><Icon name="close" /></button>
             </div>
 
+            <details className="review-options">
+              <summary><span>Review options</span><small>{markupView === 'simple' ? 'Simple markup' : markupView === 'all' ? 'All markup' : markupView === 'original' ? 'Original' : 'Final preview'} · {reviewAuthorFilter === 'all' ? 'All authors' : reviewDocument.authors.find((author) => author.id === reviewAuthorFilter)?.name ?? 'Filtered'}</small></summary>
+              <div className="review-options-body">
             <div className="markup-view-control">
               <Icon name="eye" size={16} />
               <select value={markupView} onChange={(event) => setMarkupView(event.target.value as MarkupView)} aria-label="Markup view">
@@ -3948,6 +3991,8 @@ function App() {
               </select>
               <Icon name="chevronDown" size={13} />
             </div>
+              </div>
+            </details>
 
             <AlignedReviewRail editorRef={editorAreaRef}>
               <div className="review-location"><span>{reviewLocationLabel}</span></div>
@@ -4024,7 +4069,6 @@ function App() {
               />
             </AlignedReviewRail>
           </aside>
-        )}
       </div>
 
       {reviewContextMenu && (
@@ -4091,7 +4135,7 @@ function App() {
             <form onSubmit={commitPublicationAuthors}>
             <div className="execution-dialog-head">
               <span className="execution-shield"><Icon name="users" size={19} /></span>
-              <div><span className="eyebrow">Publication metadata</span><h2 id="publication-authors-title">Manuscript authors</h2><p>These names travel with the Markdown or Quarto file and appear in clean HTML, PDF, and DOCX exports.</p></div>
+              <div><span className="eyebrow">Publication details</span><h2 id="publication-authors-title">Manuscript authors</h2><p>These details appear with the manuscript and in exported files.</p></div>
               <button className="icon-button" type="button" onClick={() => setPublicationAuthorsOpen(false)} aria-label="Close manuscript authors"><Icon name="close" /></button>
             </div>
             <div className="publication-authors-body">
@@ -4109,7 +4153,7 @@ function App() {
               </div>
               <button type="button" className="publication-author-add" onClick={() => setPublicationAuthorNames((current) => [...current, publicationAuthorDraft()])} disabled={publicationAuthorNames.length >= 100}><Icon name="plus" size={14} /> Add another author</button>
               {publicationAuthorsProblem && <div className="user-settings-problem" role="alert">{publicationAuthorsProblem}</div>}
-              <p>Names, ORCID identifiers, and affiliations travel in portable YAML. Unrelated author metadata remains unchanged; complex structured names can still be edited through the source inspector.</p>
+              <p>Names, ORCID identifiers, and affiliations are kept with this manuscript. Advanced metadata remains unchanged.</p>
             </div>
             <div className="execution-dialog-actions"><button type="button" onClick={() => setPublicationAuthorsOpen(false)}>Cancel</button><button className="primary-button" type="submit">Save authors</button></div>
             </form>
