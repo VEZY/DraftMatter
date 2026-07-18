@@ -3,6 +3,7 @@ import { extractExecutableCells, isSetupCell } from './executionCells'
 import type { JsonValue, MimeOutput, NormalizedExecutionResult } from './kernelExecution'
 import { retainedPublishedValueDirectives } from './publishedValues'
 import { executionImageFromMimeBundle, sanitizeExecutionHtml } from './outputRenderer'
+import { retainedOutputPresentation } from './numberedObjects'
 import { parseLosslessPortableSource } from './portableSource'
 import type { DocumentDiagnostic } from './types'
 
@@ -166,13 +167,22 @@ function normalizedOutputPresentation(cell: ExecutableCell, presentation: Output
   const kind = cell.attributes.output === 'table' ? 'table' : cell.attributes.output === 'figure' ? 'figure' : undefined
   if (!kind) return presentation ?? {}
   const prefix = kind === 'table' ? 'tbl-' : 'fig-'
-  const rawLabel = presentation?.label?.trim().replace(/^#/, '')
+  const cellReference = typeof cell.attributes.reference === 'string' ? cell.attributes.reference : undefined
+  const rawLabel = (presentation?.label || cellReference)?.trim().replace(/^#/, '')
   const safeLabel = rawLabel?.replace(/[^A-Za-z0-9_.:-]+/g, '-').replace(/^[^A-Za-z]+/, '')
   const label = safeLabel
     ? safeLabel.startsWith(prefix) ? safeLabel : `${prefix}${safeLabel}`
     : undefined
-  const caption = presentation?.caption?.trim() || (kind === 'table' && label ? `Generated table from ${cell.id}.` : undefined)
+  const caption = presentation?.caption?.trim() || (kind === 'table' && label ? 'Generated table.' : undefined)
   return { ...presentation, label, caption }
+}
+
+function mergePresentation(previous: OutputPresentation, requested: OutputPresentation | undefined) {
+  const next = { ...previous }
+  for (const [key, value] of Object.entries(requested ?? {})) {
+    if (value !== undefined) next[key as keyof OutputPresentation] = value
+  }
+  return next
 }
 
 function normalizeEnding(value: string, ending: string) {
@@ -200,7 +210,17 @@ export function materializeExecutionOutput(request: MaterializeOutputRequest): M
   if (missing.length) {
     return { ...diagnostic('output-artifact-missing', `Declared artifact${missing.length === 1 ? '' : 's'} missing from the successful run: ${missing.join(', ')}.`), source: request.source }
   }
-  const generated = generatedBlock({ ...request, presentation: normalizedOutputPresentation(cell, request.presentation) })
+  const existing = outputNodesFor(request.source, request.cellId)
+  const previous = existing[0]
+    ? retainedOutputPresentation(existing[0].raw, cell.attributes.output)
+    : undefined
+  const generated = generatedBlock({
+    ...request,
+    presentation: normalizedOutputPresentation(cell, mergePresentation({
+      label: previous?.label,
+      caption: previous?.caption,
+    }, request.presentation)),
+  })
   if (generated.diagnostics.length) {
     return { ok: false, source: request.source, diagnostics: generated.diagnostics }
   }
@@ -208,7 +228,6 @@ export function materializeExecutionOutput(request: MaterializeOutputRequest): M
   if (!block) return { ...diagnostic('output-empty', 'The successful run has no portable artifact, published value, or MIME output to materialize.'), source: request.source }
   const ending = lineEnding(request.source)
   const replacement = normalizeEnding(block, ending)
-  const existing = outputNodesFor(request.source, request.cellId)
   if (existing.length > 1) {
     return { ...diagnostic('output-block-duplicate', `More than one generated output block targets ${request.cellId}.`), source: request.source }
   }

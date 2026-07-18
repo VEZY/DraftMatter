@@ -80,7 +80,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(manuscript.locator('#eq-fit .katex')).toBeVisible()
     await expect(manuscript.locator('.structured-equation math')).toHaveCount(2)
     await expect(manuscript.getByRole('button', { name: 'Go to footnote 1' })).toHaveText('1')
-    await expect(codeCell.getByRole('button', { name: 'Edit saved computation source for cell-growth' })).toHaveAttribute('aria-expanded', 'false')
+    await expect(codeCell.getByRole('button', { name: 'Edit saved computation source for reproducible figure' })).toHaveAttribute('aria-expanded', 'false')
     await expect(codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveCount(0)
     await expect(manuscript.getByText('Footnote 1', { exact: true })).toBeVisible()
     await expect(manuscript.getByText('Calibration details stay portable.', { exact: true })).toBeVisible()
@@ -171,7 +171,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).not.toContain('[^methods]')
 
     await expect(codeCell).toHaveScreenshot('semantic-code-cell.png')
-    await codeCell.getByRole('button', { name: 'Edit saved computation source for cell-growth' }).click()
+    await codeCell.getByRole('button', { name: 'Edit saved computation source for reproducible figure' }).click()
     await expect(codeCell).toHaveScreenshot('semantic-code-editor.png')
     const code = codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' })
     await code.fill('println("after")')
@@ -180,7 +180,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveCount(0)
 
     await page.reload()
-    await codeCell.getByRole('button', { name: 'Edit saved computation source for cell-growth' }).click()
+    await codeCell.getByRole('button', { name: 'Edit saved computation source for reproducible figure' }).click()
     await expect(codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' })).toHaveText('println("after")')
     await codeCell.getByRole('textbox', { name: 'julia code cell cell-growth' }).press('Escape')
     await expect(page.getByRole('img', { name: 'Revised canopy response' })).toBeVisible()

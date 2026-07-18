@@ -69,6 +69,28 @@ describe('portable output materialization', () => {
     expect(materialized.source).toContain('Author text after the output remains byte-identical.')
   })
 
+  it('uses the stable friendly reference stored on a reproducible cell', () => {
+    const withoutOutput = source
+      .replace('.execute produces="figures/generated/growth.svg"', '.execute output="figure" produces="figures/generated/growth.svg" reference="fig-growth-response"')
+      .replace(/\n<!-- dm-output:start[\s\S]*?<!-- dm-output:end -->\n/, '\n')
+    const materialized = materializeExecutionOutput({ source: withoutOutput, cellId: 'fig-growth', result: result() })
+
+    expect(materialized.ok).toBe(true)
+    if (!materialized.ok) return
+    expect(materialized.source).toContain('{#fig-growth-response}')
+    expect(materialized.source).not.toContain('fig-cell-')
+  })
+
+  it('preserves an existing portable output label when rerunning a legacy cell', () => {
+    const labeled = source.replace('![Old](<figures/generated/old.svg>)', '![Old](<figures/generated/old.svg>){#fig-observed-growth}\n: Observed growth.')
+    const materialized = materializeExecutionOutput({ source: labeled, cellId: 'fig-growth', result: result() })
+
+    expect(materialized.ok).toBe(true)
+    if (!materialized.ok) return
+    expect(materialized.source).toContain('{#fig-observed-growth}')
+    expect(materialized.source).toContain(': Observed growth.')
+  })
+
   it('fails closed when a declared artifact is absent', () => {
     const missing = materializeExecutionOutput({ source, cellId: 'fig-growth', result: result({ artifacts: [] }) })
 

@@ -83,6 +83,25 @@ const ZOTERO_VERSION_KEY = 'draftmatter.zotero-version.v1'
 const PRIMARY_EXECUTION_CELL = 'fig-canopy'
 const LEGACY_SAMPLE_CODE = 'weeks = [0, 2, 4, 6, 8, 10, 12]\ncontrol = [0, 8, 21, 39, 58, 76, 91]\ndrought = [0, 7, 19, 33, 47, 60, 72]\nplot_response(weeks, control, drought)'
 
+function executionObjectPresentation(cell: ExecutableCell) {
+  const reference = typeof cell.attributes.reference === 'string' ? cell.attributes.reference : undefined
+  if (cell.id === PRIMARY_EXECUTION_CELL) return {
+    label: reference ?? 'fig-canopy-result',
+    alt: 'Canopy response over twelve weeks',
+    caption: 'Normalized canopy area across twelve weeks.',
+  }
+  if (cell.attributes.output === 'table') return {
+    label: reference,
+    alt: 'Generated table',
+    caption: 'Generated table.',
+  }
+  return {
+    label: reference,
+    alt: 'Generated figure',
+    caption: cell.attributes.output === 'figure' ? 'Generated figure.' : undefined,
+  }
+}
+
 type SetupActivityStatus = 'running' | 'succeeded' | 'failed'
 
 interface SetupActivity {
@@ -2343,11 +2362,7 @@ function App() {
           source: currentSource,
           cellId: cell.id,
           result,
-          presentation: {
-            label: cell.id === PRIMARY_EXECUTION_CELL ? 'fig-canopy-result' : `${cell.id}-result`,
-            alt: cell.id === PRIMARY_EXECUTION_CELL ? 'Canopy response over twelve weeks' : `Generated output from ${cell.id}`,
-            caption: cell.id === PRIMARY_EXECUTION_CELL ? 'Normalized canopy area across twelve weeks.' : `Generated output from ${cell.id}.`,
-          },
+          presentation: executionObjectPresentation(cell),
         })
         if (materialized.ok) {
           const parsed = parsePortableDocument(materialized.source, initialDraft)
@@ -2420,11 +2435,7 @@ function App() {
       if (command.kind === 'clean-all') {
         const previousStates = tracker.snapshot()
         const existingManifests = previousStates.flatMap((state) => state.lastSuccessful ? [state.lastSuccessful] : state.lastAttempt ? [state.lastAttempt] : [])
-        const presentation = Object.fromEntries(cells.map((cell) => [cell.id, {
-          label: cell.id === PRIMARY_EXECUTION_CELL ? 'fig-canopy-result' : `${cell.id}-result`,
-          alt: cell.id === PRIMARY_EXECUTION_CELL ? 'Canopy response over twelve weeks' : `Generated output from ${cell.id}`,
-          caption: cell.id === PRIMARY_EXECUTION_CELL ? 'Normalized canopy area across twelve weeks.' : `Generated output from ${cell.id}.`,
-        }]))
+        const presentation = Object.fromEntries(cells.map((cell) => [cell.id, executionObjectPresentation(cell)]))
         const cleanLanguages = [...new Set(cells.map((cell) => cell.language))]
         for (const language of cleanLanguages) {
           updateKernelConsoleStatus(language, 'starting')

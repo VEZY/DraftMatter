@@ -22,9 +22,9 @@ export function pipeTableAlignments(value: string): TableAlignment[] {
 }
 
 export function parseTableCaptionLine(value: string): ParsedTableCaption | null {
-  const captionLine = value.match(/^:\s*(.+)$/)
+  const captionLine = value.match(/^:\s*(.*)$/)
   if (!captionLine) return null
-  const attributeCandidate = captionLine[1].match(/^(.*?)(?:\s+\{([^}\r\n]+)\})$/)
+  const attributeCandidate = captionLine[1].match(/^(.*?)(?:\s*\{([^}\r\n]+)\})$/)
   const attributed = attributeCandidate && /(?:^|\s)(?:#[a-zA-Z]|\.[a-zA-Z]|[a-zA-Z][\w-]*=)/.test(attributeCandidate[2])
     ? attributeCandidate
     : null

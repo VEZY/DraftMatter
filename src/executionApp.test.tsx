@@ -101,7 +101,7 @@ describe('rendered local execution workflow', () => {
     expect(desktopHost.probeRuntime).toHaveBeenCalledTimes(3)
     expect(desktopHost.setExecutionPreferences).toHaveBeenCalled()
 
-    const run = container.querySelector<HTMLButtonElement>('[aria-label="Run python code cell fig-canopy"]')!
+    const run = container.querySelector<HTMLButtonElement>('[aria-label="Run Reproducible figure (python)"]')!
     await act(async () => run.click())
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 80))

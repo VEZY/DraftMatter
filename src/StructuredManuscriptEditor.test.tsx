@@ -127,6 +127,15 @@ describe('full structured manuscript editor', () => {
     if (typeof HTMLElement.prototype.scrollIntoView !== 'function') {
       Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: () => undefined })
     }
+    if (!('getClientRects' in Text.prototype)) {
+      Object.defineProperty(Text.prototype, 'getClientRects', { configurable: true, value: () => [] })
+    }
+    if (!('getClientRects' in Range.prototype)) {
+      Object.defineProperties(Range.prototype, {
+        getClientRects: { configurable: true, value: () => [] },
+        getBoundingClientRect: { configurable: true, value: () => ({ left: 0, right: 0, top: 0, bottom: 0, width: 0, height: 0 }) },
+      })
+    }
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
@@ -718,11 +727,38 @@ plot(1:3)
       <StructuredManuscriptEditor source={figureOutput} onChange={vi.fn()} onCopyReference={copied} />,
     ))
 
-    const copy = container.querySelector<HTMLButtonElement>('[aria-label="Copy figure reference @fig-growth-result"]')!
+    const copy = container.querySelector<HTMLButtonElement>('[aria-label="Copy figure reference fig-growth-result"]')!
     expect(copy.textContent).toBe('Copy reference')
-    expect(copy.title).toBe('@fig-growth-result')
+    expect(copy.title).toBe('Copy Figure 1 reference')
     await act(async () => copy.click())
     expect(copied).toHaveBeenCalledWith('fig-growth-result')
+  })
+
+  it('keeps legacy cell UUIDs out of the normal reproducible-object controls', async () => {
+    const copied = vi.fn()
+    const uuid = '359c1638-441c-4ae7-bc9b-93835c37ab9c'
+    const legacy = `# Results
+
+\`\`\`julia {#cell-julia-${uuid} .execute output="figure"}
+scatter(1:10)
+\`\`\`
+
+<!-- dm-output:start cell="cell-julia-${uuid}" run="sha256:one" -->
+![Generated](plot.svg){#fig-cell-julia-${uuid}-result}
+: Growth response.
+<!-- dm-output:end -->
+`
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={legacy} onChange={vi.fn()} onCopyReference={copied} />,
+    ))
+
+    expect(container.textContent).not.toContain(uuid)
+    expect(container.querySelector(`button[aria-label*="${uuid}"]`)).toBeNull()
+    const copy = container.querySelector<HTMLButtonElement>('.structured-output-reference')!
+    expect(copy.title).toBe('Copy Figure 1 reference')
+    expect(copy.getAttribute('aria-label')).toBe('Copy figure reference')
+    await act(async () => copy.click())
+    expect(copied).toHaveBeenCalledWith(`fig-cell-julia-${uuid}-result`)
   })
 
   it('reserves slash for commands only at an empty rendered paragraph', () => {
@@ -1045,6 +1081,46 @@ plot(1:3)
 
     await act(async () => { expect(insert(editorRef.current!)).toBe(true) })
     expect(changed.at(-1)).toContain(expected)
+  })
+
+  it('generates friendly collision-safe labels for new semantic objects and keeps them on reopen', async () => {
+    const changed: string[] = []
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    await act(async () => root.render(
+      <StructuredManuscriptEditor ref={editorRef} source={shortSource} onChange={(next) => changed.push(next)} />,
+    ))
+
+    await act(async () => { expect(editorRef.current?.insertHeading('Growth response')).toBe(true) })
+    await act(async () => { expect(editorRef.current?.insertHeading('Growth response')).toBe(true) })
+    await act(async () => { expect(editorRef.current?.insertFigure('figures/growth.svg', 'Growth response', 'Growth response.')).toBe(true) })
+    await act(async () => { expect(editorRef.current?.insertFigure('figures/growth-2.svg', 'Growth response', 'Growth response.')).toBe(true) })
+    await act(async () => { expect(editorRef.current?.insertTable()).toBe(true) })
+    await act(async () => { expect(editorRef.current?.insertEquation('E = mc^2', true)).toBe(true) })
+    await act(async () => { expect(editorRef.current?.insertCodeCell('julia', 'figure')).toBe(true) })
+
+    const portable = changed.at(-1)!
+    expect(portable).toContain('## Growth response {#sec-growth-response}')
+    expect(portable).toContain('## Growth response {#sec-growth-response-2}')
+    expect(portable).toContain('{#fig-growth-response}')
+    expect(portable).toContain('{#fig-growth-response-2}')
+    expect(portable).toContain(': {#tbl-table}')
+    expect(portable).toContain('$$ {#eq-e-mc-2}')
+    expect(portable).toMatch(/```julia \{#cell-julia-[^}]+ \.execute output="figure" reference="fig-result"\}/)
+
+    const reopened = parseStructuredManuscript(portable)
+    const labels: string[] = []
+    reopened.document.descendants((node) => {
+      if (node.attrs.label) labels.push(String(node.attrs.label))
+      return true
+    })
+    expect(labels).toEqual(expect.arrayContaining([
+      'sec-growth-response',
+      'sec-growth-response-2',
+      'fig-growth-response',
+      'fig-growth-response-2',
+      'tbl-table',
+      'eq-e-mc-2',
+    ]))
   })
 
   it('allows only one setup cell in the document', async () => {

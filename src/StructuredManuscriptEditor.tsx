@@ -40,6 +40,14 @@ import {
   retainedOutputPresentation,
 } from './numberedObjects'
 import {
+  friendlyObjectLabel,
+  isFriendlyObjectLabelForKind,
+  isLegacyMachineObjectLabel,
+  semanticCrossReferenceLabel,
+  semanticLabelIsInUse,
+  semanticLabelsInUse,
+} from './semanticObjects'
+import {
   createCollaborativeProseMirrorState,
   reconcileCollaborativeProseMirrorDocument,
   withoutCollaborativeReviewAnchors,
@@ -624,9 +632,10 @@ function updateCodeCellStatus(dom: HTMLElement, status: string) {
   const run = dom.querySelector<HTMLButtonElement>('.structured-code-run')
   if (run) {
     const running = status === 'running'
+    const objectName = dom.querySelector('strong')?.textContent ?? 'reproducible computation'
     run.dataset.action = running ? 'interrupt' : 'run'
     run.textContent = running ? 'Interrupt' : 'Run cell'
-    run.setAttribute('aria-label', `${running ? 'Interrupt' : 'Run'} ${dom.dataset.language ?? ''} code cell ${dom.dataset.dmId ?? ''}`.replace(/\s+/g, ' ').trim())
+    run.setAttribute('aria-label', `${running ? 'Interrupt' : 'Run'} ${objectName} (${dom.dataset.language ?? ''})`.replace(/\s+/g, ' ').trim())
   }
 }
 
@@ -861,13 +870,14 @@ function codeCellNodeView(
     const cellLanguage = String(node.attrs.language)
     const lines = code ? code.split(/\r\n|\r|\n/).length : 0
     const output = node.attrs.outputKind ? String(node.attrs.outputKind) : 'result'
+    const objectName = output === 'values' ? 'published values' : output
     dom.dataset.dmId = cellId
     dom.dataset.language = cellLanguage
     dom.dataset.expanded = expanded ? 'true' : 'false'
     dom.dataset.sourceStatus = String(node.attrs.status)
     language.textContent = cellLanguage === 'r' ? 'R' : cellLanguage
-    label.textContent = `Reproducible ${output === 'values' ? 'values' : output} · ${cellId}`
-    label.title = cellId
+    label.textContent = `Reproducible ${objectName}`
+    label.title = expanded ? `Computation cell ${cellId}` : ''
     const presentedStatus = presentationStatus(cellId) ?? String(node.attrs.status)
     const viewOnly = browserViewOnly()
     dom.dataset.status = presentedStatus
@@ -880,7 +890,7 @@ function codeCellNodeView(
     editorHost.hidden = !expanded
     editorHost.id = `dm-code-${cellId.replace(/[^a-zA-Z0-9_.:-]+/g, '-')}`
     toggle.textContent = expanded ? 'Close source' : viewOnly ? 'View source' : 'Edit source'
-    toggle.setAttribute('aria-label', `${expanded ? 'Close' : viewOnly ? 'View' : 'Edit'} saved computation source for ${cellId}`)
+    toggle.setAttribute('aria-label', `${expanded ? 'Close' : viewOnly ? 'View' : 'Edit'} saved computation source for reproducible ${objectName}`)
     toggle.setAttribute('aria-controls', editorHost.id)
     toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false')
     updateCodeCellStatus(dom, presentedStatus)
@@ -888,7 +898,7 @@ function codeCellNodeView(
       status.textContent = 'Browser view only'
       run.dataset.action = 'unavailable'
       run.textContent = 'Desktop required'
-      run.setAttribute('aria-label', `Execution unavailable in browser for ${cellLanguage} code cell ${cellId}`)
+      run.setAttribute('aria-label', `Execution unavailable in browser for reproducible ${objectName} (${cellLanguage})`)
       run.disabled = true
     } else {
       run.disabled = !actionsEnabled() && presentedStatus !== 'running'
@@ -1305,7 +1315,7 @@ function crossReferenceNodeView(initialNode: ProseMirrorNode, view: EditorView, 
     dom.dataset.target = target
     link.dataset.dmId = String(node.attrs.id)
     link.href = `#${target}`
-    link.textContent = numberedCrossReferenceLabel(view.state.doc, target)
+    link.textContent = semanticCrossReferenceLabel(view.state.doc, target) ?? numberedCrossReferenceLabel(view.state.doc, target)
     link.title = `Reference target ${target}`
     edit.disabled = !isEditable()
     edit.setAttribute('aria-label', `Edit cross-reference to ${target}`)
@@ -1936,7 +1946,7 @@ function rewriteRetainedOutputPresentation(markdown: string, caption: string, la
     while (index < lines.length && !lines[index].trim()) index += 1
     if (parseTableCaptionLine(lines[index] ?? '')) lines.splice(index, 1)
     while (lines.at(-1) === '') lines.pop()
-    if (nextCaption) lines.push(`: ${nextCaption}${nextAttributes ? ` {${nextAttributes}}` : ''}`)
+    if (nextCaption || nextAttributes) lines.push(`:${nextCaption ? ` ${nextCaption}` : ''}${nextAttributes ? ` {${nextAttributes}}` : ''}`)
     nextBody = lines.join(ending)
   }
 
@@ -2010,16 +2020,13 @@ function outputNodeView(
     const expectedPrefix = presentation.kind === 'table' ? 'tbl-' : 'fig-'
     const validSyntax = !nextLabel || /^[a-zA-Z][\w.:-]*$/.test(nextLabel)
     const validKind = !nextLabel || nextLabel === presentation.label || nextLabel.startsWith(expectedPrefix)
-    const captionedTable = presentation.kind !== 'table' || !nextLabel || Boolean(captionInput.value.trim())
     validation.textContent = !validSyntax
       ? 'Labels must start with a letter and contain only letters, numbers, dots, colons, underscores, or hyphens.'
       : !validKind
         ? `${presentation.kind === 'table' ? 'Table' : 'Figure'} labels must use the portable ${expectedPrefix}… form.`
-        : !captionedTable
-          ? 'A labeled table needs a caption.'
-          : ''
-    validation.hidden = validSyntax && validKind && captionedTable
-    save.disabled = !isEditable() || !validSyntax || !validKind || !captionedTable
+        : ''
+    validation.hidden = validSyntax && validKind
+    save.disabled = !isEditable() || !validSyntax || !validKind
   }
   const updateDom = () => {
     const markdown = retainedOutputBody(String(node.attrs.markdown))
@@ -2038,8 +2045,10 @@ function outputNodeView(
     const label = presentation.label
     copy.hidden = !label || !onCopyReference
     copy.textContent = label ? 'Copy reference' : ''
-    copy.title = label ? `@${label}` : ''
-    copy.setAttribute('aria-label', label ? `Copy ${kindLabel.toLowerCase()} reference @${label}` : 'Copy output reference')
+    copy.title = label ? `Copy ${descriptor.textContent} reference` : ''
+    copy.setAttribute('aria-label', label
+      ? `Copy ${kindLabel.toLowerCase()} reference${isLegacyMachineObjectLabel(label) ? '' : ` ${label}`}`
+      : 'Copy output reference')
     edit.hidden = presentation.kind === 'markdown' || editing
     edit.disabled = !isEditable()
     edit.setAttribute('aria-label', `Edit ${kindLabel.toLowerCase()} caption`)
@@ -3184,9 +3193,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     insertHeading: (title, level = 2, label) => {
       const view = viewRef.current
       if (!view || readOnlyRef.current || !title.trim()) return false
-      const normalizedLabel = label?.trim().replace(/^#/, '') || null
-      if (normalizedLabel && (!normalizedLabel.startsWith('sec-') || !isCrossReferenceTarget(normalizedLabel))) return false
-      if (normalizedLabel && labelUsedByAnotherNode(view.state.doc, normalizedLabel)) return false
+      const requestedLabel = label?.trim().replace(/^#/, '')
+      if (requestedLabel && (!isFriendlyObjectLabelForKind('section', requestedLabel) || !isCrossReferenceTarget(requestedLabel))) return false
+      const labels = semanticLabelsInUse(view.state.doc)
+      if (requestedLabel && semanticLabelIsInUse(labels, requestedLabel)) return false
+      const normalizedLabel = requestedLabel || friendlyObjectLabel('section', title, labels)
       const heading = manuscriptSchema.nodes.heading.createChecked({
         id: randomId('heading'),
         level: Math.min(6, Math.max(1, level)),
@@ -3218,6 +3229,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       const view = viewRef.current
       if (!view || readOnlyRef.current) return false
       const id = randomId(`cell-${language}`)
+      const reference = output === 'figure' || output === 'table'
+        ? friendlyObjectLabel(output, 'result', semanticLabelsInUse(view.state.doc))
+        : undefined
       const valueTemplate = output === 'values'
         ? language === 'python'
           ? '# Publish only the values used in prose:\n# publish("mean_height", mean_height, unit="cm", digits=1)'
@@ -3231,7 +3245,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         code: valueTemplate,
         outputKind: output,
         status: 'stale',
-        attributes: { execute: true, output },
+        attributes: { execute: true, output, ...(reference ? { reference } : {}) },
       })
       if (output === 'values') view.dispatch(view.state.tr.insert(view.state.doc.content.size, node))
       else {
@@ -3309,8 +3323,20 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     insertEquation: (tex, display = false, label, caption) => {
       const view = viewRef.current
       if (!view || readOnlyRef.current || !tex.trim()) return false
+      const requestedLabel = label?.trim().replace(/^[#@]/, '')
+      const labels = semanticLabelsInUse(view.state.doc)
+      if (display && requestedLabel && (!isFriendlyObjectLabelForKind('equation', requestedLabel) || semanticLabelIsInUse(labels, requestedLabel))) return false
+      const normalizedLabel = display
+        ? requestedLabel || friendlyObjectLabel('equation', caption?.trim() || tex, labels)
+        : undefined
       const node = display
-        ? manuscriptSchema.nodes.equation_block.createChecked({ id: randomId('equation'), tex: tex.trim(), label: label?.replace(/^@/, '') || null, captionMarkdown: caption?.trim() ?? '' })
+        ? manuscriptSchema.nodes.equation_block.createChecked({
+            id: randomId('equation'),
+            tex: tex.trim(),
+            label: normalizedLabel,
+            captionMarkdown: caption?.trim() ?? '',
+            sourceAttributes: `#${normalizedLabel}`,
+          })
         : manuscriptSchema.nodes.equation_inline.createChecked({ id: randomId('equation-inline'), tex: tex.trim() })
       if (display) insertBlock(view, node)
       else view.dispatch(view.state.tr.replaceSelectionWith(node))
@@ -3409,8 +3435,10 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     insertTable: (rows = 2, columns = 2, caption = '', label) => {
       const view = viewRef.current
       if (!view || readOnlyRef.current || rows < 1 || columns < 1) return false
-      const normalizedLabel = label?.trim().replace(/^#/, '') || null
-      if (normalizedLabel && (!normalizedLabel.startsWith('tbl-') || !isCrossReferenceTarget(normalizedLabel) || !caption.trim())) return false
+      const requestedLabel = label?.trim().replace(/^#/, '')
+      const labels = semanticLabelsInUse(view.state.doc)
+      if (requestedLabel && (!isFriendlyObjectLabelForKind('table', requestedLabel) || !isCrossReferenceTarget(requestedLabel) || semanticLabelIsInUse(labels, requestedLabel))) return false
+      const normalizedLabel = requestedLabel || friendlyObjectLabel('table', caption.trim() || 'table', labels)
       const tableRows = Array.from({ length: rows }, (_, rowIndex) => manuscriptSchema.nodes.table_row.createChecked(
         { id: randomId('row') },
         Array.from({ length: columns }, () => {
@@ -3432,7 +3460,10 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     insertFigure: (path, alt, caption, label) => {
       const view = viewRef.current
       if (!view || readOnlyRef.current || !path) return false
-      const normalizedLabel = label?.trim().replace(/^#/, '') || null
+      const requestedLabel = label?.trim().replace(/^#/, '')
+      const labels = semanticLabelsInUse(view.state.doc)
+      if (requestedLabel && (!isFriendlyObjectLabelForKind('figure', requestedLabel) || !isCrossReferenceTarget(requestedLabel) || semanticLabelIsInUse(labels, requestedLabel))) return false
+      const normalizedLabel = requestedLabel || friendlyObjectLabel('figure', caption?.trim() || alt.trim() || path, labels)
       const children = [manuscriptSchema.nodes.image.createChecked({
         id: randomId('image'),
         src: path,

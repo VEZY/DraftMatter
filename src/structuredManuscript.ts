@@ -564,13 +564,13 @@ function serializeTable(node: ProseMirrorNode, ending: string) {
     ...normalized.slice(1).map((row) => `| ${row.join(' | ')} |`),
   ].join(ending)
   const caption = String(node.attrs.captionMarkdown ?? '').trim()
-  if (!caption) return table
   const attributes = node.attrs.sourceAttributes
     ? ` {${node.attrs.sourceAttributes}}`
     : node.attrs.label
       ? ` {#${node.attrs.label}}`
       : ''
-  return `${table}${ending}: ${caption}${attributes}`
+  if (!caption && !attributes) return table
+  return `${table}${ending}:${caption ? ` ${caption}` : ''}${attributes}`
 }
 
 function serializeBlock(node: ProseMirrorNode, ending: string, index = 0): string {

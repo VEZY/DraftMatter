@@ -22,4 +22,12 @@ describe('portable pipe-table syntax', () => {
       sourceAttributes: null,
     })
   })
+
+  it('parses a portable label even when a table caption is not written yet', () => {
+    expect(parseTableCaptionLine(': {#tbl-results}')).toEqual({
+      captionMarkdown: '',
+      label: 'tbl-results',
+      sourceAttributes: '#tbl-results',
+    })
+  })
 })

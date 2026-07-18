@@ -112,23 +112,23 @@ export function InsertBlockDialog({
           {kind === 'section' && <>
             <label><span>Section title</span><input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Discussion" maxLength={240} /></label>
             <label><span>Heading level</span><select value={level} onChange={(event) => setLevel(Number(event.target.value))}>{[1, 2, 3, 4, 5, 6].map((value) => <option value={value} key={value}>Heading {value}</option>)}</select></label>
-            {labelField('Cross-reference label', 'sec-discussion', 'Optional; portable section labels begin with sec-.')}
+            {labelField('Cross-reference label', 'sec-discussion', 'Leave blank to generate a readable portable sec- label.')}
           </>}
           {kind === 'figure' && <>
             <label><span>Project-relative image path</span><input autoFocus value={source} onChange={(event) => setSource(event.target.value)} placeholder="figures/result.svg" spellCheck={false} /></label>
             <label><span>Accessible description</span><textarea value={alt} onChange={(event) => setAlt(event.target.value)} rows={2} placeholder="Describe the evidence shown in the figure" /></label>
             <label><span>Caption</span><textarea value={caption} onChange={(event) => setCaption(event.target.value)} rows={2} placeholder="Optional figure caption" /></label>
-            {labelField('Cross-reference label', 'fig-result', 'Optional; portable figure labels begin with fig-.')}
+            {labelField('Cross-reference label', 'fig-result', 'Leave blank to generate a readable portable fig- label.')}
           </>}
           {kind === 'table' && <>
             <div className="insert-block-grid"><label><span>Rows</span><input autoFocus type="number" min={1} max={50} value={rows} onChange={(event) => setRows(Number(event.target.value))} /></label><label><span>Columns</span><input type="number" min={1} max={20} value={columns} onChange={(event) => setColumns(Number(event.target.value))} /></label></div>
             <label><span>Caption</span><textarea value={caption} onChange={(event) => setCaption(event.target.value)} rows={2} placeholder="Optional table caption" /></label>
-            {labelField('Cross-reference label', 'tbl-results', 'A table label requires a caption and begins with tbl-.')}
+            {labelField('Cross-reference label', 'tbl-results', 'Leave blank to generate a readable portable tbl- label.')}
           </>}
           {(kind === 'equation-inline' || kind === 'equation-display') && <>
             <label><span>TeX equation</span><textarea autoFocus value={tex} onChange={(event) => setTex(event.target.value)} rows={kind === 'equation-display' ? 4 : 2} placeholder="R^2 = \\frac{a}{b}" spellCheck={false} /></label>
             {kind === 'equation-display' && <label><span>Caption</span><textarea value={caption} onChange={(event) => setCaption(event.target.value)} rows={2} placeholder="Optional equation caption" /></label>}
-            {kind === 'equation-display' && labelField('Cross-reference label', 'eq-model', 'Optional; portable equation labels begin with eq-.')}
+            {kind === 'equation-display' && labelField('Cross-reference label', 'eq-model', 'Leave blank to generate a readable portable eq- label.')}
           </>}
           {kind === 'cross-reference' && <label><span>Target label</span><input autoFocus value={target} onChange={(event) => setTarget(event.target.value)} placeholder="fig-growth" spellCheck={false} /><small>Use an existing fig-, tbl-, eq-, or sec- label.</small></label>}
           {kind === 'footnote' && <>
