@@ -73,7 +73,7 @@ const nodes: Record<string, NodeSpec> = {
   ordered_list: { ...orderedList, attrs: { ...identified, order: { default: 1, validate: 'number' } }, content: 'list_item+', group: 'block' },
   list_item: { ...listItem, attrs: identified, content: 'paragraph block*' },
   equation_block: {
-    attrs: { ...identified, tex: { default: '' }, label: { default: null }, sourceAttributes: { default: null } },
+    attrs: { ...identified, tex: { default: '' }, label: { default: null }, captionMarkdown: { default: '' }, sourceAttributes: { default: null } },
     group: 'block',
     atom: true,
     isolating: true,

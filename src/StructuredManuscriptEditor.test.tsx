@@ -167,7 +167,7 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector('.structured-equation-display .katex-html')?.textContent).not.toContain('\\frac')
     expect(container.querySelector('table')?.textContent).toContain('Drought')
     expect(container.querySelector('.structured-table-card')?.id).toBe('tbl-means')
-    expect(container.querySelector('.structured-table-caption')?.textContent).toBe('Treatment means.')
+    expect(container.querySelector('.structured-table-caption')?.textContent).toBe('Table 1. Treatment means.')
     expect(container.querySelector<HTMLTableCellElement>('th:nth-child(2)')?.dataset.alignment).toBe('right')
     expect(container.querySelector('.structured-code-editor .cm-content')?.textContent).toBe('print("before")')
     expect(container.querySelector<HTMLElement>('.structured-code-editor')?.hidden).toBe(true)
@@ -761,7 +761,7 @@ plot(1:3)
     ))
 
     const reference = container.querySelector<HTMLElement>('.structured-cross-reference[data-target="fig-growth"]')!
-    expect(reference.querySelector<HTMLAnchorElement>('[data-dm-node="cross-reference"]')?.textContent).toBe('Figure growth')
+    expect(reference.querySelector<HTMLAnchorElement>('[data-dm-node="cross-reference"]')?.textContent).toBe('Figure 1')
     await act(async () => reference.querySelector<HTMLButtonElement>('.structured-cross-reference-edit')?.click())
     const input = reference.querySelector<HTMLInputElement>('.structured-cross-reference-input')!
     const save = reference.querySelector<HTMLButtonElement>('.structured-cross-reference-editor .primary-button')!
@@ -780,7 +780,7 @@ plot(1:3)
     expect(changed.at(-1)).not.toContain('@fig-growth for context')
     expect(reference.dataset.target).toBe('tbl-means')
     expect(reference.querySelector<HTMLAnchorElement>('[data-dm-node="cross-reference"]')?.getAttribute('href')).toBe('#tbl-means')
-    expect(reference.querySelector<HTMLAnchorElement>('[data-dm-node="cross-reference"]')?.textContent).toBe('Table means')
+    expect(reference.querySelector<HTMLAnchorElement>('[data-dm-node="cross-reference"]')?.textContent).toBe('Table 1')
     expect(document.activeElement).toBe(reference.querySelector('.structured-cross-reference-edit'))
   })
 
@@ -877,6 +877,7 @@ plot(1:3)
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Edit display equation eq-fit"]')?.click())
     const display = container.querySelector<HTMLTextAreaElement>('[aria-label="Display equation eq-fit TeX"]')!
     const displayLabel = container.querySelector<HTMLInputElement>('[aria-label="Display equation label"]')!
+    const displayCaption = container.querySelector<HTMLTextAreaElement>('[aria-label="Display equation caption"]')!
     const displaySave = display.closest('.structured-equation-editor')?.querySelector<HTMLButtonElement>('.primary-button')!
     displayLabel.value = ''
     displayLabel.dispatchEvent(new Event('input', { bubbles: true }))
@@ -890,15 +891,19 @@ plot(1:3)
 
     displayLabel.value = 'eq-response'
     displayLabel.dispatchEvent(new Event('input', { bubbles: true }))
+    displayCaption.value = 'Fitted **response** model.'
+    displayCaption.dispatchEvent(new Event('input', { bubbles: true }))
     display.value = String.raw`R^2 = \frac{c}{d}`
     display.dispatchEvent(new Event('input', { bubbles: true }))
     expect(displaySave.disabled).toBe(false)
     await act(async () => displaySave.click())
     expect(changed.at(-1)).toContain(String.raw`R^2 = \frac{c}{d}`)
     expect(changed.at(-1)).toContain('$$ {#eq-response .unnumbered}')
+    expect(changed.at(-1)).toContain(': Fitted **response** model.')
     expect(changed.at(-1)).toContain('@eq-response')
     expect(changed.at(-1)).not.toContain('@eq-fit')
     expect(container.querySelector('#eq-response .katex-html')?.textContent).toContain('R')
+    expect(container.querySelector('.structured-equation-caption')?.textContent).toBe('Fitted response model.')
     expect(container.querySelector<HTMLAnchorElement>('a[href="#eq-response"]')?.textContent).toBe('Equation response')
 
     await act(async () => root.render(
@@ -931,6 +936,7 @@ plot(1:3)
       ['Figure source path', 'figures/growth-revised.svg'],
       ['Figure alternative text', 'Revised growth response'],
       ['Figure title', 'Measured canopy response'],
+      ['Figure caption', 'Revised figure legend.'],
       ['Figure label', 'fig-response'],
     ] as const
     for (const [ariaLabel, value] of values) {
@@ -941,11 +947,13 @@ plot(1:3)
     await act(async () => figure.querySelector<HTMLButtonElement>('.structured-figure-actions .primary-button')?.click())
 
     expect(changed.at(-1)).toContain('![Revised growth response](figures/growth-revised.svg "Measured canopy response"){#fig-response .wide data-owner="field-team"}')
+    expect(changed.at(-1)).toContain(': Revised figure legend.')
     expect(changed.at(-1)).toContain('@fig-response')
     expect(changed.at(-1)).not.toContain('@fig-growth')
     expect(figure.id).toBe('fig-response')
     expect(figure.querySelector('img')?.getAttribute('src')).toBe('asset://figures/growth-revised.svg')
     expect(figure.querySelector('img')?.getAttribute('title')).toBe('Measured canopy response')
+    expect(container.querySelector('.structured-figure-caption')?.textContent).toBe('Figure 1. Revised figure legend.')
     expect(container.querySelector('[data-dm-node="cross-reference"]')?.getAttribute('href')).toBe('#fig-response')
   })
 
@@ -958,7 +966,7 @@ plot(1:3)
     const table = container.querySelector<HTMLElement>('.structured-table-card')!
     expect(table.id).toBe('tbl-means')
     expect(table.querySelector<HTMLTableCellElement>('th:nth-child(2)')?.style.textAlign).toBe('right')
-    expect(container.querySelector<HTMLAnchorElement>('a[href="#tbl-means"]')?.textContent).toBe('Table means')
+    expect(container.querySelector<HTMLAnchorElement>('a[href="#tbl-means"]')?.textContent).toBe('Table 1')
 
     await act(async () => table.querySelector<HTMLButtonElement>('[aria-label="Edit table tbl-means details"]')?.click())
     const caption = table.querySelector<HTMLTextAreaElement>('[aria-label="Table caption"]')!
@@ -979,8 +987,8 @@ plot(1:3)
     expect(changed.at(-1)).toContain('@tbl-results')
     expect(changed.at(-1)).not.toContain('@tbl-means')
     expect(table.id).toBe('tbl-results')
-    expect(table.querySelector('.structured-table-caption')?.textContent).toBe('Revised treatment means.')
-    expect(container.querySelector<HTMLAnchorElement>('a[href="#tbl-results"]')?.textContent).toBe('Table results')
+    expect(table.querySelector('.structured-table-caption')?.textContent).toBe('Table 1. Revised treatment means.')
+    expect(container.querySelector<HTMLAnchorElement>('a[href="#tbl-results"]')?.textContent).toBe('Table 1')
   })
 
   it('edits semantic section labels and retargets matching references atomically', async () => {

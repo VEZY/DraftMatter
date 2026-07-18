@@ -7,7 +7,7 @@ export type InsertBlockRequest =
   | { kind: 'figure'; source: string; alt: string; caption?: string; label?: string }
   | { kind: 'table'; rows: number; columns: number; caption?: string; label?: string }
   | { kind: 'equation-inline'; tex: string }
-  | { kind: 'equation-display'; tex: string; label?: string }
+  | { kind: 'equation-display'; tex: string; caption?: string; label?: string }
   | { kind: 'cross-reference'; target: string }
   | { kind: 'footnote'; label: string; content: string }
   | { kind: 'figure-cell'; language: 'python' | 'r' | 'julia' }
@@ -83,7 +83,7 @@ export function InsertBlockDialog({
     else if (kind === 'figure') request = { kind, source: source.trim(), alt: alt.trim(), caption: caption.trim() || undefined, label: cleanLabel(label) }
     else if (kind === 'table') request = { kind, rows, columns, caption: caption.trim() || undefined, label: cleanLabel(label) }
     else if (kind === 'equation-inline') request = { kind, tex: tex.trim() }
-    else if (kind === 'equation-display') request = { kind, tex: tex.trim(), label: cleanLabel(label) }
+    else if (kind === 'equation-display') request = { kind, tex: tex.trim(), caption: caption.trim() || undefined, label: cleanLabel(label) }
     else if (kind === 'cross-reference') request = { kind, target: target.trim().replace(/^@/, '') }
     else if (kind === 'footnote') request = { kind, label: label.trim().replace(/^\[\^|\]$/g, ''), content: content.trim() }
     else if (kind === 'published-value') request = { kind, name: publishedName.trim() }
@@ -127,6 +127,7 @@ export function InsertBlockDialog({
           </>}
           {(kind === 'equation-inline' || kind === 'equation-display') && <>
             <label><span>TeX equation</span><textarea autoFocus value={tex} onChange={(event) => setTex(event.target.value)} rows={kind === 'equation-display' ? 4 : 2} placeholder="R^2 = \\frac{a}{b}" spellCheck={false} /></label>
+            {kind === 'equation-display' && <label><span>Caption</span><textarea value={caption} onChange={(event) => setCaption(event.target.value)} rows={2} placeholder="Optional equation caption" /></label>}
             {kind === 'equation-display' && labelField('Cross-reference label', 'eq-model', 'Optional; portable equation labels begin with eq-.')}
           </>}
           {kind === 'cross-reference' && <label><span>Target label</span><input autoFocus value={target} onChange={(event) => setTarget(event.target.value)} placeholder="fig-growth" spellCheck={false} /><small>Use an existing fig-, tbl-, eq-, or sec- label.</small></label>}

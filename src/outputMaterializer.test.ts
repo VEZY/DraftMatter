@@ -93,10 +93,16 @@ describe('portable output materialization', () => {
         metadata: {},
       }],
     })
-    const materialized = materializeExecutionOutput({ source: tableSource, cellId: 'fig-growth', result: table })
+    const materialized = materializeExecutionOutput({
+      source: tableSource,
+      cellId: 'fig-growth',
+      result: table,
+      presentation: { label: 'summary-result', caption: 'Weekly area summary.' },
+    })
 
     expect(materialized.ok).toBe(true)
     expect(materialized.source).toContain('| week | area |\n| --- | --- |\n| 1 | 12 |\n| 2 | 18 |')
+    expect(materialized.source).toContain(': Weekly area summary. {#tbl-summary-result}')
   })
 
   it('materializes CairoMakie HTML image output as a retained figure', () => {

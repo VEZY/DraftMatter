@@ -373,6 +373,7 @@ function parseBlocks(
 
     const equation = parseDisplayEquation(contents, index)
     if (equation) {
+      const captionLine = equation.closed ? parseTableCaptionLine(lines[equation.end]?.content ?? '') : null
       if (!equation.closed) {
         const raw = lines.slice(index, equation.end).map((line) => line.raw).join('')
         blocks.push(manuscriptSchema.nodes.raw_block.createChecked({ id: id('raw', raw), raw, format: 'unclosed-equation' }))
@@ -382,10 +383,11 @@ function parseBlocks(
           id: id('equation', equation.tex),
           tex: equation.tex,
           label: equation.label ?? null,
+          captionMarkdown: captionLine?.captionMarkdown ?? '',
           sourceAttributes: equation.sourceAttributes ?? null,
         }))
       }
-      index = equation.end
+      index = equation.end + (captionLine ? 1 : 0)
       continue
     }
 
@@ -593,7 +595,8 @@ function serializeBlock(node: ProseMirrorNode, ending: string, index = 0): strin
   if (node.type === manuscriptSchema.nodes.horizontal_rule) return '---'
   if (node.type === manuscriptSchema.nodes.equation_block) {
     const sourceAttributes = node.attrs.sourceAttributes ?? (node.attrs.label ? `#${node.attrs.label}` : null)
-    return `$$${ending}${node.attrs.tex}${ending}$$${sourceAttributes ? ` {${sourceAttributes}}` : ''}`
+    const caption = String(node.attrs.captionMarkdown ?? '').trim()
+    return `$$${ending}${node.attrs.tex}${ending}$$${sourceAttributes ? ` {${sourceAttributes}}` : ''}${caption ? `${ending}: ${caption}` : ''}`
   }
   if (node.type === manuscriptSchema.nodes.figure) {
     const image = node.firstChild

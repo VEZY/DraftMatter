@@ -1902,7 +1902,7 @@ function App() {
     }
     if (request.kind === 'equation-inline' || request.kind === 'equation-display') {
       const display = request.kind === 'equation-display'
-      const inserted = runStructuredCommand((editor) => editor.insertEquation(request.tex, display, display ? request.label : undefined), `Insert ${display ? 'display' : 'inline'} equation`)
+      const inserted = runStructuredCommand((editor) => editor.insertEquation(request.tex, display, display ? request.label : undefined, display ? request.caption : undefined), `Insert ${display ? 'display' : 'inline'} equation`)
       if (inserted) setToast(`${display ? 'Display' : 'Inline'} equation inserted`)
       return inserted
     }

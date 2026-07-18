@@ -33,6 +33,12 @@ import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
 import { motionAwareScrollBehavior } from './accessibility'
 import type { PublicationByline } from './publicationMetadata'
 import { embeddedExecutionImageFromHtml, safeEmbeddedImageDataUrl } from './outputRenderer'
+import { parseTableCaptionLine } from './tableSyntax'
+import {
+  numberedCrossReferenceLabel,
+  numberedObjectByNodeId,
+  retainedOutputPresentation,
+} from './numberedObjects'
 import {
   createCollaborativeProseMirrorState,
   reconcileCollaborativeProseMirrorDocument,
@@ -195,7 +201,7 @@ export interface StructuredManuscriptEditorHandle {
   insertSetupCell: (language: 'python' | 'r' | 'julia', code?: string) => boolean
   consolidateSetupCells: () => boolean
   insertPublishedValue: (name: string) => boolean
-  insertEquation: (tex: string, display?: boolean, label?: string) => boolean
+  insertEquation: (tex: string, display?: boolean, label?: string, caption?: string) => boolean
   insertCrossReference: (target: string) => boolean
   insertFootnote: (label: string, content: string) => boolean
   insertCitation: (items: CitationItem[], rendered?: string) => boolean
@@ -1299,7 +1305,7 @@ function crossReferenceNodeView(initialNode: ProseMirrorNode, view: EditorView, 
     dom.dataset.target = target
     link.dataset.dmId = String(node.attrs.id)
     link.href = `#${target}`
-    link.textContent = String(node.attrs.rendered || formatCrossReferenceTarget(target))
+    link.textContent = numberedCrossReferenceLabel(view.state.doc, target)
     link.title = `Reference target ${target}`
     edit.disabled = !isEditable()
     edit.setAttribute('aria-label', `Edit cross-reference to ${target}`)
@@ -1385,8 +1391,13 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
 
   const rendered = document.createElement(displayMode ? 'div' : 'span')
   rendered.className = 'structured-equation-render'
+  const number = document.createElement('span')
+  number.className = 'structured-equation-number'
+  number.setAttribute('aria-hidden', 'true')
   const error = document.createElement(displayMode ? 'p' : 'span')
   error.className = 'structured-equation-error'
+  const captionPreview = document.createElement('figcaption')
+  captionPreview.className = 'structured-equation-caption'
 
   const editor = document.createElement(displayMode ? 'div' : 'span')
   editor.className = 'structured-equation-editor'
@@ -1409,6 +1420,15 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   const labelHint = document.createElement('small')
   labelHint.textContent = 'Optional; changing it also updates matching equation references.'
   labelField.append(labelText, labelInput, labelHint)
+  const captionField = document.createElement('label')
+  captionField.className = 'structured-equation-label-field'
+  const captionText = document.createElement('span')
+  captionText.textContent = 'Equation caption'
+  const captionInput = document.createElement('textarea')
+  captionInput.className = 'structured-equation-input structured-equation-caption-input'
+  captionInput.setAttribute('aria-label', 'Display equation caption')
+  captionInput.placeholder = 'Optional explanation shown below the equation'
+  captionField.append(captionText, captionInput)
   const validation = document.createElement('p')
   validation.className = 'structured-equation-validation'
   validation.hidden = true
@@ -1422,7 +1442,7 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   save.className = 'primary-button'
   save.textContent = 'Save equation'
   actions.append(cancel, save)
-  if (displayMode) editor.append(labelField, input, validation, actions)
+  if (displayMode) editor.append(labelField, captionField, input, validation, actions)
   else editor.append(input, actions)
 
   const normalizedLabel = () => labelInput.value.trim().replace(/^#/, '')
@@ -1452,6 +1472,8 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   const updateDom = () => {
     const tex = String(node.attrs.tex)
     const equationLabel = displayMode && node.attrs.label ? String(node.attrs.label) : ''
+    const equationCaption = displayMode ? String(node.attrs.captionMarkdown ?? '').trim() : ''
+    const numbered = displayMode ? numberedObjectByNodeId(view.state.doc, String(node.attrs.id)) : undefined
     const description = displayMode ? (equationLabel ? `display equation ${equationLabel}` : 'display equation') : 'inline equation'
     const result = renderEquation(tex, displayMode)
     dom.dataset.dmNode = displayMode ? 'equation' : 'equation-inline'
@@ -1460,7 +1482,13 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
       if (equationLabel) dom.id = equationLabel
       else dom.removeAttribute('id')
       dom.dataset.label = equationLabel
-      label.textContent = equationLabel ? `Equation · ${equationLabel}` : 'Display equation'
+      label.textContent = numbered?.number ? `Equation ${numbered.number}` : 'Display equation'
+      number.textContent = numbered?.number ? `(${numbered.number})` : ''
+      number.hidden = !numbered?.number
+      captionPreview.textContent = equationCaption
+        ? `${numbered?.number ? `Equation ${numbered.number}. ` : ''}${inlineMarkdownPreviewText(equationCaption)}`
+        : ''
+      captionPreview.hidden = editing || !equationCaption
     }
     rendered.innerHTML = result.html
     rendered.hidden = Boolean(result.error)
@@ -1475,7 +1503,9 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
     if (!editing) {
       input.value = tex
       labelInput.value = equationLabel
+      captionInput.value = equationCaption
     }
+    captionInput.readOnly = !isEditable()
     updateSave()
   }
   const closeEditor = () => {
@@ -1483,9 +1513,12 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
     editor.hidden = true
     rendered.hidden = dom.classList.contains('has-error')
     error.hidden = !dom.classList.contains('has-error')
+    number.hidden = !numberedObjectByNodeId(view.state.doc, String(node.attrs.id))?.number
+    captionPreview.hidden = !String(node.attrs.captionMarkdown ?? '').trim()
     edit.hidden = false
     input.value = String(node.attrs.tex)
     labelInput.value = displayMode && node.attrs.label ? String(node.attrs.label) : ''
+    captionInput.value = displayMode ? String(node.attrs.captionMarkdown ?? '') : ''
     updateSave()
     edit.focus()
   }
@@ -1508,6 +1541,7 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
       ...node.attrs,
       tex,
       label: nextLabel || null,
+      captionMarkdown: captionInput.value.trim(),
       sourceAttributes: updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
     } : { ...node.attrs, tex })
     if (displayMode) transaction = retargetCrossReferences(transaction, previousLabel, nextLabel)
@@ -1519,6 +1553,8 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
     editing = true
     rendered.hidden = true
     error.hidden = true
+    number.hidden = true
+    captionPreview.hidden = true
     edit.hidden = true
     editor.hidden = false
     input.value = String(node.attrs.tex)
@@ -1530,6 +1566,7 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   save.addEventListener('click', saveEditor)
   input.addEventListener('input', updateSave)
   labelInput.addEventListener('input', updateSave)
+  captionInput.addEventListener('input', updateSave)
   const handleEditorKeydown = (event: Event) => {
     const keyboard = event as KeyboardEvent
     if (keyboard.key === 'Escape') {
@@ -1542,8 +1579,9 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   }
   input.addEventListener('keydown', handleEditorKeydown)
   labelInput.addEventListener('keydown', handleEditorKeydown)
+  captionInput.addEventListener('keydown', handleEditorKeydown)
 
-  if (displayMode) dom.append(header, rendered, error, editor)
+  if (displayMode) dom.append(header, rendered, number, error, captionPreview, editor)
   else dom.append(rendered, error, edit, editor)
   updateDom()
   return {
@@ -1829,50 +1867,296 @@ function footnoteDefinitionNodeView(initialNode: ProseMirrorNode, view: EditorVi
   }
 }
 
-function outputNodeView(node: ProseMirrorNode, resolveAssetUrl: (path: string) => string, onCopyReference?: (label: string) => void): NodeView {
-  const dom = document.createElement('section')
-  dom.className = 'structured-output'
-  dom.dataset.dmId = String(node.attrs.id)
-  const header = document.createElement('div')
-  header.className = 'structured-output-header'
-  const markdown = String(node.attrs.markdown)
+function retainedOutputBody(markdown: string) {
+  return markdown
     .replace(/^\s*<!-- dm-output:start[^>]*-->\s*/m, '')
     .replace(/\s*<!-- dm-output:end -->\s*$/m, '')
     .replace(/^\s*<!-- dm-published-value\b[^>]*-->\s*$/gm, '')
     .trim()
-  const markdownImage = markdown.match(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/)
-  const htmlImage = markdownImage ? undefined : embeddedExecutionImageFromHtml(markdown)
-  header.textContent = `Retained ${markdownImage || htmlImage ? 'image' : String(node.attrs.kind)} output`
-  if (!markdown) {
-    dom.classList.add('values-only')
-    dom.setAttribute('aria-hidden', 'true')
-    return { dom }
+}
+
+function retainedMarkdownImage(markdown: string) {
+  const match = markdown.match(/!\[([^\]]*)\]\((<[^>\r\n]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)\s*(?:\{([^}\r\n]+)\})?/)
+  if (!match) return undefined
+  const rawSource = match[2]
+  return {
+    alt: match[1],
+    source: rawSource.startsWith('<') && rawSource.endsWith('>') ? rawSource.slice(1, -1) : rawSource,
+    sourceAttributes: match[3]?.trim(),
   }
-  const label = markdown.match(/\{#([A-Za-z][\w.:-]*)(?:\s[^}]*)?\}/)?.[1]
-  if (label && onCopyReference) {
-    const copy = document.createElement('button')
-    copy.type = 'button'
-    copy.className = 'structured-output-reference'
-    copy.setAttribute('aria-label', `Copy figure reference @${label}`)
-    copy.textContent = `Copy @${label}`
-    copy.addEventListener('click', () => onCopyReference(label))
-    header.append(copy)
+}
+
+function retainedMarkdownTable(markdown: string) {
+  const lines = markdown.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n')
+  const separator = lines.findIndex((line) => /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line))
+  if (separator < 1) return undefined
+  const headers = lines[separator - 1].trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim())
+  const alignments = lines[separator].trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => {
+    const value = cell.trim()
+    return value.startsWith(':') && value.endsWith(':') ? 'center' : value.endsWith(':') ? 'right' : 'left'
+  })
+  const rows: string[][] = []
+  let index = separator + 1
+  while (index < lines.length && lines[index].includes('|') && lines[index].trim()) {
+    rows.push(lines[index].trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim().replaceAll('\\|', '|')))
+    index += 1
   }
-  dom.append(header)
-  if (markdownImage || htmlImage) {
-    const element = document.createElement('img')
-    element.alt = markdownImage?.[1] ?? htmlImage?.alt ?? 'Generated image output'
-    element.src = markdownImage
-      ? safeEmbeddedImageDataUrl(markdownImage[2]) ?? resolveAssetUrl(markdownImage[2])
-      : htmlImage!.source
-    element.loading = 'lazy'
-    dom.append(element)
-  } else {
-    const preview = document.createElement('pre')
-    preview.textContent = markdown.trim()
-    dom.append(preview)
+  return { headers, alignments, rows }
+}
+
+function safeOutputCaption(value: string) {
+  return value.trim().replace(/<!--\s*dm-output:/gi, '&lt;!-- dm-output:').replaceAll('\r', ' ').replaceAll('\n', ' ')
+}
+
+function rewriteRetainedOutputPresentation(markdown: string, caption: string, label: string, declaredKind: unknown) {
+  const ending = markdown.includes('\r\n') ? '\r\n' : markdown.includes('\r') ? '\r' : '\n'
+  const start = markdown.match(/<!-- dm-output:start[^>]*-->/)?.[0]
+  const end = '<!-- dm-output:end -->'
+  const publishedValues = [...markdown.matchAll(/^\s*<!-- dm-published-value\b[^>]*-->\s*$/gm)].map((match) => match[0].trim())
+  const body = retainedOutputBody(markdown)
+  const presentation = retainedOutputPresentation(markdown, declaredKind)
+  const nextCaption = safeOutputCaption(caption)
+  const nextAttributes = updatePortableAttributeId(presentation.sourceAttributes, presentation.label ?? '', label)
+  let nextBody = body
+
+  if (presentation.kind === 'image') {
+    const markdownImage = retainedMarkdownImage(body)
+    const htmlImage = markdownImage ? undefined : embeddedExecutionImageFromHtml(body)
+    const imageSource = markdownImage?.source ?? htmlImage?.source
+    if (!imageSource) return markdown
+    const alt = markdownImage?.alt ?? htmlImage?.alt ?? 'Generated image output'
+    const portableSource = /^data:/i.test(imageSource) ? imageSource : imageSource.includes(' ') ? `<${imageSource}>` : imageSource
+    nextBody = `![${alt.replaceAll(']', '\\]')}](${portableSource})${nextAttributes ? `{${nextAttributes}}` : ''}${nextCaption ? `${ending}: ${nextCaption}` : ''}`
+  } else if (presentation.kind === 'table') {
+    const lines = body.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n')
+    const separator = lines.findIndex((line) => /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line))
+    if (separator < 1) return markdown
+    let index = separator + 1
+    while (index < lines.length && lines[index].includes('|') && lines[index].trim()) index += 1
+    while (index < lines.length && !lines[index].trim()) index += 1
+    if (parseTableCaptionLine(lines[index] ?? '')) lines.splice(index, 1)
+    while (lines.at(-1) === '') lines.pop()
+    if (nextCaption) lines.push(`: ${nextCaption}${nextAttributes ? ` {${nextAttributes}}` : ''}`)
+    nextBody = lines.join(ending)
   }
-  return { dom }
+
+  return [start, ...publishedValues, nextBody, end].filter(Boolean).join(ending)
+}
+
+function outputNodeView(
+  initialNode: ProseMirrorNode,
+  view: EditorView,
+  getPos: () => number | undefined,
+  resolveAssetUrl: (path: string) => string,
+  isEditable: () => boolean,
+  onCopyReference?: (label: string) => void,
+): NodeView {
+  let node = initialNode
+  let editing = false
+  const dom = document.createElement('section')
+  dom.className = 'structured-output'
+  const header = document.createElement('div')
+  header.className = 'structured-output-header'
+  const descriptor = document.createElement('span')
+  descriptor.className = 'structured-output-label'
+  const copy = document.createElement('button')
+  copy.type = 'button'
+  copy.className = 'structured-output-reference'
+  const edit = document.createElement('button')
+  edit.type = 'button'
+  edit.className = 'structured-output-edit'
+  edit.textContent = 'Edit caption'
+  header.append(descriptor, copy, edit)
+
+  const content = document.createElement('div')
+  content.className = 'structured-output-content'
+  const captionPreview = document.createElement('figcaption')
+  captionPreview.className = 'structured-output-caption'
+  const editor = document.createElement('div')
+  editor.className = 'structured-output-editor'
+  editor.hidden = true
+  const captionField = document.createElement('label')
+  captionField.append(document.createTextNode('Caption'))
+  const captionInput = document.createElement('textarea')
+  captionInput.className = 'structured-output-input'
+  captionInput.setAttribute('aria-label', 'Generated output caption')
+  captionField.append(captionInput)
+  const labelField = document.createElement('label')
+  labelField.append(document.createTextNode('Cross-reference label'))
+  const labelInput = document.createElement('input')
+  labelInput.className = 'structured-output-input'
+  labelInput.setAttribute('aria-label', 'Generated output label')
+  labelInput.spellcheck = false
+  labelField.append(labelInput)
+  const validation = document.createElement('p')
+  validation.className = 'structured-output-validation'
+  validation.hidden = true
+  const actions = document.createElement('div')
+  actions.className = 'structured-output-actions'
+  const cancel = document.createElement('button')
+  cancel.type = 'button'
+  cancel.textContent = 'Cancel'
+  const save = document.createElement('button')
+  save.type = 'button'
+  save.className = 'primary-button'
+  save.textContent = 'Save caption'
+  actions.append(cancel, save)
+  editor.append(captionField, labelField, validation, actions)
+
+  const normalizedLabel = () => labelInput.value.trim().replace(/^#/, '')
+  const updateSave = () => {
+    const presentation = retainedOutputPresentation(String(node.attrs.markdown), node.attrs.kind)
+    const nextLabel = normalizedLabel()
+    const expectedPrefix = presentation.kind === 'table' ? 'tbl-' : 'fig-'
+    const validSyntax = !nextLabel || /^[a-zA-Z][\w.:-]*$/.test(nextLabel)
+    const validKind = !nextLabel || nextLabel === presentation.label || nextLabel.startsWith(expectedPrefix)
+    const captionedTable = presentation.kind !== 'table' || !nextLabel || Boolean(captionInput.value.trim())
+    validation.textContent = !validSyntax
+      ? 'Labels must start with a letter and contain only letters, numbers, dots, colons, underscores, or hyphens.'
+      : !validKind
+        ? `${presentation.kind === 'table' ? 'Table' : 'Figure'} labels must use the portable ${expectedPrefix}… form.`
+        : !captionedTable
+          ? 'A labeled table needs a caption.'
+          : ''
+    validation.hidden = validSyntax && validKind && captionedTable
+    save.disabled = !isEditable() || !validSyntax || !validKind || !captionedTable
+  }
+  const updateDom = () => {
+    const markdown = retainedOutputBody(String(node.attrs.markdown))
+    const presentation = retainedOutputPresentation(String(node.attrs.markdown), node.attrs.kind)
+    const numbered = numberedObjectByNodeId(view.state.doc, String(node.attrs.id))
+    const kindLabel = presentation.kind === 'table' ? 'Table' : presentation.kind === 'image' ? 'Figure' : 'Retained output'
+    dom.dataset.dmId = String(node.attrs.id)
+    dom.dataset.cellId = String(node.attrs.cellId)
+    dom.dataset.outputKind = presentation.kind
+    dom.classList.toggle('values-only', !markdown)
+    dom.classList.toggle('structured-output-image', presentation.kind === 'image')
+    dom.classList.toggle('structured-output-table', presentation.kind === 'table')
+    if (!markdown) dom.setAttribute('aria-hidden', 'true')
+    else dom.removeAttribute('aria-hidden')
+    descriptor.textContent = numbered?.number ? `${kindLabel} ${numbered.number}` : kindLabel
+    const label = presentation.label
+    copy.hidden = !label || !onCopyReference
+    copy.textContent = label ? `Copy @${label}` : ''
+    copy.setAttribute('aria-label', label ? `Copy ${kindLabel.toLowerCase()} reference @${label}` : 'Copy output reference')
+    edit.hidden = presentation.kind === 'markdown' || editing
+    edit.disabled = !isEditable()
+    edit.setAttribute('aria-label', `Edit ${kindLabel.toLowerCase()} caption`)
+    content.replaceChildren()
+
+    const markdownImage = retainedMarkdownImage(markdown)
+    const htmlImage = markdownImage ? undefined : embeddedExecutionImageFromHtml(markdown)
+    if (presentation.kind === 'image' && (markdownImage || htmlImage)) {
+      const element = document.createElement('img')
+      element.alt = markdownImage?.alt ?? htmlImage?.alt ?? 'Generated image output'
+      const source = markdownImage?.source ?? htmlImage!.source
+      element.src = safeEmbeddedImageDataUrl(source) ?? resolveAssetUrl(source)
+      element.loading = 'lazy'
+      content.append(element)
+    } else if (presentation.kind === 'table') {
+      const retainedTable = retainedMarkdownTable(markdown)
+      if (retainedTable) {
+        const table = document.createElement('table')
+        const head = document.createElement('thead')
+        const headRow = document.createElement('tr')
+        retainedTable.headers.forEach((value, index) => {
+          const cell = document.createElement('th')
+          cell.textContent = inlineMarkdownPreviewText(value)
+          cell.style.textAlign = retainedTable.alignments[index]
+          headRow.append(cell)
+        })
+        head.append(headRow)
+        const body = document.createElement('tbody')
+        retainedTable.rows.forEach((values) => {
+          const row = document.createElement('tr')
+          retainedTable.headers.forEach((_header, index) => {
+            const cell = document.createElement('td')
+            cell.textContent = inlineMarkdownPreviewText(values[index] ?? '')
+            cell.style.textAlign = retainedTable.alignments[index]
+            row.append(cell)
+          })
+          body.append(row)
+        })
+        table.append(head, body)
+        content.append(table)
+      }
+    } else {
+      const preview = document.createElement('pre')
+      preview.textContent = markdown
+      content.append(preview)
+    }
+    const caption = presentation.caption ? inlineMarkdownPreviewText(presentation.caption) : ''
+    captionPreview.textContent = `${numbered?.number ? `${kindLabel} ${numbered.number}.` : ''}${caption ? `${numbered?.number ? ' ' : ''}${caption}` : ''}`
+    captionPreview.hidden = editing || (!numbered?.number && !caption)
+    if (presentation.kind === 'table') dom.insertBefore(captionPreview, content)
+    else content.after(captionPreview)
+    if (!editing) {
+      captionInput.value = presentation.caption ?? ''
+      labelInput.value = presentation.label ?? ''
+    }
+    captionInput.readOnly = !isEditable()
+    labelInput.readOnly = !isEditable()
+    updateSave()
+  }
+  const closeEditor = () => {
+    editing = false
+    editor.hidden = true
+    updateDom()
+    edit.focus()
+  }
+  const saveEditor = () => {
+    const position = getPos()
+    if (typeof position !== 'number' || save.disabled || !isEditable()) return
+    const markdown = rewriteRetainedOutputPresentation(
+      String(node.attrs.markdown),
+      captionInput.value,
+      normalizedLabel(),
+      node.attrs.kind,
+    )
+    view.dispatch(view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, markdown }))
+    closeEditor()
+  }
+  copy.addEventListener('click', () => {
+    const label = retainedOutputPresentation(String(node.attrs.markdown), node.attrs.kind).label
+    if (label) onCopyReference?.(label)
+  })
+  edit.addEventListener('click', () => {
+    if (!isEditable()) return
+    editing = true
+    editor.hidden = false
+    captionPreview.hidden = true
+    edit.hidden = true
+    updateSave()
+    captionInput.focus()
+    captionInput.select()
+  })
+  cancel.addEventListener('click', closeEditor)
+  save.addEventListener('click', saveEditor)
+  captionInput.addEventListener('input', updateSave)
+  labelInput.addEventListener('input', updateSave)
+  for (const input of [captionInput, labelInput]) input.addEventListener('keydown', (event) => {
+    const keyboard = event as KeyboardEvent
+    if (keyboard.key === 'Escape') {
+      event.preventDefault()
+      closeEditor()
+    } else if (keyboard.key === 'Enter' && (keyboard.metaKey || keyboard.ctrlKey)) {
+      event.preventDefault()
+      saveEditor()
+    }
+  })
+  dom.append(header, content, captionPreview, editor)
+  updateDom()
+  return {
+    dom,
+    stopEvent: (event) => dom.contains(event.target as Node),
+    ignoreMutation: () => true,
+    update(next) {
+      if (next.type !== node.type) return false
+      node = next
+      updateDom()
+      return true
+    },
+  }
 }
 
 function updatePortableAttributeId(sourceAttributes: unknown, previousLabel: string, nextLabel: string) {
@@ -2133,6 +2417,39 @@ function headingNodeView(
   }
 }
 
+function captionNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () => number | undefined): NodeView {
+  let node = initialNode
+  const dom = document.createElement('figcaption')
+  dom.className = 'structured-figure-caption'
+  const prefix = document.createElement('strong')
+  prefix.className = 'structured-object-number'
+  prefix.contentEditable = 'false'
+  const contentDOM = document.createElement('span')
+  contentDOM.className = 'structured-figure-caption-content'
+  dom.append(prefix, contentDOM)
+  const updateDom = () => {
+    const position = getPos()
+    const resolved = typeof position === 'number' ? view.state.doc.resolve(position) : undefined
+    const image = resolved?.parent.type === manuscriptSchema.nodes.figure ? resolved.parent.firstChild : undefined
+    const numbered = image ? numberedObjectByNodeId(view.state.doc, String(image.attrs.id)) : undefined
+    prefix.textContent = numbered?.number ? `Figure ${numbered.number}. ` : ''
+    prefix.hidden = !numbered?.number
+    dom.dataset.dmId = String(node.attrs.id)
+  }
+  updateDom()
+  return {
+    dom,
+    contentDOM,
+    ignoreMutation: (mutation) => mutation.type !== 'selection' && !contentDOM.contains(mutation.target),
+    update(next) {
+      if (next.type !== node.type) return false
+      node = next
+      updateDom()
+      return true
+    },
+  }
+}
+
 function imageNodeView(
   initialNode: ProseMirrorNode,
   view: EditorView,
@@ -2159,6 +2476,8 @@ function imageNodeView(
   const image = document.createElement('img')
   image.loading = 'lazy'
   image.decoding = 'async'
+  const numberline = document.createElement('figcaption')
+  numberline.className = 'structured-figure-numberline'
 
   const editor = document.createElement('div')
   editor.className = 'structured-figure-editor'
@@ -2190,6 +2509,10 @@ function imageNodeView(
   title.type = 'text'
   title.className = 'structured-figure-input'
   title.setAttribute('aria-label', 'Figure title')
+  const captionInput = document.createElement('input')
+  captionInput.type = 'text'
+  captionInput.className = 'structured-figure-input'
+  captionInput.setAttribute('aria-label', 'Figure caption')
   const labelInput = document.createElement('input')
   labelInput.type = 'text'
   labelInput.className = 'structured-figure-input'
@@ -2199,6 +2522,7 @@ function imageNodeView(
     field('Image source', source, 'Use a project-relative path.'),
     field('Alternative text', alt, 'Leave blank only when the image is decorative.'),
     field('Hover title', title, 'Optional.'),
+    field('Caption', captionInput, 'Optional; shown below the numbered figure.'),
     field('Cross-reference label', labelInput, 'Optional; changing it also updates matching references.'),
   )
   const validation = document.createElement('p')
@@ -2217,6 +2541,17 @@ function imageNodeView(
   editor.append(fields, validation, actions)
 
   const normalizedLabel = () => labelInput.value.trim().replace(/^#/, '')
+  const figureContext = () => {
+    const position = getPos()
+    if (typeof position !== 'number') return undefined
+    const resolved = view.state.doc.resolve(position)
+    if (resolved.parent.type !== manuscriptSchema.nodes.figure) return undefined
+    return {
+      node: resolved.parent,
+      position: resolved.before(resolved.depth),
+      caption: resolved.parent.childCount > 1 ? resolved.parent.child(1) : undefined,
+    }
+  }
   const updateSave = () => {
     const nextLabel = normalizedLabel()
     const previousLabel = node.attrs.label ? String(node.attrs.label) : ''
@@ -2240,24 +2575,30 @@ function imageNodeView(
     const sourcePath = String(node.attrs.src)
     const figureLabel = node.attrs.label ? String(node.attrs.label) : ''
     const imageTitle = node.attrs.title ? String(node.attrs.title) : ''
+    const context = figureContext()
+    const numbered = numberedObjectByNodeId(view.state.doc, String(node.attrs.id))
     dom.dataset.dmNode = 'figure-image'
     dom.dataset.dmId = String(node.attrs.id)
     dom.dataset.label = figureLabel
     if (figureLabel) dom.id = figureLabel
     else dom.removeAttribute('id')
-    descriptor.textContent = figureLabel ? `Figure · ${figureLabel}` : 'Figure'
+    descriptor.textContent = numbered?.number ? `Figure ${numbered.number}` : 'Figure'
     edit.disabled = !isEditable()
     edit.setAttribute('aria-label', figureLabel ? `Edit figure ${figureLabel}` : 'Edit figure')
     image.src = resolveAssetUrl(sourcePath)
     image.alt = String(node.attrs.alt ?? '')
     if (imageTitle) image.title = imageTitle
     else image.removeAttribute('title')
+    numberline.textContent = numbered?.number ? `Figure ${numbered.number}.` : ''
+    numberline.hidden = Boolean(context?.caption) || !numbered?.number
     if (!editing) {
       source.value = sourcePath
       alt.value = String(node.attrs.alt ?? '')
       title.value = imageTitle
+      captionInput.value = context?.caption?.textContent ?? ''
       labelInput.value = figureLabel
     }
+    captionInput.readOnly = !isEditable()
     updateSave()
   }
   const closeEditor = () => {
@@ -2267,6 +2608,7 @@ function imageNodeView(
     source.value = String(node.attrs.src)
     alt.value = String(node.attrs.alt ?? '')
     title.value = node.attrs.title ? String(node.attrs.title) : ''
+    captionInput.value = figureContext()?.caption?.textContent ?? ''
     labelInput.value = node.attrs.label ? String(node.attrs.label) : ''
     updateSave()
     edit.focus()
@@ -2285,7 +2627,7 @@ function imageNodeView(
       || (nextLabel !== previousLabel && nextLabel && (!nextLabel.startsWith('fig-') || !isCrossReferenceTarget(nextLabel)))
       || (referenced && (!nextLabel || !nextLabel.startsWith('fig-') || !isCrossReferenceTarget(nextLabel)))
     ) return
-    let transaction = view.state.tr.setNodeMarkup(position, undefined, {
+    const nextImage = node.type.createChecked({
       ...node.attrs,
       src: sourcePath,
       alt: alt.value.trim(),
@@ -2293,6 +2635,29 @@ function imageNodeView(
       label: nextLabel || null,
       sourceAttributes: updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
     })
+    const context = figureContext()
+    const nextCaption = captionInput.value.trim()
+    const captionNodes = !nextCaption
+      ? []
+      : context?.caption && nextCaption === context.caption.textContent.trim()
+        ? [context.caption]
+        : [manuscriptSchema.nodes.caption.createChecked(
+            context?.caption?.attrs ?? { id: randomId('caption') },
+            manuscriptSchema.text(nextCaption),
+          )]
+    let transaction = context
+      ? view.state.tr.replaceWith(
+          context.position,
+          context.position + context.node.nodeSize,
+          manuscriptSchema.nodes.figure.createChecked(
+            context.node.attrs,
+            [
+              nextImage,
+              ...captionNodes,
+            ],
+          ),
+        )
+      : view.state.tr.setNodeMarkup(position, undefined, nextImage.attrs)
     transaction = retargetCrossReferences(transaction, previousLabel, nextLabel)
     view.dispatch(transaction)
     closeEditor()
@@ -2308,7 +2673,7 @@ function imageNodeView(
   })
   cancel.addEventListener('click', closeEditor)
   save.addEventListener('click', saveEditor)
-  for (const input of [source, alt, title, labelInput]) {
+  for (const input of [source, alt, title, captionInput, labelInput]) {
     input.addEventListener('input', updateSave)
     input.addEventListener('keydown', (event) => {
       if (event.key === 'Escape') {
@@ -2321,7 +2686,7 @@ function imageNodeView(
     })
   }
 
-  dom.append(header, image, editor)
+  dom.append(header, image, numberline, editor)
   updateDom()
   return {
     dom,
@@ -2433,19 +2798,20 @@ function tableNodeView(
   const updateDom = () => {
     const tableLabel = node.attrs.label ? String(node.attrs.label) : ''
     const captionMarkdown = String(node.attrs.captionMarkdown ?? '')
+    const numbered = numberedObjectByNodeId(view.state.doc, String(node.attrs.id))
     const captionId = `dm-table-caption-${String(node.attrs.id).replace(/[^a-zA-Z0-9_.:-]+/g, '-')}`
     dom.dataset.dmNode = 'table'
     dom.dataset.dmId = String(node.attrs.id)
     dom.dataset.label = tableLabel
     if (tableLabel) dom.id = tableLabel
     else dom.removeAttribute('id')
-    descriptor.textContent = tableLabel ? `Table · ${tableLabel}` : 'Table'
+    descriptor.textContent = numbered?.number ? `Table ${numbered.number}` : 'Table'
     edit.disabled = !isEditable()
     edit.setAttribute('aria-label', tableLabel ? `Edit table ${tableLabel} details` : 'Edit table details')
     preview.id = captionId
-    preview.textContent = inlineMarkdownPreviewText(captionMarkdown)
-    preview.hidden = editing || !captionMarkdown
-    if (captionMarkdown) table.setAttribute('aria-describedby', captionId)
+    preview.textContent = `${numbered?.number ? `Table ${numbered.number}.` : ''}${captionMarkdown ? `${numbered?.number ? ' ' : ''}${inlineMarkdownPreviewText(captionMarkdown)}` : ''}`
+    preview.hidden = editing || (!numbered?.number && !captionMarkdown)
+    if (numbered?.number || captionMarkdown) table.setAttribute('aria-describedby', captionId)
     else table.removeAttribute('aria-describedby')
     table.setAttribute('aria-label', tableLabel ? `Table ${tableLabel}` : 'Editable table')
     if (!editing) {
@@ -2459,7 +2825,8 @@ function tableNodeView(
   const closeEditor = () => {
     editing = false
     editor.hidden = true
-    preview.hidden = !String(node.attrs.captionMarkdown ?? '')
+    const numbered = numberedObjectByNodeId(view.state.doc, String(node.attrs.id))
+    preview.hidden = !numbered?.number && !String(node.attrs.captionMarkdown ?? '')
     edit.hidden = false
     caption.value = String(node.attrs.captionMarkdown ?? '')
     labelInput.value = node.attrs.label ? String(node.attrs.label) : ''
@@ -2515,7 +2882,7 @@ function tableNodeView(
     })
   }
 
-  dom.append(header, scroll, preview, editor)
+  dom.append(header, preview, scroll, editor)
   updateDom()
   return {
     dom,
@@ -2938,11 +3305,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       view.focus()
       return true
     },
-    insertEquation: (tex, display = false, label) => {
+    insertEquation: (tex, display = false, label, caption) => {
       const view = viewRef.current
       if (!view || readOnlyRef.current || !tex.trim()) return false
       const node = display
-        ? manuscriptSchema.nodes.equation_block.createChecked({ id: randomId('equation'), tex: tex.trim(), label: label?.replace(/^@/, '') || null })
+        ? manuscriptSchema.nodes.equation_block.createChecked({ id: randomId('equation'), tex: tex.trim(), label: label?.replace(/^@/, '') || null, captionMarkdown: caption?.trim() ?? '' })
         : manuscriptSchema.nodes.equation_inline.createChecked({ id: randomId('equation-inline'), tex: tex.trim() })
       if (display) insertBlock(view, node)
       else view.dispatch(view.state.tr.replaceSelectionWith(node))
@@ -3273,13 +3640,17 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         footnote_reference: (node, editorView) => footnoteReferenceNodeView(node, editorView),
         footnote_definition: (node, editorView, getPos) => footnoteDefinitionNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         table: (node, editorView, getPos) => tableNodeView(node, editorView, getPos, () => !readOnlyRef.current),
-        output_block: (node) => isPanelManagedNode(node)
+        output_block: (node, editorView, getPos) => isPanelManagedNode(node)
           ? panelManagedOutputNodeView(node)
           : outputNodeView(
             node,
+            editorView,
+            getPos,
             (path) => resolveAssetUrlRef.current?.(path) ?? path,
+            () => !readOnlyRef.current,
             (label) => onCopyReferenceRef.current?.(label),
           ),
+        caption: (node, editorView, getPos) => captionNodeView(node, editorView, getPos),
         image: (node, editorView, getPos) => imageNodeView(
           node,
           editorView,

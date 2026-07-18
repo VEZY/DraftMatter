@@ -6,6 +6,8 @@ import { buildPublicationByline, parsePublicationMetadata, removeDuplicateLeadin
 import { parseTableCaptionLine, pipeTableAlignments, pipeTableCells, type TableAlignment } from './tableSyntax'
 import { projectComputationsForPublication } from './publicationComputation'
 import { createStoredZip } from './zipArchive'
+import { isExplicitlyUnnumbered, numberedManuscriptObjects } from './numberedObjects'
+import { parseStructuredManuscript } from './structuredManuscript'
 
 export interface DocxExportDiagnostic {
   code: 'figure-reference' | 'raw-source'
@@ -21,6 +23,7 @@ export interface DocxExportResult {
 export interface DocxExportOptions {
   citationLabels?: Record<string, string>
   bibliography?: Array<{ id: string; value: string }>
+  objectLabels?: Record<string, string>
 }
 
 function xml(value: string) {
@@ -59,7 +62,7 @@ function stripInlineMarkdown(value: string, options: DocxExportOptions) {
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '$1')
     .replace(/\$([^$\r\n]+)\$/g, '$1')
-    .replace(/@(fig|tbl|eq|sec)-[a-zA-Z0-9](?:[a-zA-Z0-9_.:-]*[a-zA-Z0-9])?/g, (reference) => formatCrossReferenceTarget(reference))
+    .replace(/@(fig|tbl|eq|sec)-[a-zA-Z0-9](?:[a-zA-Z0-9_.:-]*[a-zA-Z0-9])?/g, (reference) => options.objectLabels?.[reference.slice(1)] ?? formatCrossReferenceTarget(reference))
     .replace(/`([^`]+)`/g, '$1')
 }
 
@@ -112,6 +115,7 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
   if (metadata.title) parts.push(paragraph(metadata.title, 'Title'))
   parts.push(...publicationBylineParagraphs(metadata))
   let index = 0
+  const counters = { figure: 0, table: 0, equation: 0 }
   while (index < lines.length) {
     const line = lines[index]
     if (!line.trim() || /^<!--\s*dm-output:(?:start|end)\b/.test(line)) {
@@ -140,28 +144,38 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
     }
     const equation = parseDisplayEquation(lines, index)
     if (equation) {
+      const unnumbered = isExplicitlyUnnumbered(equation.sourceAttributes)
+      const number = unnumbered ? undefined : ++counters.equation
+      const caption = equation.closed ? parseTableCaptionLine(lines[equation.end] ?? '') : null
       if (equation.closed) {
-        parts.push(paragraph(equation.tex.replaceAll('\n', ' '), 'Equation'))
+        parts.push(paragraph(`${equation.tex.replaceAll('\n', ' ')}${number ? `    (${number})` : ''}`, 'Equation'))
+        if (caption) parts.push(paragraphWithFootnotes(`${number ? `Equation ${number}. ` : ''}${stripInlineMarkdown(caption.captionMarkdown, options)}`, resolvedFootnotes.numbers, 'Caption'))
       } else {
         parts.push(paragraph(lines.slice(index, equation.end).join('\n'), 'CodeBlock'))
         diagnostics.push({ code: 'raw-source', level: 'warning', message: 'An unclosed display equation was preserved as visible source in the DOCX.' })
       }
-      index = equation.end
+      index = equation.end + (caption ? 1 : 0)
       continue
     }
-    const figure = line.match(/^\s*!\[([^\]]*)\]\(([^)]+)\)(?:\{#[^}]+\})?\s*$/)
+    const figure = line.match(/^\s*!\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)(?:\{([^}]*)\})?\s*$/)
     if (figure) {
-      const embedded = /^data:image\//i.test(figure[2])
-      const reference = embedded ? 'embedded image not included in native DOCX' : figure[2]
-      parts.push(paragraphWithFootnotes(`Figure: ${stripInlineMarkdown(figure[1], options)} — ${reference}`, resolvedFootnotes.numbers, 'Caption'))
+      const attributes = figure[3]?.trim()
+      const unnumbered = isExplicitlyUnnumbered(attributes)
+      const number = unnumbered ? undefined : ++counters.figure
+      const caption = parseTableCaptionLine(lines[index + 1] ?? '')
+      const source = figure[2].startsWith('<') ? figure[2].slice(1, -1) : figure[2]
+      const embedded = /^data:image\//i.test(source)
+      const reference = embedded ? 'embedded image not included in native DOCX' : source
+      const captionText = caption?.captionMarkdown || figure[1]
+      parts.push(paragraphWithFootnotes(`${number ? `Figure ${number}. ` : ''}${stripInlineMarkdown(captionText, options)} — ${reference}`, resolvedFootnotes.numbers, 'Caption'))
       diagnostics.push({
         code: 'figure-reference',
         level: 'warning',
         message: embedded
           ? `Figure “${figure[1]}” uses an embedded data image. Reinsert it in Word if a self-contained DOCX is required.`
-          : `Figure “${figure[1]}” remains a portable path reference (${figure[2]}). Embed it in Word after export if a self-contained DOCX is required.`,
+          : `Figure “${figure[1]}” remains a portable path reference (${source}). Embed it in Word after export if a self-contained DOCX is required.`,
       })
-      index += 1
+      index += caption ? 2 : 1
       continue
     }
     if (line.includes('|') && isTableSeparator(lines[index + 1] ?? '')) {
@@ -174,8 +188,10 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
       }
       const caption = parseTableCaptionLine(lines[index] ?? '')
       if (caption) index += 1
+      const unnumbered = isExplicitlyUnnumbered(caption?.sourceAttributes)
+      const number = unnumbered ? undefined : ++counters.table
+      if (number || caption) parts.push(paragraphWithFootnotes(`${number ? `Table ${number}.` : ''}${caption ? `${number ? ' ' : ''}${stripInlineMarkdown(caption.captionMarkdown, options)}` : ''}`, resolvedFootnotes.numbers, 'Caption'))
       parts.push(table(rows, alignments, resolvedFootnotes.numbers, options))
-      if (caption) parts.push(paragraphWithFootnotes(`Table: ${stripInlineMarkdown(caption.captionMarkdown, options)}`, resolvedFootnotes.numbers, 'Caption'))
       continue
     }
     if (/^\s*(?:[-+*]|\d+[.)])\s+/.test(line)) {
@@ -250,8 +266,12 @@ export function renderDocxExport(source: string, options: DocxExportOptions = {}
     throw new Error('DOCX export accepts only a clean DraftMatter projection without review storage markers.')
   }
   const publicationSource = projectComputationsForPublication(source)
+  const objectLabels = Object.fromEntries(numberedManuscriptObjects(parseStructuredManuscript(publicationSource).document)
+    .filter((object) => object.label && object.number)
+    .map((object) => [object.label!, `${object.kind === 'figure' ? 'Figure' : object.kind === 'table' ? 'Table' : 'Equation'} ${object.number}`]))
+  const renderOptions = { ...options, objectLabels }
   const diagnostics: DocxExportDiagnostic[] = []
-  const rendered = documentBody(publicationSource, diagnostics, options)
+  const rendered = documentBody(publicationSource, diagnostics, renderOptions)
   const metadata = parsePublicationMetadata(publicationSource)
   const hasFootnotes = rendered.footnotes.length > 0
   const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${rendered.body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`
@@ -266,7 +286,7 @@ export function renderDocxExport(source: string, options: DocxExportOptions = {}
     { name: 'word/styles.xml', content: styles },
     { name: 'word/_rels/document.xml.rels', content: documentRelationships(hasFootnotes) },
   ]
-  if (hasFootnotes) entries.push({ name: 'word/footnotes.xml', content: footnotesXml(rendered.footnotes, options) })
+  if (hasFootnotes) entries.push({ name: 'word/footnotes.xml', content: footnotesXml(rendered.footnotes, renderOptions) })
   return {
     bytes: createStoredZip(entries.map((entry) => ({ name: entry.name, bytes: entry.content }))),
     diagnostics,

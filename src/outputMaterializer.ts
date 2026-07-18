@@ -97,8 +97,14 @@ function mimeImageMarkdown(bundle: MimeOutput, result: NormalizedExecutionResult
   if (!image) return undefined
   const alt = escapeAlt(presentation.alt ?? presentation.caption ?? image.alt ?? `Generated output ${result.cellId}`)
   const label = presentation.label ? `{#${presentation.label}}` : ''
-  const caption = presentation.caption ? `\n\n*${escapeReserved(presentation.caption)}*` : ''
+  const caption = presentation.caption ? `\n: ${escapeReserved(presentation.caption)}` : ''
   return `![${alt}](${image.source})${label}${caption}`
+}
+
+function presentedTableMarkdown(markdown: string, presentation: OutputPresentation) {
+  if (!presentation.caption) return markdown
+  const attributes = presentation.label ? ` {#${presentation.label}}` : ''
+  return `${markdown}\n: ${escapeReserved(presentation.caption)}${attributes}`
 }
 
 function mimeMarkdown(result: NormalizedExecutionResult, presentation: OutputPresentation) {
@@ -110,7 +116,7 @@ function mimeMarkdown(result: NormalizedExecutionResult, presentation: OutputPre
       continue
     }
     const table = tableMarkdown(bundle)
-    if (table) return table
+    if (table) return presentedTableMarkdown(table, presentation)
     const markdown = bundle.data['text/markdown']
     if (typeof markdown === 'string') return escapeReserved(markdown).trim()
     const html = bundle.data['text/html']
@@ -126,7 +132,7 @@ function artifactMarkdown(result: NormalizedExecutionResult, presentation: Outpu
     const label = index === 0 && presentation.label ? `{#${presentation.label}}` : ''
     if (artifact.mediaType?.startsWith('image/')) {
       const alt = escapeAlt(index === 0 ? presentation.alt ?? presentation.caption ?? `Generated output ${result.cellId}` : `Generated artifact ${artifact.path}`)
-      const caption = index === 0 && presentation.caption ? `\n\n*${escapeReserved(presentation.caption)}*` : ''
+      const caption = index === 0 && presentation.caption ? `\n: ${escapeReserved(presentation.caption)}` : ''
       return `![${alt}](${markdownPath(artifact.path)})${label}${caption}`
     }
     const title = artifact.mediaType === 'text/csv' ? 'Generated table data' : 'Generated artifact'
@@ -156,6 +162,19 @@ function generatedBlock(request: MaterializeOutputRequest) {
   ].join('\n') }
 }
 
+function normalizedOutputPresentation(cell: ExecutableCell, presentation: OutputPresentation | undefined): OutputPresentation {
+  const kind = cell.attributes.output === 'table' ? 'table' : cell.attributes.output === 'figure' ? 'figure' : undefined
+  if (!kind) return presentation ?? {}
+  const prefix = kind === 'table' ? 'tbl-' : 'fig-'
+  const rawLabel = presentation?.label?.trim().replace(/^#/, '')
+  const safeLabel = rawLabel?.replace(/[^A-Za-z0-9_.:-]+/g, '-').replace(/^[^A-Za-z]+/, '')
+  const label = safeLabel
+    ? safeLabel.startsWith(prefix) ? safeLabel : `${prefix}${safeLabel}`
+    : undefined
+  const caption = presentation?.caption?.trim() || (kind === 'table' && label ? `Generated table from ${cell.id}.` : undefined)
+  return { ...presentation, label, caption }
+}
+
 function normalizeEnding(value: string, ending: string) {
   return value.replaceAll('\r\n', '\n').replaceAll('\r', '\n').replaceAll('\n', ending)
 }
@@ -181,7 +200,7 @@ export function materializeExecutionOutput(request: MaterializeOutputRequest): M
   if (missing.length) {
     return { ...diagnostic('output-artifact-missing', `Declared artifact${missing.length === 1 ? '' : 's'} missing from the successful run: ${missing.join(', ')}.`), source: request.source }
   }
-  const generated = generatedBlock(request)
+  const generated = generatedBlock({ ...request, presentation: normalizedOutputPresentation(cell, request.presentation) })
   if (generated.diagnostics.length) {
     return { ok: false, source: request.source, diagnostics: generated.diagnostics }
   }
