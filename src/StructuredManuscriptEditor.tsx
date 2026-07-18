@@ -34,6 +34,7 @@ import { motionAwareScrollBehavior } from './accessibility'
 import type { PublicationByline } from './publicationMetadata'
 import { embeddedExecutionImageFromHtml, safeEmbeddedImageDataUrl } from './outputRenderer'
 import { parseTableCaptionLine } from './tableSyntax'
+import { crossReferenceChoices, groupedCrossReferenceChoices, type CrossReferenceChoice } from './crossReferencePicker'
 import {
   numberedCrossReferenceLabel,
   numberedObjectByNodeId,
@@ -46,6 +47,7 @@ import {
   semanticCrossReferenceLabel,
   semanticLabelIsInUse,
   semanticLabelsInUse,
+  semanticManuscriptObjects,
 } from './semanticObjects'
 import {
   createCollaborativeProseMirrorState,
@@ -210,7 +212,7 @@ export interface StructuredManuscriptEditorHandle {
   consolidateSetupCells: () => boolean
   insertPublishedValue: (name: string) => boolean
   insertEquation: (tex: string, display?: boolean, label?: string, caption?: string) => boolean
-  insertCrossReference: (target: string) => boolean
+  insertCrossReference: (target: string, targetNodeId?: string) => boolean
   insertFootnote: (label: string, content: string) => boolean
   insertCitation: (items: CitationItem[], rendered?: string) => boolean
   citationSource: (items: CitationItem[], rendered?: string) => string | null
@@ -1271,6 +1273,7 @@ function linkMarkView(initialMark: ProseMirrorMark, view: EditorView, isEditable
 function crossReferenceNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () => number | undefined, isEditable: () => boolean): NodeView {
   let node = initialNode
   let editing = false
+  let selectedChoice: CrossReferenceChoice | undefined
   const dom = document.createElement('span')
   dom.className = 'structured-cross-reference'
   dom.contentEditable = 'false'
@@ -1284,12 +1287,16 @@ function crossReferenceNodeView(initialNode: ProseMirrorNode, view: EditorView, 
   const editor = document.createElement('span')
   editor.className = 'structured-cross-reference-editor'
   editor.hidden = true
-  const input = document.createElement('input')
-  input.type = 'text'
-  input.className = 'structured-cross-reference-input'
-  input.setAttribute('aria-label', 'Cross-reference target')
-  input.placeholder = 'fig-growth'
-  input.spellcheck = false
+  const search = document.createElement('input')
+  search.type = 'search'
+  search.className = 'structured-cross-reference-input'
+  search.setAttribute('aria-label', 'Search cross-reference targets')
+  search.placeholder = 'Search manuscript objects'
+  search.spellcheck = false
+  const select = document.createElement('select')
+  select.className = 'structured-cross-reference-select'
+  select.setAttribute('aria-label', 'Cross-reference target')
+  select.size = 6
   const validation = document.createElement('small')
   validation.className = 'structured-cross-reference-validation'
   validation.hidden = true
@@ -1300,14 +1307,40 @@ function crossReferenceNodeView(initialNode: ProseMirrorNode, view: EditorView, 
   save.type = 'button'
   save.className = 'primary-button'
   save.textContent = 'Save reference'
-  editor.append(input, validation, cancel, save)
+  editor.append(search, select, validation, cancel, save)
 
-  const normalizedTarget = () => input.value.trim().replace(/^@/, '')
   const updateSave = () => {
-    const valid = isCrossReferenceTarget(normalizedTarget())
-    validation.textContent = valid ? '' : 'Use a portable fig-, tbl-, eq-, or sec- target.'
-    validation.hidden = valid
-    save.disabled = !isEditable() || !valid
+    validation.textContent = selectedChoice
+      ? ''
+      : select.hidden
+        ? `No manuscript objects match “${search.value}”.`
+        : 'Choose a figure, table, equation, or section.'
+    validation.hidden = Boolean(selectedChoice)
+    save.disabled = !isEditable() || !selectedChoice
+  }
+  const updatePicker = () => {
+    const objects = semanticManuscriptObjects(view.state.doc)
+    const groups = groupedCrossReferenceChoices(objects, search.value)
+    const choices = groups.flatMap((group) => group.items)
+    select.replaceChildren()
+    for (const group of groups) {
+      const optgroup = document.createElement('optgroup')
+      optgroup.label = group.label
+      for (const choice of group.items) {
+        const option = document.createElement('option')
+        option.value = choice.key
+        option.textContent = choice.text
+        optgroup.append(option)
+      }
+      select.append(optgroup)
+    }
+    if (selectedChoice && choices.some((choice) => choice.key === selectedChoice?.key)) select.value = selectedChoice.key
+    else {
+      selectedChoice = undefined
+      select.selectedIndex = -1
+    }
+    select.hidden = choices.length === 0
+    updateSave()
   }
   const updateDom = () => {
     const target = String(node.attrs.target)
@@ -1316,11 +1349,11 @@ function crossReferenceNodeView(initialNode: ProseMirrorNode, view: EditorView, 
     link.dataset.dmId = String(node.attrs.id)
     link.href = `#${target}`
     link.textContent = semanticCrossReferenceLabel(view.state.doc, target) ?? numberedCrossReferenceLabel(view.state.doc, target)
-    link.title = `Reference target ${target}`
+    link.title = `Go to ${link.textContent}`
     edit.disabled = !isEditable()
-    edit.setAttribute('aria-label', `Edit cross-reference to ${target}`)
-    input.readOnly = !isEditable()
-    if (!editing) input.value = target
+    edit.setAttribute('aria-label', `Change ${link.textContent} reference`)
+    search.readOnly = !isEditable()
+    select.disabled = !isEditable()
     updateSave()
   }
   const closeEditor = () => {
@@ -1328,18 +1361,26 @@ function crossReferenceNodeView(initialNode: ProseMirrorNode, view: EditorView, 
     editor.hidden = true
     link.hidden = false
     edit.hidden = false
-    input.value = String(node.attrs.target)
+    search.value = ''
+    selectedChoice = undefined
     updateSave()
     edit.focus()
   }
   const saveEditor = () => {
-    const target = normalizedTarget()
     const position = getPos()
-    if (typeof position !== 'number' || !isEditable() || !isCrossReferenceTarget(target)) return
-    view.dispatch(view.state.tr.setNodeMarkup(position, undefined, {
+    if (typeof position !== 'number' || !isEditable() || !selectedChoice) return
+    const object = semanticManuscriptObjects(view.state.doc).find((candidate) => candidate.nodeId === selectedChoice?.nodeId)
+    if (!object || selectedChoice.target !== (object.label ?? object.suggestedLabel)) return
+    let transaction = view.state.tr
+    if (!object.label) {
+      const assigned = assignSemanticObjectLabel(transaction, object.nodeId, selectedChoice.target)
+      if (!assigned) return
+      transaction = assigned
+    }
+    view.dispatch(transaction.setNodeMarkup(position, undefined, {
       ...node.attrs,
-      target,
-      rendered: formatCrossReferenceTarget(target),
+      target: selectedChoice.target,
+      rendered: formatCrossReferenceTarget(selectedChoice.target),
     }))
     closeEditor()
   }
@@ -1350,22 +1391,36 @@ function crossReferenceNodeView(initialNode: ProseMirrorNode, view: EditorView, 
     link.hidden = true
     edit.hidden = true
     editor.hidden = false
-    input.value = String(node.attrs.target)
-    updateSave()
-    input.focus()
-    input.select()
+    search.value = ''
+    selectedChoice = crossReferenceChoices(semanticManuscriptObjects(view.state.doc))
+      .find((choice) => choice.target === String(node.attrs.target))
+    updatePicker()
+    search.focus()
   })
   cancel.addEventListener('click', closeEditor)
   save.addEventListener('click', saveEditor)
-  input.addEventListener('input', updateSave)
-  input.addEventListener('keydown', (event) => {
+  search.addEventListener('input', updatePicker)
+  search.addEventListener('keydown', (event) => {
     if (event.key === 'Escape') {
       event.preventDefault()
       closeEditor()
+    } else if (event.key === 'ArrowDown') {
+      event.preventDefault()
+      const first = crossReferenceChoices(semanticManuscriptObjects(view.state.doc), search.value)[0]
+      if (first) {
+        selectedChoice = first
+        updatePicker()
+        select.focus()
+      }
     } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault()
       saveEditor()
     }
+  })
+  select.addEventListener('change', () => {
+    selectedChoice = crossReferenceChoices(semanticManuscriptObjects(view.state.doc), search.value)
+      .find((choice) => choice.key === select.value)
+    updateSave()
   })
 
   dom.append(link, edit, editor)
@@ -1951,6 +2006,42 @@ function rewriteRetainedOutputPresentation(markdown: string, caption: string, la
   }
 
   return [start, ...publishedValues, nextBody, end].filter(Boolean).join(ending)
+}
+
+function assignSemanticObjectLabel(transaction: Transaction, nodeId: string, label: string) {
+  let found = false
+  transaction.doc.descendants((candidate, position) => {
+    if (found || String(candidate.attrs.id ?? '') !== nodeId) return !found
+    if (
+      candidate.type === manuscriptSchema.nodes.heading
+      || candidate.type === manuscriptSchema.nodes.table
+      || candidate.type === manuscriptSchema.nodes.equation_block
+      || candidate.type === manuscriptSchema.nodes.image
+    ) {
+      const previousLabel = candidate.attrs.label ? String(candidate.attrs.label) : ''
+      transaction = transaction.setNodeMarkup(position, undefined, {
+        ...candidate.attrs,
+        label,
+        sourceAttributes: updatePortableAttributeId(candidate.attrs.sourceAttributes, previousLabel, label),
+      })
+      found = true
+      return false
+    }
+    if (candidate.type === manuscriptSchema.nodes.output_block) {
+      const presentation = retainedOutputPresentation(String(candidate.attrs.markdown), candidate.attrs.kind)
+      const markdown = rewriteRetainedOutputPresentation(
+        String(candidate.attrs.markdown),
+        presentation.caption ?? '',
+        label,
+        candidate.attrs.kind,
+      )
+      transaction = transaction.setNodeMarkup(position, undefined, { ...candidate.attrs, markdown })
+      found = true
+      return false
+    }
+    return true
+  })
+  return found ? transaction : undefined
 }
 
 function outputNodeView(
@@ -3343,11 +3434,21 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       view.focus()
       return true
     },
-    insertCrossReference: (target) => {
+    insertCrossReference: (target, targetNodeId) => {
       const view = viewRef.current
       const normalized = target.trim().replace(/^@/, '')
       if (!view || readOnlyRef.current || !isCrossReferenceTarget(normalized)) return false
-      view.dispatch(view.state.tr.replaceSelectionWith(manuscriptSchema.nodes.cross_reference.createChecked({
+      let transaction = view.state.tr
+      if (targetNodeId) {
+        const object = semanticManuscriptObjects(view.state.doc).find((candidate) => candidate.nodeId === targetNodeId)
+        if (!object || normalized !== (object.label ?? object.suggestedLabel)) return false
+        if (!object.label) {
+          const assigned = assignSemanticObjectLabel(transaction, targetNodeId, normalized)
+          if (!assigned) return false
+          transaction = assigned
+        }
+      }
+      view.dispatch(transaction.replaceSelectionWith(manuscriptSchema.nodes.cross_reference.createChecked({
         id: randomId('cross-reference'),
         target: normalized,
         rendered: formatCrossReferenceTarget(normalized),

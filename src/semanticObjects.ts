@@ -207,11 +207,12 @@ export function semanticManuscriptObjects(document: ProseMirrorNode) {
           position,
           label: presentation.label,
           caption: presentation.caption,
+          alt: presentation.alt,
           number,
           displayNumber: number ? String(number) : undefined,
           unnumbered: presentation.unnumbered,
           source: 'reproducible',
-          seed: presentation.caption || `${kind} result`,
+          seed: presentation.caption || presentation.alt || `${kind} result`,
         })
       }
       return false

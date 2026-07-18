@@ -12,6 +12,7 @@ import { StructuredManuscriptEditor, moveStructuredBlock, shouldRequestStructure
 import { manuscriptSchema } from './manuscriptSchema'
 import { createReviewAlternative, createReviewChange } from './reviewOperations'
 import { parseStructuredManuscript } from './structuredManuscript'
+import { semanticManuscriptObjects } from './semanticObjects'
 import { COLLABORATIVE_PROSEMIRROR_ROOT, createCollaborativeProseMirrorState, setCollaborativeEditorPresence } from './sharedEditor/prosemirrorCollaboration'
 
 const source = `---
@@ -790,7 +791,25 @@ scatter(1:10)
     expect(changed.at(-1)).toContain('[^method]: Calibration details.')
   })
 
-  it('retargets a rendered cross-reference without exposing source punctuation', async () => {
+  it('assigns a friendly portable identity atomically when the picker references an unlabeled object', async () => {
+    const changed: string[] = []
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    const unlabeled = '# Results\n\nPlace reference here.\n\n![Growth response](growth.svg)\n: Growth through time.\n'
+    const object = semanticManuscriptObjects(parseStructuredManuscript(unlabeled).document)
+      .find((candidate) => candidate.kind === 'figure')!
+    await act(async () => root.render(
+      <StructuredManuscriptEditor ref={editorRef} source={unlabeled} onChange={(next) => changed.push(next)} />,
+    ))
+
+    await act(async () => {
+      expect(editorRef.current?.insertCrossReference(object.suggestedLabel, object.nodeId)).toBe(true)
+    })
+
+    expect(changed.at(-1)).toContain(`@${object.suggestedLabel}`)
+    expect(changed.at(-1)).toContain(`![Growth response](growth.svg){#${object.suggestedLabel}}`)
+  })
+
+  it('retargets a rendered cross-reference through the grouped object picker without exposing labels', async () => {
     const changed: string[] = []
     const referenceSource = '# References\n\nSee @fig-growth for context.\n\n![Growth](growth.svg){#fig-growth}\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n: Means. {#tbl-means}\n'
     await act(async () => root.render(
@@ -801,15 +820,20 @@ scatter(1:10)
     expect(reference.querySelector<HTMLAnchorElement>('[data-dm-node="cross-reference"]')?.textContent).toBe('Figure 1')
     await act(async () => reference.querySelector<HTMLButtonElement>('.structured-cross-reference-edit')?.click())
     const input = reference.querySelector<HTMLInputElement>('.structured-cross-reference-input')!
+    const select = reference.querySelector<HTMLSelectElement>('.structured-cross-reference-select')!
     const save = reference.querySelector<HTMLButtonElement>('.structured-cross-reference-editor .primary-button')!
 
-    input.value = 'growth'
+    expect([...select.querySelectorAll('optgroup')].map((group) => group.label)).toEqual(['Figures', 'Tables', 'Sections'])
+    expect(select.textContent).toContain('Figure 1 — Growth')
+    expect(select.textContent).not.toContain('fig-growth')
+    input.value = 'means'
     input.dispatchEvent(new Event('input', { bubbles: true }))
-    expect(reference.querySelector('.structured-cross-reference-validation')?.textContent).toContain('portable')
+    expect(select.textContent).toContain('Table 1 — Means.')
+    expect(select.textContent).not.toContain('Growth')
     expect(save.disabled).toBe(true)
 
-    input.value = '@tbl-means'
-    input.dispatchEvent(new Event('input', { bubbles: true }))
+    select.value = [...select.options].find((option) => option.textContent?.startsWith('Table 1'))!.value
+    select.dispatchEvent(new Event('change', { bubbles: true }))
     expect(save.disabled).toBe(false)
     await act(async () => save.click())
 

@@ -5072,11 +5072,14 @@ kbd {
 .structured-cross-reference:hover > .structured-cross-reference-edit,
 .structured-cross-reference-edit:focus-visible { opacity: 1; }
 .structured-cross-reference-edit:disabled { cursor: default; opacity: 0; pointer-events: none; }
-.structured-cross-reference-editor { align-items: center; display: inline-flex; font-family: Inter, ui-sans-serif, sans-serif; gap: 4px; vertical-align: baseline; }
+.structured-cross-reference-editor { align-items: center; background: var(--paper, #fff); border: 1px solid #d5ddd8; border-radius: 8px; box-shadow: 0 14px 38px rgba(31, 43, 37, .16); display: grid; font-family: Inter, ui-sans-serif, sans-serif; gap: 7px; grid-template-columns: 1fr auto; left: 0; padding: 9px; position: absolute; top: calc(100% + 5px); vertical-align: baseline; width: min(390px, calc(100vw - 48px)); z-index: 35; }
 .structured-cross-reference-editor[hidden] { display: none; }
-.structured-cross-reference-input { background: #fff; border: 1px solid #d5ddd8; border-radius: 4px; color: #3f4d46; font: 9px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; padding: 4px 6px; width: 120px; }
+.structured-cross-reference-input { background: #fff; border: 1px solid #d5ddd8; border-radius: 4px; color: #3f4d46; font: 9px/1.35 Inter, ui-sans-serif, sans-serif; grid-column: 1 / -1; padding: 6px 7px; width: 100%; }
 .structured-cross-reference-input:focus { border-color: #8ba296; outline: 2px solid rgba(63, 104, 89, .14); }
-.structured-cross-reference-validation { color: #9a5e4a; font-size: 8px; font-weight: 600; }
+.structured-cross-reference-select { background: #fff; border: 1px solid #d5ddd8; border-radius: 5px; color: #3f4d46; font: 9px/1.45 Inter, ui-sans-serif, sans-serif; grid-column: 1 / -1; min-height: 108px; padding: 3px; width: 100%; }
+.structured-cross-reference-select optgroup { color: #53615a; font-style: normal; font-weight: 750; }
+.structured-cross-reference-select option { color: #35433c; font-weight: 500; padding: 4px 6px; }
+.structured-cross-reference-validation { color: #9a5e4a; font-size: 8px; font-weight: 600; margin: 0; white-space: normal; }
 .structured-cross-reference-validation[hidden] { display: none; }
 .structured-cross-reference-editor button { font-size: 8px; padding: 4px 6px; }
 .structured-editor-content table { border-collapse: collapse; font-family: Inter, ui-sans-serif, sans-serif; font-size: 13px; margin: 1.6em 0; width: 100%; }
@@ -5169,6 +5172,13 @@ textarea.structured-table-input { min-height: 62px; }
 .insert-block-fields textarea:focus { border-color: #7f9b8b; outline: 3px solid rgba(75, 118, 95, .12); }
 .insert-block-grid { display: grid; gap: 10px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .insert-block-problem { background: #fff5f1; border: 1px solid #ead5cc; border-radius: 6px; color: #8b5744; font-size: 9px; line-height: 1.45; padding: 8px 10px; }
+.cross-reference-picker { display: grid; gap: 9px; }
+.cross-reference-picker-search { display: grid; gap: 5px; }
+.cross-reference-picker-results { min-height: 156px; padding: 4px !important; }
+.cross-reference-picker-results optgroup { color: #53615a; font-style: normal; font-weight: 750; }
+.cross-reference-picker-results option { color: #35433c; font-weight: 500; padding: 5px 7px; }
+.cross-reference-picker-empty { background: #f7f9f7; border: 1px solid #e1e6e3; border-radius: 6px; color: #7b8881; font-size: 9px; margin: 0; padding: 14px; text-align: center; }
+.cross-reference-picker > small { color: #87918c; font-size: 8px; line-height: 1.45; }
 .structured-equation { position: relative; }
 .structured-equation-inline { align-items: baseline; display: inline-flex; margin: 0 .08em; vertical-align: baseline; }
 .structured-equation-inline .structured-equation-render { display: inline-block; }
@@ -6420,6 +6430,7 @@ textarea:focus,
 .structured-heading-input,
 .structured-link-input,
 .structured-cross-reference-input,
+.structured-cross-reference-select,
 .structured-table-input,
 .structured-figure-input,
 .structured-equation-label-input,
@@ -6438,6 +6449,7 @@ textarea:focus,
 .structured-heading-input:focus,
 .structured-link-input:focus,
 .structured-cross-reference-input:focus,
+.structured-cross-reference-select:focus,
 .structured-table-input:focus,
 .structured-figure-input:focus,
 .structured-equation-label-input:focus,

@@ -1,6 +1,9 @@
 import { useMemo, useState, type FormEvent } from 'react'
 import { Icon } from './Icon'
 import { isPublishedValueName, type RetainedPublishedValue } from './publishedValues'
+import { CrossReferencePicker } from './SemanticObjectPicker'
+import type { CrossReferenceChoice } from './crossReferencePicker'
+import type { SemanticManuscriptObject } from './semanticObjects'
 
 export type InsertBlockRequest =
   | { kind: 'section'; title: string; level: number; label?: string }
@@ -8,7 +11,7 @@ export type InsertBlockRequest =
   | { kind: 'table'; rows: number; columns: number; caption?: string; label?: string }
   | { kind: 'equation-inline'; tex: string }
   | { kind: 'equation-display'; tex: string; caption?: string; label?: string }
-  | { kind: 'cross-reference'; target: string }
+  | { kind: 'cross-reference'; target: string; targetNodeId: string }
   | { kind: 'footnote'; label: string; content: string }
   | { kind: 'figure-cell'; language: 'python' | 'r' | 'julia' }
   | { kind: 'table-cell'; language: 'python' | 'r' | 'julia' }
@@ -42,11 +45,13 @@ export function InsertBlockDialog({
   onClose,
   onInsert,
   publishedValues = [],
+  semanticObjects = [],
 }: {
   kind: InsertBlockKind
   onClose: () => void
   onInsert: (request: InsertBlockRequest) => boolean
   publishedValues?: RetainedPublishedValue[]
+  semanticObjects?: SemanticManuscriptObject[]
 }) {
   const detail = details[kind]
   const [title, setTitle] = useState('')
@@ -58,7 +63,7 @@ export function InsertBlockDialog({
   const [rows, setRows] = useState(2)
   const [columns, setColumns] = useState(2)
   const [tex, setTex] = useState('')
-  const [target, setTarget] = useState('')
+  const [targetChoice, setTargetChoice] = useState<CrossReferenceChoice>()
   const [content, setContent] = useState('')
   const [language, setLanguage] = useState<'python' | 'r' | 'julia'>('python')
   const [publishedName, setPublishedName] = useState(publishedValues[0]?.name ?? '')
@@ -69,11 +74,11 @@ export function InsertBlockDialog({
     if (kind === 'figure') return Boolean(source.trim() && alt.trim())
     if (kind === 'table') return rows >= 1 && rows <= 50 && columns >= 1 && columns <= 20
     if (kind === 'equation-inline' || kind === 'equation-display') return Boolean(tex.trim())
-    if (kind === 'cross-reference') return /^(?:fig|tbl|eq|sec)-[A-Za-z0-9][A-Za-z0-9_.:-]*$/.test(target.trim().replace(/^@/, ''))
+    if (kind === 'cross-reference') return Boolean(targetChoice)
     if (kind === 'footnote') return /^[A-Za-z0-9_.:-]+$/.test(label.trim().replace(/^\[\^|\]$/g, '')) && Boolean(content.trim())
     if (kind === 'published-value') return isPublishedValueName(publishedName.trim())
     return true
-  }, [alt, columns, content, kind, label, publishedName, rows, source, target, tex, title])
+  }, [alt, columns, content, kind, label, publishedName, rows, source, targetChoice, tex, title])
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
@@ -84,7 +89,7 @@ export function InsertBlockDialog({
     else if (kind === 'table') request = { kind, rows, columns, caption: caption.trim() || undefined, label: cleanLabel(label) }
     else if (kind === 'equation-inline') request = { kind, tex: tex.trim() }
     else if (kind === 'equation-display') request = { kind, tex: tex.trim(), caption: caption.trim() || undefined, label: cleanLabel(label) }
-    else if (kind === 'cross-reference') request = { kind, target: target.trim().replace(/^@/, '') }
+    else if (kind === 'cross-reference') request = { kind, target: targetChoice!.target, targetNodeId: targetChoice!.nodeId }
     else if (kind === 'footnote') request = { kind, label: label.trim().replace(/^\[\^|\]$/g, ''), content: content.trim() }
     else if (kind === 'published-value') request = { kind, name: publishedName.trim() }
     else if (kind === 'setup-cell' || kind === 'figure-cell' || kind === 'table-cell' || kind === 'values-cell') request = { kind, language }
@@ -130,7 +135,12 @@ export function InsertBlockDialog({
             {kind === 'equation-display' && <label><span>Caption</span><textarea value={caption} onChange={(event) => setCaption(event.target.value)} rows={2} placeholder="Optional equation caption" /></label>}
             {kind === 'equation-display' && labelField('Cross-reference label', 'eq-model', 'Leave blank to generate a readable portable eq- label.')}
           </>}
-          {kind === 'cross-reference' && <label><span>Target label</span><input autoFocus value={target} onChange={(event) => setTarget(event.target.value)} placeholder="fig-growth" spellCheck={false} /><small>Use an existing fig-, tbl-, eq-, or sec- label.</small></label>}
+          {kind === 'cross-reference' && <CrossReferencePicker
+            autoFocus
+            objects={semanticObjects}
+            value={targetChoice?.key}
+            onChoose={setTargetChoice}
+          />}
           {kind === 'footnote' && <>
             {labelField('Footnote label', 'method-note', 'Letters, numbers, dots, colons, underscores, and hyphens are supported.')}
             <label><span>Footnote text</span><textarea autoFocus value={content} onChange={(event) => setContent(event.target.value)} rows={4} placeholder="Supporting detail…" /></label>

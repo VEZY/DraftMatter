@@ -5,6 +5,7 @@ export interface RetainedOutputPresentation {
   kind: 'image' | 'table' | 'markdown'
   label?: string
   caption?: string
+  alt?: string
   sourceAttributes?: string
   unnumbered: boolean
 }
@@ -22,14 +23,15 @@ function retainedOutputBody(markdown: string) {
 }
 
 function imagePresentation(body: string): RetainedOutputPresentation | undefined {
-  const image = body.match(/!\[[^\]]*\]\((?:<[^>\r\n]+>|[^)\r\n]+)\)\s*(?:\{([^}\r\n]+)\})?/)
+  const image = body.match(/!\[([^\]]*)\]\((?:<[^>\r\n]+>|[^)\r\n]+)\)\s*(?:\{([^}\r\n]+)\})?/)
   if (!image) return undefined
-  const sourceAttributes = image[1]?.trim()
+  const sourceAttributes = image[2]?.trim()
   const after = body.slice((image.index ?? 0) + image[0].length).trim()
   const conventional = after.match(/^:\s*(.+)$/m)?.[1]?.trim()
   const legacy = conventional ? undefined : after.match(/^\*([^*\r\n]+)\*$/m)?.[1]?.trim()
   return {
     kind: 'image',
+    alt: image[1].trim() || undefined,
     label: sourceAttributes?.match(/(?:^|\s)#([a-zA-Z][\w.:-]*)/)?.[1],
     caption: conventional || legacy || undefined,
     sourceAttributes,

@@ -219,6 +219,7 @@ export function materializeExecutionOutput(request: MaterializeOutputRequest): M
     presentation: normalizedOutputPresentation(cell, mergePresentation({
       label: previous?.label,
       caption: previous?.caption,
+      alt: previous?.alt,
     }, request.presentation)),
   })
   if (generated.diagnostics.length) {

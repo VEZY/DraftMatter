@@ -8,7 +8,8 @@ import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
 import { ManuscriptTextEditor } from './ManuscriptTextEditor'
 import { StructuredManuscriptEditor, type StructuredManuscriptEditorHandle, type StructuredOutlineItem, type StructuredReviewSelection } from './StructuredManuscriptEditor'
-import { structuredCitationClusters } from './structuredManuscript'
+import { parseStructuredManuscript, structuredCitationClusters } from './structuredManuscript'
+import { semanticManuscriptObjects } from './semanticObjects'
 import { applyDraftCitationTransaction, applyDraftCodeTransaction, applyDraftTextTransaction, type ManuscriptTextField } from './manuscriptModel'
 import { downloadText, projectCurrentManuscriptSource, reviewedProjection } from './projections'
 import { sampleCitations } from './sampleCitations'
@@ -1462,6 +1463,10 @@ function App() {
     return projectPortableReviewSource(manuscriptSource, { view: markupView })
   }, [manuscriptSource, markupView, structuredMode])
   const structuredEditorSource = structuredReviewProjection?.ok ? structuredReviewProjection.source : manuscriptSource
+  const semanticObjects = useMemo(
+    () => semanticManuscriptObjects(parseStructuredManuscript(structuredEditorSource).document),
+    [structuredEditorSource],
+  )
   const demoAliceChange = reviewDocument.changes.find((change) => change.id === 'dm-c01')
   const demoMarcusChange = reviewDocument.changes.find((change) => change.id === 'dm-c02')
   const demoCommentThread = reviewDocument.threads.find((thread) => thread.id === 'dm-comment-01')
@@ -1926,8 +1931,8 @@ function App() {
       return inserted
     }
     if (request.kind === 'cross-reference') {
-      const inserted = runStructuredCommand((editor) => editor.insertCrossReference(request.target), 'Insert cross-reference')
-      if (inserted) setToast(`Cross-reference inserted · @${request.target}`)
+      const inserted = runStructuredCommand((editor) => editor.insertCrossReference(request.target, request.targetNodeId), 'Insert cross-reference')
+      if (inserted) setToast('Cross-reference inserted')
       return inserted
     }
     if (request.kind === 'footnote') {
@@ -4494,6 +4499,7 @@ function App() {
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('figure') }}><Icon name="image" size={15} /><span><strong>Figure</strong><small>Image and caption</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('table') }}><Icon name="table" size={15} /><span><strong>Table</strong><small>Editable rows and columns</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('equation-inline') }}><span className="toolbar-symbol">∑</span><span><strong>Equation</strong><small>Inline or display mathematics</small></span></button>
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('cross-reference') }}><Icon name="link" size={15} /><span><strong>Cross-reference</strong><small>Figure, table, equation, or section</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('published-value') }}><span className="toolbar-symbol">123</span><span><strong>Published value</strong><small>Statistic or model result in text</small></span></button>
                 <button disabled={!desktopSession} title={!desktopSession ? 'Code is view-only in the browser. Open this project in DraftMatter desktop to add a computation.' : undefined} onClick={() => { setInsertMenuOpen(false); openInsertBlock('figure-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible figure</strong><small>{desktopSession ? 'Visible code block and retained figure' : 'DraftMatter desktop required'}</small></span></button>
                 <button disabled={!desktopSession} title={!desktopSession ? 'Code is view-only in the browser. Open this project in DraftMatter desktop to add a computation.' : undefined} onClick={() => { setInsertMenuOpen(false); openInsertBlock('table-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible table</strong><small>{desktopSession ? 'Visible code block and retained table' : 'DraftMatter desktop required'}</small></span></button>
@@ -5053,6 +5059,7 @@ function App() {
           onClose={() => setInsertBlockKind(undefined)}
           onInsert={insertStructuredRequest}
           publishedValues={retainedPublishedValues}
+          semanticObjects={semanticObjects}
         />
       )}
 
