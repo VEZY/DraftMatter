@@ -75,6 +75,9 @@ jobs:
       - name: Test frontend and host adapter
         run: npm test
 
+      - name: Run article-sized alpha dogfood gate
+        run: npm run test:alpha
+
       - name: Build standalone clean-export CLI
         run: npm run build:cli
 

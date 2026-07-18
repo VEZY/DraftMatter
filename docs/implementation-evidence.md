@@ -3,8 +3,8 @@
 This ledger consolidates the implementation and verification evidence for the
 task register in `draftmatter-app-design.md`. The canonical register and this
 ledger were reconciled on 2026-07-18: DM-P0 through DM-P6 and AC-L01 through
-AC-C06 and DM-P7-01 through DM-P7-04 are checked, while the remaining DM-P7 alpha-authoring
-milestones remain open.
+AC-C06 and DM-P7-01 through DM-P7-05 are checked, while the DM-P7 alpha-authoring
+phase gate remains open.
 The design document carries the product-level status and interaction decisions;
 this file remains the task-level source for tests, fixtures, and implementation
 commits.
@@ -173,9 +173,8 @@ also covered here.
 
 DM-P7 was added on 2026-07-18 after the MVP evidence was reconciled with
 hands-on product review. It is the active implementation milestone. DM-P7-01
-through DM-P7-04 are complete. The remaining real-manuscript dogfood and alpha
-gate requirements remain open in
-the canonical register.
+through DM-P7-05 are complete. The alpha phase gate remains open in the
+canonical register.
 
 | Task | Automated or reproducible evidence | Implementation commit |
 | --- | --- | --- |
@@ -183,6 +182,7 @@ the canonical register.
 | DM-P7-02 | `src/crossReferencePicker.test.ts`, `src/InsertBlockDialog.test.tsx`, and `src/StructuredManuscriptEditor.test.tsx` cover grouped current-number/caption choices, searching, Arrow-key focus transfer, insertion for figures/tables/equations/sections, retargeting, legacy-label concealment, and atomic labeling of older unlabeled targets. `npm run check`, 6 focused files / 66 tests, `npm run build`, and all 3 generic-manuscript Chromium tests passed. Wide and narrow rendered inspection verified non-overlapping geometry, visible focus, filtered selection, and a clean browser console. | `50f8f13` |
 | DM-P7-03 | `src/semanticObjectInspector.test.ts`, `src/StructuredManuscriptEditor.test.tsx`, and `src/cairoMakieOutput.test.tsx` cover a shared object-details model for sections, figures, tables, equations, and reproducible outputs; caption and accessible-description edits; portable labels and `.unnumbered`; duplicate prevention; secondary UUID-free computation provenance; cross-reference retargeting; and atomic source-cell reference updates. Native HTML, PDF print-projection, and DOCX tests verify matching captions, descriptions, labels, numbering choices, and hidden computation source. All 127 Vitest files / 635 tests passed with bounded concurrency, `npm run check` and `npm run build` passed, and all 3 generic-manuscript Chromium tests passed against refreshed visual baselines. Rendered inspection confirmed consistent hierarchy, keyboard focus, and unobstructed actions after moving the status bar out of the manuscript overlay plane. | `d3915b1` |
 | DM-P7-04 | `src/referenceIntegrity.test.ts` and `src/StructuredManuscriptEditor.test.tsx` cover valid, missing, duplicate, wrong-kind, and reproducible-orphan diagnoses; explicit non-linking failure states; atomic rename repair; external deletion; live numbering after block reorder; and keyboard-focus-preserving navigation from reference to object and back. Reference diagnostics feed the project checks. All 128 Vitest files / 641 tests passed with loopback collaboration enabled, `npm run check` and `npm run build` passed, and all 3 generic-manuscript Chromium tests passed against refreshed visual baselines. Rendered inspection verified the new reference-count controls do not collide with figure, table, or equation actions. | `9634582` |
+| DM-P7-05 | `src/fixtures/projects/alpha-article` stores a structured-author/citation/review project with Python, R, and Julia figure, table, and published-value cells. `src/phase7AlphaDogfood.test.ts` proves exact round-trip, nine retained outputs, clean HTML/DOCX, a named-child copy, real Git checkpoint, close, and byte-identical reopen. `tests/e2e/alpha-dogfood.spec.ts` proves quiet source, review decisions, the freshness safety gate and override, HTML/PDF publication, and reload in the rendered app. `docs/alpha-dogfood-matrix.md` documents the Linux x64, Windows x64, macOS ARM, and macOS Intel gate now named in desktop CI. The focused unit gate (3 tests), Chromium dogfood (1 test), and `npm run check` passed locally on Darwin arm64. The dogfood also added a regression preventing collapsed code source from leaking through drag-handle accessible labels. | `3ebc0fa` |
 
 ## Acceptance-criterion evidence
 
