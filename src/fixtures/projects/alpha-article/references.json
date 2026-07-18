@@ -1,0 +1,25 @@
+[
+  {
+    "id": "vezy2024",
+    "type": "article-journal",
+    "title": "Reproducible canopy analysis across research environments",
+    "author": [
+      { "family": "Vezy", "given": "Remi" },
+      { "family": "Martin", "given": "Ada" }
+    ],
+    "issued": { "date-parts": [[2024]] },
+    "container-title": "Open Plant Science",
+    "DOI": "10.5555/draftmatter.2024.1"
+  },
+  {
+    "id": "chen2025",
+    "type": "article-journal",
+    "title": "Portable evidence for drought-response synthesis",
+    "author": [
+      { "family": "Chen", "given": "Lin" }
+    ],
+    "issued": { "date-parts": [[2025]] },
+    "container-title": "Methods and Evidence",
+    "DOI": "10.5555/draftmatter.2025.2"
+  }
+]

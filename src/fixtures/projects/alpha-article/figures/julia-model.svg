@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 280" role="img" aria-labelledby="title description">
+  <title id="title">Julia model fit</title>
+  <desc id="description">Observed points follow a smooth fitted curve.</desc>
+  <rect width="640" height="280" fill="#ffffff"/>
+  <path d="M55 225 C175 210 245 165 340 132 S505 72 595 48" fill="none" stroke="#466f5e" stroke-width="5"/>
+  <g fill="#ffffff" stroke="#466f5e" stroke-width="4"><circle cx="75" cy="220" r="8"/><circle cx="180" cy="194" r="8"/><circle cx="285" cy="151" r="8"/><circle cx="390" cy="111" r="8"/><circle cx="495" cy="78" r="8"/><circle cx="580" cy="54" r="8"/></g>
+</svg>

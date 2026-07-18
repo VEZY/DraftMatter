@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 280" role="img" aria-labelledby="title description">
+  <title id="title">R allocation intervals</title>
+  <desc id="description">Three interval estimates with central points.</desc>
+  <rect width="640" height="280" fill="#ffffff"/>
+  <g stroke="#dfe6e2" stroke-width="2"><path d="M120 70H535"/><path d="M165 140H475"/><path d="M205 210H430"/></g>
+  <g fill="#4e7766"><circle cx="360" cy="70" r="9"/><circle cx="325" cy="140" r="9"/><circle cx="298" cy="210" r="9"/></g>
+</svg>

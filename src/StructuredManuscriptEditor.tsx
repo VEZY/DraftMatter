@@ -106,7 +106,22 @@ function structuredBlockRanges(document: ProseMirrorNode) {
 function structuredBlockLabel(range: StructuredBlockRange) {
   const isSection = range.headingLevel !== undefined
   const nodeKind = range.node.type.name.replaceAll('_', ' ')
-  const preview = [range.node.textContent, range.node.attrs.alt, range.node.attrs.tex, range.node.attrs.code]
+  if (range.node.type === manuscriptSchema.nodes.code_cell) {
+    const language = String(range.node.attrs.language || 'code')
+    const languageName = `${language[0]?.toUpperCase() ?? ''}${language.slice(1)}`
+    const outputKind = String(range.node.attrs.outputKind ?? '')
+    const purpose = outputKind === 'figure'
+      ? 'reproducible figure source'
+      : outputKind === 'table'
+        ? 'reproducible table source'
+        : outputKind === 'values'
+          ? 'published-value source'
+          : outputKind === 'setup'
+            ? 'project setup source'
+            : 'computation source'
+    return `${languageName} ${purpose}`
+  }
+  const preview = [range.node.textContent, range.node.attrs.alt, range.node.attrs.tex]
     .find((candidate) => typeof candidate === 'string' && candidate.trim())?.trim()
   return isSection
     ? range.node.textContent || 'Untitled section'

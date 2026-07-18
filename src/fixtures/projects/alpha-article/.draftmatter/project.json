@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "name": "Cross-language canopy alpha",
+  "mainDocument": "paper.qmd",
+  "citationStyle": "draftmatter-author-date",
+  "citationLocale": "en-US",
+  "citationBibliography": "references.json",
+  "execution": {
+    "python": {},
+    "r": {},
+    "julia": {}
+  }
+}

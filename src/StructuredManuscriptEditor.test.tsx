@@ -183,6 +183,10 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector<HTMLElement>('.structured-code-editor')?.hidden).toBe(true)
     expect(container.querySelector('.structured-code-summary')?.textContent).toBe('Source stays outside the manuscript · 1 line')
     expect(container.querySelector<HTMLButtonElement>('.structured-code-toggle')?.getAttribute('aria-expanded')).toBe('false')
+    const codeMoveHandle = [...container.querySelectorAll<HTMLButtonElement>('.structured-block-drag-handle')]
+      .find((handle) => handle.dataset.blockId === 'cell-growth')
+    expect(codeMoveHandle?.getAttribute('aria-label')).toBe('Move block Python reproducible figure source')
+    expect(codeMoveHandle?.getAttribute('aria-label')).not.toContain('print')
     expect(container.querySelector('img')?.getAttribute('src')).toBe('asset://figures/growth.svg')
     expect(container.querySelector('.structured-output pre')?.textContent).toContain('<script>window.__unsafe = true</script>')
     expect(container.querySelector('.structured-output script')).toBeNull()
