@@ -18,7 +18,7 @@ describe('desktop host adapter', () => {
     const host = createDesktopHost(invoke, vi.fn(), true)
 
     await expect(host.openProject('/research/canopy')).resolves.toEqual(project)
-    await host.createProject('/research', 'Canopy study')
+    await host.createProject('/research', 'Canopy study', { name: 'Alice Martin', orcid: '0000-0002-1825-0097', affiliations: ['Plant Research Institute'] })
     await host.readDocument('/research/canopy', 'paper.qmd')
     await host.readBibliography('/research/canopy', 'references.bib')
     await host.readCitationLock('/research/canopy')
@@ -95,7 +95,11 @@ describe('desktop host adapter', () => {
 
     expect(calls).toEqual([
       ['open_project', { root: '/research/canopy' }],
-      ['create_project', { parent: '/research', name: 'Canopy study' }],
+      ['create_project', {
+        parent: '/research',
+        name: 'Canopy study',
+        firstAuthor: { name: 'Alice Martin', orcid: '0000-0002-1825-0097', affiliations: ['Plant Research Institute'] },
+      }],
       ['read_document', { root: '/research/canopy', path: 'paper.qmd' }],
       ['read_bibliography', { root: '/research/canopy', path: 'references.bib' }],
       ['read_citation_lock', { root: '/research/canopy' }],

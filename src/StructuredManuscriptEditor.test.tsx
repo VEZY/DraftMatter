@@ -187,7 +187,7 @@ describe('full structured manuscript editor', () => {
     expect(asset).toHaveBeenCalledWith('figures/growth.svg')
   })
 
-  it('offers keyboard-accessible drag handles and moves a whole section', async () => {
+  it('offers keyboard-accessible move handles and moves a whole section', async () => {
     const changed: string[] = []
     const reorderSource = '# Study\n\n## Introduction\n\nIntro body.\n\n## Methods\n\nMethods body.\n\n## Results\n\nResults body.\n'
     await act(async () => root.render(
@@ -195,7 +195,7 @@ describe('full structured manuscript editor', () => {
     ))
 
     const introductionHandle = container.querySelector<HTMLButtonElement>('[aria-label="Move section Introduction"]')!
-    expect(introductionHandle.draggable).toBe(true)
+    expect(introductionHandle.draggable).toBe(false)
     await act(async () => introductionHandle.dispatchEvent(new KeyboardEvent('keydown', {
       altKey: true,
       bubbles: true,
@@ -205,6 +205,47 @@ describe('full structured manuscript editor', () => {
     expect(changed).toHaveLength(1)
     expect(changed[0].indexOf('Methods body.')).toBeLessThan(changed[0].indexOf('## Introduction'))
     expect(changed[0].indexOf('Intro body.')).toBeLessThan(changed[0].indexOf('## Results'))
+  })
+
+  it('pointer-drags a section onto destination content without native WebView drag support', async () => {
+    const changed: string[] = []
+    const reorderSource = '# Study\n\n## Introduction\n\nIntro body.\n\n## Methods\n\nMethods body.\n\n## Results\n\nResults body.\n'
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={reorderSource} onChange={(next) => changed.push(next)} />,
+    ))
+
+    const introductionHandle = container.querySelector<HTMLButtonElement>('[aria-label="Move section Introduction"]')!
+    const methodsBody = [...container.querySelectorAll<HTMLElement>('[data-dm-id]')].find((block) => block.textContent === 'Methods body.')!
+    vi.spyOn(methodsBody, 'getBoundingClientRect').mockReturnValue({
+      bottom: 140,
+      height: 40,
+      left: 0,
+      right: 200,
+      top: 100,
+      width: 200,
+      x: 0,
+      y: 100,
+      toJSON: () => ({}),
+    })
+    const pointerEvent = (type: string, clientX: number, clientY: number) => {
+      const event = new Event(type, { bubbles: true, cancelable: true })
+      Object.defineProperties(event, {
+        button: { value: 0 },
+        clientX: { value: clientX },
+        clientY: { value: clientY },
+        pointerId: { value: 1 },
+      })
+      return event
+    }
+
+    await act(async () => introductionHandle.dispatchEvent(pointerEvent('pointerdown', 10, 10)))
+    await act(async () => methodsBody.dispatchEvent(pointerEvent('pointermove', 30, 135)))
+    expect(container.querySelector<HTMLElement>('.structured-block-drop-indicator')?.hidden).toBe(false)
+    await act(async () => methodsBody.dispatchEvent(pointerEvent('pointerup', 30, 135)))
+
+    expect(changed).toHaveLength(1)
+    expect(changed[0].indexOf('Methods body.')).toBeLessThan(changed[0].indexOf('## Introduction'))
+    expect(container.querySelector<HTMLElement>('.structured-block-drop-indicator')?.hidden).toBe(true)
   })
 
   it('filters manuscript review marks by author and highlights the active navigable anchor', async () => {

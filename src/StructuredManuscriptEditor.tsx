@@ -99,6 +99,33 @@ export function moveStructuredBlock(
   return document.copy(remaining.cut(0, insertPosition).append(moved).append(remaining.cut(insertPosition)))
 }
 
+function structuredBlockDropTarget(document: ProseMirrorNode, target: EventTarget | null, sourceId?: string) {
+  const ranges = structuredBlockRanges(document)
+  const blockIds = new Set(ranges.map((range) => range.id))
+  let element = target instanceof Element
+    ? target.closest<HTMLElement>('[data-block-id], [data-dm-id]')
+    : null
+  while (element) {
+    const id = element.dataset.blockId ?? element.dataset.dmId
+    if (id && blockIds.has(id)) {
+      const source = ranges.find((range) => range.id === sourceId)
+      const destination = ranges.find((range) => range.id === id)
+      if (source?.headingLevel !== undefined && destination) {
+        const containingSection = ranges.filter((range) => (
+          range.headingLevel !== undefined
+          && range.headingLevel <= source.headingLevel!
+          && range.start <= destination.start
+          && destination.start < range.end
+        )).at(-1)
+        if (containingSection) return { id: containingSection.id, element }
+      }
+      return { id, element }
+    }
+    element = element.parentElement?.closest<HTMLElement>('[data-block-id], [data-dm-id]') ?? null
+  }
+  return undefined
+}
+
 export function shouldRequestStructuredCommands(state: EditorState, event: Pick<KeyboardEvent, 'key' | 'metaKey' | 'ctrlKey' | 'altKey' | 'isComposing'>, readOnly = false) {
   const selection = state.selection
   return event.key === '/'
@@ -400,6 +427,8 @@ function blockHandleDecorations(
   readOnly: boolean,
   onKeyboardMove: (sourceId: string, direction: 'up' | 'down') => void,
   onDragStart: (sourceId: string) => void,
+  onDragMove: (sourceId: string, clientX: number, clientY: number, target: EventTarget | null) => void,
+  onDrop: (sourceId: string, clientX: number, clientY: number, target: EventTarget | null) => void,
   onDragEnd: () => void,
 ) {
   if (readOnly) return []
@@ -415,22 +444,65 @@ function blockHandleDecorations(
     handle.type = 'button'
     handle.className = `structured-block-drag-handle${isSection ? ' structured-section-drag-handle' : ''}`
     handle.contentEditable = 'false'
-    handle.draggable = true
+    handle.draggable = false
     handle.dataset.blockId = range.id
     handle.dataset.blockKind = isSection ? 'section' : 'block'
     handle.setAttribute('aria-label', `Move ${isSection ? 'section' : 'block'} ${label}`)
     handle.title = 'Drag to reorder · Alt+Up/Down also moves this item'
     handle.textContent = '⋮⋮'
-    handle.addEventListener('dragstart', (event) => {
-      onDragStart(range.id)
-      event.dataTransfer?.setData('application/x-draftmatter-block', range.id)
-      event.dataTransfer?.setData('text/plain', range.id)
-      if (event.dataTransfer) event.dataTransfer.effectAllowed = 'move'
-      handle.dataset.dragging = 'true'
-    })
-    handle.addEventListener('dragend', () => {
-      onDragEnd()
-      delete handle.dataset.dragging
+    handle.addEventListener('pointerdown', (event) => {
+      if (event.button !== 0) return
+      event.preventDefault()
+      event.stopPropagation()
+      const ownerDocument = handle.ownerDocument
+      const pointerId = event.pointerId
+      const startX = event.clientX
+      const startY = event.clientY
+      let dragging = false
+      const cleanup = () => {
+        ownerDocument.removeEventListener('pointermove', move, true)
+        ownerDocument.removeEventListener('pointerup', finish, true)
+        ownerDocument.removeEventListener('pointercancel', cancel, true)
+      }
+      const move = (moveEvent: PointerEvent) => {
+        if (moveEvent.pointerId !== pointerId) return
+        if (!dragging && Math.hypot(moveEvent.clientX - startX, moveEvent.clientY - startY) < 5) return
+        if (!dragging) {
+          dragging = true
+          handle.dataset.dragging = 'true'
+          onDragStart(range.id)
+        }
+        moveEvent.preventDefault()
+        const scroller = handle.closest<HTMLElement>('.editor-area')
+        if (scroller) {
+          const bounds = scroller.getBoundingClientRect()
+          if (moveEvent.clientY < bounds.top + 48) scroller.scrollTop -= Math.max(4, Math.ceil((bounds.top + 48 - moveEvent.clientY) / 3))
+          else if (moveEvent.clientY > bounds.bottom - 48) scroller.scrollTop += Math.max(4, Math.ceil((moveEvent.clientY - bounds.bottom + 48) / 3))
+        }
+        onDragMove(range.id, moveEvent.clientX, moveEvent.clientY, moveEvent.target)
+      }
+      const finish = (upEvent: PointerEvent) => {
+        if (upEvent.pointerId !== pointerId) return
+        cleanup()
+        upEvent.preventDefault()
+        upEvent.stopPropagation()
+        if (!dragging) {
+          handle.focus({ preventScroll: true })
+          return
+        }
+        onDrop(range.id, upEvent.clientX, upEvent.clientY, upEvent.target)
+        onDragEnd()
+        delete handle.dataset.dragging
+      }
+      const cancel = (cancelEvent: PointerEvent) => {
+        if (cancelEvent.pointerId !== pointerId) return
+        cleanup()
+        if (dragging) onDragEnd()
+        delete handle.dataset.dragging
+      }
+      ownerDocument.addEventListener('pointermove', move, true)
+      ownerDocument.addEventListener('pointerup', finish, true)
+      ownerDocument.addEventListener('pointercancel', cancel, true)
     })
     handle.addEventListener('keydown', (event) => {
       if (!event.altKey || (event.key !== 'ArrowUp' && event.key !== 'ArrowDown')) return
@@ -2813,6 +2885,31 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     metadataRef.current = metadataForEditor(parsed)
     onDiagnosticsRef.current?.(parsed.diagnostics)
     onOutlineRef.current?.(outlineFor(parsed.document))
+    const dropIndicator = globalThis.document.createElement('div')
+    dropIndicator.className = 'structured-block-drop-indicator'
+    dropIndicator.hidden = true
+    dropIndicator.setAttribute('aria-hidden', 'true')
+    host.append(dropIndicator)
+    const pointerTarget = (editorView: EditorView, sourceId: string, clientX: number, clientY: number, fallback: EventTarget | null) => {
+      const hit = host.ownerDocument.elementFromPoint?.(clientX, clientY) ?? fallback
+      const target = structuredBlockDropTarget(editorView.state.doc, hit, sourceId)
+      if (!target || target.id === sourceId) return undefined
+      const bounds = target.element.getBoundingClientRect()
+      const placement: StructuredBlockMovePlacement = clientY > bounds.top + bounds.height / 2 ? 'after' : 'before'
+      return { ...target, bounds, placement }
+    }
+    const showPointerTarget = (editorView: EditorView, sourceId: string, clientX: number, clientY: number, fallback: EventTarget | null) => {
+      const target = pointerTarget(editorView, sourceId, clientX, clientY, fallback)
+      if (!target) {
+        dropIndicator.hidden = true
+        return
+      }
+      const hostBounds = host.getBoundingClientRect()
+      dropIndicator.style.left = `${Math.max(0, target.bounds.left - hostBounds.left)}px`
+      dropIndicator.style.top = `${(target.placement === 'before' ? target.bounds.top : target.bounds.bottom) - hostBounds.top}px`
+      dropIndicator.style.width = `${target.bounds.width}px`
+      dropIndicator.hidden = false
+    }
     const view = new EditorView(host, {
       state: editorState(parsed.document, collaboration),
       editable: () => !readOnlyRef.current,
@@ -2835,7 +2932,20 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         ).find(),
         ...blockHandleDecorations(state.doc, readOnlyRef.current, (sourceId, direction) => {
           moveBlockByKeyboard(viewRef.current ?? view, sourceId, direction)
-        }, (sourceId) => { draggedBlockIdRef.current = sourceId }, () => { draggedBlockIdRef.current = undefined }),
+        }, (sourceId) => {
+          draggedBlockIdRef.current = sourceId
+          host.dataset.pointerBlockDragging = 'true'
+        }, (sourceId, clientX, clientY, target) => {
+          showPointerTarget(viewRef.current ?? view, sourceId, clientX, clientY, target)
+        }, (sourceId, clientX, clientY, fallback) => {
+          const editorView = viewRef.current ?? view
+          const target = pointerTarget(editorView, sourceId, clientX, clientY, fallback)
+          if (target) moveBlock(editorView, sourceId, target.id, target.placement)
+        }, () => {
+          draggedBlockIdRef.current = undefined
+          dropIndicator.hidden = true
+          delete host.dataset.pointerBlockDragging
+        }),
       ]),
       handleDOMEvents: {
         click: (_editorView, event) => {
@@ -2848,22 +2958,25 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           if (pendingSuggestionRef.current) finishPendingSuggestion(editorView)
           return false
         },
-        dragover: (_editorView, event) => {
-          const target = event.target instanceof Element ? event.target.closest('.structured-block-drag-handle') : null
+        dragover: (editorView, event) => {
+          const sourceId = draggedBlockIdRef.current
+            || event.dataTransfer?.getData('application/x-draftmatter-block')
+            || event.dataTransfer?.getData('text/plain')
+          const target = structuredBlockDropTarget(editorView.state.doc, event.target, sourceId)
           if (!target || readOnlyRef.current) return false
           event.preventDefault()
           if (event.dataTransfer) event.dataTransfer.dropEffect = 'move'
           return true
         },
         drop: (editorView, event) => {
-          const target = event.target instanceof Element ? event.target.closest<HTMLElement>('.structured-block-drag-handle') : null
           const sourceId = draggedBlockIdRef.current
             || event.dataTransfer?.getData('application/x-draftmatter-block')
             || event.dataTransfer?.getData('text/plain')
-          const targetId = target?.dataset.blockId
+          const target = structuredBlockDropTarget(editorView.state.doc, event.target, sourceId)
+          const targetId = target?.id
           if (!sourceId || !targetId || readOnlyRef.current) return false
           event.preventDefault()
-          const bounds = target.getBoundingClientRect()
+          const bounds = target.element.getBoundingClientRect()
           const placement: StructuredBlockMovePlacement = event.clientY > bounds.top + bounds.height / 2 ? 'after' : 'before'
           moveBlock(editorView, sourceId, targetId, placement)
           draggedBlockIdRef.current = undefined
@@ -2981,6 +3094,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       host.removeEventListener('contextmenu', openReviewContextMenu, true)
       viewRef.current = null
       view.destroy()
+      dropIndicator.remove()
     }
   }, [ariaLabel, collaboration])
 

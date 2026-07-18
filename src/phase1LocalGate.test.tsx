@@ -147,7 +147,10 @@ describe('DM-P1-GATE local project workflow', () => {
     await flush(30)
 
     expect(desktopHost.pickProjectFolder).toHaveBeenCalledWith('Choose where to create the new project')
-    expect(desktopHost.createProject).toHaveBeenCalledWith(projectParent, 'Portable research article')
+    expect(desktopHost.createProject).toHaveBeenCalledWith(projectParent, 'Portable research article', {
+      name: 'Remi Vezy',
+      affiliations: [],
+    })
     expect(container.querySelector('.structured-manuscript-editor h1')?.textContent).toBe('Phase 1 article')
     expect(localStorage.getItem('draftmatter.last-project-root.v1')).toBe(projectRoot)
 

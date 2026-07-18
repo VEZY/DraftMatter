@@ -127,6 +127,16 @@ pub struct ProjectConfig {
     pub execution: ProjectExecutionPreferences,
 }
 
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+struct NewProjectAuthor {
+    name: String,
+    #[serde(default)]
+    orcid: Option<String>,
+    #[serde(default)]
+    affiliations: Vec<String>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 #[serde(deny_unknown_fields)]
@@ -2375,7 +2385,83 @@ fn portable_project_folder_name(name: &str) -> Result<String, HostError> {
     Ok(folder)
 }
 
-fn initialize_project_root(root_path: &Path, raw_name: &str) -> Result<ProjectSnapshot, HostError> {
+fn normalized_new_project_author(
+    mut author: NewProjectAuthor,
+) -> Result<NewProjectAuthor, HostError> {
+    author.name = author.name.trim().to_string();
+    if author.name.is_empty()
+        || author.name.chars().count() > 240
+        || author.name.chars().any(char::is_control)
+    {
+        return Err(HostError::InvalidProject(
+            "Enter a valid first-author name on one line.".into(),
+        ));
+    }
+    author.orcid = author.orcid.and_then(|value| {
+        let trimmed = value.trim().to_uppercase();
+        (!trimmed.is_empty()).then_some(trimmed)
+    });
+    if author
+        .orcid
+        .as_ref()
+        .is_some_and(|value| value.len() > 64 || value.chars().any(char::is_control))
+    {
+        return Err(HostError::InvalidProject(
+            "Enter a valid ORCID identifier on one line.".into(),
+        ));
+    }
+    let mut affiliations = Vec::new();
+    for affiliation in author.affiliations {
+        let affiliation = affiliation.trim().to_string();
+        if !affiliation.is_empty() && !affiliations.contains(&affiliation) {
+            affiliations.push(affiliation);
+        }
+    }
+    author.affiliations = affiliations;
+    if author.affiliations.len() > 20
+        || author
+            .affiliations
+            .iter()
+            .any(|value| value.chars().count() > 300 || value.chars().any(char::is_control))
+    {
+        return Err(HostError::InvalidProject(
+            "Use at most 20 one-line affiliations for the first author.".into(),
+        ));
+    }
+    Ok(author)
+}
+
+fn starter_author_yaml(author: Option<&NewProjectAuthor>) -> String {
+    let Some(author) = author else {
+        return String::new();
+    };
+    let mut yaml = format!(
+        "author:\n  - name: {}\n",
+        serde_json::to_string(&author.name).unwrap()
+    );
+    if let Some(orcid) = &author.orcid {
+        yaml.push_str(&format!(
+            "    orcid: {}\n",
+            serde_json::to_string(orcid).unwrap()
+        ));
+    }
+    if !author.affiliations.is_empty() {
+        yaml.push_str("    affiliations:\n");
+        for affiliation in &author.affiliations {
+            yaml.push_str(&format!(
+                "      - {}\n",
+                serde_json::to_string(affiliation).unwrap()
+            ));
+        }
+    }
+    yaml
+}
+
+fn initialize_project_root(
+    root_path: &Path,
+    raw_name: &str,
+    first_author: Option<&NewProjectAuthor>,
+) -> Result<ProjectSnapshot, HostError> {
     let name = normalized_project_name(raw_name)?;
     let canonical = fs::canonicalize(root_path)?;
     let main_document = "paper.qmd".to_string();
@@ -2392,8 +2478,9 @@ fn initialize_project_root(root_path: &Path, raw_name: &str) -> Result<ProjectSn
     let document = canonical.join(&main_document);
     if !document.exists() {
         let title = config.name.replace('\\', "\\\\").replace('"', "\\\"");
+        let author = starter_author_yaml(first_author);
         let source = format!(
-            "---\ntitle: \"{title}\"\nformat: html\n---\n\n## Abstract\n\n\n\n## Introduction\n\n\n\n## Methods\n\n\n\n## Results\n\n\n\n## Conclusion\n"
+            "---\ntitle: \"{title}\"\n{author}format: html\n---\n\n## Abstract\n\nThis starter abstract introduces the research question, outlines the approach, and summarizes the principal finding. Replace it with a concise account of your own study.\n\n## Introduction\n\nIntroduce the topic, explain why it matters, and identify the gap your study addresses. End with the central research question or hypothesis.\n\n## Methods\n\nDescribe the study design, materials, measurements, and analysis in enough detail for another researcher to reproduce the work.\n\n## Results\n\nReport the observations that answer the research question most directly. Add figures, tables, or published values where they help readers understand the evidence.\n\n## Discussion\n\nInterpret the main findings in relation to the research question and relevant literature. Explain plausible mechanisms, limitations, and directions for future work.\n\n## Conclusion\n\nSummarize what the findings mean, note the main limitation, and close with the broader implication of the work.\n"
         );
         write_atomic(&document, source.as_bytes(), false)?;
     }
@@ -2409,13 +2496,20 @@ fn create_project_at_root(root_path: &Path, name: &str) -> Result<ProjectSnapsho
         )));
     }
     fs::create_dir_all(root_path)?;
-    initialize_project_root(root_path, name)
+    initialize_project_root(root_path, name, None)
 }
 
 #[tauri::command]
-fn create_project(parent: String, name: String) -> Result<ProjectSnapshot, HostError> {
+fn create_project(
+    parent: String,
+    name: String,
+    first_author: Option<NewProjectAuthor>,
+) -> Result<ProjectSnapshot, HostError> {
     let parent_path = canonical_root(&parent)?;
     let normalized_name = normalized_project_name(&name)?;
+    let first_author = first_author
+        .map(normalized_new_project_author)
+        .transpose()?;
     let folder_name = portable_project_folder_name(&normalized_name)?;
     let root_path = parent_path.join(&folder_name);
     fs::create_dir(&root_path).map_err(|error| {
@@ -2428,7 +2522,7 @@ fn create_project(parent: String, name: String) -> Result<ProjectSnapshot, HostE
             HostError::Io(error.to_string())
         }
     })?;
-    match initialize_project_root(&root_path, &normalized_name) {
+    match initialize_project_root(&root_path, &normalized_name, first_author.as_ref()) {
         Ok(snapshot) => Ok(snapshot),
         Err(error) => {
             let _ = fs::remove_dir_all(&root_path);
@@ -3354,6 +3448,11 @@ mod tests {
         let snapshot = create_project(
             temporary.path().to_string_lossy().into_owned(),
             "Canopy study".into(),
+            Some(NewProjectAuthor {
+                name: "Alice Martin".into(),
+                orcid: Some("0000-0002-1825-0097".into()),
+                affiliations: vec!["Plant Research Institute".into()],
+            }),
         )
         .unwrap();
         let root = temporary.path().join("Canopy study");
@@ -3367,6 +3466,43 @@ mod tests {
         assert_eq!(snapshot.documents.len(), 1);
         assert_eq!(snapshot.documents[0].path, "paper.qmd");
         assert!(root.join(".draftmatter/project.json").is_file());
+        let starter = fs::read_to_string(root.join("paper.qmd")).unwrap();
+        let section_blocks = [
+            (
+                "Abstract",
+                "This starter abstract introduces the research question",
+            ),
+            (
+                "Introduction",
+                "Introduce the topic, explain why it matters",
+            ),
+            (
+                "Methods",
+                "Describe the study design, materials, measurements",
+            ),
+            (
+                "Results",
+                "Report the observations that answer the research question",
+            ),
+            (
+                "Discussion",
+                "Interpret the main findings in relation to the research question",
+            ),
+            ("Conclusion", "Summarize what the findings mean"),
+        ];
+        for (heading, paragraph_start) in section_blocks {
+            assert!(starter.contains(&format!("## {heading}\n\n{paragraph_start}")));
+        }
+        assert_eq!(
+            starter
+                .lines()
+                .filter(|line| line.starts_with("## "))
+                .count(),
+            6
+        );
+        assert!(starter.contains("author:\n  - name: \"Alice Martin\""));
+        assert!(starter.contains("orcid: \"0000-0002-1825-0097\""));
+        assert!(starter.contains("- \"Plant Research Institute\""));
         assert_eq!(
             fs::read_to_string(temporary.path().join("another-download.txt")).unwrap(),
             "keep me"
@@ -3450,6 +3586,7 @@ mod tests {
         let error = create_project(
             temporary.path().to_string_lossy().into_owned(),
             "Unsafe".into(),
+            None,
         )
         .unwrap_err();
         assert!(matches!(error, HostError::InvalidProject(_)));
@@ -3465,6 +3602,7 @@ mod tests {
         let snapshot = create_project(
             temporary.path().to_string_lossy().into_owned(),
             "  Canopy: water / 2026  ".into(),
+            None,
         )
         .unwrap();
 

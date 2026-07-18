@@ -50,6 +50,12 @@ export interface ProjectSnapshot {
   bibliographies: ProjectEntry[]
 }
 
+export interface NewProjectAuthor {
+  name: string
+  orcid?: string
+  affiliations: string[]
+}
+
 export interface DocumentSnapshot {
   path: string
   content: string
@@ -441,8 +447,8 @@ export function createDesktopHost(
     openProject(root: string) {
       return invokeBridge<ProjectSnapshot>('open_project', { root })
     },
-    createProject(parent: string, name: string) {
-      return invokeBridge<ProjectSnapshot>('create_project', { parent, name })
+    createProject(parent: string, name: string, firstAuthor?: NewProjectAuthor) {
+      return invokeBridge<ProjectSnapshot>('create_project', firstAuthor ? { parent, name, firstAuthor } : { parent, name })
     },
     readDocument(root: string, path: string) {
       return invokeBridge<DocumentSnapshot>('read_document', { root, path })

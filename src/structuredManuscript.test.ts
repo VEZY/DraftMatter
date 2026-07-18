@@ -86,6 +86,57 @@ function replaceFirstText(document: ReturnType<typeof parseStructuredManuscript>
 }
 
 describe('generic structured manuscript bridge', () => {
+  it('creates a separate heading and paragraph block for every starter section', () => {
+    const starter = `---
+title: "New study"
+format: html
+---
+
+## Abstract
+
+Short abstract placeholder.
+
+## Introduction
+
+Short introduction placeholder.
+
+## Methods
+
+Short methods placeholder.
+
+## Results
+
+Short results placeholder.
+
+## Discussion
+
+Short discussion placeholder.
+
+## Conclusion
+
+Short conclusion placeholder.
+`
+    const parsed = parseStructuredManuscript(starter)
+    const blocks: Array<{ type: string; text: string }> = []
+    parsed.document.forEach((node) => blocks.push({ type: node.type.name, text: node.textContent }))
+
+    expect(blocks).toEqual([
+      { type: 'heading', text: 'Abstract' },
+      { type: 'paragraph', text: 'Short abstract placeholder.' },
+      { type: 'heading', text: 'Introduction' },
+      { type: 'paragraph', text: 'Short introduction placeholder.' },
+      { type: 'heading', text: 'Methods' },
+      { type: 'paragraph', text: 'Short methods placeholder.' },
+      { type: 'heading', text: 'Results' },
+      { type: 'paragraph', text: 'Short results placeholder.' },
+      { type: 'heading', text: 'Discussion' },
+      { type: 'paragraph', text: 'Short discussion placeholder.' },
+      { type: 'heading', text: 'Conclusion' },
+      { type: 'paragraph', text: 'Short conclusion placeholder.' },
+    ])
+    expect(serializeStructuredManuscript(parsed.document, parsed.metadata)).toBe(starter)
+  })
+
   it('opens every portable fixture as a valid editor document without changing source bytes', () => {
     expect(Object.keys(portableFixtures)).toHaveLength(30)
     for (const [path, source] of Object.entries(portableFixtures)) {

@@ -61,6 +61,7 @@ import { motionAwareScrollBehavior } from './accessibility'
 import { normalizeProjectRelativePath, projectFilePath } from './projectPaths'
 import { authorInitials, readUserSettings, renameLocalAuthor, saveUserSettings } from './userSettings'
 import { parsePublicationMetadata, updatePublicationAuthorDetails, type PublicationAuthor } from './publicationMetadata'
+import { forgetAuthor, normalizeAuthorProfile, readAuthorBank, rememberAuthors, saveAuthorBank, type RememberedAuthor } from './authorBank'
 import { copyPlainText } from './clipboard'
 import { parseRetainedPublishedValues } from './publishedValues'
 import { publicationFreshnessProblem } from './publicationFreshness'
@@ -522,6 +523,7 @@ function App() {
   const [publicationAuthorsOpen, setPublicationAuthorsOpen] = useState(false)
   const [publicationAuthorNames, setPublicationAuthorNames] = useState<PublicationAuthorDraft[]>(() => [publicationAuthorDraft()])
   const [publicationAuthorsProblem, setPublicationAuthorsProblem] = useState('')
+  const [authorBank, setAuthorBank] = useState(() => readAuthorBank(localStorage))
   const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [collaborationOpen, setCollaborationOpen] = useState(false)
   const [collaborationStatus, setCollaborationStatus] = useState<CollaborationClientStatus>('disconnected')
@@ -563,6 +565,9 @@ function App() {
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
   const [newProjectParent, setNewProjectParent] = useState('')
   const [newProjectName, setNewProjectName] = useState('')
+  const [newProjectAuthorSelection, setNewProjectAuthorSelection] = useState('new')
+  const [newProjectAuthor, setNewProjectAuthor] = useState<PublicationAuthorDraft>(() => publicationAuthorDraft({ name: userSettings.author.name }))
+  const [newProjectProblem, setNewProjectProblem] = useState('')
   const [pendingProject, setPendingProject] = useState<{ project: ProjectSnapshot; announce: boolean } | null>(null)
   const [runtimeInventory, setRuntimeInventory] = useState<RuntimeInventory>()
   const [runtimeDiscoveryState, setRuntimeDiscoveryState] = useState<'idle' | 'discovering' | 'ready'>('idle')
@@ -839,6 +844,7 @@ function App() {
 
   const openPublicationAuthors = () => {
     if (!canEditManuscript) return
+    setAuthorBank(readAuthorBank(localStorage))
     setPublicationAuthorNames(publicationMetadata.authorDetails.length
       ? publicationMetadata.authorDetails.map((author, sourceIndex) => publicationAuthorDraft(author, sourceIndex))
       : [publicationAuthorDraft()])
@@ -864,13 +870,35 @@ function App() {
     setPublicationAuthorNames((current) => current.length === 1 ? [publicationAuthorDraft()] : current.filter((_candidate, candidateIndex) => candidateIndex !== index))
   }
 
+  const addRememberedAuthorToManuscript = (author: RememberedAuthor) => {
+    setPublicationAuthorNames((current) => {
+      const duplicate = current.some((candidate) => (
+        candidate.id === author.id
+        || (candidate.orcid && author.orcid && candidate.orcid.toUpperCase() === author.orcid.toUpperCase())
+        || candidate.name.trim().toLocaleLowerCase() === author.name.toLocaleLowerCase()
+      ))
+      if (duplicate) return current
+      const next = { ...publicationAuthorDraft(author), id: author.id }
+      return current.length === 1 && !current[0].name.trim() ? [next] : [...current, next]
+    })
+  }
+
+  const removeRememberedAuthor = (id: string) => {
+    const next = forgetAuthor(authorBank, id)
+    saveAuthorBank(localStorage, next)
+    setAuthorBank(next)
+  }
+
   const commitPublicationAuthors = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     if (!canEditManuscript) return
     try {
       const populated = publicationAuthorNames.filter((author) => author.name.trim())
-      const details = populated.map((author) => ({ name: author.name.trim(), orcid: author.orcid.trim() || undefined, affiliations: author.affiliations }))
+      const details = populated.map((author) => normalizeAuthorProfile({ name: author.name, orcid: author.orcid, affiliations: author.affiliations }))
       const nextSource = updatePublicationAuthorDetails(manuscriptSource, details, populated.map((author) => author.sourceIndex))
+      const nextBank = rememberAuthors(readAuthorBank(localStorage), populated.map((author, index) => ({ ...details[index], id: author.id })))
+      saveAuthorBank(localStorage, nextBank)
+      setAuthorBank(nextBank)
       if (!structuredMode) setStructuredMode(true)
       updateStructuredManuscript(nextSource)
       setPublicationAuthorsOpen(false)
@@ -3307,8 +3335,16 @@ function App() {
     try {
       const parent = await desktopHost.pickProjectFolder('Choose where to create the new project')
       if (!parent) return
+      const remembered = readAuthorBank(localStorage)
+      const firstAuthor = remembered.authors[0]
+      setAuthorBank(remembered)
       setNewProjectParent(parent)
       setNewProjectName('')
+      setNewProjectAuthorSelection(firstAuthor?.id ?? 'new')
+      setNewProjectAuthor(firstAuthor
+        ? { ...publicationAuthorDraft(firstAuthor), id: firstAuthor.id }
+        : publicationAuthorDraft({ name: userSettings.author.name }))
+      setNewProjectProblem('')
       setProjectMenuOpen(false)
       setCreateProjectOpen(true)
     } catch (error) {
@@ -3320,14 +3356,24 @@ function App() {
 
   const confirmCreateDesktopProject = async () => {
     const name = newProjectName.trim()
-    if (!name || !newProjectParent || projectBusy) return
+    if (!name || !newProjectParent || !newProjectAuthor.name.trim() || projectBusy) return
     setProjectBusy(true)
     try {
-      const project = await desktopHost.createProject(newProjectParent, name)
+      const firstAuthor = normalizeAuthorProfile(newProjectAuthor)
+      const nextBank = rememberAuthors(readAuthorBank(localStorage), [{
+        ...firstAuthor,
+        ...(newProjectAuthorSelection === 'new' ? {} : { id: newProjectAuthorSelection }),
+      }])
+      saveAuthorBank(localStorage, nextBank)
+      setAuthorBank(nextBank)
+      const project = await desktopHost.createProject(newProjectParent, name, firstAuthor)
       await applyDesktopProject(project)
       setCreateProjectOpen(false)
+      setNewProjectProblem('')
     } catch (error) {
-      setToast(normaliseHostFailure(error).message)
+      const message = error instanceof Error ? error.message : normaliseHostFailure(error).message
+      setNewProjectProblem(message)
+      setToast(message)
     } finally {
       setProjectBusy(false)
     }
@@ -4762,6 +4808,21 @@ function App() {
               <button className="icon-button" type="button" onClick={() => setPublicationAuthorsOpen(false)} aria-label="Close manuscript authors"><Icon name="close" /></button>
             </div>
             <div className="publication-authors-body">
+              <section className="remembered-author-bank" aria-labelledby="remembered-authors-title">
+                <div><span><strong id="remembered-authors-title">Remembered authors</strong><small>Add a saved profile to this manuscript, or remove profiles you no longer need.</small></span><span>{authorBank.authors.length}</span></div>
+                {authorBank.authors.length ? <div className="remembered-author-list">
+                  {authorBank.authors.map((author) => (
+                    <div className="remembered-author-row" key={author.id}>
+                      <button type="button" onClick={() => addRememberedAuthorToManuscript(author)} aria-label={`Add ${author.name} to manuscript`}>
+                        <Avatar initials={authorInitials(author.name)} small label={author.name} />
+                        <span><strong>{author.name}</strong><small>{author.affiliations[0] || author.orcid || 'Saved author profile'}</small></span>
+                        <Icon name="plus" size={13} />
+                      </button>
+                      <button type="button" className="remembered-author-remove" onClick={() => removeRememberedAuthor(author.id)} aria-label={`Forget ${author.name}`} title="Remove from remembered authors"><Icon name="x" size={13} /></button>
+                    </div>
+                  ))}
+                </div> : <p>No saved authors yet. Authors are remembered on this device when you save them below.</p>}
+              </section>
               <div className="publication-author-list">
                 {publicationAuthorNames.map((author, index) => (
                   <div className="publication-author-row" key={author.id}>
@@ -4776,7 +4837,7 @@ function App() {
               </div>
               <button type="button" className="publication-author-add" onClick={() => setPublicationAuthorNames((current) => [...current, publicationAuthorDraft()])} disabled={publicationAuthorNames.length >= 100}><Icon name="plus" size={14} /> Add another author</button>
               {publicationAuthorsProblem && <div className="user-settings-problem" role="alert">{publicationAuthorsProblem}</div>}
-              <p>Names, ORCID identifiers, and affiliations are kept with this manuscript. Advanced metadata remains unchanged.</p>
+              <p>Names, ORCID identifiers, and affiliations are kept with this manuscript. Saved profiles stay on this device; advanced metadata remains unchanged.</p>
             </div>
             <div className="execution-dialog-actions"><button type="button" onClick={() => setPublicationAuthorsOpen(false)}>Cancel</button><button className="primary-button" type="submit">Save authors</button></div>
             </form>
@@ -4978,8 +5039,28 @@ function App() {
               <button className="icon-button" type="button" onClick={() => setCreateProjectOpen(false)} aria-label="Close create project dialog"><Icon name="close" /></button>
             </div>
             <label className="create-project-field"><span>Project name</span><input autoFocus maxLength={240} value={newProjectName} onChange={(event) => setNewProjectName(event.target.value)} placeholder="My research project" /></label>
+            <section className="create-project-author" aria-labelledby="create-project-author-title">
+              <div><strong id="create-project-author-title">First author</strong><small>This profile is written into the manuscript and remembered for future papers.</small></div>
+              {authorBank.authors.length > 0 && <label><span>Saved profile</span><select value={newProjectAuthorSelection} onChange={(event) => {
+                const selection = event.target.value
+                setNewProjectAuthorSelection(selection)
+                const remembered = authorBank.authors.find((author) => author.id === selection)
+                setNewProjectAuthor(remembered
+                  ? { ...publicationAuthorDraft(remembered), id: remembered.id }
+                  : publicationAuthorDraft({ name: userSettings.author.name }))
+              }} aria-label="First author saved profile">
+                {authorBank.authors.map((author) => <option value={author.id} key={author.id}>{author.name}</option>)}
+                <option value="new">Enter a new author…</option>
+              </select></label>}
+              <div className="create-project-author-fields">
+                <label><span>Full name</span><input value={newProjectAuthor.name} onChange={(event) => setNewProjectAuthor((current) => ({ ...current, name: event.target.value }))} maxLength={240} autoComplete="name" /></label>
+                <label><span>ORCID <em>optional</em></span><input value={newProjectAuthor.orcid} onChange={(event) => setNewProjectAuthor((current) => ({ ...current, orcid: event.target.value }))} placeholder="0000-0000-0000-0000" autoComplete="off" spellCheck={false} /></label>
+                <label><span>Affiliations <em>optional · one per line</em></span><textarea value={newProjectAuthor.affiliations.join('\n')} onChange={(event) => setNewProjectAuthor((current) => ({ ...current, affiliations: event.target.value.split(/\r\n|\r|\n/).map((value) => value.trim()).filter(Boolean) }))} rows={2} placeholder="Research institute or university" /></label>
+              </div>
+            </section>
             <div className="create-project-location"><Icon name="folder" size={15} /><span title={newProjectParent}>New project folder inside: {newProjectParent}</span></div>
-            <div className="create-project-actions"><button type="button" onClick={() => setCreateProjectOpen(false)}>Cancel</button><button className="primary-button" type="submit" disabled={!newProjectName.trim() || projectBusy}>{projectBusy ? 'Creating…' : 'Create project'}</button></div>
+            {newProjectProblem && <div className="create-project-problem" role="alert">{newProjectProblem}</div>}
+            <div className="create-project-actions"><button type="button" onClick={() => setCreateProjectOpen(false)}>Cancel</button><button className="primary-button" type="submit" disabled={!newProjectName.trim() || !newProjectAuthor.name.trim() || projectBusy}>{projectBusy ? 'Creating…' : 'Create project'}</button></div>
           </form>
         </div>
       )}
