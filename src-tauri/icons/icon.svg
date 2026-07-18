@@ -1,4 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#315347"/>
-  <path d="M150 106h103c99 0 161 55 161 149 0 96-62 151-161 151H150V106Zm98 239c60 0 94-31 94-89 0-57-34-88-94-88h-27v177h27Z" fill="#fff"/>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="none">
+  <rect x="16" y="16" width="480" height="480" rx="108" fill="#fff"/>
+  <g transform="translate(42 42) scale(13.4)">
+    <path d="M2.5 28.65c2.45-.13 4.84.2 7.25-.06" stroke="#3f6b52" stroke-width="1.15" stroke-linecap="round"/>
+    <path d="m9.92 27.55 2.51-5.72L24.2 6.94l3.92 3.1-11.78 14.9-6.42 2.61Z" stroke="#242424" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="m12.43 21.83 3.91 3.11" stroke="#606060" stroke-width=".85" stroke-linecap="round"/>
+    <path d="m24.2 6.94 1.63-2.06c.34-.43.97-.51 1.41-.16l2.35 1.86c.43.34.51.97.16 1.41l-1.63 2.05" stroke="#242424" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/>
+    <path d="m25.52 5.29 3.92 3.1" stroke="#606060" stroke-width=".72" stroke-linecap="round" opacity=".72"/>
+    <path d="m10.08 27.47 1.28-2.94 2.04 1.61-3.32 1.33Z" fill="#242424"/>
+    <path d="M16.94 25.38 28.55 10.7" stroke="#606060" stroke-width=".48" stroke-linecap="round" opacity=".58"/>
+  </g>
 </svg>
