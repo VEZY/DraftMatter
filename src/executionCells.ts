@@ -138,6 +138,10 @@ export function isSetupCell(cell: Pick<ExecutableCell, 'role'>) {
   return cell.role === 'setup'
 }
 
+export function isPanelManagedCell(cell: Pick<ExecutableCell, 'role'>) {
+  return cell.role === 'setup' || cell.role === 'values'
+}
+
 export function extractExecutableCells(source: string): ExecutableCellResult {
   const tree = unified().use(remarkParse).parse(source) as Root
   const excluded = excludedDivRanges(source)

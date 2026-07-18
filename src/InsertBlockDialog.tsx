@@ -26,10 +26,10 @@ const details: Record<InsertBlockKind, { eyebrow: string; title: string; descrip
   'equation-display': { eyebrow: 'Mathematics', title: 'Insert display equation', description: 'Create a centered equation that can be referenced elsewhere.' },
   'cross-reference': { eyebrow: 'Document link', title: 'Insert cross-reference', description: 'Link to a figure, table, equation, or section.' },
   footnote: { eyebrow: 'Supporting note', title: 'Insert footnote', description: 'Add supporting text at the current position.' },
-  'figure-cell': { eyebrow: 'Reproducible result', title: 'Add reproducible figure', description: 'Create a hidden computation whose retained figure appears in the manuscript.' },
-  'table-cell': { eyebrow: 'Reproducible result', title: 'Add reproducible table', description: 'Create a hidden computation whose retained table appears in the manuscript.' },
-  'values-cell': { eyebrow: 'Reproducible result', title: 'Add published values', description: 'Create a hidden computation that explicitly publishes named scalar results for manuscript text.' },
-  'setup-cell': { eyebrow: 'Reproducible state', title: 'Add setup cell', description: 'Initialize packages, functions, datasets, and constants before ordinary cells run.' },
+  'figure-cell': { eyebrow: 'Reproducible result', title: 'Add reproducible figure', description: 'Create a manuscript code block whose retained figure appears with the paper.' },
+  'table-cell': { eyebrow: 'Reproducible result', title: 'Add reproducible table', description: 'Create a manuscript code block whose retained table appears with the paper.' },
+  'values-cell': { eyebrow: 'Code & computation', title: 'Add published values', description: 'Add project-only code that publishes named scalar results for manuscript text.' },
+  'setup-cell': { eyebrow: 'Code & computation', title: 'Add language setup', description: 'Initialize packages, functions, datasets, and constants before ordinary cells run.' },
   'published-value': { eyebrow: 'Reproducible result', title: 'Insert published value', description: 'Place an explicitly published result directly in the sentence.' },
 }
 
@@ -90,7 +90,9 @@ export function InsertBlockDialog({
     else if (kind === 'setup-cell' || kind === 'figure-cell' || kind === 'table-cell' || kind === 'values-cell') request = { kind, language }
     else throw new Error(`Unsupported insertion kind: ${kind satisfies never}`)
     if (onInsert(request)) onClose()
-    else setProblem('The item could not be inserted at the current editor position. Place the cursor in the manuscript and try again.')
+    else setProblem(kind === 'setup-cell' || kind === 'values-cell'
+      ? 'The project code could not be added. Close this dialog and reopen the Code & computation panel before trying again.'
+      : 'The item could not be inserted at the current editor position. Place the cursor in the manuscript and try again.')
   }
 
   const labelField = (captionText: string, placeholder: string, hint: string) => (
@@ -132,13 +134,14 @@ export function InsertBlockDialog({
             {labelField('Footnote label', 'method-note', 'Letters, numbers, dots, colons, underscores, and hyphens are supported.')}
             <label><span>Footnote text</span><textarea autoFocus value={content} onChange={(event) => setContent(event.target.value)} rows={4} placeholder="Supporting detail…" /></label>
           </>}
-          {(kind === 'figure-cell' || kind === 'table-cell' || kind === 'values-cell') && <label><span>Language</span><select autoFocus value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>The computation source stays hidden in exports; only the retained result is published.</small></label>}
-          {kind === 'setup-cell' && <label><span>Language</span><select autoFocus value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>Setup runs first in a fresh shared kernel and never appears in exports.</small></label>}
+          {(kind === 'figure-cell' || kind === 'table-cell') && <label><span>Language</span><select autoFocus value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>The code block remains in the manuscript editor; publication exports use its retained result.</small></label>}
+          {kind === 'values-cell' && <label><span>Language</span><select autoFocus value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>The computation is edited in Code &amp; computation; only the values you insert into prose appear in the manuscript.</small></label>}
+          {kind === 'setup-cell' && <label><span>Language</span><select autoFocus value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>Setup is edited in Code &amp; computation, runs first in a fresh shared kernel, and is omitted from the manuscript view.</small></label>}
           {kind === 'published-value' && <label><span>Published name</span><input autoFocus value={publishedName} onChange={(event) => setPublishedName(event.target.value)} list="published-value-options" placeholder="mean_height" spellCheck={false} /><datalist id="published-value-options">{publishedValues.map((value) => <option key={value.name} value={value.name}>{value.rendered}</option>)}</datalist><small>{publishedValues.length ? 'Choose a retained publication or enter the name a values cell will publish.' : 'Enter the name a values cell will publish. It will show “Value unavailable” until that cell has run.'}</small></label>}
           {problem && <div className="insert-block-problem" role="alert">{problem}</div>}
         </div>
 
-        <div className="execution-dialog-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={!valid}>Insert</button></div>
+        <div className="execution-dialog-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={!valid}>{kind === 'setup-cell' || kind === 'values-cell' ? 'Add to code panel' : 'Insert'}</button></div>
       </form>
     </div>
   )

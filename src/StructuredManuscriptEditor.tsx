@@ -73,12 +73,14 @@ function structuredBlockRanges(document: ProseMirrorNode) {
       node,
     })
   })
+  let manuscriptEnd = document.content.size
+  for (let index = blocks.length - 1; index >= 0 && isPanelManagedNode(blocks[index].node); index -= 1) manuscriptEnd = blocks[index].start
   return blocks.map((block, index) => {
     if (block.headingLevel === undefined) return block
     const nextPeer = blocks.slice(index + 1).find((candidate) => (
       candidate.headingLevel !== undefined && candidate.headingLevel <= block.headingLevel!
     ))
-    return { ...block, end: nextPeer?.start ?? document.content.size }
+    return { ...block, end: Math.min(nextPeer?.start ?? document.content.size, manuscriptEnd > block.start ? manuscriptEnd : document.content.size) }
   })
 }
 
@@ -90,6 +92,22 @@ function structuredBlockLabel(range: StructuredBlockRange) {
   return isSection
     ? range.node.textContent || 'Untitled section'
     : preview ? `${nodeKind} “${preview.slice(0, 54)}${preview.length > 54 ? '…' : ''}”` : nodeKind
+}
+
+function isPanelManagedNode(node: ProseMirrorNode) {
+  if (node.type === manuscriptSchema.nodes.code_cell) {
+    const attributes = (node.attrs.attributes ?? {}) as Record<string, unknown>
+    return node.attrs.outputKind === 'setup'
+      || node.attrs.outputKind === 'values'
+      || attributes.role === 'setup'
+      || attributes.output === 'values'
+  }
+  if (node.type !== manuscriptSchema.nodes.output_block) return false
+  return !String(node.attrs.markdown)
+    .replace(/^\s*<!-- dm-output:start[^>]*-->\s*/m, '')
+    .replace(/\s*<!-- dm-output:end -->\s*$/m, '')
+    .replace(/^\s*<!-- dm-published-value\b[^>]*-->\s*$/gm, '')
+    .trim()
 }
 
 export function moveStructuredBlock(
@@ -165,6 +183,7 @@ export interface StructuredManuscriptEditorHandle {
   wrapOrderedList: () => boolean
   undo: () => boolean
   redo: () => boolean
+  updateCodeCellSource: (cellId: string, source: string) => boolean
   insertCodeCell: (language: 'python' | 'r' | 'julia', output?: 'figure' | 'table' | 'values') => boolean
   insertSetupCell: (language: 'python' | 'r' | 'julia', code?: string) => boolean
   insertPublishedValue: (name: string) => boolean
@@ -499,7 +518,7 @@ function blockHandleDecorations(
   onDragEnd: () => void,
 ) {
   if (readOnly) return []
-  return structuredBlockRanges(document).filter((range) => range.headingLevel !== 1).map((range) => Decoration.widget(range.start, () => {
+  return structuredBlockRanges(document).filter((range) => range.headingLevel !== 1 && !isPanelManagedNode(range.node)).map((range) => Decoration.widget(range.start, () => {
     const handle = globalThis.document.createElement('button')
     const isSection = range.headingLevel !== undefined
     const label = structuredBlockLabel(range)
@@ -600,6 +619,31 @@ function codeLanguageExtension(language: string) {
   if (language === 'julia') return StreamLanguage.define(julia)
   if (language === 'r') return StreamLanguage.define(r)
   return StreamLanguage.define(python)
+}
+
+function panelManagedCodeNodeView(initialNode: ProseMirrorNode): NodeView {
+  let node = initialNode
+  const dom = document.createElement('div')
+  dom.className = 'structured-panel-code-placeholder'
+  dom.hidden = true
+  dom.contentEditable = 'false'
+  dom.setAttribute('aria-hidden', 'true')
+  const updateDom = () => {
+    dom.dataset.dmId = String(node.attrs.id)
+    dom.dataset.language = String(node.attrs.language)
+    dom.dataset.role = node.attrs.outputKind === 'setup' ? 'setup' : 'values'
+  }
+  updateDom()
+  return {
+    dom,
+    ignoreMutation: () => true,
+    update(next) {
+      if (next.type !== node.type || !isPanelManagedNode(next)) return false
+      node = next
+      updateDom()
+      return true
+    },
+  }
 }
 
 function codeCellNodeView(
@@ -2737,6 +2781,17 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     wrapOrderedList: () => run(wrapInList(manuscriptSchema.nodes.ordered_list, { id: randomId('list'), order: 1 })),
     undo: () => run(collaborationRef.current ? collaborativeUndo : historyUndo),
     redo: () => run(collaborationRef.current ? collaborativeRedo : historyRedo),
+    updateCodeCellSource: (cellId, code) => {
+      const view = viewRef.current
+      if (!view || readOnlyRef.current) return false
+      const position = positionForNodeId(view.state.doc, manuscriptSchema.nodes.code_cell, cellId)
+      if (position === undefined) return false
+      const node = view.state.doc.nodeAt(position)
+      if (!node || node.type !== manuscriptSchema.nodes.code_cell) return false
+      if (String(node.attrs.code) === code) return true
+      view.dispatch(view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, code, status: 'stale' }))
+      return true
+    },
     insertCodeCell: (language, output = 'figure') => {
       const view = viewRef.current
       if (!view || readOnlyRef.current) return false
@@ -2748,30 +2803,34 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
             ? '# Publish only the values used in prose:\n# publish("mean_height", mean_height, unit = "cm", digits = 1)'
             : '# Publish only the values used in prose:\n# @publish mean_height unit="cm" digits=1'
         : ''
-      insertBlock(view, manuscriptSchema.nodes.code_cell.createChecked({
+      const node = manuscriptSchema.nodes.code_cell.createChecked({
         id,
         language,
         code: valueTemplate,
         outputKind: output,
         status: 'stale',
         attributes: { execute: true, output },
-      }))
-      view.focus()
+      })
+      if (output === 'values') view.dispatch(view.state.tr.insert(view.state.doc.content.size, node))
+      else {
+        insertBlock(view, node)
+        view.focus()
+      }
       return true
     },
     insertSetupCell: (language, code) => {
       const view = viewRef.current
       if (!view || readOnlyRef.current) return false
       const id = randomId(`setup-${language}`)
-      insertBlock(view, manuscriptSchema.nodes.code_cell.createChecked({
+      const node = manuscriptSchema.nodes.code_cell.createChecked({
         id,
         language,
         code: code?.trim() || (language === 'python' ? '# Import packages and load reusable data here.' : '# Load packages and reusable data here.'),
         outputKind: 'setup',
         status: 'stale',
         attributes: { execute: true, role: 'setup' },
-      }))
-      view.focus()
+      })
+      view.dispatch(view.state.tr.insert(view.state.doc.content.size, node))
       return true
     },
     insertPublishedValue: (name) => {
@@ -3105,17 +3164,19 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       },
       nodeViews: {
         heading: (node, editorView, getPos) => headingNodeView(node, editorView, getPos, () => !readOnlyRef.current),
-        code_cell: (node, editorView, getPos) => codeCellNodeView(
-          node,
-          editorView,
-          getPos,
-          () => !readOnlyRef.current,
-          (cellId) => codeCellStatusesRef.current?.[cellId],
-          () => codeCellActionsEnabledRef.current,
-          (cellId) => onRunCodeCellRef.current?.(cellId),
-          (language) => onInterruptCodeCellRef.current?.(language),
-          (cellId, code) => onFormatCodeCellRef.current?.(cellId, code) ?? Promise.resolve(undefined),
-        ),
+        code_cell: (node, editorView, getPos) => isPanelManagedNode(node)
+          ? panelManagedCodeNodeView(node)
+          : codeCellNodeView(
+            node,
+            editorView,
+            getPos,
+            () => !readOnlyRef.current,
+            (cellId) => codeCellStatusesRef.current?.[cellId],
+            () => codeCellActionsEnabledRef.current,
+            (cellId) => onRunCodeCellRef.current?.(cellId),
+            (language) => onInterruptCodeCellRef.current?.(language),
+            (cellId, code) => onFormatCodeCellRef.current?.(cellId, code) ?? Promise.resolve(undefined),
+          ),
         raw_block: (node, editorView, getPos) => rawNodeView(node, editorView, getPos, () => !readOnlyRef.current, (nodeId) => onInspectRawRef.current?.(nodeId)),
         citation: (node, editorView, getPos) => citationNodeView(node, editorView, getPos, (id, items) => onCitationSelectRef.current?.(id, items)),
         cross_reference: (node, editorView, getPos) => crossReferenceNodeView(node, editorView, getPos, () => !readOnlyRef.current),

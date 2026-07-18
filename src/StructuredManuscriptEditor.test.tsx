@@ -3,6 +3,7 @@
 import { act, createRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import { EditorState } from 'prosemirror-state'
+import type { Node as ProseMirrorNode } from 'prosemirror-model'
 import { EditorView as CodeMirrorView } from '@codemirror/view'
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness'
 import * as Y from 'yjs'
@@ -100,6 +101,18 @@ Results body.
     expect(moved.textContent.indexOf('Introduction')).toBeLessThan(moved.textContent.indexOf('Intro two.'))
     expect(moved.textContent.indexOf('Intro two.')).toBeLessThan(moved.textContent.indexOf('Intro one.'))
     expect(moved.textContent.indexOf('Intro one.')).toBeLessThan(moved.textContent.indexOf('Methods'))
+  })
+
+  it('does not attach trailing project-only code to the final manuscript section', () => {
+    const document = parseStructuredManuscript(`${reorderSource}\n\`\`\`python {#project-setup .execute role="setup"}\nimport statistics\n\`\`\`\n`).document
+    const ids = new Map<string, string>()
+    document.forEach((node) => ids.set(node.textContent, String(node.attrs.id)))
+    const moved = moveStructuredBlock(document, ids.get('Results')!, ids.get('Introduction')!, 'before')
+    const children: ProseMirrorNode[] = []
+    moved.forEach((node) => children.push(node))
+
+    expect(children.at(-1)?.attrs.id).toBe('project-setup')
+    expect(moved.textContent.indexOf('Results')).toBeLessThan(moved.textContent.indexOf('Introduction'))
   })
 })
 
@@ -614,6 +627,36 @@ end
     expect(cells).toHaveLength(3)
     expect(cells.map((cell) => cell.dataset.language)).toEqual(['python', 'r', 'julia'])
     expect(cells.every((cell) => cell.querySelectorAll('.cm-content span').length > 0)).toBe(true)
+  })
+
+  it('keeps setup and published-value computations out of the manuscript surface', async () => {
+    const projectCode = `# Analysis
+
+\`\`\`python {#py-setup .execute role="setup"}
+import statistics
+\`\`\`
+
+\`\`\`julia {#jl-values .execute output="values"}
+@publish mean_height
+\`\`\`
+
+<!-- dm-output:start cell="jl-values" run="sha256:values" -->
+<!-- dm-output:end -->
+
+\`\`\`r {#r-figure .execute output="figure"}
+plot(1:3)
+\`\`\`
+`
+    await act(async () => root.render(<StructuredManuscriptEditor source={projectCode} onChange={vi.fn()} />))
+
+    expect([...container.querySelectorAll<HTMLElement>('.structured-code-cell')].map((cell) => cell.dataset.dmId)).toEqual(['r-figure'])
+    const hidden = [...container.querySelectorAll<HTMLElement>('.structured-panel-code-placeholder')]
+    expect(hidden.map((cell) => cell.dataset.dmId)).toEqual(['py-setup', 'jl-values'])
+    expect(hidden.every((cell) => cell.hidden)).toBe(true)
+    expect(container.querySelector('[aria-label="Move block Reproducible setup"]')).toBeNull()
+    expect(container.querySelector('[aria-label="Move block output block"]')).toBeNull()
+    expect(container.textContent).not.toContain('import statistics')
+    expect(container.textContent).not.toContain('@publish mean_height')
   })
 
   it('runs, interrupts, and formats a Julia cell automatically after editing', async () => {

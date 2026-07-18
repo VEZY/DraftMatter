@@ -31,7 +31,7 @@ import { assignCollisionSafeCitekeys, CITATION_INTAKE_MAX_BYTES, previewCitation
 import { CrossrefSearchSession, crossrefCandidateToCitationRecord, crossrefDuplicateCitekeys, type CrossrefCandidate } from './crossref'
 import { DEFAULT_ACQUISITION_BIBLIOGRAPHY, canonicalizeAcquisitionRecord, citationRecordToAcquisitionCsl, ensureBibliographyReference, persistedAcquisitionRecord } from './citationAcquisition'
 import { createDesktopKernelExecutionTransport } from './kernelExecutionTransport'
-import { extractExecutableCells, isSetupCell, type ExecutableCell, type ExecutionLanguage } from './executionCells'
+import { extractExecutableCells, isPanelManagedCell, isSetupCell, type ExecutableCell, type ExecutionLanguage } from './executionCells'
 import { ExecutionFreshnessTracker, parseExecutionManifest, serializeExecutionManifest, type CleanRunCertification, type ExecutionCellFreshness, type ExecutionManifest } from './executionFreshness'
 import { createKernelExecutionManager, executionEnvironmentFingerprint, executionInputsFingerprint, sha256, type NormalizedExecutionResult } from './kernelExecution'
 import { cleanExecutePortableDocument } from './cleanExecution'
@@ -70,6 +70,7 @@ import { ReviewTimestamp } from './ReviewTimestamp'
 import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
 import { workspaceRoleCapabilities, type WorkspaceRole } from './collaboration/workspaceService'
 import { KernelConsole, type KernelConsoleRestartEpochs, type KernelConsoleStatus, type KernelConsoleStatuses } from './KernelConsole'
+import { ManagedCodeCellEditor } from './ManagedCodeCellEditor'
 
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
 const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
@@ -1446,6 +1447,8 @@ function App() {
   const reviewLocationLabel = reviewQueue.length ? `REVIEW ${activeReviewPosition + 1} OF ${reviewQueue.length}` : 'NO FEEDBACK IN THIS VIEW'
   const reviewProposalStatus = reviewProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
   const executableCells = extractExecutableCells(executionSource).cells
+  const panelManagedCells = executableCells.filter(isPanelManagedCell)
+  const manuscriptCodeCells = executableCells.filter((cell) => !isPanelManagedCell(cell))
   const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL) ?? executableCells[0]
   const retainedOutputParse = parseRetainedOutputs(executionSource)
   const retainedOutputs = retainedOutputParse.outputs
@@ -1788,9 +1791,19 @@ function App() {
     return true
   }
 
+  const savePanelManagedCell = (cellId: string, source: string) => {
+    if (!canEditManuscript || !structuredEditorRef.current?.updateCodeCellSource(cellId, source)) {
+      setToast('The project code source could not be updated')
+      return false
+    }
+    setToast(`Project code saved · ${cellId}`)
+    return true
+  }
+
   const openInsertBlock = (kind: InsertBlockKind) => {
     if (!canEditManuscript) return
     if (!structuredMode) setStructuredMode(true)
+    if (kind === 'setup-cell' || kind === 'values-cell') setExecutionWorkspaceOpen(true)
     setInsertBlockKind(kind)
   }
 
@@ -1855,12 +1868,20 @@ function App() {
     }
     if (request.kind === 'setup-cell') {
       const inserted = runStructuredCommand((editor) => editor.insertSetupCell(request.language), 'Add setup cell')
-      if (inserted) setToast(`${runtimeName(request.language)} setup cell added · runs first in a fresh kernel`)
+      if (inserted) {
+        setExecutionWorkspaceOpen(true)
+        setToast(`${runtimeName(request.language)} setup added to Code & computation · runs first in a fresh kernel`)
+      }
       return inserted
     }
     const output = request.kind === 'figure-cell' ? 'figure' : request.kind === 'table-cell' ? 'table' : 'values'
     const inserted = runStructuredCommand((editor) => editor.insertCodeCell(request.language, output), `Add reproducible ${output}`)
-    if (inserted) setToast(`Reproducible ${output} added · source stays hidden`)
+    if (inserted) {
+      if (output === 'values') setExecutionWorkspaceOpen(true)
+      setToast(output === 'values'
+        ? 'Published-values computation added to Code & computation'
+        : `Reproducible ${output} code block added to the manuscript`)
+    }
     return inserted
   }
 
@@ -3094,6 +3115,14 @@ function App() {
     setRightPanelOpen(true)
   }
 
+  const setTrackedChangesDisplay = (display: 'simple' | 'all') => {
+    setMarkupView(display)
+    if (display === 'simple') showReviewPanel()
+    setToast(display === 'all'
+      ? 'Changes displayed in text · additions and deletions are visible in the manuscript'
+      : 'Changes displayed in panel · manuscript hints link to the review panel')
+  }
+
   const toggleTrackChanges = () => {
     if (!canSuggestReview || !structuredMode) return
     const enabled = !suggestionMode
@@ -3972,12 +4001,21 @@ function App() {
     },
     {
       id: 'setup-cell',
-      label: 'Add setup cell',
-      description: 'Initialize reproducible state in a shared language kernel',
+      label: 'Add language setup',
+      description: 'Add project-only setup in the Code & computation panel',
       keywords: 'setup imports packages data state kernel reproducible',
       icon: <span className="command-icon">⚙</span>,
       disabled: !canEditManuscript,
       action: () => { setCommandOpen(false); openInsertBlock('setup-cell') },
+    },
+    {
+      id: 'values-cell',
+      label: 'Add published-values computation',
+      description: 'Compute inline manuscript values from project-only code',
+      keywords: 'values statistic publish scalar code computation',
+      icon: <span className="command-icon">123</span>,
+      disabled: !canEditManuscript,
+      action: () => { setCommandOpen(false); openInsertBlock('values-cell') },
     },
     {
       id: 'figure-cell',
@@ -4034,6 +4072,45 @@ function App() {
   const outlineCount = structuredMode ? structuredOutline.length : legacyOutlineItems.length
   const visibleOutlineCount = structuredMode ? visibleStructuredOutline.length : visibleLegacyOutline.length
   const outlineFiltered = Boolean(normalizedOutlineQuery) || outlineMaxDepth < 6
+  const renderExecutionCellRow = (cell: ExecutableCell) => {
+    const index = executableCells.findIndex((candidate) => candidate.id === cell.id)
+    const state = executionCellStates.find((candidate) => candidate.cellId === cell.id)
+    const view = executionViews.find((candidate) => candidate.cellId === cell.id)
+    const status = executionActiveCell === cell.id ? 'running' : state?.status ?? 'never-run'
+    const result = executionResults[cell.id]
+    const managed = isPanelManagedCell(cell)
+    return (
+      <div className={`execution-cell-row ${managed ? 'panel-managed' : 'manuscript-cell'} ${view?.tone === 'warning' ? 'warning' : ''}`} data-cell-id={cell.id} key={cell.id}>
+        <div className="execution-cell-summary">
+          <span className="execution-language">{runtimeName(cell.language)}</span>
+          <span className="execution-cell-kind">{cell.role === 'setup' ? 'Setup' : cell.role === 'values' ? 'Published values' : 'Manuscript'}</span>
+          <strong>{cell.id}</strong>
+          <em className={`cell-status ${status}`}><i />{cellStatusLabel(status)}</em>
+          <small>{state?.reason ?? view?.message ?? 'Ready for an explicit run.'}</small>
+        </div>
+        <div className="execution-cell-actions">
+          {index > 0 && <button className="subtle" onClick={() => void requestExecution({ kind: 'above', cellId: cell.id })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && executableCells.slice(0, index).some((candidate) => !executionEnvironmentAvailable(candidate)))}>Run above</button>}
+          {executionActiveCell === cell.id
+            ? <button onClick={() => void interruptExecution(cell.language)}><Icon name="close" size={13} /> Interrupt</button>
+            : <button className="run-button" onClick={() => void requestExecution({ kind: 'cell', cellId: cell.id })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && view && !view.executionEnabled)}><Icon name="play" size={13} /> Run</button>}
+        </div>
+        {managed && (
+          <ManagedCodeCellEditor
+            cell={cell}
+            readOnly={!canEditManuscript}
+            onSave={savePanelManagedCell}
+            onFormat={cell.language === 'julia' ? formatJuliaCodeCell : undefined}
+          />
+        )}
+        {view?.provenance.length ? <p className="execution-cell-provenance">{view.provenance.join(' · ')}</p> : null}
+        {result && (
+          <div className="structured-live-result" aria-label={`Latest execution result for ${cell.id}`}>
+            <ExecutionOutputView result={result} artifactUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) : path} />
+          </div>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div className={`app-shell ${focusMode ? 'focus-mode' : ''}`}>
@@ -4301,10 +4378,8 @@ function App() {
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('table') }}><Icon name="table" size={15} /><span><strong>Table</strong><small>Editable rows and columns</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('equation-inline') }}><span className="toolbar-symbol">∑</span><span><strong>Equation</strong><small>Inline or display mathematics</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('published-value') }}><span className="toolbar-symbol">123</span><span><strong>Published value</strong><small>Statistic or model result in text</small></span></button>
-                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('setup-cell') }}><span className="toolbar-symbol">⚙</span><span><strong>Setup cell</strong><small>Packages, data, and shared state</small></span></button>
-                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('figure-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible figure</strong><small>Hidden computation, visible figure</small></span></button>
-                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('table-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible table</strong><small>Hidden computation, visible table</small></span></button>
-                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('values-cell') }}><span className="toolbar-symbol">123</span><span><strong>Published values</strong><small>Hidden statistics for manuscript text</small></span></button>
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('figure-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible figure</strong><small>Visible code block and retained figure</small></span></button>
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('table-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible table</strong><small>Visible code block and retained table</small></span></button>
               </div>}
             </div>
             <span className="toolbar-divider" />
@@ -4323,15 +4398,16 @@ function App() {
 
           {structuredMode ? (
           <article className="manuscript structured-manuscript" aria-label="Editable manuscript">
-            {primaryCell && (
-              <section className={`structured-execution-workspace ${executionWorkspaceOpen ? 'open' : 'collapsed'}`} aria-label="Reproducible outputs">
+              <section className={`structured-execution-workspace ${executionWorkspaceOpen ? 'open' : 'collapsed'}`} aria-label="Code and computation">
                 <div className="execution-summary-bar">
-                  <span><Icon name="spark" size={15} /><strong>Reproducibility</strong><small>{executableCells.length} output{executableCells.length === 1 ? '' : 's'} · {cellStatusLabel(executionSummaryStatus)}</small></span>
-                  <button className="subtle" onClick={() => setExecutionWorkspaceOpen((open) => !open)} aria-expanded={executionWorkspaceOpen}>{executionWorkspaceOpen ? 'Hide details' : 'Manage'}</button>
+                  <span><Icon name="code" size={15} /><strong>Code &amp; computation</strong><small>{executableCells.length ? `${executableCells.length} cell${executableCells.length === 1 ? '' : 's'} · ${cellStatusLabel(executionSummaryStatus)}` : 'Set up a language or add a computation'}</small></span>
+                  <button className="subtle" onClick={() => setExecutionWorkspaceOpen((open) => !open)} aria-expanded={executionWorkspaceOpen}>{executionWorkspaceOpen ? 'Close panel' : 'Open panel'}</button>
                 </div>
                 <div className="execution-workspace-details" hidden={!executionWorkspaceOpen}>
                 <div className="structured-execution-bar">
-                  <span><small>Update figures, tables, and values from their saved computations.</small></span>
+                  <span><small>Languages, environments, setup, and project-only computations.</small></span>
+                  <button className="subtle" onClick={() => openInsertBlock('setup-cell')} disabled={!canEditManuscript}><Icon name="plus" size={12} /> Add setup</button>
+                  <button className="subtle" onClick={() => openInsertBlock('values-cell')} disabled={!canEditManuscript}><Icon name="plus" size={12} /> Add values</button>
                   {[...new Set(executableCells.map((cell) => cell.language))].map((language) => (
                     <button className="subtle" key={language} onClick={() => void requestExecution({ kind: 'language', language })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && executableCells.filter((cell) => cell.language === language).some((cell) => !executionEnvironmentAvailable(cell)))}>
                       <Icon name="play" size={12} /> Run {runtimeName(language)}
@@ -4343,39 +4419,15 @@ function App() {
                 </div>
                 {!desktopSession && <p className="execution-browser-note">Execution controls are disabled in the browser. Open this manuscript as a desktop project to run local code.</p>}
                 <div className="execution-cell-list">
-                  {executableCells.map((cell, index) => {
-                    const state = executionCellStates.find((candidate) => candidate.cellId === cell.id)
-                    const view = executionViews.find((candidate) => candidate.cellId === cell.id)
-                    const status = executionActiveCell === cell.id ? 'running' : state?.status ?? 'never-run'
-                    const result = executionResults[cell.id]
-                    return (
-                      <div className={`execution-cell-row ${view?.tone === 'warning' ? 'warning' : ''}`} key={cell.id}>
-                        <div className="execution-cell-summary">
-                          <span className="execution-language">{runtimeName(cell.language)}</span>
-                          <strong>{cell.id}</strong>
-                          <em className={`cell-status ${status}`}><i />{cellStatusLabel(status)}</em>
-                          <small>{state?.reason ?? view?.message ?? 'Ready for an explicit run.'}</small>
-                        </div>
-                        <div className="execution-cell-actions">
-                          {index > 0 && <button className="subtle" onClick={() => void requestExecution({ kind: 'above', cellId: cell.id })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && executableCells.slice(0, index).some((candidate) => !executionEnvironmentAvailable(candidate)))}>Run above</button>}
-                          {executionActiveCell === cell.id
-                            ? <button onClick={() => void interruptExecution(cell.language)}><Icon name="close" size={13} /> Interrupt</button>
-                            : <button className="run-button" onClick={() => void requestExecution({ kind: 'cell', cellId: cell.id })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && view && !view.executionEnabled)}><Icon name="play" size={13} /> Run</button>}
-                        </div>
-                        {view?.provenance.length ? <p className="execution-cell-provenance">{view.provenance.join(' · ')}</p> : null}
-                        {result && (
-                          <div className="structured-live-result" aria-label={`Latest execution result for ${cell.id}`}>
-                            <ExecutionOutputView result={result} artifactUrl={(path) => desktopSession ? projectArtifactUrl(desktopSession.root, path) : path} />
-                          </div>
-                        )}
-                      </div>
-                    )
-                  })}
+                  {panelManagedCells.length > 0 && <div className="execution-cell-group"><strong>Project code</strong><small>Setup and published-value computations run with the document but are not displayed in the manuscript.</small></div>}
+                  {panelManagedCells.map(renderExecutionCellRow)}
+                  {manuscriptCodeCells.length > 0 && <div className="execution-cell-group"><strong>Manuscript code blocks</strong><small>These code blocks remain visible and editable in the document.</small></div>}
+                  {manuscriptCodeCells.map(renderExecutionCellRow)}
+                  {executableCells.length === 0 && <div className="execution-cell-empty"><strong>No computations yet</strong><small>Add a language setup or a published-values computation here. Figure and table code blocks can be inserted directly in the manuscript.</small></div>}
                 </div>
                 {cleanRunCertification && <p className="clean-run-certification"><Icon name="check" size={13} /> Clean run certified · {cleanRunCertification.resultHashes.length} outputs from one ordered run</p>}
                 </div>
               </section>
-            )}
             {structuredReviewProjection && (
               <div className={`structured-review-preview ${structuredReviewProjection.ok ? '' : 'blocked'}`} role={structuredReviewProjection.ok ? 'status' : 'alert'}>
                 <Icon name={structuredReviewProjection.ok ? 'eye' : 'branch'} size={15} />
@@ -4652,14 +4704,41 @@ function App() {
               <button className="icon-button subtle" onClick={() => setRightPanelOpen(false)} aria-label="Close review panel"><Icon name="close" /></button>
             </div>
 
+            <div className="tracked-changes-display" role="group" aria-label="Display tracked changes">
+              <div className="tracked-changes-display-heading">
+                <Icon name="eye" size={14} />
+                <span><strong>Display changes</strong><small>{markupView === 'all' ? 'Additions and deletions appear in the manuscript' : markupView === 'simple' ? 'Text hints link to details in this panel' : 'Choose a markup display to leave the clean preview'}</small></span>
+              </div>
+              <div className="tracked-changes-display-options">
+                <button
+                  type="button"
+                  className={markupView === 'simple' ? 'active' : ''}
+                  aria-pressed={markupView === 'simple'}
+                  onClick={() => setTrackedChangesDisplay('simple')}
+                >
+                  <Icon name="panelRight" size={14} />
+                  <span><strong>In panel</strong><small>Hints in text</small></span>
+                </button>
+                <button
+                  type="button"
+                  className={markupView === 'all' ? 'active' : ''}
+                  aria-pressed={markupView === 'all'}
+                  onClick={() => setTrackedChangesDisplay('all')}
+                >
+                  <Icon name="document" size={14} />
+                  <span><strong>In text</strong><small>Additions / deletions</small></span>
+                </button>
+              </div>
+            </div>
+
             <details className="review-options">
-              <summary><span>Review options</span><small>{markupView === 'simple' ? 'Simple markup' : markupView === 'all' ? 'All markup' : markupView === 'original' ? 'Original' : 'Final preview'} · {reviewAuthorFilter === 'all' ? 'All authors' : reviewDocument.authors.find((author) => author.id === reviewAuthorFilter)?.name ?? 'Filtered'}</small></summary>
+              <summary><span>More options</span><small>{markupView === 'simple' ? 'Panel' : markupView === 'all' ? 'In text' : markupView === 'original' ? 'Original' : 'Final preview'} · {reviewAuthorFilter === 'all' ? 'All authors' : reviewDocument.authors.find((author) => author.id === reviewAuthorFilter)?.name ?? 'Filtered'}</small></summary>
               <div className="review-options-body">
             <div className="markup-view-control">
               <Icon name="eye" size={16} />
-              <select value={markupView} onChange={(event) => setMarkupView(event.target.value as MarkupView)} aria-label="Markup view">
-                <option value="simple">Simple Markup</option>
-                <option value="all">All Markup</option>
+              <select value={markupView} onChange={(event) => setMarkupView(event.target.value as MarkupView)} aria-label="Review display and preview">
+                <option value="simple">Hints + review panel</option>
+                <option value="all">Inline additions &amp; deletions</option>
                 <option value="original">Original</option>
                 <option value="final">Final preview</option>
               </select>
@@ -4674,7 +4753,7 @@ function App() {
               disabled={!canSuggestReview || !structuredMode}
             >
               <Icon name="spark" size={15} />
-              <span><strong>{canSuggestReview ? `Track changes ${suggestionMode ? 'on' : 'off'}` : collaborationRole === 'commenter' ? 'Comment-only' : 'Read-only'}</strong><small>{canSuggestReview ? (suggestionMode ? 'Insertions and deletions appear inline until accepted or rejected' : structuredMode ? 'Edits apply directly to the manuscript' : 'Open a portable manuscript to track changes') : collaborationRole === 'commenter' ? 'Add comments without changing the manuscript' : 'This role can inspect the manuscript and review history'}</small></span>
+              <span><strong>{canSuggestReview ? `Track changes ${suggestionMode ? 'on' : 'off'}` : collaborationRole === 'commenter' ? 'Comment-only' : 'Read-only'}</strong><small>{canSuggestReview ? (suggestionMode ? (markupView === 'all' ? 'Additions and deletions appear directly in the manuscript' : 'Text hints link to the full changes in this panel') : structuredMode ? 'Edits apply directly to the manuscript' : 'Open a portable manuscript to track changes') : collaborationRole === 'commenter' ? 'Add comments without changing the manuscript' : 'This role can inspect the manuscript and review history'}</small></span>
               <span className="suggestion-mode-switch" aria-hidden="true"><i /></span>
             </button>
 
@@ -5372,7 +5451,10 @@ function App() {
             onRestart={async (language) => { await restartExecution(language) }}
             onPromoteSetup={(language, code) => {
               const inserted = runStructuredCommand((editor) => editor.insertSetupCell(language, code), 'Add setup cell')
-              if (inserted) setToast(`${runtimeName(language)} setup cell added from the terminal`)
+              if (inserted) {
+                setExecutionWorkspaceOpen(true)
+                setToast(`${runtimeName(language)} setup added to Code & computation from the terminal`)
+              }
             }}
             onClose={() => setKernelConsoleOpen(false)}
           />

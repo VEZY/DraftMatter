@@ -33,8 +33,9 @@ test.describe('DM-P4-05 markup filtering and navigation', () => {
     await page.goto('/')
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Review feedback' })
-    await review.getByText('Review options', { exact: true }).click()
-    await review.getByLabel('Markup view').selectOption('all')
+    await expect(review.getByRole('button', { name: /In panel/ })).toHaveAttribute('aria-pressed', 'true')
+    await review.getByRole('button', { name: /In text/ }).click()
+    await review.getByText('More options', { exact: true }).click()
   })
 
   test('keeps the manuscript marks, author filter, rail selection, and navigation aligned', async ({ page }) => {
@@ -49,10 +50,12 @@ test.describe('DM-P4-05 markup filtering and navigation', () => {
     await expect(manuscript.locator('.dm-review-proposal')).toHaveText('revised alpha phrase')
     await expect(marks.first()).toHaveAttribute('data-review-anchor', 'dm-alpha')
 
-    await review.getByLabel('Markup view').selectOption('simple')
+    await review.getByRole('button', { name: /In panel/ }).click()
+    await expect(review.getByRole('button', { name: /In panel/ })).toHaveAttribute('aria-pressed', 'true')
     await expect(manuscript.locator('.dm-review-proposal')).toHaveCount(0)
     await expect(marks).toHaveCount(1)
-    await review.getByLabel('Markup view').selectOption('all')
+    await review.getByRole('button', { name: /In text/ }).click()
+    await expect(review.getByRole('button', { name: /In text/ })).toHaveAttribute('aria-pressed', 'true')
 
     await review.getByLabel('Review author').selectOption('dm-marcus')
     await expect(marks).toHaveCount(1)
@@ -74,8 +77,7 @@ test.describe('DM-P4-05 modeled review alternatives', () => {
     await page.goto('/')
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Review feedback' })
-    await review.getByText('Review options', { exact: true }).click()
-    await review.getByLabel('Markup view').selectOption('all')
+    await review.getByRole('button', { name: /In text/ }).click()
     const reviewedSentence = page.getByRole('article', { name: 'Editable manuscript' })
 
     await expect(reviewedSentence.locator('.dm-review-proposal')).toHaveText('reduced leaf area by 18%')

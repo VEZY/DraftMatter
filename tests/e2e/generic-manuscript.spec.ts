@@ -263,12 +263,12 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(commentMarker).toHaveAttribute('aria-pressed', 'true')
     await expect(manuscript.locator('.dm-review-thread')).toHaveClass(/dm-review-active/)
 
-    await reviewPanel.getByText('Review options', { exact: true }).click()
-    await reviewPanel.getByLabel('Markup view').selectOption('original')
+    await reviewPanel.getByText('More options', { exact: true }).click()
+    await reviewPanel.getByLabel('Review display and preview').selectOption('original')
     await expect(manuscript.getByText('Original preview')).toBeVisible()
     await expect(page.getByRole('textbox', { name: 'Rendered manuscript editor' })).toHaveAttribute('contenteditable', 'false')
     await expect(manuscript.locator('.dm-review-thread')).toHaveCount(0)
-    await reviewPanel.getByLabel('Markup view').selectOption('all')
+    await reviewPanel.getByLabel('Review display and preview').selectOption('all')
     await expect(page.getByRole('textbox', { name: 'Rendered manuscript editor' })).toHaveAttribute('contenteditable', 'true')
     await expect(manuscript.locator('.dm-review-thread')).toContainText('A uniquely selected review sentence.')
 
@@ -283,10 +283,10 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(reviewPanel.getByText('Accepted')).toBeVisible()
     await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('A carefully revised suggestion sentence.')
 
-    await reviewPanel.getByLabel('Markup view').selectOption('final')
+    await reviewPanel.getByLabel('Review display and preview').selectOption('final')
     await expect(manuscript.getByText('Final preview')).toBeVisible()
     await expect(manuscript.getByText('A carefully revised suggestion sentence.', { exact: true })).toBeVisible()
-    await reviewPanel.getByLabel('Markup view').selectOption('all')
+    await reviewPanel.getByLabel('Review display and preview').selectOption('all')
 
     await page.getByRole('complementary', { name: 'Manuscript outline' }).getByRole('button', { name: /Add section/ }).click()
     const insertion = page.getByRole('dialog', { name: 'Add section' })

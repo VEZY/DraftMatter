@@ -56,8 +56,8 @@ test.describe('DM-P4-04 atomic local rebase', () => {
     expect(portable).toContain('The []{')
     expect(portable).toContain('leaf expansion slowed')
 
-    await review.getByText('Review options', { exact: true }).click()
-    await review.getByLabel('Markup view').selectOption('final')
+    await review.getByText('More options', { exact: true }).click()
+    await review.getByLabel('Review display and preview').selectOption('final')
     await expect(page.getByRole('article', { name: 'Editable manuscript' })).toContainText('The leaf area declined by 16%.')
   })
 })

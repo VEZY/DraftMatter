@@ -2,6 +2,7 @@
 
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
+import { EditorView as CodeMirrorView } from '@codemirror/view'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { desktopHost, type JuliaEnvironment, type ProjectSnapshot } from './desktopHost'
@@ -120,6 +121,8 @@ describe('shared Jupyter execution workspace', () => {
   })
 
   it('runs setup before the first ordinary cell in the exact same selected kernel', async () => {
+    expect(container.querySelector('.structured-code-cell[data-dm-id="py-setup"]')).toBeNull()
+    expect(container.querySelector('.structured-panel-code-placeholder[data-dm-id="py-setup"]')).not.toBeNull()
     const pythonCell = container.querySelector<HTMLElement>('.structured-code-cell[data-dm-id="py-value"]')!
     await act(async () => pythonCell.querySelector<HTMLButtonElement>('.structured-code-run')!.click())
     await settle()
@@ -136,8 +139,10 @@ describe('shared Jupyter execution workspace', () => {
     const published = container.querySelector<HTMLElement>('[data-dm-node="published-value"][data-name="a"]')!
     expect(published.dataset.status).toBe('missing')
 
-    const juliaCell = container.querySelector<HTMLElement>('.structured-code-cell[data-dm-id="jl-report"]')!
-    await act(async () => juliaCell.querySelector<HTMLButtonElement>('.structured-code-run')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('.execution-summary-bar button')!.click())
+    const juliaCell = container.querySelector<HTMLElement>('.execution-cell-row[data-cell-id="jl-report"]')!
+    expect(container.querySelector('.structured-code-cell[data-dm-id="jl-report"]')).toBeNull()
+    await act(async () => juliaCell.querySelector<HTMLButtonElement>('.run-button')!.click())
     await settle()
 
     const resolved = container.querySelector<HTMLElement>('[data-dm-node="published-value"][data-name="a"]')!
@@ -145,6 +150,21 @@ describe('shared Jupyter execution workspace', () => {
     expect(resolved.textContent).toBe('42')
     await settle(950)
     expect(vi.mocked(desktopHost.saveDocument).mock.calls.map(([request]) => request.content).join('\n')).toContain('dm-published-value')
+  })
+
+  it('edits setup and published-value source from the code panel', async () => {
+    await act(async () => container.querySelector<HTMLButtonElement>('.execution-summary-bar button')!.click())
+    const setupRow = container.querySelector<HTMLElement>('.execution-cell-row[data-cell-id="py-setup"]')!
+    const codeView = CodeMirrorView.findFromDOM(setupRow.querySelector<HTMLElement>('.cm-editor')!)!
+    await act(async () => codeView.dispatch({ changes: { from: codeView.state.doc.length, insert: '\nthreshold = 2' } }))
+    expect(setupRow.textContent).toContain('Unsaved source changes')
+
+    await act(async () => [...setupRow.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Save source')!.click())
+    await settle(950)
+
+    expect(vi.mocked(desktopHost.saveDocument).mock.calls.map(([request]) => request.content).join('\n')).toContain('threshold = 2')
+    expect(setupRow.textContent).toContain('Saved in the project document')
+    expect(container.querySelector('.structured-code-cell[data-dm-id="py-setup"]')).toBeNull()
   })
 
   it('checks detected project languages automatically and restores remembered trust', async () => {
