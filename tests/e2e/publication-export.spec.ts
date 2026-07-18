@@ -3,6 +3,21 @@ import { expect, test } from '@playwright/test'
 
 const figure = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 220"><rect width="640" height="220" fill="#fff"/><g stroke="#e5ebe7"><path d="M45 35H610M45 80H610M45 125H610M45 170H610"/></g><polyline points="45,175 135,158 225,132 315,102 405,73 495,51 585,39" fill="none" stroke="#466f5c" stroke-width="5"/><polyline points="45,175 135,164 225,148 315,128 405,111 495,96 585,83" fill="none" stroke="#b9785c" stroke-width="5"/><g fill="#466f5c"><circle cx="45" cy="175" r="5"/><circle cx="315" cy="102" r="5"/><circle cx="585" cy="39" r="5"/></g><g fill="#b9785c"><circle cx="45" cy="175" r="5"/><circle cx="315" cy="128" r="5"/><circle cx="585" cy="83" r="5"/></g></svg>`).toString('base64')
 
+function storedZipEntry(archive: Buffer, expectedName: string) {
+  let cursor = 0
+  while (archive.readUInt32LE(cursor) === 0x04034b50) {
+    const size = archive.readUInt32LE(cursor + 18)
+    const nameLength = archive.readUInt16LE(cursor + 26)
+    const extraLength = archive.readUInt16LE(cursor + 28)
+    const nameStart = cursor + 30
+    const contentStart = nameStart + nameLength + extraLength
+    const name = archive.subarray(nameStart, nameStart + nameLength).toString('utf8')
+    if (name === expectedName) return archive.subarray(contentStart, contentStart + size)
+    cursor = contentStart + size
+  }
+  throw new Error(`Missing ZIP entry: ${expectedName}`)
+}
+
 const source = `---
 title: "Independent canopy synthesis"
 author:
@@ -208,5 +223,32 @@ test.describe('DM-P5-01/02 native publication exports', () => {
     expect(readableDocx).toContain('word/document.xml')
     expect(readableDocx).not.toContain('Drought acclimation reshapes canopy development')
     expect(readableDocx).not.toMatch(/\.dm-anchor|\.draftmatter-reviews|<w:(?:ins|del)\b/)
+
+    await page.getByRole('button', { name: 'Export' }).click()
+    await page.getByRole('button', { name: /Journal submission/ }).click()
+    const submissionDialog = page.getByRole('dialog', { name: 'Prepare journal submission' })
+    await submissionDialog.getByLabel('Target journal').fill('Journal of Field Synthesis')
+    await submissionDialog.getByLabel('Corresponding email').fill('ada@example.org')
+    await submissionDialog.getByLabel('Double-anonymous copy').check()
+    const packageDownloadEvent = page.waitForEvent('download')
+    await submissionDialog.getByRole('button', { name: 'Prepare ZIP package' }).click()
+    const packageSaveDialog = page.getByRole('dialog', { name: 'Save journal submission package' })
+    await expect(packageSaveDialog.getByLabel('File name')).toHaveValue('canopy-drought-submission.zip')
+    await packageSaveDialog.getByRole('button', { name: 'Choose location…' }).click()
+    const packageDownload = await packageDownloadEvent
+    const packagePath = await packageDownload.path()
+    expect(packagePath).not.toBeNull()
+    const archive = await readFile(packagePath!)
+    const packageSource = storedZipEntry(archive, 'source/manuscript.qmd').toString('utf8')
+    const packageDocx = storedZipEntry(archive, 'manuscript.docx').toString('utf8')
+    const packageSummary = storedZipEntry(archive, 'submission-summary.html').toString('utf8')
+
+    expect(packageDownload.suggestedFilename()).toBe('canopy-drought-submission.zip')
+    expect(storedZipEntry(archive, 'figures/Figure1.svg')).toEqual(Buffer.from(figure, 'base64'))
+    expect(packageSource).not.toContain('author:')
+    expect(packageSource).not.toContain('must remain inert')
+    expect(packageDocx).not.toContain('Ada Researcher')
+    expect(packageSummary).toContain('Ada Researcher')
+    expect(packageSummary).toContain('Journal of Field Synthesis')
   })
 })

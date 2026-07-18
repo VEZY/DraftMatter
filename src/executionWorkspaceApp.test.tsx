@@ -81,7 +81,7 @@ describe('shared Jupyter execution workspace', () => {
     vi.spyOn(desktopHost, 'executionTrustStatus').mockResolvedValue({ trusted: true, scope: 'session', warning: 'trusted' })
     vi.spyOn(desktopHost, 'trustProjectForSession').mockResolvedValue({ trusted: true, scope: 'session', warning: 'trusted' })
     vi.spyOn(desktopHost, 'listJuliaPackages').mockResolvedValue({
-      packages: [], projectFile: true, manifestFile: true,
+      packages: [{ name: 'IJulia', version: '1.34.4', kind: 'package' }], projectFile: true, manifestFile: true,
     })
     vi.spyOn(desktopHost, 'addJuliaPackage').mockResolvedValue({
       packages: [{ name: 'DataFrames', version: '1.7.0', kind: 'package' }], projectFile: true, manifestFile: true,
@@ -186,6 +186,47 @@ describe('shared Jupyter execution workspace', () => {
     expect(container.querySelector('[aria-labelledby="execution-trust-title"]')).toBeNull()
   })
 
+  it('repairs a Julia project when its local IJulia integration is missing', async () => {
+    await act(async () => appRoot.unmount())
+    vi.mocked(desktopHost.listJuliaPackages).mockReset().mockResolvedValue({
+      packages: [{ name: 'CairoMakie', version: '0.15.6', kind: 'package' }],
+      projectFile: true,
+      manifestFile: true,
+    })
+    vi.mocked(desktopHost.setupKernelIntegration).mockReset().mockResolvedValue({
+      language: 'julia',
+      kernelName: 'julia-draftmatter-fixture',
+      inventory: {
+        health: 'available',
+        searchedLocations: ['/kernels'],
+        kernels: [{
+          name: 'julia-draftmatter-fixture',
+          displayName: 'Julia · DraftMatter',
+          language: 'julia',
+          health: 'available',
+          resourceDir: '/kernels/julia-draftmatter',
+          executable: '/usr/bin/julia',
+        }],
+      },
+    })
+    appRoot = createRoot(container)
+    await act(async () => appRoot.render(<App />))
+    await settle(520)
+
+    expect(desktopHost.setupKernelIntegration).toHaveBeenCalledWith(
+      rootPath,
+      'julia',
+      expect.any(String),
+      expect.any(String),
+    )
+    expect(desktopHost.setExecutionPreferences).toHaveBeenCalledWith(
+      rootPath,
+      expect.objectContaining({
+        julia: expect.objectContaining({ kernel: 'julia-draftmatter-fixture' }),
+      }),
+    )
+  })
+
   it('moves Julia package work into a project tab in the shared terminal', async () => {
     await settle(420)
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
@@ -236,6 +277,40 @@ describe('shared Jupyter execution workspace', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close kernel terminal"]')!.click())
     expect(container.querySelector('.kernel-console-toggle')?.textContent).toContain('TerminalReady')
     expect(container.querySelector('.kernel-console-toggle')?.getAttribute('data-status')).toBe('succeeded')
+  })
+
+  it('opens failed Julia manuscript cells in the terminal with their traceback', async () => {
+    vi.mocked(desktopHost.executeKernel).mockImplementationOnce(async (request) => ({
+      status: 'error',
+      messages: [{
+        kind: 'error', sequence: 0, name: 'MethodError',
+        message: 'no method matching Figure(::Nothing)',
+        traceback: ['Figure at Makie/src/figureplotting.jl:117', 'top-level scope at cell.jl:3'],
+      }],
+      artifacts: [], environment: { identity: request.kernelName, version: 'fixture' },
+      kernelRunId: `kernel-${request.cellId}`, executionCount: ++executionSequence, sessionGeneration: 1, executionSequence,
+    }))
+    const openTerminal = container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel terminal"]')
+    if (!openTerminal) await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close kernel terminal"]')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    const juliaCell = container.querySelector<HTMLElement>('.execution-cell-row[data-cell-id="jl-report"]')!
+    await act(async () => juliaCell.querySelector<HTMLButtonElement>('.run-button')!.click())
+    await settle()
+
+    const terminal = container.querySelector<HTMLElement>('[aria-label="Shared kernel terminal"]')!
+    expect(terminal).toBeTruthy()
+    expect(terminal.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Julia')
+    expect(terminal.textContent).toContain('jl-report failed')
+    expect(terminal.textContent).toContain('MethodError: no method matching Figure(::Nothing)')
+    expect(terminal.textContent).toContain('Figure at Makie/src/figureplotting.jl:117')
+    expect(container.querySelector('.toast')?.textContent).toContain('details opened in Terminal')
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close kernel terminal"]')!.click())
+    const reopen = container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel terminal"]')!
+    expect(reopen.textContent).toContain('Needs attention')
+    await act(async () => reopen.click())
+    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Julia')
+    expect(container.querySelector('[aria-label="Shared kernel terminal"]')?.textContent).toContain('Figure at Makie/src/figureplotting.jl:117')
   })
 
   it('clean-runs setup first, restarts every language kernel, and never materializes setup output', async () => {

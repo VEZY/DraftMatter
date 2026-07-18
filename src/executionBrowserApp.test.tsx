@@ -8,6 +8,10 @@ import { desktopHost } from './desktopHost'
 
 const source = `# Browser manuscript
 
+\`\`\`python {#browser-setup .execute role="setup"}
+from pathlib import Path
+\`\`\`
+
 \`\`\`python {#browser-cell .execute output="text"}
 print("local only")
 \`\`\`
@@ -42,13 +46,33 @@ describe('browser execution boundary', () => {
     container.remove()
   })
 
-  it('shows retained-source context but keeps every process control disabled', async () => {
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
-    expect(container.textContent).toContain('Execution controls are disabled in the browser')
-    const controls = [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
-      .filter((button) => /^(Run|Clean run|Julia packages|Environments)/.test(button.textContent?.trim() ?? ''))
-    expect(controls.length).toBeGreaterThan(0)
-    expect(controls.every((button) => button.disabled)).toBe(true)
+  it('immediately presents browser code as view-only and replaces process controls with desktop instructions', async () => {
+    const banner = container.querySelector<HTMLElement>('.browser-execution-banner')
+    expect(banner?.textContent).toContain('Execution is unavailable in this browser')
+    expect(banner?.textContent).toContain('Code is view-only here')
+    expect(container.querySelector('.kernel-console-toggle')).toBeNull()
+    expect(container.querySelector('[aria-label="Shared kernel terminal"]')).toBeNull()
+
+    const manuscriptCell = container.querySelector<HTMLElement>('.structured-code-cell')
+    expect(manuscriptCell?.dataset.executionMode).toBe('browser-view-only')
+    const cellRun = manuscriptCell?.querySelector<HTMLButtonElement>('.structured-code-run')
+    expect(cellRun?.textContent).toBe('Desktop required')
+    expect(cellRun?.disabled).toBe(true)
+    const sourceToggle = manuscriptCell?.querySelector<HTMLButtonElement>('.structured-code-toggle')
+    expect(sourceToggle?.textContent).toBe('View source')
+    await act(async () => sourceToggle!.click())
+    expect(manuscriptCell?.querySelector('.cm-content')?.getAttribute('contenteditable')).toBe('false')
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open browser view-only code and desktop instructions"]')!.click())
+    expect(container.querySelector('.code-workspace-toolbar')).toBeNull()
+    const boundary = container.querySelector<HTMLElement>('.execution-browser-boundary')
+    expect(boundary?.textContent).toContain('Execution is unavailable in this browser')
+    expect(boundary?.textContent).toContain('No terminal, package manager, or local language runtime is created here')
+    expect(boundary?.textContent).toContain('Open project folder…')
+    expect(boundary?.textContent).toContain('one-time trust and language setup')
+    expect(container.querySelector('.execution-cell-view-only')?.textContent).toContain('Browser view only')
+    expect(container.querySelector('.managed-code-actions span')?.textContent).toBe('Portable source · view only in browser')
+    expect(container.querySelector('.managed-code-editor .cm-content')?.getAttribute('contenteditable')).toBe('false')
     expect(desktopHost.executeKernel).not.toHaveBeenCalled()
   })
 })

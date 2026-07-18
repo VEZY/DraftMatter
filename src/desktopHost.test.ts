@@ -21,6 +21,7 @@ describe('desktop host adapter', () => {
     await host.createProject('/research', 'Canopy study', { name: 'Alice Martin', orcid: '0000-0002-1825-0097', affiliations: ['Plant Research Institute'] })
     await host.readDocument('/research/canopy', 'paper.qmd')
     await host.readBibliography('/research/canopy', 'references.bib')
+    await host.readProjectAssets('/research/canopy', ['figures/canopy.png'])
     await host.readCitationLock('/research/canopy')
     await host.readCitationCache('/research/canopy')
     await host.saveCitationLock({ root: '/research/canopy', content: '{"schemaVersion":1,"entries":[]}', expectedHash: null })
@@ -102,6 +103,7 @@ describe('desktop host adapter', () => {
       }],
       ['read_document', { root: '/research/canopy', path: 'paper.qmd' }],
       ['read_bibliography', { root: '/research/canopy', path: 'references.bib' }],
+      ['read_project_assets', { root: '/research/canopy', paths: ['figures/canopy.png'] }],
       ['read_citation_lock', { root: '/research/canopy' }],
       ['read_citation_cache', { root: '/research/canopy' }],
       ['save_citation_lock', { request: { root: '/research/canopy', content: '{"schemaVersion":1,"entries":[]}', expectedHash: null } }],

@@ -41,6 +41,9 @@ pub(crate) fn configure_project_environment(
 ) {
     if language == RuntimeLanguage::Julia {
         command.env("JULIA_PROJECT", root);
+        if let Ok(load_path) = env::join_paths([OsStr::new("@"), OsStr::new("@stdlib")]) {
+            command.env("JULIA_LOAD_PATH", load_path);
+        }
     }
 }
 
@@ -690,7 +693,7 @@ fn julia_setup_expression(root: &Path, display_name: &str) -> String {
         .replace('\\', "\\\\")
         .replace('"', "\\\"");
     format!(
-        "using Pkg; project = \"{}\"; Pkg.activate(project); project_file = Base.active_project(); isfile(project_file) || write(project_file, \"[deps]\\n\"); Pkg.instantiate(); Pkg.resolve(); Pkg.add(\"IJulia\"); using IJulia; IJulia.installkernel(\"{}\", \"--project=.\"; env=Dict(\"JULIA_PROJECT\" => project))",
+        "using Pkg; project = \"{}\"; Pkg.activate(project); project_file = Base.active_project(); isfile(project_file) || write(project_file, \"[deps]\\n\"); Pkg.instantiate(); Pkg.resolve(); Pkg.add(\"IJulia\"); using IJulia; IJulia.installkernel(\"{}\", \"--startup-file=no\", \"--project=.\"; env=Dict(\"JULIA_PROJECT\" => project))",
         project, display_name
     )
 }
@@ -856,13 +859,26 @@ mod tests {
             .get_envs()
             .find(|(name, _)| *name == OsStr::new("JULIA_PROJECT"))
             .and_then(|(_, value)| value);
+        let julia_load_path = julia
+            .get_envs()
+            .find(|(name, _)| *name == OsStr::new("JULIA_LOAD_PATH"))
+            .and_then(|(_, value)| value);
         assert_eq!(julia_project, Some(root.as_os_str()));
+        assert_eq!(
+            julia_load_path,
+            env::join_paths([OsStr::new("@"), OsStr::new("@stdlib")])
+                .ok()
+                .as_deref()
+        );
 
         let mut python = Command::new("python");
         configure_project_environment(&mut python, RuntimeLanguage::Python, root);
         assert!(!python
             .get_envs()
             .any(|(name, _)| name == OsStr::new("JULIA_PROJECT")));
+        assert!(!python
+            .get_envs()
+            .any(|(name, _)| name == OsStr::new("JULIA_LOAD_PATH")));
     }
 
     #[test]
@@ -931,6 +947,6 @@ mod tests {
         assert!(expression.contains("Pkg.activate(project)"));
         assert!(!expression.contains("Pkg.activate();"));
         assert!(expression.contains("Pkg.add(\"IJulia\")"));
-        assert!(expression.contains("installkernel(\"Julia · DraftMatter\", \"--project=.\""));
+        assert!(expression.contains("installkernel(\"Julia · DraftMatter\", \"--startup-file=no\", \"--project=.\""));
     }
 }

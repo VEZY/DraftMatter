@@ -5,6 +5,7 @@ import { resolveFootnotes, type ResolvedFootnote } from './footnotes'
 import { buildPublicationByline, parsePublicationMetadata, removeDuplicateLeadingTitle, type PublicationMetadata } from './publicationMetadata'
 import { parseTableCaptionLine, pipeTableAlignments, pipeTableCells, type TableAlignment } from './tableSyntax'
 import { projectComputationsForPublication } from './publicationComputation'
+import { createStoredZip } from './zipArchive'
 
 export interface DocxExportDiagnostic {
   code: 'figure-reference' | 'raw-source'
@@ -22,15 +23,6 @@ export interface DocxExportOptions {
   bibliography?: Array<{ id: string; value: string }>
 }
 
-interface ZipEntry {
-  name: string
-  bytes: Uint8Array
-  crc: number
-  offset: number
-}
-
-const encoder = new TextEncoder()
-
 function xml(value: string) {
   return value
     .replaceAll('&', '&amp;')
@@ -38,85 +30,6 @@ function xml(value: string) {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&apos;')
-}
-
-function crc32(bytes: Uint8Array) {
-  let crc = 0xffffffff
-  for (const byte of bytes) {
-    crc ^= byte
-    for (let bit = 0; bit < 8; bit += 1) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0)
-  }
-  return (crc ^ 0xffffffff) >>> 0
-}
-
-function write16(view: DataView, offset: number, value: number) {
-  view.setUint16(offset, value, true)
-}
-
-function write32(view: DataView, offset: number, value: number) {
-  view.setUint32(offset, value, true)
-}
-
-function storedZip(files: Array<{ name: string; content: string }>): Uint8Array<ArrayBuffer> {
-  const entries: ZipEntry[] = []
-  const localParts: Uint8Array[] = []
-  let offset = 0
-  for (const file of files) {
-    const name = encoder.encode(file.name)
-    const bytes = encoder.encode(file.content)
-    const header = new Uint8Array(30 + name.length)
-    const view = new DataView(header.buffer)
-    write32(view, 0, 0x04034b50)
-    write16(view, 4, 20)
-    write16(view, 6, 0x0800)
-    write16(view, 8, 0)
-    write32(view, 14, crc32(bytes))
-    write32(view, 18, bytes.length)
-    write32(view, 22, bytes.length)
-    write16(view, 26, name.length)
-    header.set(name, 30)
-    entries.push({ name: file.name, bytes, crc: crc32(bytes), offset })
-    localParts.push(header, bytes)
-    offset += header.length + bytes.length
-  }
-
-  const centralParts: Uint8Array[] = []
-  let centralSize = 0
-  for (const entry of entries) {
-    const name = encoder.encode(entry.name)
-    const header = new Uint8Array(46 + name.length)
-    const view = new DataView(header.buffer)
-    write32(view, 0, 0x02014b50)
-    write16(view, 4, 20)
-    write16(view, 6, 20)
-    write16(view, 8, 0x0800)
-    write16(view, 10, 0)
-    write32(view, 16, entry.crc)
-    write32(view, 20, entry.bytes.length)
-    write32(view, 24, entry.bytes.length)
-    write16(view, 28, name.length)
-    write32(view, 38, 0)
-    write32(view, 42, entry.offset)
-    header.set(name, 46)
-    centralParts.push(header)
-    centralSize += header.length
-  }
-
-  const end = new Uint8Array(22)
-  const endView = new DataView(end.buffer)
-  write32(endView, 0, 0x06054b50)
-  write16(endView, 8, entries.length)
-  write16(endView, 10, entries.length)
-  write32(endView, 12, centralSize)
-  write32(endView, 16, offset)
-  const total = offset + centralSize + end.length
-  const archive = new Uint8Array(total)
-  let cursor = 0
-  for (const part of [...localParts, ...centralParts, end]) {
-    archive.set(part, cursor)
-    cursor += part.length
-  }
-  return archive
 }
 
 function paragraph(value: string, style?: string) {
@@ -355,7 +268,7 @@ export function renderDocxExport(source: string, options: DocxExportOptions = {}
   ]
   if (hasFootnotes) entries.push({ name: 'word/footnotes.xml', content: footnotesXml(rendered.footnotes, options) })
   return {
-    bytes: storedZip(entries),
+    bytes: createStoredZip(entries.map((entry) => ({ name: entry.name, bytes: entry.content }))),
     diagnostics,
   }
 }

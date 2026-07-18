@@ -42,8 +42,10 @@ describe('accessibility baseline', () => {
   it('keeps project execution visibly unavailable at the browser capability boundary', async () => {
     await act(async () => root.render(<App />))
     expect(container.querySelector<HTMLButtonElement>('.structured-code-run')?.disabled).toBe(true)
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
-    expect(container.querySelector<HTMLButtonElement>('[aria-label="Execution environments and options"]')?.disabled).toBe(true)
+    expect(container.querySelector('.browser-execution-banner')?.textContent).toContain('Execution is unavailable in this browser')
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open browser view-only code and desktop instructions"]')!.click())
+    expect(container.querySelector('.code-workspace-toolbar')).toBeNull()
+    expect(container.querySelector('.execution-browser-boundary')?.textContent).toContain('No terminal, package manager, or local language runtime is created here')
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open command menu"]')!.click())
     const search = container.querySelector<HTMLInputElement>('[aria-label="Search commands"]')!
     const setValue = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set

@@ -63,6 +63,12 @@ export interface DocumentSnapshot {
   modifiedMs: number
 }
 
+export interface ProjectAsset {
+  path: string
+  bytes: number[]
+  mediaType: string
+}
+
 export interface SaveDocumentRequest {
   root: string
   path: string
@@ -455,6 +461,9 @@ export function createDesktopHost(
     },
     readBibliography(root: string, path: string) {
       return invokeBridge<DocumentSnapshot>('read_bibliography', { root, path })
+    },
+    readProjectAssets(root: string, paths: string[]) {
+      return invokeBridge<ProjectAsset[]>('read_project_assets', { root, paths })
     },
     readCitationLock(root: string) {
       return invokeBridge<DocumentSnapshot | null>('read_citation_lock', { root })

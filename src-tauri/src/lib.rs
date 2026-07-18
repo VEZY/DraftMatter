@@ -105,6 +105,8 @@ const MAX_CITATION_LOCK_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_ZOTERO_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_CROSSREF_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_GENERATED_EXPORT_BYTES: usize = 128 * 1024 * 1024;
+const MAX_PROJECT_ASSET_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_PROJECT_ASSETS_BYTES: u64 = 96 * 1024 * 1024;
 const ZOTERO_PORT: u16 = 23119;
 const CROSSREF_WORKS_URL: &str = "https://api.crossref.org/works";
 const DOI_RESOLVER_URL: &str = "https://doi.org";
@@ -257,6 +259,14 @@ pub struct DocumentSnapshot {
     pub content: String,
     pub hash: String,
     pub modified_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectAsset {
+    pub path: String,
+    pub bytes: Vec<u8>,
+    pub media_type: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -754,6 +764,79 @@ fn read_bibliography_impl(raw_root: &str, relative: &str) -> Result<DocumentSnap
     })
 }
 
+fn project_asset_media_type(path: &Path) -> Option<&'static str> {
+    match path
+        .extension()
+        .and_then(OsStr::to_str)
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "png" => Some("image/png"),
+        "jpg" | "jpeg" => Some("image/jpeg"),
+        "tif" | "tiff" => Some("image/tiff"),
+        "svg" => Some("image/svg+xml"),
+        "pdf" => Some("application/pdf"),
+        "eps" => Some("application/postscript"),
+        "webp" => Some("image/webp"),
+        _ => None,
+    }
+}
+
+fn read_project_assets_impl(
+    raw_root: &str,
+    paths: &[String],
+) -> Result<Vec<ProjectAsset>, HostError> {
+    if paths.len() > 128 {
+        return Err(HostError::UnsupportedFile(
+            "A submission package cannot include more than 128 project assets.".to_string(),
+        ));
+    }
+    let root = canonical_root(raw_root)?;
+    let mut total_bytes = 0_u64;
+    let mut assets = Vec::with_capacity(paths.len());
+    for relative in paths {
+        let safe = safe_relative(relative)?;
+        let requested = root.join(&safe);
+        let canonical = fs::canonicalize(&requested).map_err(|_| {
+            HostError::NotFound(format!("The project asset was not found: {relative}"))
+        })?;
+        if !canonical.starts_with(&root) {
+            return Err(HostError::InvalidPath(format!(
+                "Project assets cannot resolve outside the project folder: {relative}"
+            )));
+        }
+        let media_type = project_asset_media_type(&canonical).ok_or_else(|| {
+            HostError::UnsupportedFile(format!(
+                "Submission assets must be PNG, JPEG, TIFF, SVG, PDF, EPS, or WebP files: {relative}"
+            ))
+        })?;
+        let metadata = fs::metadata(&canonical)?;
+        if !metadata.is_file() {
+            return Err(HostError::UnsupportedFile(format!(
+                "The project asset is not a file: {relative}"
+            )));
+        }
+        if metadata.len() > MAX_PROJECT_ASSET_BYTES {
+            return Err(HostError::UnsupportedFile(format!(
+                "A project asset exceeds the 32 MB packaging limit: {relative}"
+            )));
+        }
+        total_bytes = total_bytes.saturating_add(metadata.len());
+        if total_bytes > MAX_PROJECT_ASSETS_BYTES {
+            return Err(HostError::UnsupportedFile(
+                "Project assets exceed the 96 MB packaging limit.".to_string(),
+            ));
+        }
+        assets.push(ProjectAsset {
+            path: slash_path(&safe),
+            bytes: fs::read(&canonical)?,
+            media_type: media_type.to_string(),
+        });
+    }
+    Ok(assets)
+}
+
 fn citation_lock_path(root: &Path) -> PathBuf {
     root.join(".draftmatter").join("citations.lock.json")
 }
@@ -1211,9 +1294,9 @@ fn generated_export_extension(name: &str) -> Result<&str, HostError> {
         ));
     }
     let extension = path.extension().and_then(OsStr::to_str).unwrap_or_default();
-    if !matches!(extension, "md" | "qmd" | "html" | "docx") {
+    if !matches!(extension, "md" | "qmd" | "html" | "docx" | "zip") {
         return Err(HostError::UnsupportedFile(
-            "Generated exports must use .md, .qmd, .html, or .docx.".to_string(),
+            "Generated exports must use .md, .qmd, .html, .docx, or .zip.".to_string(),
         ));
     }
     Ok(extension)
@@ -2542,6 +2625,11 @@ fn read_bibliography(root: String, path: String) -> Result<DocumentSnapshot, Hos
 }
 
 #[tauri::command]
+fn read_project_assets(root: String, paths: Vec<String>) -> Result<Vec<ProjectAsset>, HostError> {
+    read_project_assets_impl(&root, &paths)
+}
+
+#[tauri::command]
 fn read_citation_lock(root: String) -> Result<Option<DocumentSnapshot>, HostError> {
     read_citation_lock_impl(&root)
 }
@@ -2576,6 +2664,7 @@ async fn save_export_file(
         "md" | "qmd" => "Portable manuscript",
         "html" => "HTML document",
         "docx" => "Word document",
+        "zip" => "Journal submission package",
         _ => unreachable!(),
     };
     let selected = app
@@ -3039,6 +3128,7 @@ pub fn run() {
             create_project,
             read_document,
             read_bibliography,
+            read_project_assets,
             read_citation_lock,
             read_citation_cache,
             save_citation_lock,
@@ -3676,6 +3766,32 @@ mod tests {
     }
 
     #[test]
+    fn reads_only_supported_submission_assets_inside_the_project() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("project");
+        create_project_at_root(&root, "Test").unwrap();
+        fs::create_dir_all(root.join("figures")).unwrap();
+        fs::write(root.join("figures/canopy.png"), b"png-fixture").unwrap();
+        fs::write(root.join("figures/data.csv"), b"x,y\n1,2\n").unwrap();
+
+        let assets =
+            read_project_assets_impl(root.to_str().unwrap(), &["figures/canopy.png".to_string()])
+                .unwrap();
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].path, "figures/canopy.png");
+        assert_eq!(assets[0].bytes, b"png-fixture");
+        assert_eq!(assets[0].media_type, "image/png");
+        assert!(matches!(
+            read_project_assets_impl(root.to_str().unwrap(), &["../outside.png".to_string()]),
+            Err(HostError::InvalidPath(_))
+        ));
+        assert!(matches!(
+            read_project_assets_impl(root.to_str().unwrap(), &["figures/data.csv".to_string()]),
+            Err(HostError::UnsupportedFile(_))
+        ));
+    }
+
+    #[test]
     fn persists_only_valid_citation_locks_atomically_and_detects_conflicts() {
         let temporary = tempdir().unwrap();
         let root = temporary.path().join("project");
@@ -3939,6 +4055,10 @@ mod tests {
         assert_eq!(
             generated_export_extension("paper.final.qmd").unwrap(),
             "qmd"
+        );
+        assert_eq!(
+            generated_export_extension("paper-submission.zip").unwrap(),
+            "zip"
         );
         assert!(generated_export_extension("../paper.qmd").is_err());
         assert!(generated_export_extension("paper.pdf").is_err());

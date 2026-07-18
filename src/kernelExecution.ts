@@ -135,6 +135,12 @@ export interface KernelExecutionManager {
 
 type Clock = () => Date
 
+const terminalControlSequence = /\u001b\[[0-?]*[ -/]*[@-~]/g
+
+export function stripTerminalControlSequences(value: string) {
+  return value.replaceAll(terminalControlSequence, '')
+}
+
 function stableJson(value: unknown): string {
   if (value === null || typeof value !== 'object') return JSON.stringify(value)
   if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`
@@ -158,7 +164,7 @@ export function executionInputsFingerprint(inputs: ExecutionInput[]) {
 function sortedStreams(messages: KernelExecutionMessage[]) {
   return messages
     .filter((message): message is KernelStreamMessage => message.kind === 'stream')
-    .map(({ sequence, name, text }) => ({ sequence, name, text }))
+    .map(({ sequence, name, text }) => ({ sequence, name, text: stripTerminalControlSequences(text) }))
     .sort((left, right) => left.sequence - right.sequence)
 }
 
@@ -166,7 +172,11 @@ function kernelErrors(messages: KernelExecutionMessage[]) {
   return messages
     .filter((message): message is KernelErrorMessage => message.kind === 'error')
     .sort((left, right) => left.sequence - right.sequence)
-    .map(({ name, message, traceback = [] }) => ({ name, message, traceback }))
+    .map(({ name, message, traceback = [] }) => ({
+      name: stripTerminalControlSequences(name),
+      message: stripTerminalControlSequences(message),
+      traceback: traceback.map(stripTerminalControlSequences),
+    }))
 }
 
 function kernelMime(messages: KernelExecutionMessage[]) {

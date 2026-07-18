@@ -64,7 +64,7 @@ describe('rendered Phase 0 vertical slice', () => {
           "MCMarcus Chen15 Jul 2026 · 09:04 UTCOpendid not substantially alter leaf expansionlowered leaf expansion during the treatment period",
         ],
         "citation": "(Vezy et al., 2024)",
-        "codeCell": "pythonReproducible figure · fig-canopyNeeds runRun cellEdit source",
+        "codeCell": "pythonReproducible figure · fig-canopyBrowser view onlyDesktop requiredView source",
         "comment": "Can we quantify this increase in the main text? The estimate is already in the supplement.",
         "conflict": "2 overlapping alternativesCompare one at a time",
         "outputLabel": "Leaf area response over twelve weeks",

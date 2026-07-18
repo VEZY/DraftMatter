@@ -229,6 +229,7 @@ export interface StructuredManuscriptEditorProps {
   citationLabels?: Record<string, string>
   codeCellStatuses?: Record<string, ExecutionFreshnessStatus>
   codeCellActionsEnabled?: boolean
+  codeCellBrowserViewOnly?: boolean
   onRunCodeCell?: (cellId: string) => void
   onInterruptCodeCell?: (language: ExecutionLanguage) => void
   onFormatCodeCell?: (cellId: string, code: string) => Promise<string | undefined>
@@ -687,6 +688,7 @@ function codeCellNodeView(
   isEditable: () => boolean,
   presentationStatus: (cellId: string) => ExecutionFreshnessStatus | undefined,
   actionsEnabled: () => boolean,
+  browserViewOnly: () => boolean,
   onRun: (cellId: string) => void,
   onInterrupt: (language: ExecutionLanguage) => void,
   onFormat: (cellId: string, code: string) => Promise<string | undefined>,
@@ -861,18 +863,30 @@ function codeCellNodeView(
     label.textContent = `Reproducible ${output === 'values' ? 'values' : output} · ${cellId}`
     label.title = cellId
     const presentedStatus = presentationStatus(cellId) ?? String(node.attrs.status)
+    const viewOnly = browserViewOnly()
     dom.dataset.status = presentedStatus
-    status.textContent = codeCellStatusLabel(presentedStatus)
-    summary.textContent = `Source stays outside the manuscript · ${lines} ${lines === 1 ? 'line' : 'lines'}`
+    dom.dataset.executionMode = viewOnly ? 'browser-view-only' : 'desktop'
+    status.textContent = viewOnly ? 'Browser view only' : codeCellStatusLabel(presentedStatus)
+    summary.textContent = viewOnly
+      ? `Code is view-only in this browser · ${lines} ${lines === 1 ? 'line' : 'lines'} · Open the project in DraftMatter desktop to run it`
+      : `Source stays outside the manuscript · ${lines} ${lines === 1 ? 'line' : 'lines'}`
     summary.hidden = expanded
     editorHost.hidden = !expanded
     editorHost.id = `dm-code-${cellId.replace(/[^a-zA-Z0-9_.:-]+/g, '-')}`
-    toggle.textContent = expanded ? 'Close source' : 'Edit source'
-    toggle.setAttribute('aria-label', `${expanded ? 'Close' : 'Edit'} saved computation source for ${cellId}`)
+    toggle.textContent = expanded ? 'Close source' : viewOnly ? 'View source' : 'Edit source'
+    toggle.setAttribute('aria-label', `${expanded ? 'Close' : viewOnly ? 'View' : 'Edit'} saved computation source for ${cellId}`)
     toggle.setAttribute('aria-controls', editorHost.id)
     toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false')
-    run.disabled = !actionsEnabled() && presentedStatus !== 'running'
     updateCodeCellStatus(dom, presentedStatus)
+    if (viewOnly) {
+      status.textContent = 'Browser view only'
+      run.dataset.action = 'unavailable'
+      run.textContent = 'Desktop required'
+      run.setAttribute('aria-label', `Execution unavailable in browser for ${cellLanguage} code cell ${cellId}`)
+      run.disabled = true
+    } else {
+      run.disabled = !actionsEnabled() && presentedStatus !== 'running'
+    }
     if (editor.state.doc.toString() !== code) {
       syncingEditor = true
       editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: code } })
@@ -2568,6 +2582,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   citationLabels,
   codeCellStatuses,
   codeCellActionsEnabled = false,
+  codeCellBrowserViewOnly = false,
   onRunCodeCell,
   onInterruptCodeCell,
   onFormatCodeCell,
@@ -2605,6 +2620,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const resolveAssetUrlRef = useRef(resolveAssetUrl)
   const codeCellStatusesRef = useRef(codeCellStatuses)
   const codeCellActionsEnabledRef = useRef(codeCellActionsEnabled)
+  const codeCellBrowserViewOnlyRef = useRef(codeCellBrowserViewOnly)
   const onRunCodeCellRef = useRef(onRunCodeCell)
   const onInterruptCodeCellRef = useRef(onInterruptCodeCell)
   const onFormatCodeCellRef = useRef(onFormatCodeCell)
@@ -2632,6 +2648,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   resolveAssetUrlRef.current = resolveAssetUrl
   codeCellStatusesRef.current = codeCellStatuses
   codeCellActionsEnabledRef.current = codeCellActionsEnabled
+  codeCellBrowserViewOnlyRef.current = codeCellBrowserViewOnly
   onRunCodeCellRef.current = onRunCodeCell
   onInterruptCodeCellRef.current = onInterruptCodeCell
   onFormatCodeCellRef.current = onFormatCodeCell
@@ -3240,9 +3257,10 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
             node,
             editorView,
             getPos,
-            () => !readOnlyRef.current,
+            () => !readOnlyRef.current && !codeCellBrowserViewOnlyRef.current,
             (cellId) => codeCellStatusesRef.current?.[cellId],
             () => codeCellActionsEnabledRef.current,
+            () => codeCellBrowserViewOnlyRef.current,
             (cellId) => onRunCodeCellRef.current?.(cellId),
             (language) => onInterruptCodeCellRef.current?.(language),
             (cellId, code) => onFormatCodeCellRef.current?.(cellId, code) ?? Promise.resolve(undefined),
@@ -3430,9 +3448,10 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
 
   useEffect(() => {
     hostRef.current?.querySelectorAll<HTMLElement>('.structured-code-cell').forEach((cell) => {
+      cell.dispatchEvent(new Event('dm-code-read-only-change'))
       cell.dispatchEvent(new Event('dm-code-presentation-change'))
     })
-  }, [codeCellActionsEnabled])
+  }, [codeCellActionsEnabled, codeCellBrowserViewOnly])
 
   useEffect(() => {
     const view = viewRef.current

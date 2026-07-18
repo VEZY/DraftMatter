@@ -1,7 +1,6 @@
 // @vitest-environment jsdom
 
 import { act } from 'react'
-import { EditorView as CodeMirrorView } from '@codemirror/view'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
@@ -48,7 +47,7 @@ describe('generic portable manuscript app workflow', () => {
     vi.restoreAllMocks()
   })
 
-  it('opens, renders, edits, inspects, and locally reopens an arbitrary QMD source', async () => {
+  it('opens, renders, safely inspects, and locally reopens an arbitrary QMD source', async () => {
     await act(async () => root.render(<App />))
     const input = container.querySelector('input[aria-label="Open portable manuscript"]') as HTMLInputElement
     const file = { name: 'real-paper.qmd', size: source.length, text: vi.fn().mockResolvedValue(source) } as unknown as File
@@ -65,21 +64,12 @@ describe('generic portable manuscript app workflow', () => {
     expect(readRecoverySnapshots(localStorage)[0]?.source).toBe(source)
     expect(readRecoverySnapshots(localStorage)[0]?.source).not.toContain('Drought acclimation reshapes canopy development')
 
-    const code = container.querySelector('.structured-code-editor') as HTMLElement
-    const codeView = CodeMirrorView.findFromDOM(code)!
-    await act(async () => {
-      codeView.dispatch({ changes: { from: 0, to: codeView.state.doc.length, insert: 'println("after")' } })
-    })
-    await flush(450)
-
-    const saved = localStorage.getItem('draftmatter.structured-source.v1') ?? ''
-    expect(saved).toContain('println("after")')
-    expect(saved).toContain('::: {.future-extension}\nKeep this opaque block exactly.\n:::')
-    expect(localStorage.getItem('draftmatter.structured-mode.v1')).toBe('true')
+    expect(container.querySelector('.structured-code-editor .cm-content')?.getAttribute('contenteditable')).toBe('false')
+    expect(container.querySelector('.structured-code-cell')?.getAttribute('data-execution-mode')).toBe('browser-view-only')
 
     const sourceButton = [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('View source'))
     await act(async () => sourceButton?.click())
-    expect(container.querySelector('.source-drawer pre')?.textContent).toContain('println("after")')
+    expect(container.querySelector('.source-drawer pre')?.textContent).toContain('println("before")')
     await act(async () => (container.querySelector('[aria-label="Close source inspector"]') as HTMLButtonElement).click())
 
     await act(async () => (container.querySelector('.quick-cite') as HTMLButtonElement).click())
@@ -91,6 +81,9 @@ describe('generic portable manuscript app workflow', () => {
     await act(async () => confirmCitation?.click())
     await flush(450)
     expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('[@martin2023]')
+    expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('println("before")')
+    expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('::: {.future-extension}\nKeep this opaque block exactly.\n:::')
+    expect(localStorage.getItem('draftmatter.structured-mode.v1')).toBe('true')
     expect(container.querySelector('.citation-picker')).toBeNull()
 
     await act(async () => (container.querySelector('[aria-label="Edit citation @martin2023"]') as HTMLButtonElement).click())
@@ -113,7 +106,7 @@ describe('generic portable manuscript app workflow', () => {
     await flush()
 
     expect(container.querySelector('.structured-manuscript-editor h2')?.textContent).toBe('Background')
-    expect(container.querySelector('.structured-code-editor .cm-content')?.textContent).toBe('println("after")')
+    expect(container.querySelector('.structured-code-editor .cm-content')?.textContent).toBe('println("before")')
   })
 
   it('restores a structured manuscript even when only the authoritative source autosave remains', async () => {

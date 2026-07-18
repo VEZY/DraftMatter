@@ -21,12 +21,14 @@ function sourceLabel(cell: ExecutableCell) {
 export function ManagedCodeCellEditor({
   cell,
   readOnly,
+  readOnlyMessage,
   initiallyOpen = false,
   onSave,
   onFormat,
 }: {
   cell: ExecutableCell
   readOnly: boolean
+  readOnlyMessage?: string
   initiallyOpen?: boolean
   onSave: (cellId: string, source: string) => boolean
   onFormat?: (cellId: string, source: string) => Promise<string | undefined>
@@ -137,7 +139,7 @@ export function ManagedCodeCellEditor({
       <summary>{sourceLabel(cell)}<span>{cell.source.split(/\r\n|\r|\n/).length} lines</span></summary>
       <div className="managed-code-editor" ref={hostRef} aria-label={`${sourceLabel(cell)} for ${cell.id}`} />
       <div className="managed-code-actions">
-        <span>{dirty ? 'Unsaved source changes' : 'Saved in the project document'}</span>
+        <span>{readOnly && readOnlyMessage ? readOnlyMessage : dirty ? 'Unsaved source changes' : 'Saved in the project document'}</span>
         {cell.language === 'julia' && <button type="button" onClick={() => void format()} disabled={readOnly || formatting}>{formatting ? 'Formatting…' : 'Format'}</button>}
         <button type="button" onClick={() => {
           const view = viewRef.current

@@ -838,6 +838,7 @@ dependencies = [
  "tokio",
  "ureq",
  "uuid",
+ "zeromq",
 ]
 
 [[package]]

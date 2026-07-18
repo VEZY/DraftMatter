@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react'
 import type { ExecutionLanguage } from './executionCells'
-import type { NormalizedExecutionResult } from './kernelExecution'
+import { stripTerminalControlSequences, type NormalizedExecutionResult } from './kernelExecution'
 import { publishedValuesFromExecution, renderPublishedValue } from './publishedValues'
 
 export type KernelConsoleStatus = 'not-started' | 'starting' | 'ready' | 'busy' | 'interrupted' | 'failed'
@@ -15,6 +15,14 @@ export interface KernelProjectActivity {
   language?: ExecutionLanguage
 }
 
+export interface KernelCellFailure {
+  id: number
+  cellId: string
+  language: ExecutionLanguage
+  result?: NormalizedExecutionResult
+  message?: string
+}
+
 interface ConsoleEntry {
   id: number
   prompt: string
@@ -22,6 +30,7 @@ interface ConsoleEntry {
   setupCode?: string
   result?: NormalizedExecutionResult
   error?: string
+  sourceCellId?: string
 }
 
 export type JuliaTerminalMode = 'julia' | 'pkg' | 'shell' | 'help'
@@ -30,11 +39,7 @@ const languageLabel: Record<ExecutionLanguage, string> = { python: 'Python', r: 
 const languagePrompt: Record<ExecutionLanguage, string> = { python: '>>>', r: '>', julia: 'julia>' }
 
 const juliaModePrefix: Record<string, JuliaTerminalMode> = { ']': 'pkg', ';': 'shell', '?': 'help' }
-const ansiControlSequence = /\u001b\[[0-?]*[ -/]*[@-~]/g
-
-export function stripTerminalControlSequences(value: string) {
-  return value.replaceAll(ansiControlSequence, '')
-}
+export { stripTerminalControlSequences } from './kernelExecution'
 
 function juliaStringLiteral(value: string) {
   return `"${value
@@ -82,6 +87,7 @@ export function KernelConsole({
   statuses,
   restartEpochs,
   projectActivity,
+  cellFailure,
   onExecute,
   onInterrupt,
   onRestart,
@@ -97,6 +103,7 @@ export function KernelConsole({
   statuses: KernelConsoleStatuses
   restartEpochs: KernelConsoleRestartEpochs
   projectActivity?: KernelProjectActivity
+  cellFailure?: KernelCellFailure
   onExecute: (language: ExecutionLanguage, code: string) => Promise<NormalizedExecutionResult>
   onInterrupt: (language: ExecutionLanguage) => Promise<void>
   onRestart: (language: ExecutionLanguage) => Promise<void>
@@ -137,6 +144,25 @@ export function KernelConsole({
   }, [projectActivity?.id])
 
   useEffect(() => {
+    if (!cellFailure) return
+    const id = ++counter.current
+    setEntries((current) => ({
+      ...current,
+      [cellFailure.language]: [...current[cellFailure.language], {
+        id,
+        prompt: 'cell',
+        code: cellFailure.cellId,
+        result: cellFailure.result,
+        error: cellFailure.result ? undefined : cellFailure.message,
+        sourceCellId: cellFailure.cellId,
+      }],
+    }))
+    setActive(cellFailure.language)
+    setActiveView(cellFailure.language)
+    setHistoryIndex(undefined)
+  }, [cellFailure?.id])
+
+  useEffect(() => {
     if (typeof outputRef.current?.scrollTo === 'function') outputRef.current.scrollTo({ top: outputRef.current.scrollHeight })
   }, [entries, active])
 
@@ -169,7 +195,7 @@ export function KernelConsole({
       const streams = entry.result?.streams.map((stream) => stripTerminalControlSequences(stream.text)).join('') ?? ''
       const mime = entry.result ? textualMime(entry.result).join('\n') : ''
       const errors = entry.result?.errors.map((error) => stripTerminalControlSequences(`${error.name}: ${error.message}`)).join('\n') ?? stripTerminalControlSequences(entry.error ?? '')
-      return [`${entry.prompt} ${entry.code}`, streams, mime, errors].filter(Boolean).join('\n')
+      return [entry.sourceCellId ? `[cell ${entry.sourceCellId} failed]` : `${entry.prompt} ${entry.code}`, streams, mime, errors].filter(Boolean).join('\n')
     }).join('\n\n')
     if (text && globalThis.navigator?.clipboard) {
       try {
@@ -266,7 +292,7 @@ export function KernelConsole({
       {currentEntries.map((entry) => {
         const published = entry.result ? publishedValuesFromExecution(entry.result).records : []
         return <div className="kernel-console-entry" key={entry.id}>
-          <pre className="kernel-console-input"><span>{entry.prompt}</span>{entry.code}</pre>
+          <pre className={`kernel-console-input ${entry.sourceCellId ? 'document-cell-failure' : ''}`}><span>{entry.prompt}</span>{entry.sourceCellId ? `${entry.sourceCellId} failed` : entry.code}</pre>
           {entry.result?.streams.map((stream) => <pre className={`kernel-console-stream ${stream.name}`} key={`${entry.id}-${stream.sequence}`}>{stripTerminalControlSequences(stream.text)}</pre>)}
           {entry.result && textualMime(entry.result).map((value, index) => <pre className="kernel-console-result" key={`${entry.id}-mime-${index}`}>{value}</pre>)}
           {published.map((record) => <div className="kernel-console-published" key={record.name}><span>{`{{${record.name}}}`}</span><strong>{renderPublishedValue(record)}</strong><small>session preview only</small></div>)}

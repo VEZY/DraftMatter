@@ -126,6 +126,42 @@ describe('KernelConsole', () => {
     await act(async () => root.unmount())
   })
 
+  it('prints a failed document cell and its Julia traceback in the Julia terminal tab', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    const failure: NormalizedExecutionResult = {
+      ...result,
+      cellId: 'makie-figure',
+      language: 'julia',
+      status: 'failed',
+      streams: [{ sequence: 0, name: 'stderr', text: 'Makie backend stopped\n' }],
+      errors: [{ name: 'MethodError', message: 'no method matching plot(::Nothing)', traceback: ['plot at figure.jl:12', 'top-level scope at cell.jl:4'] }],
+    }
+    await act(async () => {
+      root.render(<KernelConsole
+        languages={['python', 'julia']}
+        statuses={{ ...statuses, julia: 'failed' }}
+        restartEpochs={restartEpochs}
+        cellFailure={{ id: 1, cellId: failure.cellId, language: 'julia', result: failure }}
+        onExecute={async () => result}
+        onInterrupt={vi.fn()}
+        onRestart={vi.fn()}
+        onStatusChange={vi.fn()}
+        onDirtyChange={vi.fn()}
+        onPromoteSetup={vi.fn()}
+        onClose={vi.fn()}
+      />)
+    })
+
+    expect(host.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Julia')
+    expect(host.textContent).toContain('makie-figure failed')
+    expect(host.textContent).toContain('Makie backend stopped')
+    expect(host.textContent).toContain('MethodError: no method matching plot(::Nothing)')
+    expect(host.textContent).toContain('plot at figure.jl:12')
+    await act(async () => root.unmount())
+  })
+
   it('promotes the most recent command to a setup cell', async () => {
     const host = document.createElement('div')
     document.body.append(host)
