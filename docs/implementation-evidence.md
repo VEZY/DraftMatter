@@ -173,14 +173,15 @@ also covered here.
 
 DM-P7 was added on 2026-07-18 after the MVP evidence was reconciled with
 hands-on product review. It is the active implementation milestone. DM-P7-01
-and DM-P7-02 are complete. The remaining unified inspector, reference-integrity,
-and real-manuscript dogfood requirements remain open in
+through DM-P7-03 are complete. The remaining reference-integrity and
+real-manuscript dogfood requirements remain open in
 the canonical register.
 
 | Task | Automated or reproducible evidence | Implementation commit |
 | --- | --- | --- |
 | DM-P7-01 | `src/semanticObjects.test.ts`, `src/StructuredManuscriptEditor.test.tsx`, `src/outputMaterializer.test.ts`, `src/numberedObjects.test.ts`, and table/serializer/export regressions cover friendly creation, deterministic duplicate suffixes, section/object numbering, rename compatibility, reorder, reopen, captionless table identities, legacy machine-label preservation, and quiet UUID-free normal controls. `npm run check` and 9 focused files / 88 tests passed. The full run passed 621 non-network tests; all 3 loopback collaboration tests then passed in an isolated permitted rerun (125 files / 624 tests in aggregate). | `6b489fd` |
 | DM-P7-02 | `src/crossReferencePicker.test.ts`, `src/InsertBlockDialog.test.tsx`, and `src/StructuredManuscriptEditor.test.tsx` cover grouped current-number/caption choices, searching, Arrow-key focus transfer, insertion for figures/tables/equations/sections, retargeting, legacy-label concealment, and atomic labeling of older unlabeled targets. `npm run check`, 6 focused files / 66 tests, `npm run build`, and all 3 generic-manuscript Chromium tests passed. Wide and narrow rendered inspection verified non-overlapping geometry, visible focus, filtered selection, and a clean browser console. | `50f8f13` |
+| DM-P7-03 | `src/semanticObjectInspector.test.ts`, `src/StructuredManuscriptEditor.test.tsx`, and `src/cairoMakieOutput.test.tsx` cover a shared object-details model for sections, figures, tables, equations, and reproducible outputs; caption and accessible-description edits; portable labels and `.unnumbered`; duplicate prevention; secondary UUID-free computation provenance; cross-reference retargeting; and atomic source-cell reference updates. Native HTML, PDF print-projection, and DOCX tests verify matching captions, descriptions, labels, numbering choices, and hidden computation source. All 127 Vitest files / 635 tests passed with bounded concurrency, `npm run check` and `npm run build` passed, and all 3 generic-manuscript Chromium tests passed against refreshed visual baselines. Rendered inspection confirmed consistent hierarchy, keyboard focus, and unobstructed actions after moving the status bar out of the manuscript overlay plane. | `d3915b1` |
 
 ## Acceptance-criterion evidence
 
