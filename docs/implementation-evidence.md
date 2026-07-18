@@ -2,9 +2,10 @@
 
 This ledger consolidates the implementation and verification evidence for the
 task register in `draftmatter-app-design.md`. The canonical register and this
-ledger were reconciled on 2026-07-18: DM-P0 through DM-P6 and AC-L01 through
-AC-C06 and DM-P7-01 through DM-P7-05 are checked, while the DM-P7 alpha-authoring
-phase gate remains open.
+ledger were reconciled on 2026-07-18: DM-P0 through DM-P7, AC-L01 through
+AC-L17, and AC-C01 through AC-C06 are checked. Repository implementation gates
+are complete; installed-app field trials and external release/operations gates
+remain outside this ledger.
 The design document carries the product-level status and interaction decisions;
 this file remains the task-level source for tests, fixtures, and implementation
 commits.
@@ -172,9 +173,8 @@ also covered here.
 ### DM-P7 — Alpha authoring polish and semantic-object workflow
 
 DM-P7 was added on 2026-07-18 after the MVP evidence was reconciled with
-hands-on product review. It is the active implementation milestone. DM-P7-01
-through DM-P7-05 are complete. The alpha phase gate remains open in the
-canonical register.
+hands-on product review. DM-P7-01 through DM-P7-05 and the alpha authoring gate
+are complete in the canonical register.
 
 | Task | Automated or reproducible evidence | Implementation commit |
 | --- | --- | --- |
@@ -183,6 +183,7 @@ canonical register.
 | DM-P7-03 | `src/semanticObjectInspector.test.ts`, `src/StructuredManuscriptEditor.test.tsx`, and `src/cairoMakieOutput.test.tsx` cover a shared object-details model for sections, figures, tables, equations, and reproducible outputs; caption and accessible-description edits; portable labels and `.unnumbered`; duplicate prevention; secondary UUID-free computation provenance; cross-reference retargeting; and atomic source-cell reference updates. Native HTML, PDF print-projection, and DOCX tests verify matching captions, descriptions, labels, numbering choices, and hidden computation source. All 127 Vitest files / 635 tests passed with bounded concurrency, `npm run check` and `npm run build` passed, and all 3 generic-manuscript Chromium tests passed against refreshed visual baselines. Rendered inspection confirmed consistent hierarchy, keyboard focus, and unobstructed actions after moving the status bar out of the manuscript overlay plane. | `d3915b1` |
 | DM-P7-04 | `src/referenceIntegrity.test.ts` and `src/StructuredManuscriptEditor.test.tsx` cover valid, missing, duplicate, wrong-kind, and reproducible-orphan diagnoses; explicit non-linking failure states; atomic rename repair; external deletion; live numbering after block reorder; and keyboard-focus-preserving navigation from reference to object and back. Reference diagnostics feed the project checks. All 128 Vitest files / 641 tests passed with loopback collaboration enabled, `npm run check` and `npm run build` passed, and all 3 generic-manuscript Chromium tests passed against refreshed visual baselines. Rendered inspection verified the new reference-count controls do not collide with figure, table, or equation actions. | `9634582` |
 | DM-P7-05 | `src/fixtures/projects/alpha-article` stores a structured-author/citation/review project with Python, R, and Julia figure, table, and published-value cells. `src/phase7AlphaDogfood.test.ts` proves exact round-trip, nine retained outputs, clean HTML/DOCX, a named-child copy, real Git checkpoint, close, and byte-identical reopen. `tests/e2e/alpha-dogfood.spec.ts` proves quiet source, review decisions, the freshness safety gate and override, HTML/PDF publication, and reload in the rendered app. `docs/alpha-dogfood-matrix.md` documents the Linux x64, Windows x64, macOS ARM, and macOS Intel gate now named in desktop CI. The focused unit gate (3 tests), Chromium dogfood (1 test), and `npm run check` passed locally on Darwin arm64. The dogfood also added a regression preventing collapsed code source from leaking through drag-handle accessible labels. | `3ebc0fa` |
+| DM-P7-GATE | `src/phase7AlphaAuthoringGate.test.ts` accepts and resolves the stored article review, proves friendly non-machine labels, exact numbering/captions, six valid current-number references, unchanged retained outputs and values, deterministic serialize/reopen state, and matching clean HTML/DOCX semantics. `tests/e2e/alpha-dogfood.spec.ts` supplies the rendered workflow boundary. Final verification passed `npm run check`; 130 Vitest files / 645 tests; 32 Chromium tests; the collaboration/service/CLI/browser production build; release identity; real-process CLI projection; the 612-component compliance lock; and 75 native-host tests. Browser gate repairs in `4f7bf5b` replaced obsolete machine-label, color, shortcut, and pre-numbering assertions while retaining drag, keyboard, hover-control, citation-boundary, and visual checks. | `16b15d1`, `4f7bf5b` |
 
 ## Acceptance-criterion evidence
 

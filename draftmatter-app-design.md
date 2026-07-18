@@ -20,7 +20,7 @@ The recommended working name is **DraftMatter**: “draft” describes the autho
 
 The working licence decision is **MIT for the desktop application, reusable document/review libraries, CLI/export tooling, and public collaboration code**. The initial delivery assumption was a macOS-first local MVP, with Git and local track changes in the open-source product and a paid managed collaboration service as a later milestone. Cloud execution and lossless Word round-tripping remain outside the planned scope.
 
-As of 2026-07-18, the repository implements and certifies the local MVP in DM-P0 through DM-P5 and the repository-owned collaboration beta foundation in DM-P6. Windows, macOS, and Linux packaging paths are defined and tested in CI. The product is now in an **alpha refinement and real-manuscript dogfooding stage**, not an initial feature-spike stage. A public desktop release and operated paid service still depend on external signing, production infrastructure, security, privacy, support, and deployment gates that cannot be completed by repository code alone.
+As of 2026-07-18, the repository implements and certifies the local MVP in DM-P0 through DM-P5, the repository-owned collaboration beta foundation in DM-P6, and the alpha authoring workflow in DM-P7. Windows, macOS, and Linux packaging paths are defined and tested in CI. The product is now ready for **installed-app alpha field trials**, not another initial feature spike. A public desktop release and operated paid service still depend on external signing, production infrastructure, security, privacy, support, and deployment gates that cannot be completed by repository code alone.
 
 ## Agent-executable implementation contract
 
@@ -35,7 +35,7 @@ Deliver the **open-source local MVP** described in this brief. This goal is now 
 3. the full verification suite passes from a clean checkout;
 4. a representative article-sized project can be opened, edited, reviewed, executed, checkpointed, exported, closed, and reopened without losing source, citations, outputs, or review state.
 
-DM-P6 is a separate post-MVP goal for paid online collaboration. Its reusable editor, synchronization, authorization, persistence, and deterministic-checkpoint foundations are implemented and tested in the repository. This does not claim that a production service is deployed or externally security-reviewed. DM-P7 is the next active product milestone.
+DM-P6 is a separate post-MVP goal for paid online collaboration. Its reusable editor, synchronization, authorization, persistence, and deterministic-checkpoint foundations are implemented and tested in the repository. This does not claim that a production service is deployed or externally security-reviewed. DM-P7 is also repository-complete; the next product step is installed-app alpha validation and release operations rather than another repository feature phase.
 
 ### Status and evidence rules
 
@@ -150,7 +150,7 @@ DM-P7 converts the technically complete MVP into a smoother article-writing prod
 - [x] **DM-P7-03 — Unified semantic-object inspector.** Edit caption, accessible description, portable label, and supported display options from one contextual inspector for manual and reproducible objects. Keep code provenance available but secondary. **Check:** edits round-trip through Markdown and retain identical HTML, PDF, and DOCX semantics.
 - [x] **DM-P7-04 — Reference integrity and navigation.** Diagnose missing, duplicate, wrong-kind, and orphaned targets; update visible numbering after drag-and-drop; and navigate between a reference and its object. **Check:** reorder/delete/rename fixtures never leave a silently misleading reference.
 - [x] **DM-P7-05 — Article-sized alpha dogfood.** Exercise project creation, structured authors, citations, Python/R/Julia figures and tables, published values, comments, suggestions, checkpoints, clean exports, close, and reopen on representative real manuscripts. Convert every discovered loss, blocked workflow, or recurring visual collision into a regression test. **Check:** a documented macOS/Windows/Linux dogfood matrix and stored representative projects pass without manual source repair.
-- [ ] **DM-P7-GATE — Alpha authoring gate.** A researcher can build and revise an article with friendly semantic objects and cross-references without seeing machine identifiers, then export and reopen it with matching numbering, captions, references, outputs, and review state. **Depends:** DM-P7-01 through DM-P7-05.
+- [x] **DM-P7-GATE — Alpha authoring gate.** A researcher can build and revise an article with friendly semantic objects and cross-references without seeing machine identifiers, then export and reopen it with matching numbering, captions, references, outputs, and review state. **Depends:** DM-P7-01 through DM-P7-05.
 
 ### Global definition of done for a checked task
 
@@ -185,6 +185,7 @@ Task-by-task evidence is maintained in [`docs/implementation-evidence.md`](docs/
 | DM-P7-03 | Unified manual/reproducible object details, portable numbering, secondary provenance, and matching clean-export semantics. | `d3915b1` | 2026-07-18 |
 | DM-P7-04 | Explicit missing/ambiguous/wrong-kind/orphan diagnostics, live renumbering, and bidirectional object-reference navigation. | `9634582` | 2026-07-18 |
 | DM-P7-05 | Stored cross-language article fixture, exact lifecycle/export/checkpoint gate, rendered browser dogfood, and named four-target desktop CI matrix. | `3ebc0fa` | 2026-07-18 |
+| DM-P7-GATE | Unified friendly-object/review/export/reopen certification plus the full unit, browser, build, CLI, compliance, and native-host verification set. | `16b15d1`, `4f7bf5b` | 2026-07-18 |
 | UX refinement batch | White Graphite visual system, structured author profiles, section/block drag-and-drop, focused code/review surfaces, and contextual comment markers. | `b719d11`, `a22554e`, `5920675`, `d483fd9` | 2026-07-18 |
 | Reproducible-output refinement batch | Child-folder project creation, shared-kernel console and published values, output-only export, CairoMakie image recovery, automatic numbering/captions, unified hover controls, and overlap repair. | `dc9e8d2`, `0c2c134`, `5f2b254`, `0d85304`, `15e4b63`, `597fc3c` | 2026-07-18 |
 
@@ -1174,7 +1175,7 @@ Git scope included across phases 1–5: repository discovery and safe status fir
 
 Exit test: two editors create overlapping alternatives while one is offline, reconnect without data loss, resolve a concurrent-decision conflict explicitly, preserve attribution and threads, create a deterministic local checkpoint, and commit it through Git. Authorization tests must prove that users cannot enumerate or access another workspace’s projects.
 
-### Phase 7 — alpha authoring and real-manuscript dogfooding (current)
+### Phase 7 — alpha authoring and real-manuscript dogfooding (complete)
 
 - Replace machine-facing figure/table/equation labels with readable stable identities.
 - Insert and retarget cross-references from a searchable semantic-object picker.

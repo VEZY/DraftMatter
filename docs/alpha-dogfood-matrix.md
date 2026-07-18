@@ -63,10 +63,15 @@ checkpoint, clean status, close, and byte-identical reopen.
 
 On 2026-07-18 the focused gate passed on Darwin arm64 with Node 24:
 
-- `npm run test:alpha`: 1 file / 3 tests;
+- `npm run test:alpha`: 2 files / 4 tests;
 - `npx playwright test tests/e2e/alpha-dogfood.spec.ts --reporter=line`:
   1 Chromium test;
 - `npm run check`: passed.
+
+The completed DM-P7 certification also passed 130 Vitest files / 645 tests,
+all 32 Chromium tests, the production browser/service/CLI build, release
+identity, real-process CLI projection, the 612-component compliance lock, and
+75 native-host tests on the same machine.
 
 The rendered dogfood found one real privacy/accessibility defect: a collapsed
 code block's drag-handle label repeated its source. The block label now names
