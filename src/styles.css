@@ -1,30 +1,37 @@
 :root {
   font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  color: #27312d;
-  background: #f4f5f3;
+  color: #242424;
+  background: #ffffff;
   font-synthesis: none;
   text-rendering: optimizeLegibility;
-  --ink: #27312d;
-  --muted: #626c67;
-  --faint: #626c67;
-  --line: #e1e5e1;
-  --line-strong: #d2d8d3;
+  --paper: #ffffff;
+  --graphite: #242424;
+  --lead: #606060;
+  --smudge: #f2f2ef;
+  --green-pen: #3f6b52;
+  --rust-pen: #a45740;
+  --ink: var(--graphite);
+  --muted: var(--lead);
+  --faint: #777772;
+  --line: #d2d2cd;
+  --line-strong: #adada8;
   --surface: #ffffff;
-  --surface-soft: #f7f8f6;
-  --surface-warm: #fafaf8;
-  --sage: #3f6859;
-  --sage-dark: #315347;
-  --sage-soft: #e7efeb;
-  --blue: #476f91;
-  --blue-soft: #e9f0f6;
-  --clay: #86533f;
-  --clay-soft: #f4ebe7;
-  --amber: #a16d28;
-  --amber-soft: #f8f0df;
-  --danger: #a45151;
-  --danger-soft: #faeded;
-  --shadow-sm: 0 1px 2px rgba(34, 44, 39, 0.04), 0 4px 14px rgba(34, 44, 39, 0.04);
-  --shadow-md: 0 12px 36px rgba(27, 36, 32, 0.13), 0 2px 8px rgba(27, 36, 32, 0.07);
+  --surface-soft: #ffffff;
+  --surface-warm: #ffffff;
+  --sage: var(--green-pen);
+  --sage-dark: #315541;
+  --sage-soft: var(--smudge);
+  --blue: var(--lead);
+  --blue-soft: var(--smudge);
+  --clay: var(--rust-pen);
+  --clay-soft: #fbf5f3;
+  --amber: var(--rust-pen);
+  --amber-soft: #fbf5f3;
+  --danger: var(--rust-pen);
+  --danger-soft: #fbf5f3;
+  --shadow-sm: 0 1px 2px rgba(36, 36, 36, 0.05), 0 3px 10px rgba(36, 36, 36, 0.06);
+  --shadow-md: 0 16px 44px rgba(36, 36, 36, 0.12), 0 3px 10px rgba(36, 36, 36, 0.07);
+  --pencil-echo: 1px 1px 0 rgba(36, 36, 36, 0.16);
 }
 
 * {
@@ -41,6 +48,7 @@ body,
 body {
   min-width: 1024px;
   overflow: hidden;
+  background: var(--paper);
 }
 
 button,
@@ -63,8 +71,9 @@ select:focus-visible,
 textarea:focus-visible,
 [contenteditable]:focus-visible,
 [tabindex]:not([tabindex="-1"]):focus-visible {
-  outline: 2px solid var(--sage) !important;
-  outline-offset: 2px;
+  outline: 1px solid var(--graphite) !important;
+  outline-offset: 3px;
+  box-shadow: 0 0 0 5px var(--smudge);
 }
 
 button:disabled {
@@ -74,7 +83,7 @@ button:disabled {
 
 .app-shell {
   height: 100%;
-  background: var(--surface-soft);
+  background: var(--paper);
 }
 
 .focus-mode-exit {
@@ -5641,5 +5650,398 @@ img.ProseMirror-separator { border: 0 !important; display: inline !important; he
     scroll-behavior: auto !important;
     transition-delay: 0ms !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* White Graphite --------------------------------------------------------- */
+
+::selection {
+  background: rgba(63, 107, 82, 0.14);
+  color: var(--graphite);
+}
+
+button,
+input,
+select,
+textarea {
+  border-color: var(--line-strong);
+}
+
+button {
+  transition: background-color 120ms ease, border-color 120ms ease, box-shadow 120ms ease, color 120ms ease, transform 120ms ease;
+}
+
+.topbar {
+  background: rgba(255, 255, 255, 0.98);
+  border-bottom-color: var(--line-strong);
+  height: 60px;
+  padding-left: 14px;
+}
+
+.workspace {
+  height: calc(100% - 60px);
+}
+
+.brand-block {
+  gap: 14px;
+}
+
+.wordmark {
+  color: var(--graphite);
+  font-size: 19px;
+  font-weight: 500;
+  gap: 9px;
+  letter-spacing: -0.45px;
+}
+
+.brand-mark {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  color: inherit;
+  height: 31px;
+  width: 31px;
+}
+
+.brand-mark img {
+  display: block;
+  height: 31px;
+  width: 31px;
+}
+
+.topbar-divider {
+  background: var(--line-strong);
+}
+
+.project-switcher {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  color: var(--graphite);
+}
+
+.project-switcher:hover,
+.project-switcher.active {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  box-shadow: var(--pencil-echo);
+  color: var(--graphite);
+}
+
+.document-state.saved,
+.document-state.saved svg,
+.document-state .saved,
+.bibliography-status:not(:has(.error)) {
+  color: var(--green-pen);
+}
+
+.primary-button,
+.run-button,
+.review-actions .accept,
+.citation-preview-footer > button,
+.collaboration-dialog footer button:not(.secondary),
+.collaboration-create-row button,
+.collaboration-checkpoint button,
+.collaboration-oidc button {
+  background-color: #373735;
+  background-image: repeating-linear-gradient(116deg, transparent 0 3px, rgba(255, 255, 255, 0.08) 3px 4px);
+  border: 1px solid var(--graphite);
+  border-radius: 8px;
+  box-shadow: var(--pencil-echo);
+  color: #ffffff;
+}
+
+.primary-button:hover,
+.run-button:hover,
+.review-actions .accept:hover,
+.citation-preview-footer > button:hover,
+.collaboration-dialog footer button:not(.secondary):hover,
+.collaboration-create-row button:hover,
+.collaboration-checkpoint button:hover,
+.collaboration-oidc button:hover {
+  background-color: var(--graphite);
+  background-image: repeating-linear-gradient(116deg, transparent 0 2px, rgba(255, 255, 255, 0.12) 2px 3px);
+  transform: translateY(-1px);
+}
+
+.icon-button,
+.review-toggle,
+.collaboration-toggle,
+.topbar-code-workspace,
+.focus-mode-exit,
+.publication-authors-trigger,
+.run-above-button,
+.environment-actions button,
+.manuscript-choice-list > button,
+.citation-actions button,
+.citation-record-links button {
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  box-shadow: var(--pencil-echo);
+  color: var(--graphite);
+}
+
+.icon-button:hover,
+.review-toggle:hover,
+.review-toggle.active,
+.collaboration-toggle:hover,
+.collaboration-toggle.connected,
+.topbar-code-workspace:hover,
+.topbar-code-workspace.active,
+.publication-authors-trigger:hover,
+.run-above-button:hover,
+.environment-actions button:hover,
+.citation-actions button:hover,
+.citation-record-links button:hover {
+  background: var(--smudge);
+  border-color: var(--graphite);
+  color: var(--graphite);
+}
+
+.format-toolbar .icon-button,
+.format-toolbar button,
+.panel-footer .icon-button,
+.review-panel-footer .icon-button,
+.app-rail .icon-button {
+  box-shadow: none;
+}
+
+.shortcut {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  color: var(--lead);
+}
+
+.count-badge,
+.rail-notice {
+  background: var(--rust-pen);
+}
+
+.avatar,
+.avatar-sage,
+.avatar-blue,
+.avatar-clay {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  color: var(--graphite);
+}
+
+.app-rail {
+  background: var(--paper);
+  border-right-color: var(--line-strong);
+  flex-basis: 56px;
+}
+
+.app-rail button {
+  border: 1px solid transparent;
+  border-radius: 9px;
+  color: var(--lead);
+}
+
+.app-rail button:hover,
+.app-rail button.active {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  box-shadow: var(--pencil-echo);
+  color: var(--graphite);
+}
+
+.app-rail button.active::before {
+  background: var(--graphite);
+  border-radius: 2px;
+  left: -11px;
+  width: 2px;
+}
+
+.app-rail button:hover::after {
+  background: var(--graphite);
+  border: 1px solid var(--graphite);
+  border-radius: 7px;
+  box-shadow: var(--pencil-echo);
+}
+
+.rail-notice {
+  border-color: var(--paper);
+}
+
+.left-panel,
+.review-panel,
+.app-rail,
+.panel-footer,
+.review-panel-footer,
+.git-history-panel {
+  background: var(--paper);
+}
+
+.left-panel {
+  border-right-color: var(--line-strong);
+  flex-basis: 250px;
+}
+
+.review-panel {
+  border-left-color: var(--line-strong);
+  flex-basis: 350px;
+}
+
+.panel-footer,
+.review-panel-footer {
+  border-top-color: var(--line-strong);
+}
+
+.editor-area,
+.app-shell.focus-mode .editor-area {
+  background: var(--paper);
+}
+
+.format-toolbar {
+  background: rgba(255, 255, 255, 0.98);
+  border-color: var(--line-strong);
+  border-radius: 10px;
+  box-shadow: var(--pencil-echo), var(--shadow-sm);
+  height: 42px;
+  padding: 4px 6px;
+  top: 16px;
+}
+
+.format-toolbar button,
+.format-toolbar .style-select {
+  border: 1px solid transparent;
+  border-radius: 7px;
+  color: var(--graphite);
+}
+
+.format-toolbar button:hover,
+.format-toolbar .style-select:hover,
+.format-toolbar .style-select:focus-within {
+  background: var(--smudge);
+  border-color: var(--line);
+}
+
+.format-toolbar .toolbar-track-changes.active {
+  background: var(--paper);
+  border-color: var(--green-pen);
+  box-shadow: inset 0 -2px 0 var(--green-pen);
+  color: var(--green-pen);
+}
+
+.toolbar-divider {
+  background: var(--line-strong);
+}
+
+.manuscript {
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  box-shadow: var(--pencil-echo), var(--shadow-sm);
+  color: var(--graphite);
+  margin: 40px auto 48px;
+  padding: 74px 88px 112px;
+  width: min(820px, calc(100% - 64px));
+}
+
+.paper-title,
+.manuscript section > h2,
+.abstract-block p,
+.structured-editor-content,
+.structured-editor-content h1,
+.structured-editor-content h2,
+.structured-editor-content h3 {
+  color: var(--graphite);
+}
+
+.abstract-block {
+  border-bottom-color: var(--line);
+  border-top-color: var(--line-strong);
+}
+
+.publication-authors-trigger,
+.structured-publication-byline {
+  background: var(--paper);
+}
+
+.structured-publication-byline {
+  border-bottom-color: var(--line);
+}
+
+.project-menu,
+.popover,
+.citation-picker,
+.command-menu,
+.source-drawer,
+.code-workspace-drawer,
+.manuscript-picker-dialog,
+.collaboration-dialog {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  box-shadow: var(--pencil-echo), var(--shadow-md);
+}
+
+input,
+select,
+textarea,
+.reply-box,
+.citation-modifiers input,
+.citation-format-controls select,
+.collaboration-dialog input,
+.collaboration-dialog select,
+.collaboration-review-request-form textarea,
+.collaboration-review-decision textarea {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  color: var(--graphite);
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+.citation-modifiers input:focus,
+.citation-format-controls select:focus,
+.collaboration-dialog input:focus,
+.collaboration-dialog select:focus,
+.collaboration-review-request-form textarea:focus,
+.collaboration-review-decision textarea:focus {
+  background: var(--paper);
+  border-color: var(--graphite);
+  box-shadow: 0 0 0 3px var(--smudge);
+  outline: 1px solid var(--graphite);
+  outline-offset: 1px;
+}
+
+.focus-mode-exit {
+  border-radius: 8px;
+  color: var(--graphite);
+}
+
+.app-shell.focus-mode .manuscript {
+  margin-top: 30px;
+  width: min(860px, calc(100% - 64px));
+}
+
+@media (max-width: 1280px) {
+  .left-panel { flex-basis: 220px; }
+  .review-panel { flex-basis: 315px; }
+  .manuscript { padding-left: 66px; padding-right: 66px; }
+}
+
+@media (max-width: 1120px) {
+  .manuscript { width: min(760px, calc(100% - 42px)); }
+}
+
+@media (max-width: 880px) {
+  .manuscript { width: min(740px, calc(100% - 32px)); }
+}
+
+@media (max-width: 700px) {
+  .topbar { height: 58px; }
+  .workspace { height: calc(100% - 58px); }
+  .wordmark { font-size: 17px; }
+  .brand-mark,
+  .brand-mark img { height: 27px; width: 27px; }
+  .format-toolbar { border-radius: 9px; top: 10px; }
+  .manuscript {
+    border-radius: 10px;
+    margin-top: 24px;
+    padding: 48px 28px 80px;
+    width: calc(100% - 18px);
   }
 }

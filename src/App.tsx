@@ -4159,7 +4159,7 @@ function App() {
             <Icon name="panelLeft" />
           </button>
           <div className="wordmark" aria-label="DraftMatter home">
-            <span className="brand-mark">D</span>
+            <span className="brand-mark" aria-hidden="true"><img src="/draftmatter-pencil-mark.svg" alt="" /></span>
             <span>DraftMatter</span>
           </div>
           <span className="topbar-divider" />
