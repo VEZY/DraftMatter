@@ -101,7 +101,7 @@ describe('rendered local execution workflow', () => {
     expect(desktopHost.probeRuntime).toHaveBeenCalledTimes(3)
     expect(desktopHost.setExecutionPreferences).toHaveBeenCalled()
 
-    const run = container.querySelector<HTMLButtonElement>('.run-button')!
+    const run = container.querySelector<HTMLButtonElement>('[aria-label="Run python code cell fig-canopy"]')!
     await act(async () => run.click())
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 80))
@@ -121,8 +121,9 @@ describe('rendered local execution workflow', () => {
       expectedHash: null,
     }))
     expect(desktopHost.inspectExecutionArtifacts).toHaveBeenCalledWith(rootPath, ['figures/generated/fig-canopy.svg'])
-    expect(container.querySelector('.cell-status')?.textContent).toBe('Current')
-    expect(container.textContent).toContain('Wrote figures/generated/fig-canopy.svg')
+    expect(container.querySelector('.structured-cell-status')?.textContent).toBe('Current')
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    expect(container.querySelector('.code-workspace-drawer')?.textContent).toContain('Wrote figures/generated/fig-canopy.svg')
 
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 950))

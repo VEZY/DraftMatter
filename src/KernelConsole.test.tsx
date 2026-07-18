@@ -98,6 +98,34 @@ describe('KernelConsole', () => {
     await act(async () => root.unmount())
   })
 
+  it('shows project setup progress as a terminal tab', async () => {
+    const host = document.createElement('div')
+    document.body.append(host)
+    const root = createRoot(host)
+    await act(async () => {
+      root.render(<KernelConsole
+        languages={['julia']}
+        statuses={statuses}
+        restartEpochs={restartEpochs}
+        projectActivity={{ id: 'setup-1', title: 'Checking the Julia project', status: 'succeeded', output: '$ julia --project=.\nProject is ready.\n', language: 'julia' }}
+        onExecute={async () => ({ ...result, language: 'julia' })}
+        onInterrupt={vi.fn()}
+        onRestart={vi.fn()}
+        onStatusChange={vi.fn()}
+        onDirtyChange={vi.fn()}
+        onPromoteSetup={vi.fn()}
+        onClose={vi.fn()}
+      />)
+    })
+
+    expect(host.querySelector<HTMLButtonElement>('.kernel-project-tab')?.getAttribute('aria-selected')).toBe('true')
+    expect(host.querySelector('.kernel-project-activity')?.textContent).toContain('Checking the Julia project')
+    expect(host.querySelector('.kernel-project-activity')?.textContent).toContain('Project is ready.')
+    await act(async () => host.querySelector<HTMLButtonElement>('.kernel-project-activity-footer button')!.click())
+    expect(host.textContent).toContain('Julia REPL · shared document kernel')
+    await act(async () => root.unmount())
+  })
+
   it('promotes the most recent command to a setup cell', async () => {
     const host = document.createElement('div')
     document.body.append(host)

@@ -26,9 +26,12 @@ describe('focused authoring workspace', () => {
     await act(async () => root.render(<App />))
 
     expect(container.querySelector<HTMLElement>('.review-panel')?.hidden).toBe(true)
-    expect(container.querySelector<HTMLElement>('.execution-workspace-details')?.hidden).toBe(true)
-    await act(async () => container.querySelector<HTMLButtonElement>('.execution-summary-bar button')!.click())
-    expect(container.querySelector<HTMLElement>('.execution-workspace-details')?.hidden).toBe(false)
+    expect(container.querySelector<HTMLElement>('.code-workspace-drawer')).toBeNull()
+    expect(container.querySelector('article.manuscript [aria-label="Code and computation"]')).toBeNull()
+    expect(container.querySelector('.topbar-actions [aria-label="Open Code and computation"]')).not.toBeNull()
+    expect(container.querySelector('.format-toolbar [aria-label="Open Code and computation"]')).toBeNull()
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    expect(container.querySelector<HTMLElement>('.code-workspace-drawer')).not.toBeNull()
   })
 
   it('enters a manuscript-only focus mode and leaves it with Escape', async () => {
@@ -47,7 +50,8 @@ describe('focused authoring workspace', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('.toolbar-insert-button')!.click())
     const labels = [...container.querySelectorAll('.toolbar-insert-menu strong')].map((item) => item.textContent)
     expect(labels).toEqual(['Figure', 'Table', 'Equation', 'Published value', 'Reproducible figure', 'Reproducible table'])
-    expect(container.querySelector('[aria-label="Code and computation"]')?.textContent).toContain('Add setup')
-    expect(container.querySelector('[aria-label="Code and computation"]')?.textContent).toContain('Add values')
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    expect(container.querySelector('.code-workspace-drawer')?.textContent).toContain('Add setup')
+    expect(container.querySelector('.code-workspace-drawer')?.textContent).toContain('Add values')
   })
 })

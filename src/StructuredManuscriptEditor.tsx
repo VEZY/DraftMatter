@@ -110,6 +110,12 @@ function isPanelManagedNode(node: ProseMirrorNode) {
     .trim()
 }
 
+function isSetupNode(node: ProseMirrorNode) {
+  if (node.type !== manuscriptSchema.nodes.code_cell) return false
+  const attributes = (node.attrs.attributes ?? {}) as Record<string, unknown>
+  return node.attrs.outputKind === 'setup' || attributes.role === 'setup'
+}
+
 export function moveStructuredBlock(
   document: ProseMirrorNode,
   sourceId: string,
@@ -186,6 +192,7 @@ export interface StructuredManuscriptEditorHandle {
   updateCodeCellSource: (cellId: string, source: string) => boolean
   insertCodeCell: (language: 'python' | 'r' | 'julia', output?: 'figure' | 'table' | 'values') => boolean
   insertSetupCell: (language: 'python' | 'r' | 'julia', code?: string) => boolean
+  consolidateSetupCells: () => boolean
   insertPublishedValue: (name: string) => boolean
   insertEquation: (tex: string, display?: boolean, label?: string) => boolean
   insertCrossReference: (target: string) => boolean
@@ -626,12 +633,38 @@ function panelManagedCodeNodeView(initialNode: ProseMirrorNode): NodeView {
   const dom = document.createElement('div')
   dom.className = 'structured-panel-code-placeholder'
   dom.hidden = true
+  dom.style.display = 'none'
   dom.contentEditable = 'false'
   dom.setAttribute('aria-hidden', 'true')
   const updateDom = () => {
     dom.dataset.dmId = String(node.attrs.id)
     dom.dataset.language = String(node.attrs.language)
     dom.dataset.role = node.attrs.outputKind === 'setup' ? 'setup' : 'values'
+  }
+  updateDom()
+  return {
+    dom,
+    ignoreMutation: () => true,
+    update(next) {
+      if (next.type !== node.type || !isPanelManagedNode(next)) return false
+      node = next
+      updateDom()
+      return true
+    },
+  }
+}
+
+function panelManagedOutputNodeView(initialNode: ProseMirrorNode): NodeView {
+  let node = initialNode
+  const dom = document.createElement('div')
+  dom.className = 'structured-panel-output-placeholder'
+  dom.hidden = true
+  dom.style.display = 'none'
+  dom.contentEditable = 'false'
+  dom.setAttribute('aria-hidden', 'true')
+  const updateDom = () => {
+    dom.dataset.dmId = String(node.attrs.id)
+    dom.dataset.cellId = String(node.attrs.cellId)
   }
   updateDom()
   return {
@@ -2821,6 +2854,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     insertSetupCell: (language, code) => {
       const view = viewRef.current
       if (!view || readOnlyRef.current) return false
+      let setupExists = false
+      view.state.doc.forEach((child) => {
+        if (isSetupNode(child)) setupExists = true
+      })
+      if (setupExists) return false
       const id = randomId(`setup-${language}`)
       const node = manuscriptSchema.nodes.code_cell.createChecked({
         id,
@@ -2831,6 +2869,34 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         attributes: { execute: true, role: 'setup' },
       })
       view.dispatch(view.state.tr.insert(view.state.doc.content.size, node))
+      return true
+    },
+    consolidateSetupCells: () => {
+      const view = viewRef.current
+      if (!view || readOnlyRef.current) return false
+      const setups: Array<{ node: ProseMirrorNode; position: number }> = []
+      view.state.doc.forEach((node, position) => {
+        if (isSetupNode(node)) setups.push({ node, position })
+      })
+      if (setups.length < 2) return false
+      const language = String(setups[0].node.attrs.language)
+      if (setups.some((setup) => String(setup.node.attrs.language) !== language)) return false
+      const distinctSources = setups.filter((setup, index) => setups.findIndex((candidate) => (
+        String(candidate.node.attrs.code).trim() === String(setup.node.attrs.code).trim()
+      )) === index)
+      const mergedCode = distinctSources.map((setup, index) => {
+        const source = String(setup.node.attrs.code).trim()
+        return index === 0 ? source : `# Merged from ${String(setup.node.attrs.id)}\n${source}`
+      }).filter(Boolean).join('\n\n')
+      let transaction = view.state.tr.setNodeMarkup(setups[0].position, undefined, {
+        ...setups[0].node.attrs,
+        code: mergedCode,
+        status: 'stale',
+      })
+      for (let index = setups.length - 1; index >= 1; index -= 1) {
+        transaction = transaction.delete(setups[index].position, setups[index].position + setups[index].node.nodeSize)
+      }
+      view.dispatch(transaction)
       return true
     },
     insertPublishedValue: (name) => {
@@ -3185,11 +3251,13 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         footnote_reference: (node, editorView) => footnoteReferenceNodeView(node, editorView),
         footnote_definition: (node, editorView, getPos) => footnoteDefinitionNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         table: (node, editorView, getPos) => tableNodeView(node, editorView, getPos, () => !readOnlyRef.current),
-        output_block: (node) => outputNodeView(
-          node,
-          (path) => resolveAssetUrlRef.current?.(path) ?? path,
-          (label) => onCopyReferenceRef.current?.(label),
-        ),
+        output_block: (node) => isPanelManagedNode(node)
+          ? panelManagedOutputNodeView(node)
+          : outputNodeView(
+            node,
+            (path) => resolveAssetUrlRef.current?.(path) ?? path,
+            (label) => onCopyReferenceRef.current?.(label),
+          ),
         image: (node, editorView, getPos) => imageNodeView(
           node,
           editorView,

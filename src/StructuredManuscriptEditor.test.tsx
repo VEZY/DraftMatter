@@ -1038,6 +1038,37 @@ plot(1:3)
     expect(changed.at(-1)).toContain(expected)
   })
 
+  it('allows only one setup cell in the document', async () => {
+    const changed: string[] = []
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    await act(async () => root.render(
+      <StructuredManuscriptEditor ref={editorRef} source={shortSource} onChange={(next) => changed.push(next)} />,
+    ))
+
+    await act(async () => {
+      expect(editorRef.current!.insertSetupCell('julia', 'using DataFrames')).toBe(true)
+      expect(editorRef.current!.insertSetupCell('julia', 'using Statistics')).toBe(false)
+    })
+    expect(changed.at(-1)?.match(/role="setup"/g)).toHaveLength(1)
+    expect(changed.at(-1)).toContain('using DataFrames')
+    expect(changed.at(-1)).not.toContain('using Statistics')
+  })
+
+  it('combines same-language legacy setup cells without losing their source', async () => {
+    const changed: string[] = []
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    const legacySource = `${shortSource}\n\`\`\`julia {#setup-one .execute role="setup"}\nusing DataFrames\n\`\`\`\n\n\`\`\`julia {#setup-two .execute role="setup"}\nusing Statistics\n\`\`\`\n`
+    await act(async () => root.render(
+      <StructuredManuscriptEditor ref={editorRef} source={legacySource} onChange={(next) => changed.push(next)} />,
+    ))
+
+    await act(async () => { expect(editorRef.current!.consolidateSetupCells()).toBe(true) })
+    expect(changed.at(-1)?.match(/role="setup"/g)).toHaveLength(1)
+    expect(changed.at(-1)).toContain('using DataFrames')
+    expect(changed.at(-1)).toContain('using Statistics')
+    expect(changed.at(-1)).toContain('# Merged from setup-two')
+  })
+
   it('makes both prose and embedded code read-only for non-editing roles', async () => {
     await act(async () => root.render(<StructuredManuscriptEditor source={`${source}\nRead [the protocol](https://example.test).\n`} onChange={vi.fn()} readOnly />))
 

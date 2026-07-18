@@ -131,7 +131,10 @@ describe('shared Jupyter execution workspace', () => {
       ['py-setup', 'python-fixture'], ['py-value', 'python-fixture'],
     ])
     expect(container.textContent).toContain('kernel:py-value')
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel terminal"]')!.click())
+    if (!container.querySelector('[aria-label="Shared kernel terminal"]')) {
+      await act(async () => container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel terminal"]')!.click())
+    }
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent?.includes('Python'))!.click())
     expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('ready')
   })
 
@@ -139,7 +142,7 @@ describe('shared Jupyter execution workspace', () => {
     const published = container.querySelector<HTMLElement>('[data-dm-node="published-value"][data-name="a"]')!
     expect(published.dataset.status).toBe('missing')
 
-    await act(async () => container.querySelector<HTMLButtonElement>('.execution-summary-bar button')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
     const juliaCell = container.querySelector<HTMLElement>('.execution-cell-row[data-cell-id="jl-report"]')!
     expect(container.querySelector('.structured-code-cell[data-dm-id="jl-report"]')).toBeNull()
     await act(async () => juliaCell.querySelector<HTMLButtonElement>('.run-button')!.click())
@@ -153,7 +156,7 @@ describe('shared Jupyter execution workspace', () => {
   })
 
   it('edits setup and published-value source from the code panel', async () => {
-    await act(async () => container.querySelector<HTMLButtonElement>('.execution-summary-bar button')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
     const setupRow = container.querySelector<HTMLElement>('.execution-cell-row[data-cell-id="py-setup"]')!
     const codeView = CodeMirrorView.findFromDOM(setupRow.querySelector<HTMLElement>('.cm-editor')!)!
     await act(async () => codeView.dispatch({ changes: { from: codeView.state.doc.length, insert: '\nthreshold = 2' } }))
@@ -183,8 +186,9 @@ describe('shared Jupyter execution workspace', () => {
     expect(container.querySelector('[aria-labelledby="execution-trust-title"]')).toBeNull()
   })
 
-  it('moves Julia package work into a visible non-blocking activity window', async () => {
+  it('moves Julia package work into a project tab in the shared terminal', async () => {
     await settle(420)
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
     let resolveAdd: (environment: JuliaEnvironment) => void = () => undefined
     vi.mocked(desktopHost.addJuliaPackage).mockImplementationOnce(() => new Promise((resolve) => { resolveAdd = resolve }))
     const packages = [...container.querySelectorAll<HTMLButtonElement>('button')]
@@ -203,7 +207,7 @@ describe('shared Jupyter execution workspace', () => {
     await settle(30)
 
     expect(container.querySelector('[aria-labelledby="julia-packages-title"]')).toBeNull()
-    const activity = container.querySelector<HTMLElement>('.setup-activity-window')!
+    const activity = container.querySelector<HTMLElement>('.kernel-project-activity')!
     expect(activity.textContent).toContain('Adding DataFrames')
     expect(activity.textContent).toContain('editor remains usable')
     expect(activity.textContent).toContain('julia --project=.')
@@ -222,17 +226,21 @@ describe('shared Jupyter execution workspace', () => {
     expect(refreshedDialog).toBeTruthy()
     expect(refreshedDialog.textContent).toContain('JuliaFormatter')
     expect([...refreshedDialog.querySelectorAll('button')].some((button) => button.textContent === 'Add JuliaFormatter')).toBe(false)
-    expect(container.querySelector('.setup-activity-window')?.textContent).toContain('Ready')
+    expect(container.querySelector('.kernel-project-activity')?.textContent).toContain('Ready')
+    expect(container.querySelector<HTMLButtonElement>('.kernel-project-tab')?.getAttribute('aria-selected')).toBe('true')
 
-    const openTerminal = [...container.querySelectorAll<HTMLButtonElement>('.setup-activity-window button')]
-      .find((button) => button.textContent?.includes('Open Julia terminal'))!
+    const openTerminal = container.querySelector<HTMLButtonElement>('.kernel-project-activity-footer button')!
     await act(async () => openTerminal.click())
     expect(container.querySelector('[aria-label="Shared kernel terminal"]')?.textContent).toContain('Julia REPL · shared document kernel')
     expect(container.querySelector('[aria-label="Shared kernel terminal"]')?.textContent).toContain('julia --project=.')
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close kernel terminal"]')!.click())
+    expect(container.querySelector('.kernel-console-toggle')?.textContent).toContain('TerminalReady')
+    expect(container.querySelector('.kernel-console-toggle')?.getAttribute('data-status')).toBe('succeeded')
   })
 
   it('clean-runs setup first, restarts every language kernel, and never materializes setup output', async () => {
-    const cleanRun = [...container.querySelectorAll<HTMLButtonElement>('.structured-execution-bar button')]
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    const cleanRun = [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
       .find((button) => button.textContent?.includes('Clean run'))!
     await act(async () => cleanRun.click())
     await settle(220)
@@ -244,7 +252,8 @@ describe('shared Jupyter execution workspace', () => {
   })
 
   it('shows only language environments and shared kernels', async () => {
-    const environments = [...container.querySelectorAll<HTMLButtonElement>('.structured-execution-bar button')]
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    const environments = [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
       .find((button) => button.textContent?.includes('Environments'))!
     await act(async () => environments.click())
     const dialog = container.querySelector<HTMLElement>('[aria-labelledby="execution-environment-title"]')!
@@ -252,8 +261,9 @@ describe('shared Jupyter execution workspace', () => {
   })
 
   it('keeps terminal history and shared kernel status when the bottom panel closes', async () => {
-    const open = container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel terminal"]')!
-    await act(async () => open.click())
+    const open = container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel terminal"]')
+    if (open) await act(async () => open.click())
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent?.includes('Python'))!.click())
     const input = container.querySelector<HTMLTextAreaElement>('[aria-label="Python terminal input"]')!
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
     await act(async () => {

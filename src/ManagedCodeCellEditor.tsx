@@ -21,11 +21,13 @@ function sourceLabel(cell: ExecutableCell) {
 export function ManagedCodeCellEditor({
   cell,
   readOnly,
+  initiallyOpen = false,
   onSave,
   onFormat,
 }: {
   cell: ExecutableCell
   readOnly: boolean
+  initiallyOpen?: boolean
   onSave: (cellId: string, source: string) => boolean
   onFormat?: (cellId: string, source: string) => Promise<string | undefined>
 }) {
@@ -36,6 +38,7 @@ export function ManagedCodeCellEditor({
   const onFormatRef = useRef(onFormat)
   const [dirty, setDirty] = useState(false)
   const [formatting, setFormatting] = useState(false)
+  const [open, setOpen] = useState(initiallyOpen)
   onSaveRef.current = onSave
   onFormatRef.current = onFormat
 
@@ -127,7 +130,10 @@ export function ManagedCodeCellEditor({
   }
 
   return (
-    <details className="managed-code-source" onToggle={() => window.requestAnimationFrame(() => viewRef.current?.requestMeasure())}>
+    <details className="managed-code-source" open={open} onToggle={(event) => {
+      setOpen(event.currentTarget.open)
+      window.requestAnimationFrame(() => viewRef.current?.requestMeasure())
+    }}>
       <summary>{sourceLabel(cell)}<span>{cell.source.split(/\r\n|\r|\n/).length} lines</span></summary>
       <div className="managed-code-editor" ref={hostRef} aria-label={`${sourceLabel(cell)} for ${cell.id}`} />
       <div className="managed-code-actions">

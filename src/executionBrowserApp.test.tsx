@@ -42,11 +42,13 @@ describe('browser execution boundary', () => {
     container.remove()
   })
 
-  it('shows retained-source context but keeps every process control disabled', () => {
+  it('shows retained-source context but keeps every process control disabled', async () => {
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
     expect(container.textContent).toContain('Execution controls are disabled in the browser')
-    const controls = container.querySelectorAll<HTMLButtonElement>('.execution-workspace-details button')
+    const controls = [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
+      .filter((button) => /^(Run|Clean run|Julia packages|Environments)/.test(button.textContent?.trim() ?? ''))
     expect(controls.length).toBeGreaterThan(0)
-    expect([...controls].every((button) => button.disabled)).toBe(true)
+    expect(controls.every((button) => button.disabled)).toBe(true)
     expect(desktopHost.executeKernel).not.toHaveBeenCalled()
   })
 })

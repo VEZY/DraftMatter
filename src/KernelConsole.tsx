@@ -7,6 +7,14 @@ export type KernelConsoleStatus = 'not-started' | 'starting' | 'ready' | 'busy' 
 export type KernelConsoleStatuses = Record<ExecutionLanguage, KernelConsoleStatus>
 export type KernelConsoleRestartEpochs = Record<ExecutionLanguage, number>
 
+export interface KernelProjectActivity {
+  id: string
+  title: string
+  status: 'running' | 'succeeded' | 'failed'
+  output: string
+  language?: ExecutionLanguage
+}
+
 interface ConsoleEntry {
   id: number
   prompt: string
@@ -73,6 +81,7 @@ export function KernelConsole({
   preferredLanguageEpoch,
   statuses,
   restartEpochs,
+  projectActivity,
   onExecute,
   onInterrupt,
   onRestart,
@@ -87,6 +96,7 @@ export function KernelConsole({
   preferredLanguageEpoch?: number
   statuses: KernelConsoleStatuses
   restartEpochs: KernelConsoleRestartEpochs
+  projectActivity?: KernelProjectActivity
   onExecute: (language: ExecutionLanguage, code: string) => Promise<NormalizedExecutionResult>
   onInterrupt: (language: ExecutionLanguage) => Promise<void>
   onRestart: (language: ExecutionLanguage) => Promise<void>
@@ -96,6 +106,7 @@ export function KernelConsole({
   onClose: () => void
 }) {
   const [active, setActive] = useState<ExecutionLanguage>(languages[0] ?? 'python')
+  const [activeView, setActiveView] = useState<ExecutionLanguage | 'project'>(languages[0] ?? 'python')
   const [juliaMode, setJuliaMode] = useState<JuliaTerminalMode>('julia')
   const [input, setInput] = useState('')
   const [entries, setEntries] = useState<Record<ExecutionLanguage, ConsoleEntry[]>>({ python: [], r: [], julia: [] })
@@ -104,19 +115,35 @@ export function KernelConsole({
   const [height, setHeight] = useState(310)
   const counter = useRef(0)
   const outputRef = useRef<HTMLDivElement>(null)
+  const projectOutputRef = useRef<HTMLPreElement>(null)
   const previousRestartEpochs = useRef(restartEpochs)
 
   useEffect(() => {
-    if (!languages.includes(active) && languages[0]) setActive(languages[0])
-  }, [active, languages])
+    if (!languages.includes(active) && languages[0]) {
+      setActive(languages[0])
+      if (activeView !== 'project') setActiveView(languages[0])
+    }
+  }, [active, activeView, languages])
 
   useEffect(() => {
-    if (preferredLanguage && languages.includes(preferredLanguage)) setActive(preferredLanguage)
+    if (preferredLanguage && languages.includes(preferredLanguage)) {
+      setActive(preferredLanguage)
+      setActiveView(preferredLanguage)
+    }
   }, [languages, preferredLanguage, preferredLanguageEpoch])
+
+  useEffect(() => {
+    if (projectActivity) setActiveView('project')
+  }, [projectActivity?.id])
 
   useEffect(() => {
     if (typeof outputRef.current?.scrollTo === 'function') outputRef.current.scrollTo({ top: outputRef.current.scrollHeight })
   }, [entries, active])
+
+  useEffect(() => {
+    const output = projectOutputRef.current
+    if (output) output.scrollTop = output.scrollHeight
+  }, [projectActivity?.output, activeView])
 
   useEffect(() => {
     const reset = (['python', 'r', 'julia'] as const).filter((language) => previousRestartEpochs.current[language] !== restartEpochs[language])
@@ -213,13 +240,27 @@ export function KernelConsole({
     <button className="kernel-console-resize" onPointerDown={startResize} aria-label="Resize kernel terminal" title="Drag to resize" />
     <header>
       <div className="kernel-console-tabs" role="tablist" aria-label="Kernel language">
-        {languages.map((language) => <button key={language} role="tab" aria-selected={active === language} onClick={() => { setActive(language); setHistoryIndex(undefined) }}>
+        {languages.map((language) => <button key={language} role="tab" aria-selected={activeView === language} onClick={() => { setActive(language); setActiveView(language); setHistoryIndex(undefined) }}>
           <span>{languageLabel[language]}</span><i className={statuses[language]} /> <small>{statusLabel(statuses[language])}</small>
         </button>)}
+        {projectActivity && <button className="kernel-project-tab" role="tab" aria-selected={activeView === 'project'} data-status={projectActivity.status} onClick={() => setActiveView('project')} title={projectActivity.title}>
+          <span>Project</span><i className={projectActivity.status === 'running' ? 'busy' : projectActivity.status === 'succeeded' ? 'ready' : 'failed'} /> <small>{projectActivity.status === 'running' ? 'working' : projectActivity.status === 'succeeded' ? 'ready' : 'attention'}</small>
+        </button>}
       </div>
       <span className={`kernel-console-dirty ${dirty ? 'dirty' : ''}`}>{dirty ? 'Interactive · clean run will restart this kernel' : 'Reproducible session'}</span>
       <button onClick={onClose} aria-label="Close kernel terminal">Close</button>
     </header>
+    {activeView === 'project' && projectActivity ? <div className="kernel-project-activity" data-status={projectActivity.status}>
+      <div className="kernel-project-activity-head">
+        <span className="setup-activity-indicator" aria-hidden="true" />
+        <span><strong>{projectActivity.title}</strong><small>{projectActivity.status === 'running' ? 'Project process · live output · editor remains usable' : projectActivity.status === 'succeeded' ? 'Process completed successfully' : 'Process needs attention'}</small></span>
+      </div>
+      <pre ref={projectOutputRef} className="kernel-project-activity-output" role="log" aria-live="polite">{projectActivity.output}</pre>
+      <div className="kernel-project-activity-footer">
+        <span>{projectActivity.status === 'running' ? 'Working…' : projectActivity.status === 'succeeded' ? 'Ready' : 'Setup stopped'}</span>
+        {projectActivity.language && <button onClick={() => { setActive(projectActivity.language!); setActiveView(projectActivity.language!); setHistoryIndex(undefined) }}>Open {languageLabel[projectActivity.language]} REPL</button>}
+      </div>
+    </div> : <>
     <div className="kernel-console-output" ref={outputRef} aria-live="polite">
       {!currentEntries.length && <div className="kernel-console-empty"><strong>{languageLabel[active]} REPL · shared document kernel</strong>{active === 'julia' && <><code>$ julia --project=.</code><span>Type <kbd>]</kbd> for Pkg mode, <kbd>;</kbd> for shell mode, or <kbd>?</kbd> for help. Backspace on an empty prompt returns to Julia mode.</span></>}<span>Commands run in the same live session as document cells, so variables, imports, and working state are shared.</span></div>}
       {currentEntries.map((entry) => {
@@ -269,5 +310,6 @@ export function KernelConsole({
         <button className="primary" onClick={() => void run()} disabled={!canRun}>Run</button>
       </div>
     </div>
+    </>}
   </section>
 }

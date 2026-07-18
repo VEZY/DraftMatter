@@ -166,6 +166,15 @@ function initialKernelConsoleRestartEpochs(): KernelConsoleRestartEpochs {
   return { python: 0, r: 0, julia: 0 }
 }
 
+function kernelConsoleStatusLabel(status: KernelConsoleStatus) {
+  if (status === 'not-started') return 'Not started'
+  if (status === 'starting') return 'Starting…'
+  if (status === 'busy') return 'Working…'
+  if (status === 'interrupted') return 'Interrupted'
+  if (status === 'failed') return 'Needs attention'
+  return 'Ready'
+}
+
 function cellStatusLabel(status: DraftState['cellStatus'] | ExecutionCellFreshness['status']) {
   if (status === 'environment-changed') return 'Environment changed'
   if (status === 'output-missing') return 'Output missing'
@@ -635,7 +644,6 @@ function App() {
   const [juliaPackageBusy, setJuliaPackageBusy] = useState(false)
   const [juliaPackageProblem, setJuliaPackageProblem] = useState('')
   const [setupActivity, setSetupActivity] = useState<SetupActivity>()
-  const [setupActivityOpen, setSetupActivityOpen] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bibliographyInputRef = useRef<HTMLInputElement>(null)
   const structuredEditorRef = useRef<StructuredManuscriptEditorHandle>(null)
@@ -671,7 +679,6 @@ function App() {
   const pendingExecutionCommandRef = useRef<ExecutionCommand | undefined>(undefined)
   const pendingConsoleRef = useRef<{ language: ExecutionLanguage; code: string; resolve: (result: NormalizedExecutionResult) => void; reject: (error: Error) => void } | undefined>(undefined)
   const setupActivityIdRef = useRef<string | undefined>(undefined)
-  const setupActivityOutputRef = useRef<HTMLPreElement>(null)
   const automaticSetupSignatureRef = useRef('')
   const pendingSetupLanguagesRef = useRef<ExecutionLanguage[]>([])
   const automaticSetupRunningRef = useRef(false)
@@ -684,14 +691,14 @@ function App() {
     setupActivityIdRef.current = id
     const command = language === 'julia' ? '$ julia --project=.\n' : ''
     setSetupActivity({ id, title, status: 'running', output: `${command}${message.trim()}\n`, language })
-    setSetupActivityOpen(true)
+    setExecutionWorkspaceOpen(false)
+    setKernelConsoleOpen(true)
     return id
   }
 
   const openKernelTerminal = (language?: ExecutionLanguage) => {
     if (language) setKernelConsolePreferredLanguage(language)
     setKernelConsolePreferredLanguageEpoch((current) => current + 1)
-    setSetupActivityOpen(false)
     setJuliaPackagesOpen(false)
     setEnvironmentOpen(false)
     setKernelConsoleOpen(true)
@@ -724,11 +731,6 @@ function App() {
     }).then((dispose) => { unlisten = dispose }).catch(() => undefined)
     return () => unlisten?.()
   }, [])
-
-  useEffect(() => {
-    const output = setupActivityOutputRef.current
-    if (output) output.scrollTop = output.scrollHeight
-  }, [setupActivity?.output, setupActivityOpen])
 
   const activeCollaborationCapabilities = collaborationRole ? workspaceRoleCapabilities(collaborationRole) : null
   const canEditManuscript = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.edit)
@@ -1380,6 +1382,7 @@ function App() {
         if (!executionTrustBusy) setExecutionTrustOpen(false)
         setSourceOpen(false)
         setSourceEditing(false)
+        setExecutionWorkspaceOpen(false)
       }
     }
     window.addEventListener('keydown', onKeyDown)
@@ -1447,7 +1450,11 @@ function App() {
   const reviewLocationLabel = reviewQueue.length ? `REVIEW ${activeReviewPosition + 1} OF ${reviewQueue.length}` : 'NO FEEDBACK IN THIS VIEW'
   const reviewProposalStatus = reviewProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
   const executableCells = extractExecutableCells(executionSource).cells
-  const panelManagedCells = executableCells.filter(isPanelManagedCell)
+  const setupCells = executableCells.filter(isSetupCell)
+  const setupCell = setupCells[0]
+  const panelManagedCells = executableCells.filter(isPanelManagedCell).sort((left, right) => (
+    Number(right.role === 'setup') - Number(left.role === 'setup')
+  ))
   const manuscriptCodeCells = executableCells.filter((cell) => !isPanelManagedCell(cell))
   const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL) ?? executableCells[0]
   const retainedOutputParse = parseRetainedOutputs(executionSource)
@@ -1800,9 +1807,39 @@ function App() {
     return true
   }
 
+  const revealPanelManagedCell = (cellId: string) => {
+    setExecutionWorkspaceOpen(true)
+    window.requestAnimationFrame(() => {
+      const escaped = globalThis.CSS?.escape ? globalThis.CSS.escape(cellId) : cellId.replace(/["\\]/g, '\\$&')
+      const row = document.querySelector<HTMLElement>(`.code-workspace-drawer .execution-cell-row[data-cell-id="${escaped}"]`)
+      const source = row?.querySelector<HTMLDetailsElement>('.managed-code-source')
+      if (source) source.open = true
+      row?.scrollIntoView({ behavior: motionAwareScrollBehavior(), block: 'center' })
+      window.requestAnimationFrame(() => row?.querySelector<HTMLElement>('.cm-content')?.focus())
+    })
+  }
+
+  const consolidateSetupCells = () => {
+    const languages = new Set(setupCells.map((cell) => cell.language))
+    if (languages.size > 1) {
+      setToast('Setup cells use different languages; copy the code you need into one setup before removing the others in source view')
+      return
+    }
+    if (!structuredEditorRef.current?.consolidateSetupCells()) {
+      setToast('The setup cells could not be combined')
+      return
+    }
+    setToast('Setup code combined into one cell · duplicate source preserved')
+  }
+
   const openInsertBlock = (kind: InsertBlockKind) => {
     if (!canEditManuscript) return
     if (!structuredMode) setStructuredMode(true)
+    if (kind === 'setup-cell' && setupCell) {
+      revealPanelManagedCell(setupCell.id)
+      setToast('This project already has its single setup cell')
+      return
+    }
     if (kind === 'setup-cell' || kind === 'values-cell') setExecutionWorkspaceOpen(true)
     setInsertBlockKind(kind)
   }
@@ -4001,8 +4038,8 @@ function App() {
     },
     {
       id: 'setup-cell',
-      label: 'Add language setup',
-      description: 'Add project-only setup in the Code & computation panel',
+      label: setupCell ? 'Edit language setup' : 'Add language setup',
+      description: setupCell ? 'Open the project’s single setup cell' : 'Add the project’s single setup cell in Code & computation',
       keywords: 'setup imports packages data state kernel reproducible',
       icon: <span className="command-icon">⚙</span>,
       disabled: !canEditManuscript,
@@ -4098,6 +4135,7 @@ function App() {
           <ManagedCodeCellEditor
             cell={cell}
             readOnly={!canEditManuscript}
+            initiallyOpen={cell.role === 'setup'}
             onSave={savePanelManagedCell}
             onFormat={cell.language === 'julia' ? formatJuliaCodeCell : undefined}
           />
@@ -4176,6 +4214,7 @@ function App() {
             <span>{collaborationStatus === 'connected' ? `Live${collaborationRole ? ` · ${collaborationRole[0].toUpperCase()}${collaborationRole.slice(1)}` : ''}` : 'Collaborate'}</span>
             <i />
           </button>
+          {structuredMode && <button className={`topbar-code-workspace ${executionWorkspaceOpen ? 'active' : ''}`} aria-label="Open Code and computation" aria-expanded={executionWorkspaceOpen} onClick={() => setExecutionWorkspaceOpen(true)} title="Open Code & computation"><Icon name="code" size={15} /><span>Code</span>{executableCells.length > 0 && <span className="count-badge" aria-hidden="true">{executableCells.length}</span>}</button>}
           <button className="icon-button command-button" onClick={() => setCommandOpen(true)} aria-label="Open command menu" title={`Open command menu (${commandUsesMetaKey ? 'Command' : 'Control'} P)`}>
             <Icon name="search" />
             <span className="shortcut">{commandUsesMetaKey ? <><Icon name="command" size={12} />P</> : 'Ctrl+P'}</span>
@@ -4398,36 +4437,6 @@ function App() {
 
           {structuredMode ? (
           <article className="manuscript structured-manuscript" aria-label="Editable manuscript">
-              <section className={`structured-execution-workspace ${executionWorkspaceOpen ? 'open' : 'collapsed'}`} aria-label="Code and computation">
-                <div className="execution-summary-bar">
-                  <span><Icon name="code" size={15} /><strong>Code &amp; computation</strong><small>{executableCells.length ? `${executableCells.length} cell${executableCells.length === 1 ? '' : 's'} · ${cellStatusLabel(executionSummaryStatus)}` : 'Set up a language or add a computation'}</small></span>
-                  <button className="subtle" onClick={() => setExecutionWorkspaceOpen((open) => !open)} aria-expanded={executionWorkspaceOpen}>{executionWorkspaceOpen ? 'Close panel' : 'Open panel'}</button>
-                </div>
-                <div className="execution-workspace-details" hidden={!executionWorkspaceOpen}>
-                <div className="structured-execution-bar">
-                  <span><small>Languages, environments, setup, and project-only computations.</small></span>
-                  <button className="subtle" onClick={() => openInsertBlock('setup-cell')} disabled={!canEditManuscript}><Icon name="plus" size={12} /> Add setup</button>
-                  <button className="subtle" onClick={() => openInsertBlock('values-cell')} disabled={!canEditManuscript}><Icon name="plus" size={12} /> Add values</button>
-                  {[...new Set(executableCells.map((cell) => cell.language))].map((language) => (
-                    <button className="subtle" key={language} onClick={() => void requestExecution({ kind: 'language', language })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && executableCells.filter((cell) => cell.language === language).some((cell) => !executionEnvironmentAvailable(cell)))}>
-                      <Icon name="play" size={12} /> Run {runtimeName(language)}
-                    </button>
-                  ))}
-                  <button className="subtle" onClick={() => void requestExecution({ kind: 'clean-all' })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && executableCells.some((cell) => !executionEnvironmentAvailable(cell)))}><Icon name="history" size={13} /> Clean run</button>
-                  {executableCells.some((cell) => cell.language === 'julia') && <button className="subtle" onClick={() => void openJuliaPackages()} disabled={!desktopSession || juliaPackageBusy}><Icon name="plus" size={12} /> Julia packages</button>}
-                  <button className="subtle" onClick={() => void discoverExecutionEnvironments(true)} disabled={!desktopSession} aria-label="Execution environments and options"><Icon name="more" size={14} /> Environments</button>
-                </div>
-                {!desktopSession && <p className="execution-browser-note">Execution controls are disabled in the browser. Open this manuscript as a desktop project to run local code.</p>}
-                <div className="execution-cell-list">
-                  {panelManagedCells.length > 0 && <div className="execution-cell-group"><strong>Project code</strong><small>Setup and published-value computations run with the document but are not displayed in the manuscript.</small></div>}
-                  {panelManagedCells.map(renderExecutionCellRow)}
-                  {manuscriptCodeCells.length > 0 && <div className="execution-cell-group"><strong>Manuscript code blocks</strong><small>These code blocks remain visible and editable in the document.</small></div>}
-                  {manuscriptCodeCells.map(renderExecutionCellRow)}
-                  {executableCells.length === 0 && <div className="execution-cell-empty"><strong>No computations yet</strong><small>Add a language setup or a published-values computation here. Figure and table code blocks can be inserted directly in the manuscript.</small></div>}
-                </div>
-                {cleanRunCertification && <p className="clean-run-certification"><Icon name="check" size={13} /> Clean run certified · {cleanRunCertification.resultHashes.length} outputs from one ordered run</p>}
-                </div>
-              </section>
             {structuredReviewProjection && (
               <div className={`structured-review-preview ${structuredReviewProjection.ok ? '' : 'blocked'}`} role={structuredReviewProjection.ok ? 'status' : 'alert'}>
                 <Icon name={structuredReviewProjection.ok ? 'eye' : 'branch'} size={15} />
@@ -4698,6 +4707,48 @@ function App() {
           </div>
         </main>
 
+        {structuredMode && executionWorkspaceOpen && (
+          <div className="code-workspace-backdrop" onMouseDown={() => setExecutionWorkspaceOpen(false)}>
+            <aside className="code-workspace-drawer" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="code-workspace-title">
+              <header className="code-workspace-drawer-head">
+                <span className="execution-shield"><Icon name="code" size={19} /></span>
+                <div><span className="eyebrow">Project tools</span><h2 id="code-workspace-title">Code &amp; computation</h2><p>{executableCells.length ? `${executableCells.length} cell${executableCells.length === 1 ? '' : 's'} · ${cellStatusLabel(executionSummaryStatus)} ·` : 'Set up a language or add a computation.'} Setup and published-value source stay outside the manuscript page.</p></div>
+                <button className="icon-button" onClick={() => setExecutionWorkspaceOpen(false)} aria-label="Close Code and computation"><Icon name="close" /></button>
+              </header>
+              <div className="code-workspace-toolbar">
+                <button className="subtle" onClick={() => setupCell ? revealPanelManagedCell(setupCell.id) : openInsertBlock('setup-cell')} disabled={!canEditManuscript}><Icon name={setupCell ? 'code' : 'plus'} size={12} /> {setupCell ? 'Edit setup' : 'Add setup'}</button>
+                <button className="subtle" onClick={() => openInsertBlock('values-cell')} disabled={!canEditManuscript}><Icon name="plus" size={12} /> Add values</button>
+                {[...new Set(executableCells.map((cell) => cell.language))].map((language) => (
+                  <button className="subtle" key={language} onClick={() => void requestExecution({ kind: 'language', language })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && executableCells.filter((cell) => cell.language === language).some((cell) => !executionEnvironmentAvailable(cell)))}>
+                    <Icon name="play" size={12} /> Run {runtimeName(language)}
+                  </button>
+                ))}
+                <button className="subtle" onClick={() => void requestExecution({ kind: 'clean-all' })} disabled={!desktopSession || executionPlanBusy || Boolean(runtimeInventory && executableCells.some((cell) => !executionEnvironmentAvailable(cell)))}><Icon name="history" size={13} /> Clean run</button>
+                {executableCells.some((cell) => cell.language === 'julia') && <button className="subtle" onClick={() => void openJuliaPackages()} disabled={!desktopSession || juliaPackageBusy}><Icon name="plus" size={12} /> Julia packages</button>}
+                <button className="subtle" onClick={() => void discoverExecutionEnvironments(true)} disabled={!desktopSession} aria-label="Execution environments and options"><Icon name="more" size={14} /> Environments</button>
+              </div>
+              {!desktopSession && <p className="execution-browser-note">Execution controls are disabled in the browser. Open this manuscript as a desktop project to run local code.</p>}
+              {setupCells.length > 1 && (
+                <div className="duplicate-setup-warning" role="alert">
+                  <span><strong>{setupCells.length} legacy setup cells found</strong><small>New documents allow one setup cell. Combine these {runtimeName(setupCells[0].language)} sources without losing their code.</small></span>
+                  <button onClick={consolidateSetupCells} disabled={!canEditManuscript}>Combine setups</button>
+                </div>
+              )}
+              <div className="code-workspace-scroll">
+                <div className="execution-cell-list">
+                  {panelManagedCells.length > 0 && <div className="execution-cell-group"><strong>Project code</strong><small>Setup and published-value computations run with the document but are never displayed on the manuscript page.</small></div>}
+                  {panelManagedCells.map(renderExecutionCellRow)}
+                  {manuscriptCodeCells.length > 0 && <div className="execution-cell-group"><strong>Manuscript code blocks</strong><small>These figure, table, and ordinary code blocks remain visible and editable in the manuscript.</small></div>}
+                  {manuscriptCodeCells.map(renderExecutionCellRow)}
+                  {executableCells.length === 0 && <div className="execution-cell-empty"><strong>No computations yet</strong><small>Add the project setup or a published-values computation here. Figure and table code blocks can be inserted directly in the manuscript.</small></div>}
+                </div>
+                {cleanRunCertification && <p className="clean-run-certification"><Icon name="check" size={13} /> Clean run certified · {cleanRunCertification.resultHashes.length} outputs from one ordered run</p>}
+              </div>
+              <footer className="code-workspace-footer"><span><Icon name="document" size={13} /> Source is saved in the portable project document</span><button onClick={() => setExecutionWorkspaceOpen(false)}>Done</button></footer>
+            </aside>
+          </div>
+        )}
+
           <aside className="review-panel" aria-label="Review feedback" hidden={!rightPanelOpen}>
             <div className="review-panel-header">
               <div><span className="eyebrow">Review</span><h2>Open feedback <span>{openReviewCount}</span></h2></div>
@@ -4948,29 +4999,6 @@ function App() {
             </form>
           </div>
         </div>
-      )}
-
-      {setupActivity && setupActivityOpen && (
-        <section className="setup-activity-window" data-status={setupActivity.status} aria-labelledby="setup-activity-title">
-          <div className="setup-activity-head">
-            <span className="setup-activity-indicator" aria-hidden="true" />
-            <span><strong id="setup-activity-title">{setupActivity.title}</strong><small>{setupActivity.status === 'running' ? 'Project process · live output · editor remains usable' : setupActivity.status === 'succeeded' ? 'Process completed successfully' : 'Process needs attention'}</small></span>
-            <button className="icon-button" onClick={() => setSetupActivityOpen(false)} aria-label="Hide setup activity"><Icon name="close" size={14} /></button>
-          </div>
-          <pre ref={setupActivityOutputRef} className="setup-activity-output" role="log" aria-live="polite">{setupActivity.output}</pre>
-          <div className="setup-activity-footer">
-            <span>{setupActivity.status === 'running' ? 'Working…' : setupActivity.status === 'succeeded' ? 'Ready' : 'Setup stopped'}</span>
-            {setupActivity.language && setupActivity.status !== 'running' && <button onClick={() => openKernelTerminal(setupActivity.language)}>Open {runtimeName(setupActivity.language)} terminal</button>}
-            <button onClick={() => setSetupActivityOpen(false)}>{setupActivity.status === 'running' ? 'Hide' : 'Done'}</button>
-          </div>
-        </section>
-      )}
-
-      {setupActivity && !setupActivityOpen && (
-        <button className="setup-activity-pill" data-status={setupActivity.status} onClick={() => setSetupActivityOpen(true)} aria-label={`Show ${setupActivity.title} activity`}>
-          <span className="setup-activity-indicator" aria-hidden="true" />
-          <span><strong>{setupActivity.title}</strong><small>{setupActivity.status === 'running' ? 'Working…' : setupActivity.status === 'succeeded' ? 'Ready' : 'Needs attention'}</small></span>
-        </button>
       )}
 
       {executionTrustOpen && (
@@ -5444,12 +5472,26 @@ function App() {
             preferredLanguageEpoch={kernelConsolePreferredLanguageEpoch}
             statuses={kernelConsoleStatuses}
             restartEpochs={kernelConsoleRestartEpochs}
+            projectActivity={setupActivity}
             onStatusChange={updateKernelConsoleStatus}
             onDirtyChange={setKernelConsoleDirty}
             onExecute={executeConsole}
             onInterrupt={async (language) => { await interruptExecution(language) }}
             onRestart={async (language) => { await restartExecution(language) }}
             onPromoteSetup={(language, code) => {
+              if (setupCell) {
+                if (setupCell.language !== language) {
+                  revealPanelManagedCell(setupCell.id)
+                  setToast(`The single setup cell already uses ${runtimeName(setupCell.language)}`)
+                  return
+                }
+                const nextSource = [setupCell.source.trim(), code.trim()].filter(Boolean).join('\n\n# Added from the shared terminal\n')
+                if (savePanelManagedCell(setupCell.id, nextSource)) {
+                  revealPanelManagedCell(setupCell.id)
+                  setToast(`${runtimeName(language)} terminal code added to the existing setup`)
+                }
+                return
+              }
               const inserted = runStructuredCommand((editor) => editor.insertSetupCell(language, code), 'Add setup cell')
               if (inserted) {
                 setExecutionWorkspaceOpen(true)
@@ -5462,7 +5504,17 @@ function App() {
       )}
 
       {desktopSession && !kernelConsoleOpen && (
-        <button className={`kernel-console-toggle ${kernelConsoleDirty ? 'dirty' : ''}`} onClick={() => openKernelTerminal(primaryCell?.language ?? selectedEnvironmentLanguage)} aria-label={`Open shared kernel terminal${kernelConsoleDirty ? ', interactive state present' : ''}`}><Icon name="code" size={14} /> Terminal{kernelConsoleDirty && <i title="Interactive state present" />}</button>
+        <button
+          className={`kernel-console-toggle ${kernelConsoleDirty ? 'dirty' : ''}`}
+          data-status={setupActivity?.status ?? kernelConsoleStatuses[primaryCell?.language ?? selectedEnvironmentLanguage]}
+          onClick={() => openKernelTerminal(primaryCell?.language ?? selectedEnvironmentLanguage)}
+          aria-label={`Open shared kernel terminal, ${setupActivity?.status === 'running' ? 'working' : setupActivity?.status === 'succeeded' ? 'ready' : setupActivity?.status === 'failed' ? 'needs attention' : kernelConsoleStatusLabel(kernelConsoleStatuses[primaryCell?.language ?? selectedEnvironmentLanguage])}${kernelConsoleDirty ? ', interactive state present' : ''}`}
+          title={setupActivity?.title}
+        >
+          <span className="terminal-status-indicator" aria-hidden="true" />
+          <span className="kernel-console-toggle-copy"><strong>Terminal</strong><small>{setupActivity?.status === 'running' ? 'Working…' : setupActivity?.status === 'succeeded' ? 'Ready' : setupActivity?.status === 'failed' ? 'Needs attention' : kernelConsoleStatusLabel(kernelConsoleStatuses[primaryCell?.language ?? selectedEnvironmentLanguage])}</small></span>
+          {kernelConsoleDirty && <i title="Interactive state present" />}
+        </button>
       )}
 
       {toast && <div className="toast" role="status"><Icon name="check" size={16} /> {toast}</div>}
