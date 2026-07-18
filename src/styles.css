@@ -6045,3 +6045,408 @@ textarea:focus,
     width: calc(100% - 18px);
   }
 }
+
+/* White Graphite manuscript and structured content ---------------------- */
+
+.structured-manuscript-editor {
+  color: var(--graphite);
+  font-size: 16.5px;
+  line-height: 1.72;
+}
+
+.structured-editor-content h1 {
+  color: var(--graphite);
+  font-size: 2.45rem;
+  font-weight: 500;
+  letter-spacing: -0.045em;
+}
+
+.structured-editor-content h2 {
+  border-top-color: var(--line-strong);
+  color: var(--graphite);
+  font-size: 1.55rem;
+  font-weight: 550;
+  letter-spacing: -0.022em;
+  margin-top: 2.65em;
+}
+
+.structured-editor-content h3 {
+  color: var(--graphite);
+  font-weight: 550;
+}
+
+.structured-heading-card[data-section-kind="numbered"] > .structured-heading-content::before {
+  color: var(--lead);
+  font-family: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  font-size: 9px;
+}
+
+.structured-heading-card[data-section-kind="abstract"] {
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-bottom: 0;
+  border-radius: 12px 12px 0 0;
+  box-shadow: var(--pencil-echo);
+  padding: 20px 22px 10px;
+}
+
+.structured-heading-card[data-section-kind="abstract"] > .structured-heading-content {
+  color: var(--graphite);
+}
+
+.structured-heading-card[data-section-kind="abstract"] > .structured-heading-content::after {
+  color: var(--graphite);
+  content: "△";
+  font-size: 11px;
+  margin-left: 10px;
+}
+
+.structured-heading-card[data-section-kind="abstract"] + p,
+.structured-heading-card[data-section-kind="abstract"] + .structured-block-drag-handle + p {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  border-radius: 0 0 12px 12px;
+  box-shadow: var(--pencil-echo);
+  color: var(--graphite);
+  padding: 0 22px 21px;
+}
+
+.structured-editor-content blockquote {
+  border-left-color: var(--graphite);
+  color: var(--lead);
+}
+
+.structured-editor-content a {
+  color: var(--graphite);
+  text-decoration-color: var(--green-pen);
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 3px;
+}
+
+.structured-block-drag-handle {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  border-radius: 6px;
+  box-shadow: var(--pencil-echo);
+  color: var(--lead);
+}
+
+.structured-block-drag-handle:hover,
+.structured-block-drag-handle:focus-visible,
+.structured-block-drag-handle[data-dragging="true"],
+.structured-block-drag-handle:has(+ *:hover) {
+  border-color: var(--graphite);
+  color: var(--graphite);
+}
+
+.structured-block-drop-target {
+  background: rgba(36, 36, 36, 0.025);
+  border-color: rgba(36, 36, 36, 0.46);
+}
+
+.structured-block-drop-indicator,
+.structured-block-drop-indicator::before {
+  background: var(--graphite);
+}
+
+.structured-block-drop-indicator {
+  box-shadow: 0 0 0 3px var(--smudge);
+}
+
+.structured-block-drop-indicator > span {
+  background: var(--graphite);
+  border: 1px solid var(--graphite);
+  border-radius: 7px;
+  box-shadow: var(--pencil-echo), var(--shadow-sm);
+}
+
+.structured-editor-content .ProseMirror-selectednode {
+  background-image:
+    linear-gradient(var(--graphite), var(--graphite)),
+    linear-gradient(var(--graphite), var(--graphite)),
+    linear-gradient(var(--graphite), var(--graphite)),
+    linear-gradient(var(--graphite), var(--graphite)),
+    linear-gradient(var(--graphite), var(--graphite)),
+    linear-gradient(var(--graphite), var(--graphite)),
+    linear-gradient(var(--graphite), var(--graphite)),
+    linear-gradient(var(--graphite), var(--graphite));
+  background-position: left top, left top, right top, right top, left bottom, left bottom, right bottom, right bottom;
+  background-repeat: no-repeat;
+  background-size: 14px 1px, 1px 14px, 14px 1px, 1px 14px, 14px 1px, 1px 14px, 14px 1px, 1px 14px;
+  outline: 0;
+}
+
+.structured-heading-edit,
+.structured-link-edit,
+.structured-equation-edit,
+.structured-footnote-edit,
+.structured-table-edit,
+.structured-figure-edit,
+.structured-raw-node button,
+.structured-output-reference {
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  box-shadow: var(--pencil-echo);
+  color: var(--graphite);
+}
+
+.structured-heading-edit:hover,
+.structured-link-edit:hover,
+.structured-equation-edit:hover,
+.structured-footnote-edit:hover,
+.structured-table-edit:hover,
+.structured-figure-edit:hover,
+.structured-raw-node button:hover,
+.structured-output-reference:hover {
+  background: var(--smudge);
+  border-color: var(--graphite);
+  color: var(--graphite);
+}
+
+.structured-heading-editor,
+.structured-link-editor,
+.insert-block-dialog {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  border-radius: 12px;
+  box-shadow: var(--pencil-echo), var(--shadow-md);
+}
+
+.structured-heading-dialog-head,
+.structured-link-dialog-head {
+  border-bottom-color: var(--line-strong);
+}
+
+.structured-heading-input,
+.structured-link-input,
+.structured-cross-reference-input,
+.structured-table-input,
+.structured-figure-input,
+.structured-equation-label-input,
+.structured-equation-input,
+.structured-footnote-label-input,
+.structured-footnote-textarea,
+.structured-raw-editor,
+.insert-block-fields input,
+.insert-block-fields select,
+.insert-block-fields textarea {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  color: var(--graphite);
+}
+
+.structured-heading-input:focus,
+.structured-link-input:focus,
+.structured-cross-reference-input:focus,
+.structured-table-input:focus,
+.structured-figure-input:focus,
+.structured-equation-label-input:focus,
+.structured-equation-input:focus,
+.structured-footnote-label-input:focus,
+.structured-footnote-textarea:focus,
+.structured-raw-editor:focus,
+.insert-block-fields input:focus,
+.insert-block-fields select:focus,
+.insert-block-fields textarea:focus {
+  border-color: var(--graphite);
+  box-shadow: 0 0 0 3px var(--smudge);
+  outline: 1px solid var(--graphite);
+}
+
+.structured-table-card,
+.structured-figure-media,
+.structured-equation-display,
+.structured-footnote-definition,
+.structured-code-cell,
+.structured-output,
+.structured-raw-node {
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  box-shadow: var(--pencil-echo);
+  color: var(--graphite);
+}
+
+.structured-editor-content th {
+  background: var(--paper);
+  border-bottom-color: var(--graphite);
+  color: var(--graphite);
+}
+
+.structured-editor-content th,
+.structured-editor-content td,
+.structured-table-caption,
+.structured-table-editor,
+.structured-figure-editor,
+.structured-raw-inspector {
+  border-color: var(--line);
+}
+
+.structured-table-card .selectedCell {
+  background: var(--smudge);
+  box-shadow: inset 0 -2px 0 var(--green-pen);
+}
+
+.structured-figure-media > img {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+}
+
+.structured-footnote-definition {
+  border-left: 3px double var(--graphite);
+}
+
+.structured-footnote-reference button {
+  color: var(--green-pen);
+}
+
+.structured-citation,
+.citation-chip,
+.citation-inline {
+  background: var(--paper);
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  box-shadow: 0.7px 0.7px 0 rgba(36, 36, 36, 0.13);
+  color: var(--graphite);
+  padding: 1px 5px;
+}
+
+.structured-citation:hover,
+.citation-chip:hover,
+.citation-inline:hover {
+  background: var(--smudge);
+  border-color: var(--graphite);
+}
+
+.structured-code-cell-header,
+.structured-output-header,
+.structured-code-summary,
+.structured-code-editor,
+.structured-code-editor .cm-editor,
+.structured-code-editor .cm-gutters,
+.structured-output pre,
+.structured-raw-summary {
+  background: var(--paper);
+  border-color: var(--line);
+  color: var(--graphite);
+}
+
+.structured-language {
+  background: var(--graphite);
+  border-radius: 5px;
+  color: var(--paper);
+}
+
+.structured-code-run {
+  background-color: #373735;
+  background-image: repeating-linear-gradient(116deg, transparent 0 3px, rgba(255, 255, 255, 0.08) 3px 4px);
+  border: 1px solid var(--graphite);
+  border-radius: 7px;
+  box-shadow: var(--pencil-echo);
+  color: var(--paper);
+}
+
+.structured-code-run[data-action="interrupt"] {
+  background: var(--paper);
+  border-color: var(--rust-pen);
+  color: var(--rust-pen);
+}
+
+.structured-editor-content [data-dm-node="published-value"] {
+  background: transparent;
+  border-radius: 0;
+  box-shadow: inset 0 -2px 0 rgba(63, 107, 82, 0.7);
+  color: var(--green-pen);
+}
+
+.structured-editor-content [data-dm-node="published-value"][data-status="missing"],
+.structured-editor-content [data-dm-node="published-value"]:not([data-status="current"]):not([data-status="missing"]) {
+  background: transparent;
+  box-shadow: inset 0 -2px 0 rgba(164, 87, 64, 0.7);
+  color: var(--rust-pen);
+}
+
+.dm-review-thread {
+  background: transparent;
+  border-bottom: 1px dashed var(--lead);
+  border-radius: 0;
+}
+
+.dm-review-thread:hover,
+.dm-review-thread.dm-review-active {
+  background: var(--smudge);
+  box-shadow: inset 0 -1px 0 var(--graphite);
+}
+
+.dm-review-change,
+.dm-review-proposal {
+  background: transparent;
+  border: 0;
+  border-bottom: 2px solid rgba(63, 107, 82, 0.72);
+  border-radius: 0;
+  color: var(--green-pen);
+}
+
+.dm-review-active {
+  background: transparent;
+  box-shadow: inset 0 -3px 0 rgba(63, 107, 82, 0.18);
+}
+
+.dm-review-all.dm-review-kind-delete,
+.dm-review-all.dm-review-kind-replace,
+.dm-review-all.dm-review-kind-format,
+.dm-review-all.dm-review-kind-structural,
+.dm-review-proposal.dm-review-rejected {
+  color: var(--rust-pen);
+  text-decoration-color: var(--rust-pen);
+  text-decoration-thickness: 1.5px;
+}
+
+.dm-review-point,
+.dm-review-point.dm-review-change,
+.dm-review-margin-marker {
+  background: var(--paper);
+  border-color: var(--line-strong);
+  box-shadow: var(--pencil-echo);
+  color: var(--graphite);
+}
+
+.dm-review-margin-marker:hover,
+.dm-review-margin-marker.dm-review-active {
+  background: var(--smudge);
+  border-color: var(--graphite);
+  box-shadow: var(--pencil-echo), 0 0 0 3px var(--smudge);
+}
+
+.dm-review-margin-marker-count {
+  background: var(--graphite);
+}
+
+.app-shell.focus-mode .format-toolbar {
+  opacity: 0.1;
+}
+
+.structured-code-cell[data-expanded="false"] {
+  opacity: 0.72;
+}
+
+.focus-mode-exit {
+  opacity: 0.72;
+}
+
+.app-shell.focus-mode .manuscript {
+  border-color: var(--line);
+  box-shadow: var(--pencil-echo), 0 4px 20px rgba(36, 36, 36, 0.045);
+  padding-left: 96px;
+  padding-right: 96px;
+}
+
+@media (max-width: 700px) {
+  .structured-manuscript-editor { font-size: 15.5px; }
+  .structured-editor-content h1 { font-size: 2rem; }
+  .structured-heading-card[data-section-kind="abstract"] { padding-left: 17px; padding-right: 17px; }
+  .structured-heading-card[data-section-kind="abstract"] + p,
+  .structured-heading-card[data-section-kind="abstract"] + .structured-block-drag-handle + p { padding-left: 17px; padding-right: 17px; }
+  .app-shell.focus-mode .manuscript { padding-left: 30px; padding-right: 30px; }
+}
