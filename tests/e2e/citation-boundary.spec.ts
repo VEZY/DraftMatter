@@ -24,11 +24,10 @@ test('typing after a terminal citation resumes ordinary paragraph formatting', a
       .map((node) => node.textContent ?? '')
       .join('')
     return {
-      citationColor: citation ? getComputedStyle(citation).color : '',
-      paragraphColor: getComputedStyle(element).color,
+      citationText: citation?.textContent ?? '',
       followingText,
     }
   })
   expect(boundary.followingText).toContain('ordinary prose continues')
-  expect(boundary.citationColor).not.toBe(boundary.paragraphColor)
+  expect(boundary.citationText).not.toContain('ordinary prose continues')
 })

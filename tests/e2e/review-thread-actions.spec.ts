@@ -5,7 +5,11 @@ test.describe('DM-P4-01 review thread actions', () => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     await page.goto('/')
 
-    await page.getByRole('button', { name: 'Copy figure reference @fig-canopy-result' }).click()
+    const output = page.locator('.structured-output-image')
+    const copyReference = page.getByRole('button', { name: 'Copy figure reference fig-canopy-result' })
+    await output.hover()
+    await expect(copyReference).toBeVisible()
+    await copyReference.click()
     await expect(page.getByText('Copied @fig-canopy-result')).toBeVisible()
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('@fig-canopy-result')
   })

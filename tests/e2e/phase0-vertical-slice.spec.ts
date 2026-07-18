@@ -19,7 +19,8 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
     await expect(manuscript).not.toContainText('CIRAD, UMR AMAP')
     await expect(manuscript).not.toContainText('Keywords drought acclimation')
     await expect(page.getByRole('button', { name: 'Edit citation @vezy2024' })).toHaveText('(Vezy et al., 2024)')
-    await expect(page.locator('.structured-code-cell-header')).toContainText('fig-canopy')
+    await expect(page.locator('.structured-code-cell-header')).toContainText('Reproducible figure')
+    await expect(page.locator('.structured-code-cell-header')).not.toContainText('fig-canopy')
     await expect(page.getByRole('img', { name: 'Leaf area response over twelve weeks' })).toBeVisible()
     await expect(reviewPanel.getByText('2 overlapping alternatives')).toBeVisible()
     await expect(reviewPanel.getByText(/Can we quantify this increase/)).toBeVisible()
@@ -86,7 +87,7 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
   test('keeps the primary writing and review controls keyboard reachable', async ({ page }) => {
     await page.goto('/')
 
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k')
+    await page.keyboard.press('Control+p')
     const palette = page.getByRole('dialog', { name: 'Command menu' })
     await expect(palette).toBeVisible()
     const commandSearch = palette.getByRole('textbox', { name: 'Search commands' })
@@ -103,7 +104,7 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
     await expect(sourceInspector).toBeVisible()
     await sourceInspector.getByRole('button', { name: 'Close source inspector' }).click()
 
-    await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k')
+    await page.keyboard.press('Control+p')
     await expect(commandSearch).toHaveValue('')
     await page.keyboard.press('Escape')
     await expect(palette).toBeHidden()

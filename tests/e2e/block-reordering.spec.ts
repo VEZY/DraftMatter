@@ -28,7 +28,7 @@ test.describe('section and block drag handles', () => {
 
   test('moves a section with its content and moves one paragraph independently', async ({ page }) => {
     const methods = page.getByRole('button', { name: 'Move section Methods' })
-    const introduction = page.getByRole('button', { name: 'Move section Introduction' })
+    const introduction = page.getByRole('heading', { name: 'Introduction', exact: true })
     await methods.dragTo(introduction)
 
     await expect.poll(async () => {
@@ -38,7 +38,7 @@ test.describe('section and block drag handles', () => {
     }).toBe(true)
 
     const second = page.getByRole('button', { name: 'Move block paragraph “Second introduction block.”' })
-    const first = page.getByRole('button', { name: 'Move block paragraph “First introduction block.”' })
+    const first = page.getByText('First introduction block.', { exact: true })
     await second.dragTo(first)
 
     await expect.poll(async () => {
