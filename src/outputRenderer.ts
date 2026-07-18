@@ -21,11 +21,27 @@ const blockedElement = /<(script|iframe|frame|frameset|object|embed|base|meta|li
 const dangerousAttribute = /\s(?:on[a-z0-9_-]+|srcdoc)\s*=\s*(?:"[^"]*"|'[^']*'|[^\s>]+)/gi
 const urlAttribute = /\s(href|src|xlink:href|action|formaction)\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi
 const styleAttribute = /\sstyle\s*=\s*("([^"]*)"|'([^']*)'|([^\s>]+))/gi
+const MAX_EMBEDDED_IMAGE_URL_CHARS = 24 * 1024 * 1024
+
+export interface EmbeddedExecutionImage {
+  mediaType: string
+  source: string
+  alt: string
+}
+
+export function safeEmbeddedImageDataUrl(value: string) {
+  if (value.length > MAX_EMBEDDED_IMAGE_URL_CHARS) return undefined
+  const match = value.match(/^data:(image\/(?:png|jpeg|gif|webp|svg\+xml));base64,([\s\S]+)$/i)
+  if (!match) return undefined
+  const payload = match[2].replace(/\s+/g, '')
+  if (!payload || !/^[a-z0-9+/]+={0,2}$/i.test(payload)) return undefined
+  return `data:${match[1].toLowerCase()};base64,${payload}`
+}
 
 function safeUrl(attribute: string, value: string) {
   const normalized = value.trim().toLowerCase()
   if (attribute === 'href' && normalized.startsWith('#')) return true
-  if (attribute === 'src' && /^data:image\/(?:png|jpeg|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(value)) return true
+  if (attribute === 'src' && safeEmbeddedImageDataUrl(value)) return true
   return false
 }
 
@@ -62,9 +78,50 @@ function metadataText(bundle: MimeOutput, key: string, fallback: string) {
   return stringValue(bundle.metadata[key]) ?? fallback
 }
 
-function sanitizedSvgData(source: string) {
+function base64Utf8(value: string) {
+  const bytes = new TextEncoder().encode(value)
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += 32_768) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + 32_768))
+  }
+  return btoa(binary)
+}
+
+function portableSvgData(source: string) {
   const sanitized = sanitizeExecutionHtml(source).replace(/<foreignObject\b[^>]*>[\s\S]*?<\/foreignObject\s*>/gi, '')
-  return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(sanitized)}`
+  return `data:image/svg+xml;base64,${base64Utf8(sanitized)}`
+}
+
+function htmlAttribute(tag: string, name: string) {
+  const match = tag.match(new RegExp(`\\s${name}\\s*=\\s*(?:"([^"]*)"|'([^']*)')`, 'i'))
+  return match?.[1] ?? match?.[2]
+}
+
+export function embeddedExecutionImageFromHtml(source: string): EmbeddedExecutionImage | undefined {
+  for (const match of source.matchAll(/<img\b[^>]*>/gi)) {
+    const dataUrl = safeEmbeddedImageDataUrl(htmlAttribute(match[0], 'src') ?? '')
+    if (!dataUrl) continue
+    return {
+      mediaType: dataUrl.slice(5, dataUrl.indexOf(';')),
+      source: dataUrl,
+      alt: htmlAttribute(match[0], 'alt')?.trim() || 'Generated image output',
+    }
+  }
+  return undefined
+}
+
+export function executionImageFromMimeBundle(bundle: MimeOutput): EmbeddedExecutionImage | undefined {
+  const alt = metadataText(bundle, 'alt', 'Generated image output')
+  const svg = stringValue(bundle.data['image/svg+xml'])
+  if (svg) return { mediaType: 'image/svg+xml', source: portableSvgData(svg), alt }
+  for (const mediaType of ['image/png', 'image/jpeg'] as const) {
+    const encoded = stringValue(bundle.data[mediaType])
+    const source = encoded && safeEmbeddedImageDataUrl(`data:${mediaType};base64,${encoded}`)
+    if (source) return { mediaType, source, alt }
+  }
+  const html = stringValue(bundle.data['text/html'])
+  const embedded = html ? embeddedExecutionImageFromHtml(html) : undefined
+  return embedded ? { ...embedded, alt: metadataText(bundle, 'alt', embedded.alt) } : undefined
 }
 
 function tableFromValue(value: JsonValue | undefined): Extract<RenderedExecutionOutput, { kind: 'table' }> | undefined {
@@ -95,12 +152,8 @@ function tableFromValue(value: JsonValue | undefined): Extract<RenderedExecution
 }
 
 function renderMime(bundle: MimeOutput): RenderedExecutionOutput | undefined {
-  const svg = stringValue(bundle.data['image/svg+xml'])
-  if (svg) return { kind: 'image', mediaType: 'image/svg+xml', source: sanitizedSvgData(svg), alt: metadataText(bundle, 'alt', 'Generated SVG output') }
-  for (const mediaType of ['image/png', 'image/jpeg'] as const) {
-    const encoded = stringValue(bundle.data[mediaType])
-    if (encoded) return { kind: 'image', mediaType, source: `data:${mediaType};base64,${encoded.replace(/\s+/g, '')}`, alt: metadataText(bundle, 'alt', 'Generated image output') }
-  }
+  const image = executionImageFromMimeBundle(bundle)
+  if (image) return { kind: 'image', ...image }
   const dataResource = tableFromValue(bundle.data['application/vnd.dataresource+json'])
   if (dataResource) return dataResource
   const jsonTable = tableFromValue(bundle.data['application/json'])

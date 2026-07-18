@@ -2,7 +2,7 @@ import type { ExecutableCell } from './executionCells'
 import { extractExecutableCells, isSetupCell } from './executionCells'
 import type { JsonValue, MimeOutput, NormalizedExecutionResult } from './kernelExecution'
 import { retainedPublishedValueDirectives } from './publishedValues'
-import { sanitizeExecutionHtml } from './outputRenderer'
+import { executionImageFromMimeBundle, sanitizeExecutionHtml } from './outputRenderer'
 import { parseLosslessPortableSource } from './portableSource'
 import type { DocumentDiagnostic } from './types'
 
@@ -92,8 +92,23 @@ function tableMarkdown(bundle: MimeOutput) {
   ].join('\n')
 }
 
-function mimeMarkdown(result: NormalizedExecutionResult) {
+function mimeImageMarkdown(bundle: MimeOutput, result: NormalizedExecutionResult, presentation: OutputPresentation) {
+  const image = executionImageFromMimeBundle(bundle)
+  if (!image) return undefined
+  const alt = escapeAlt(presentation.alt ?? presentation.caption ?? image.alt ?? `Generated output ${result.cellId}`)
+  const label = presentation.label ? `{#${presentation.label}}` : ''
+  const caption = presentation.caption ? `\n\n*${escapeReserved(presentation.caption)}*` : ''
+  return `![${alt}](${image.source})${label}${caption}`
+}
+
+function mimeMarkdown(result: NormalizedExecutionResult, presentation: OutputPresentation) {
+  const hasImageArtifact = result.artifacts.some((artifact) => artifact.mediaType?.startsWith('image/'))
   for (const bundle of result.mime) {
+    const image = mimeImageMarkdown(bundle, result, presentation)
+    if (image) {
+      if (!hasImageArtifact) return image
+      continue
+    }
     const table = tableMarkdown(bundle)
     if (table) return table
     const markdown = bundle.data['text/markdown']
@@ -122,7 +137,7 @@ function artifactMarkdown(result: NormalizedExecutionResult, presentation: Outpu
 function generatedBlock(request: MaterializeOutputRequest) {
   const presentation = request.presentation ?? {}
   const pieces = artifactMarkdown(request.result, presentation)
-  const mime = mimeMarkdown(request.result)
+  const mime = mimeMarkdown(request.result, presentation)
   if (mime) pieces.push(mime)
   if (pieces.length === 0) {
     const stdout = request.result.streams

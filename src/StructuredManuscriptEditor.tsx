@@ -32,6 +32,7 @@ import { extractExecutableCells, type ExecutionLanguage } from './executionCells
 import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
 import { motionAwareScrollBehavior } from './accessibility'
 import type { PublicationByline } from './publicationMetadata'
+import { embeddedExecutionImageFromHtml, safeEmbeddedImageDataUrl } from './outputRenderer'
 import {
   createCollaborativeProseMirrorState,
   reconcileCollaborativeProseMirrorDocument,
@@ -1820,12 +1821,14 @@ function outputNodeView(node: ProseMirrorNode, resolveAssetUrl: (path: string) =
   dom.dataset.dmId = String(node.attrs.id)
   const header = document.createElement('div')
   header.className = 'structured-output-header'
-  header.textContent = `Retained ${String(node.attrs.kind)} output`
   const markdown = String(node.attrs.markdown)
     .replace(/^\s*<!-- dm-output:start[^>]*-->\s*/m, '')
     .replace(/\s*<!-- dm-output:end -->\s*$/m, '')
     .replace(/^\s*<!-- dm-published-value\b[^>]*-->\s*$/gm, '')
     .trim()
+  const markdownImage = markdown.match(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/)
+  const htmlImage = markdownImage ? undefined : embeddedExecutionImageFromHtml(markdown)
+  header.textContent = `Retained ${markdownImage || htmlImage ? 'image' : String(node.attrs.kind)} output`
   if (!markdown) {
     dom.classList.add('values-only')
     dom.setAttribute('aria-hidden', 'true')
@@ -1842,11 +1845,12 @@ function outputNodeView(node: ProseMirrorNode, resolveAssetUrl: (path: string) =
     header.append(copy)
   }
   dom.append(header)
-  const image = markdown.match(/!\[([^\]]*)\]\(([^)\s]+)(?:\s+["'][^"']*["'])?\)/)
-  if (image) {
+  if (markdownImage || htmlImage) {
     const element = document.createElement('img')
-    element.alt = image[1]
-    element.src = resolveAssetUrl(image[2])
+    element.alt = markdownImage?.[1] ?? htmlImage?.alt ?? 'Generated image output'
+    element.src = markdownImage
+      ? safeEmbeddedImageDataUrl(markdownImage[2]) ?? resolveAssetUrl(markdownImage[2])
+      : htmlImage!.source
     element.loading = 'lazy'
     dom.append(element)
   } else {

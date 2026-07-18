@@ -99,6 +99,31 @@ describe('portable output materialization', () => {
     expect(materialized.source).toContain('| week | area |\n| --- | --- |\n| 1 | 12 |\n| 2 | 18 |')
   })
 
+  it('materializes CairoMakie HTML image output as a retained figure', () => {
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlY4AAAAASUVORK5CYII='
+    const figureSource = source.replace('produces="figures/generated/growth.svg"', 'output="figure"')
+    const cairoMakie = result({
+      artifacts: [],
+      mime: [{
+        data: {
+          'text/html': `<img width=600 height=450 style='object-fit: contain; height: auto;'\n src="data:image/png;base64, ${png}">`,
+          'text/plain': 'Figure',
+        },
+        metadata: {},
+      }],
+    })
+    const materialized = materializeExecutionOutput({
+      source: figureSource,
+      cellId: 'fig-growth',
+      result: cairoMakie,
+      presentation: { alt: 'CairoMakie output' },
+    })
+
+    expect(materialized.ok).toBe(true)
+    expect(materialized.source).toContain(`![CairoMakie output](data:image/png;base64,${png})`)
+    expect(materialized.source).not.toContain('<img width=600')
+  })
+
   it('does not consume author source after an unclosed reserved marker', () => {
     const broken = source.replace('<!-- dm-output:end -->', '<!-- missing end -->')
     const materialized = materializeExecutionOutput({ source: broken, cellId: 'fig-growth', result: result() })

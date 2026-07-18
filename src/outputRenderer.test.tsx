@@ -64,6 +64,29 @@ describe('isolated execution output rendering', () => {
     ])
   })
 
+  it('recognizes the HTML-wrapped PNG emitted by CairoMakie as an image', () => {
+    const cairoMakie = result()
+    cairoMakie.mime = [{
+      data: {
+        'text/html': `<img width=600 height=450 style='object-fit: contain; height: auto;'\n src="data:image/png;base64, iVBORw0KGgo=">`,
+        'text/plain': 'Figure',
+      },
+      metadata: {},
+    }]
+
+    expect(renderExecutionOutputs(cairoMakie)).toEqual([
+      expect.objectContaining({ kind: 'stream' }),
+      {
+        kind: 'image',
+        mediaType: 'image/png',
+        source: 'data:image/png;base64,iVBORw0KGgo=',
+        alt: 'Generated image output',
+      },
+      expect.objectContaining({ kind: 'image', artifactPath: 'figures/generated/plot.png' }),
+      expect.objectContaining({ kind: 'error' }),
+    ])
+  })
+
   it('mounts HTML only in a scriptless sandbox and keeps Markdown raw HTML inert', async () => {
     await act(async () => root.render(<ExecutionOutputView result={result()} artifactUrl={(path) => `asset://${path}`} />))
 
