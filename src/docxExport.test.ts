@@ -117,4 +117,42 @@ Publication body.
     expect(readable).toContain('Open Methods Lab')
     expect(readable).toContain('<dc:creator>Ada Researcher; Lin Reviewer</dc:creator>')
   })
+
+  it('carries inspector-authored semantics into DOCX while keeping computation source hidden', () => {
+    const result = renderDocxExport(`## Results {#sec-results .unnumbered}
+
+$$
+y = ax + b
+$$ {#eq-response .unnumbered}
+: Response model.
+
+![Accessible canopy response](figures/canopy.svg){#fig-canopy .unnumbered}
+: Manual response figure.
+
+| Group | Mean |
+| --- | ---: |
+| A | 12 |
+: Summary table. {#tbl-summary .unnumbered}
+
+\`\`\`julia {#cell-generated .execute output="figure"}
+plot_response()
+\`\`\`
+
+<!-- dm-output:start cell="cell-generated" run="sha256:run" -->
+![Accessible generated response](figures/generated.svg){#fig-generated .unnumbered}
+: Reproducible response figure.
+<!-- dm-output:end -->
+`)
+    const readable = new TextDecoder().decode(result.bytes)
+
+    expect(readable).toContain('Response model.')
+    expect(readable).toContain('Manual response figure. — figures/canopy.svg')
+    expect(readable).toContain('Summary table.')
+    expect(readable).toContain('Reproducible response figure. — figures/generated.svg')
+    expect(readable).not.toContain('Figure 1.')
+    expect(readable).not.toContain('Table 1.')
+    expect(readable).not.toContain('(1)')
+    expect(readable).not.toContain('plot_response()')
+    expect(readable).not.toContain('dm-output:')
+  })
 })

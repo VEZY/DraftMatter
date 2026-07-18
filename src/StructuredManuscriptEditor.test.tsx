@@ -939,6 +939,7 @@ scatter(1:10)
     const display = container.querySelector<HTMLTextAreaElement>('[aria-label="Display equation eq-fit TeX"]')!
     const displayLabel = container.querySelector<HTMLInputElement>('[aria-label="Display equation label"]')!
     const displayCaption = container.querySelector<HTMLTextAreaElement>('[aria-label="Display equation caption"]')!
+    expect(container.querySelector<HTMLSelectElement>('[aria-label="Display equation numbering"]')?.value).toBe('unnumbered')
     const displaySave = display.closest('.structured-equation-editor')?.querySelector<HTMLButtonElement>('.primary-button')!
     displayLabel.value = ''
     displayLabel.dispatchEvent(new Event('input', { bubbles: true }))
@@ -977,8 +978,9 @@ scatter(1:10)
   it('edits semantic figure metadata and keeps matching cross-references valid', async () => {
     const changed: string[] = []
     const asset = vi.fn((path: string) => `asset://${path}`)
+    const figureSource = `${source}\n<!-- dm-output:start cell="cell-output" run="sha256:result" -->\n![Generated response](figures/generated.svg){#fig-output}\n<!-- dm-output:end -->\n`
     await act(async () => root.render(
-      <StructuredManuscriptEditor source={source} onChange={(next) => changed.push(next)} resolveAssetUrl={asset} />,
+      <StructuredManuscriptEditor source={figureSource} onChange={(next) => changed.push(next)} resolveAssetUrl={asset} />,
     ))
 
     const figure = container.querySelector<HTMLElement>('.structured-figure-media')!
@@ -987,15 +989,20 @@ scatter(1:10)
     expect(container.querySelector('[data-dm-node="cross-reference"]')?.getAttribute('href')).toBe('#fig-growth')
 
     await act(async () => figure.querySelector<HTMLButtonElement>('[aria-label="Edit figure fig-growth"]')?.click())
+    expect(figure.querySelector<HTMLSelectElement>('[aria-label="Figure numbering"]')?.value).toBe('numbered')
     const label = figure.querySelector<HTMLInputElement>('[aria-label="Figure label"]')!
     label.value = ''
     label.dispatchEvent(new Event('input', { bubbles: true }))
     expect(figure.querySelector('.structured-figure-validation')?.textContent).toContain('referenced')
     expect(figure.querySelector<HTMLButtonElement>('.structured-figure-actions .primary-button')?.disabled).toBe(true)
 
+    label.value = 'fig-output'
+    label.dispatchEvent(new Event('input', { bubbles: true }))
+    expect(figure.querySelector('.structured-figure-validation')?.textContent).toContain('already belongs')
+
     const values = [
       ['Figure source path', 'figures/growth-revised.svg'],
-      ['Figure alternative text', 'Revised growth response'],
+      ['Figure accessible description', 'Revised growth response'],
       ['Figure title', 'Measured canopy response'],
       ['Figure caption', 'Revised figure legend.'],
       ['Figure label', 'fig-response'],
@@ -1030,11 +1037,12 @@ scatter(1:10)
     expect(container.querySelector<HTMLAnchorElement>('a[href="#tbl-means"]')?.textContent).toBe('Table 1')
 
     await act(async () => table.querySelector<HTMLButtonElement>('[aria-label="Edit table tbl-means details"]')?.click())
+    expect(table.querySelector<HTMLSelectElement>('[aria-label="Table numbering"]')?.value).toBe('numbered')
     const caption = table.querySelector<HTMLTextAreaElement>('[aria-label="Table caption"]')!
     caption.value = ''
     caption.dispatchEvent(new Event('input', { bubbles: true }))
-    expect(table.querySelector('.structured-table-validation')?.textContent).toContain('needs a caption')
-    expect(table.querySelector<HTMLButtonElement>('.structured-table-actions .primary-button')?.disabled).toBe(true)
+    expect(table.querySelector<HTMLElement>('.structured-table-validation')?.hidden).toBe(true)
+    expect(table.querySelector<HTMLButtonElement>('.structured-table-actions .primary-button')?.disabled).toBe(false)
 
     caption.value = 'Revised **treatment means**.'
     caption.dispatchEvent(new Event('input', { bubbles: true }))
@@ -1062,7 +1070,8 @@ scatter(1:10)
     const section = container.querySelector<HTMLElement>('.structured-heading-card[data-label="sec-background"]')!
     expect(section.querySelector('h2')?.id).toBe('sec-background')
     await act(async () => section.querySelector<HTMLButtonElement>('.structured-heading-edit')?.click())
-    const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Section details"]')!
+    const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Section object details"]')!
+    expect(dialog.querySelector<HTMLSelectElement>('[aria-label="Section numbering"]')?.value).toBe('unnumbered')
     const label = dialog.querySelector<HTMLInputElement>('[aria-label="Section label"]')!
     const save = dialog.querySelector<HTMLButtonElement>('.structured-heading-save')!
 

@@ -49,7 +49,7 @@ describe('focused authoring workspace', () => {
     expect(container.querySelectorAll('.format-toolbar > button[aria-label^="Insert "]')).toHaveLength(0)
     await act(async () => container.querySelector<HTMLButtonElement>('.toolbar-insert-button')!.click())
     const labels = [...container.querySelectorAll('.toolbar-insert-menu strong')].map((item) => item.textContent)
-    expect(labels).toEqual(['Figure', 'Table', 'Equation', 'Published value', 'Reproducible figure', 'Reproducible table'])
+    expect(labels).toEqual(['Figure', 'Table', 'Equation', 'Cross-reference', 'Published value', 'Reproducible figure', 'Reproducible table'])
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open browser view-only code and desktop instructions"]')!.click())
     expect(container.querySelector('.code-workspace-drawer')?.textContent).toContain('Execution is unavailable in this browser')
     expect(container.querySelector('.code-workspace-drawer')?.textContent).toContain('Open project folder…')

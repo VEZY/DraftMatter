@@ -2502,14 +2502,13 @@ button:disabled {
   align-items: center;
   background: rgba(248, 249, 247, 0.94);
   border-top: 1px solid var(--line);
-  bottom: 0;
   color: var(--muted);
   display: flex;
   font-size: 8px;
   gap: 16px;
   height: 28px;
   justify-content: center;
-  position: sticky;
+  position: relative;
   z-index: 15;
 }
 
@@ -4859,6 +4858,7 @@ kbd {
   counter-reset: manuscript-section;
   min-height: 70vh;
   outline: none;
+  padding-bottom: 48px;
   position: relative;
   white-space: pre-wrap;
 }
@@ -5503,6 +5503,17 @@ textarea.structured-output-input { min-height: 58px; }
 .structured-output-validation[hidden] { display: none; }
 .structured-output-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .structured-output-actions button { font-size: 8px; padding: 6px 8px; }
+.semantic-object-inspector { scroll-margin-block: 52px; }
+.semantic-object-inspector-head { border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 2px; padding: 0 0 8px; }
+.semantic-object-inspector-head strong { color: #3f4d46; font: 750 10px/1.35 Inter, ui-sans-serif, sans-serif; }
+.semantic-object-inspector-head small { color: #849089; font: 500 8px/1.4 Inter, ui-sans-serif, sans-serif; }
+.semantic-object-numbering-field { color: #56635d; display: grid; font: 700 9px/1.4 Inter, ui-sans-serif, sans-serif; gap: 4px; }
+.semantic-object-numbering-field > small { color: #87928c; font-size: 8px; font-weight: 500; }
+.semantic-object-numbering { background: #fff; border: 1px solid #d7dfda; border-radius: 5px; color: #3e4b44; font: 11px/1.5 Inter, ui-sans-serif, sans-serif; min-height: 34px; padding: 6px 28px 6px 8px; width: 100%; }
+.semantic-object-numbering:focus { border-color: #88a193; outline: 2px solid rgba(63, 104, 89, .14); }
+.semantic-object-provenance { border: 1px solid var(--line); border-radius: 6px; color: #6f7b75; font: 500 8px/1.5 Inter, ui-sans-serif, sans-serif; overflow: hidden; }
+.semantic-object-provenance > summary { background: #f7f9f7; color: #5d6a63; cursor: pointer; font-weight: 700; list-style-position: inside; padding: 7px 9px; }
+.semantic-object-provenance > p { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 0 !important; overflow-wrap: anywhere; padding: 8px 10px; }
 .structured-manuscript-editor { container-type: inline-size; }
 
 /* A collapsed computation and its retained result read as one manuscript object. */

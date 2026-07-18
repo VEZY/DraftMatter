@@ -124,4 +124,41 @@ Publication body.
     expect(html).toContain('<li id="fn-missing" class="missing-footnote">Missing footnote definition for “missing”.')
     expect(html).not.toContain('[^missing]')
   })
+
+  it('preserves inspector-authored captions, descriptions, labels, and display choices', () => {
+    const html = renderNativeHtmlExport(`## Results {#sec-results .unnumbered}
+
+$$
+y = ax + b
+$$ {#eq-response .unnumbered}
+: Response model.
+
+![Accessible canopy response](figures/canopy.svg){#fig-canopy .unnumbered}
+: Manual response figure.
+
+| Group | Mean |
+| --- | ---: |
+| A | 12 |
+: Summary table. {#tbl-summary .unnumbered}
+
+\`\`\`julia {#cell-generated .execute output="figure"}
+plot_response()
+\`\`\`
+
+<!-- dm-output:start cell="cell-generated" run="sha256:run" -->
+![Accessible generated response](figures/generated.svg){#fig-generated .unnumbered}
+: Reproducible response figure.
+<!-- dm-output:end -->
+`)
+
+    expect(html).toContain('<h2 id="sec-results">Results</h2>')
+    expect(html).toContain('<div id="eq-response" class="equation display-equation"')
+    expect(html).toContain('<figcaption>Response model.</figcaption>')
+    expect(html).toContain('<figure id="fig-canopy"><img src="figures/canopy.svg" alt="Accessible canopy response"><figcaption>Manual response figure.</figcaption>')
+    expect(html).toContain('<table id="tbl-summary"><caption>Summary table.</caption>')
+    expect(html).toContain('<figure id="fig-generated"><img src="figures/generated.svg" alt="Accessible generated response"><figcaption>Reproducible response figure.</figcaption>')
+    expect(html).not.toMatch(/<(?:strong|span)[^>]*>\s*(?:Figure|Table|Equation)\s+\d/)
+    expect(html).not.toContain('plot_response()')
+    expect(html).not.toContain('dm-output:')
+  })
 })

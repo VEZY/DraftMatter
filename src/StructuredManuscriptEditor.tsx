@@ -36,6 +36,7 @@ import { embeddedExecutionImageFromHtml, safeEmbeddedImageDataUrl } from './outp
 import { parseTableCaptionLine } from './tableSyntax'
 import { crossReferenceChoices, groupedCrossReferenceChoices, type CrossReferenceChoice } from './crossReferencePicker'
 import {
+  isExplicitlyUnnumbered,
   numberedCrossReferenceLabel,
   numberedObjectByNodeId,
   retainedOutputPresentation,
@@ -1465,8 +1466,11 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   captionPreview.className = 'structured-equation-caption'
 
   const editor = document.createElement(displayMode ? 'div' : 'span')
-  editor.className = 'structured-equation-editor'
+  editor.className = displayMode
+    ? 'structured-equation-editor semantic-object-inspector'
+    : 'structured-equation-editor'
   editor.hidden = true
+  const inspectorHead = semanticInspectorHeader('Object details', 'Display equation')
   const input = document.createElement(displayMode ? 'textarea' : 'input')
   input.className = 'structured-equation-input'
   if (input instanceof HTMLInputElement) input.type = 'text'
@@ -1494,6 +1498,14 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   captionInput.setAttribute('aria-label', 'Display equation caption')
   captionInput.placeholder = 'Optional explanation shown below the equation'
   captionField.append(captionText, captionInput)
+  const numbering = semanticNumberingField('Display equation numbering')
+  const texField = document.createElement('label')
+  texField.className = 'structured-equation-label-field semantic-object-source-field'
+  const texLabel = document.createElement('span')
+  texLabel.textContent = 'Equation source'
+  const texHint = document.createElement('small')
+  texHint.textContent = 'TeX used to render the equation.'
+  texField.append(texLabel, input, texHint)
   const validation = document.createElement('p')
   validation.className = 'structured-equation-validation'
   validation.hidden = true
@@ -1507,7 +1519,7 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   save.className = 'primary-button'
   save.textContent = 'Save equation'
   actions.append(cancel, save)
-  if (displayMode) editor.append(labelField, captionField, input, validation, actions)
+  if (displayMode) editor.append(inspectorHead.header, captionField, labelField, numbering.field, texField, validation, actions)
   else editor.append(input, actions)
 
   const normalizedLabel = () => labelInput.value.trim().replace(/^#/, '')
@@ -1569,8 +1581,11 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
       input.value = tex
       labelInput.value = equationLabel
       captionInput.value = equationCaption
+      numbering.select.value = isExplicitlyUnnumbered(node.attrs.sourceAttributes) ? 'unnumbered' : 'numbered'
     }
     captionInput.readOnly = !isEditable()
+    labelInput.readOnly = !isEditable()
+    numbering.select.disabled = !isEditable()
     updateSave()
   }
   const closeEditor = () => {
@@ -1584,6 +1599,7 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
     input.value = String(node.attrs.tex)
     labelInput.value = displayMode && node.attrs.label ? String(node.attrs.label) : ''
     captionInput.value = displayMode ? String(node.attrs.captionMarkdown ?? '') : ''
+    numbering.select.value = isExplicitlyUnnumbered(node.attrs.sourceAttributes) ? 'unnumbered' : 'numbered'
     updateSave()
     edit.focus()
   }
@@ -1607,7 +1623,11 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
       tex,
       label: nextLabel || null,
       captionMarkdown: captionInput.value.trim(),
-      sourceAttributes: updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
+      sourceAttributes: updatePortableAttributeClass(
+        updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
+        'unnumbered',
+        numbering.select.value === 'unnumbered',
+      ),
     } : { ...node.attrs, tex })
     if (displayMode) transaction = retargetCrossReferences(transaction, previousLabel, nextLabel)
     view.dispatch(transaction)
@@ -1626,12 +1646,14 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
     updateSave()
     input.focus()
     input.select()
+    if (displayMode) revealSemanticInspector(editor)
   })
   cancel.addEventListener('click', closeEditor)
   save.addEventListener('click', saveEditor)
   input.addEventListener('input', updateSave)
   labelInput.addEventListener('input', updateSave)
   captionInput.addEventListener('input', updateSave)
+  numbering.select.addEventListener('change', updateSave)
   const handleEditorKeydown = (event: Event) => {
     const keyboard = event as KeyboardEvent
     if (keyboard.key === 'Escape') {
@@ -1645,6 +1667,7 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   input.addEventListener('keydown', handleEditorKeydown)
   labelInput.addEventListener('keydown', handleEditorKeydown)
   captionInput.addEventListener('keydown', handleEditorKeydown)
+  numbering.select.addEventListener('keydown', handleEditorKeydown)
 
   if (displayMode) dom.append(header, rendered, number, error, captionPreview, editor)
   else dom.append(rendered, error, edit, editor)
@@ -1973,15 +1996,29 @@ function safeOutputCaption(value: string) {
   return value.trim().replace(/<!--\s*dm-output:/gi, '&lt;!-- dm-output:').replaceAll('\r', ' ').replaceAll('\n', ' ')
 }
 
-function rewriteRetainedOutputPresentation(markdown: string, caption: string, label: string, declaredKind: unknown) {
+export interface RetainedOutputPresentationEdit {
+  caption: string
+  label: string
+  alt?: string
+  numbered?: boolean
+}
+
+export function rewriteRetainedOutputPresentation(
+  markdown: string,
+  edit: RetainedOutputPresentationEdit,
+  declaredKind: unknown,
+) {
   const ending = markdown.includes('\r\n') ? '\r\n' : markdown.includes('\r') ? '\r' : '\n'
   const start = markdown.match(/<!-- dm-output:start[^>]*-->/)?.[0]
   const end = '<!-- dm-output:end -->'
   const publishedValues = [...markdown.matchAll(/^\s*<!-- dm-published-value\b[^>]*-->\s*$/gm)].map((match) => match[0].trim())
   const body = retainedOutputBody(markdown)
   const presentation = retainedOutputPresentation(markdown, declaredKind)
-  const nextCaption = safeOutputCaption(caption)
-  const nextAttributes = updatePortableAttributeId(presentation.sourceAttributes, presentation.label ?? '', label)
+  const nextCaption = safeOutputCaption(edit.caption)
+  const withLabel = updatePortableAttributeId(presentation.sourceAttributes, presentation.label ?? '', edit.label)
+  const nextAttributes = edit.numbered === undefined
+    ? withLabel
+    : updatePortableAttributeClass(withLabel, 'unnumbered', !edit.numbered)
   let nextBody = body
 
   if (presentation.kind === 'image') {
@@ -1989,7 +2026,7 @@ function rewriteRetainedOutputPresentation(markdown: string, caption: string, la
     const htmlImage = markdownImage ? undefined : embeddedExecutionImageFromHtml(body)
     const imageSource = markdownImage?.source ?? htmlImage?.source
     if (!imageSource) return markdown
-    const alt = markdownImage?.alt ?? htmlImage?.alt ?? 'Generated image output'
+    const alt = edit.alt ?? markdownImage?.alt ?? htmlImage?.alt ?? 'Generated image output'
     const portableSource = /^data:/i.test(imageSource) ? imageSource : imageSource.includes(' ') ? `<${imageSource}>` : imageSource
     nextBody = `![${alt.replaceAll(']', '\\]')}](${portableSource})${nextAttributes ? `{${nextAttributes}}` : ''}${nextCaption ? `${ending}: ${nextCaption}` : ''}`
   } else if (presentation.kind === 'table') {
@@ -2031,11 +2068,16 @@ function assignSemanticObjectLabel(transaction: Transaction, nodeId: string, lab
       const presentation = retainedOutputPresentation(String(candidate.attrs.markdown), candidate.attrs.kind)
       const markdown = rewriteRetainedOutputPresentation(
         String(candidate.attrs.markdown),
-        presentation.caption ?? '',
-        label,
+        {
+          caption: presentation.caption ?? '',
+          label,
+          alt: presentation.alt,
+          numbered: !presentation.unnumbered,
+        },
         candidate.attrs.kind,
       )
       transaction = transaction.setNodeMarkup(position, undefined, { ...candidate.attrs, markdown })
+      transaction = updateCodeCellSemanticReference(transaction, String(candidate.attrs.cellId), label)
       found = true
       return false
     }
@@ -2066,7 +2108,7 @@ function outputNodeView(
   const edit = document.createElement('button')
   edit.type = 'button'
   edit.className = 'structured-output-edit'
-  edit.textContent = 'Edit caption'
+  edit.textContent = 'Object details'
   header.append(descriptor, copy, edit)
 
   const content = document.createElement('div')
@@ -2074,14 +2116,21 @@ function outputNodeView(
   const captionPreview = document.createElement('figcaption')
   captionPreview.className = 'structured-output-caption'
   const editor = document.createElement('div')
-  editor.className = 'structured-output-editor'
+  editor.className = 'structured-output-editor semantic-object-inspector'
   editor.hidden = true
+  const inspectorHead = semanticInspectorHeader('Object details', 'Reproducible output')
   const captionField = document.createElement('label')
   captionField.append(document.createTextNode('Caption'))
   const captionInput = document.createElement('textarea')
   captionInput.className = 'structured-output-input'
   captionInput.setAttribute('aria-label', 'Generated output caption')
   captionField.append(captionInput)
+  const altField = document.createElement('label')
+  altField.append(document.createTextNode('Accessible description'))
+  const altInput = document.createElement('textarea')
+  altInput.className = 'structured-output-input'
+  altInput.setAttribute('aria-label', 'Generated figure accessible description')
+  altField.append(altInput)
   const labelField = document.createElement('label')
   labelField.append(document.createTextNode('Cross-reference label'))
   const labelInput = document.createElement('input')
@@ -2089,6 +2138,13 @@ function outputNodeView(
   labelInput.setAttribute('aria-label', 'Generated output label')
   labelInput.spellcheck = false
   labelField.append(labelInput)
+  const numbering = semanticNumberingField('Generated output numbering')
+  const provenance = document.createElement('details')
+  provenance.className = 'semantic-object-provenance'
+  const provenanceSummary = document.createElement('summary')
+  provenanceSummary.textContent = 'Computation provenance'
+  const provenanceText = document.createElement('p')
+  provenance.append(provenanceSummary, provenanceText)
   const validation = document.createElement('p')
   validation.className = 'structured-output-validation'
   validation.hidden = true
@@ -2100,9 +2156,9 @@ function outputNodeView(
   const save = document.createElement('button')
   save.type = 'button'
   save.className = 'primary-button'
-  save.textContent = 'Save caption'
+  save.textContent = 'Save details'
   actions.append(cancel, save)
-  editor.append(captionField, labelField, validation, actions)
+  editor.append(inspectorHead.header, captionField, altField, labelField, numbering.field, provenance, validation, actions)
 
   const normalizedLabel = () => labelInput.value.trim().replace(/^#/, '')
   const updateSave = () => {
@@ -2111,19 +2167,27 @@ function outputNodeView(
     const expectedPrefix = presentation.kind === 'table' ? 'tbl-' : 'fig-'
     const validSyntax = !nextLabel || /^[a-zA-Z][\w.:-]*$/.test(nextLabel)
     const validKind = !nextLabel || nextLabel === presentation.label || nextLabel.startsWith(expectedPrefix)
+    const unique = !semanticLabelUsedByAnotherObject(view.state.doc, nextLabel, String(node.attrs.id))
     validation.textContent = !validSyntax
       ? 'Labels must start with a letter and contain only letters, numbers, dots, colons, underscores, or hyphens.'
       : !validKind
         ? `${presentation.kind === 'table' ? 'Table' : 'Figure'} labels must use the portable ${expectedPrefix}… form.`
-        : ''
-    validation.hidden = validSyntax && validKind
-    save.disabled = !isEditable() || !validSyntax || !validKind
+        : !unique
+          ? 'That label already belongs to another manuscript object.'
+          : ''
+    validation.hidden = validSyntax && validKind && unique
+    save.disabled = !isEditable() || !validSyntax || !validKind || !unique
   }
   const updateDom = () => {
     const markdown = retainedOutputBody(String(node.attrs.markdown))
     const presentation = retainedOutputPresentation(String(node.attrs.markdown), node.attrs.kind)
     const numbered = numberedObjectByNodeId(view.state.doc, String(node.attrs.id))
     const kindLabel = presentation.kind === 'table' ? 'Table' : presentation.kind === 'image' ? 'Figure' : 'Retained output'
+    let sourceCell: ProseMirrorNode | undefined
+    view.state.doc.descendants((candidate) => {
+      if (candidate.type === manuscriptSchema.nodes.code_cell && String(candidate.attrs.id) === String(node.attrs.cellId)) sourceCell = candidate
+      return !sourceCell
+    })
     dom.dataset.dmId = String(node.attrs.id)
     dom.dataset.cellId = String(node.attrs.cellId)
     dom.dataset.outputKind = presentation.kind
@@ -2142,7 +2206,17 @@ function outputNodeView(
       : 'Copy output reference')
     edit.hidden = presentation.kind === 'markdown' || editing
     edit.disabled = !isEditable()
-    edit.setAttribute('aria-label', `Edit ${kindLabel.toLowerCase()} caption`)
+    edit.setAttribute('aria-label', `Edit ${kindLabel.toLowerCase()} object details`)
+    inspectorHead.detail.textContent = `${kindLabel} · reproducible output`
+    altField.hidden = presentation.kind !== 'image'
+    const provenanceKind = sourceCell?.attrs.outputKind === 'table'
+      ? 'reproducible table'
+      : sourceCell?.attrs.outputKind === 'figure'
+        ? 'reproducible figure'
+        : 'reproducible output'
+    provenanceText.textContent = sourceCell
+      ? `${String(sourceCell.attrs.language).toUpperCase()} source cell · ${provenanceKind}`
+      : 'Linked reproducible source cell'
     content.replaceChildren()
 
     const markdownImage = retainedMarkdownImage(markdown)
@@ -2193,10 +2267,14 @@ function outputNodeView(
     else content.after(captionPreview)
     if (!editing) {
       captionInput.value = presentation.caption ?? ''
+      altInput.value = presentation.alt ?? ''
       labelInput.value = presentation.label ?? ''
+      numbering.select.value = presentation.unnumbered ? 'unnumbered' : 'numbered'
     }
     captionInput.readOnly = !isEditable()
+    altInput.readOnly = !isEditable()
     labelInput.readOnly = !isEditable()
+    numbering.select.disabled = !isEditable()
     updateSave()
   }
   const closeEditor = () => {
@@ -2208,13 +2286,23 @@ function outputNodeView(
   const saveEditor = () => {
     const position = getPos()
     if (typeof position !== 'number' || save.disabled || !isEditable()) return
+    const presentation = retainedOutputPresentation(String(node.attrs.markdown), node.attrs.kind)
+    const previousLabel = presentation.label ?? ''
+    const nextLabel = normalizedLabel()
     const markdown = rewriteRetainedOutputPresentation(
       String(node.attrs.markdown),
-      captionInput.value,
-      normalizedLabel(),
+      {
+        caption: captionInput.value,
+        label: nextLabel,
+        alt: altInput.value.trim(),
+        numbered: numbering.select.value === 'numbered',
+      },
       node.attrs.kind,
     )
-    view.dispatch(view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, markdown }))
+    let transaction = view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, markdown })
+    transaction = updateCodeCellSemanticReference(transaction, String(node.attrs.cellId), nextLabel)
+    transaction = retargetCrossReferences(transaction, previousLabel, nextLabel)
+    view.dispatch(transaction)
     closeEditor()
   }
   copy.addEventListener('click', () => {
@@ -2230,12 +2318,15 @@ function outputNodeView(
     updateSave()
     captionInput.focus()
     captionInput.select()
+    revealSemanticInspector(editor)
   })
   cancel.addEventListener('click', closeEditor)
   save.addEventListener('click', saveEditor)
   captionInput.addEventListener('input', updateSave)
+  altInput.addEventListener('input', updateSave)
   labelInput.addEventListener('input', updateSave)
-  for (const input of [captionInput, labelInput]) input.addEventListener('keydown', (event) => {
+  numbering.select.addEventListener('change', updateSave)
+  for (const input of [captionInput, altInput, labelInput, numbering.select]) input.addEventListener('keydown', (event) => {
     const keyboard = event as KeyboardEvent
     if (keyboard.key === 'Escape') {
       event.preventDefault()
@@ -2272,6 +2363,50 @@ function updatePortableAttributeId(sourceAttributes: unknown, previousLabel: str
   return withoutId || null
 }
 
+export function updatePortableAttributeClass(sourceAttributes: unknown, className: string, enabled: boolean) {
+  const classToken = `.${className.replace(/^\./, '')}`
+  const tokens = String(sourceAttributes ?? '').trim().split(/\s+/).filter(Boolean)
+  const retained = tokens.filter((token) => token !== classToken)
+  if (enabled) retained.push(classToken)
+  return retained.join(' ') || null
+}
+
+function semanticInspectorHeader(title: string, context: string) {
+  const header = document.createElement('div')
+  header.className = 'semantic-object-inspector-head'
+  const heading = document.createElement('strong')
+  heading.textContent = title
+  const detail = document.createElement('small')
+  detail.textContent = context
+  header.append(heading, detail)
+  return { header, detail }
+}
+
+function semanticNumberingField(ariaLabel: string) {
+  const field = document.createElement('label')
+  field.className = 'semantic-object-numbering-field'
+  const label = document.createElement('span')
+  label.textContent = 'Numbering'
+  const select = document.createElement('select')
+  select.className = 'semantic-object-numbering'
+  select.setAttribute('aria-label', ariaLabel)
+  const numbered = document.createElement('option')
+  numbered.value = 'numbered'
+  numbered.textContent = 'Number automatically'
+  const unnumbered = document.createElement('option')
+  unnumbered.value = 'unnumbered'
+  unnumbered.textContent = 'Do not number'
+  select.append(numbered, unnumbered)
+  const hint = document.createElement('small')
+  hint.textContent = 'Stored portably in the manuscript source.'
+  field.append(label, select, hint)
+  return { field, select }
+}
+
+function revealSemanticInspector(inspector: HTMLElement) {
+  requestAnimationFrame(() => inspector.scrollIntoView?.({ block: 'center', behavior: motionAwareScrollBehavior() }))
+}
+
 function hasCrossReferences(document: ProseMirrorNode, target: string) {
   let found = false
   if (!target) return found
@@ -2298,6 +2433,19 @@ function retargetCrossReferences(transaction: Transaction, previousTarget: strin
   return updated
 }
 
+function updateCodeCellSemanticReference(transaction: Transaction, cellId: string, nextLabel: string) {
+  let updated = transaction
+  transaction.doc.descendants((candidate, position) => {
+    if (candidate.type !== manuscriptSchema.nodes.code_cell || String(candidate.attrs.id) !== cellId) return true
+    const attributes = { ...((candidate.attrs.attributes ?? {}) as Record<string, unknown>) }
+    if (nextLabel) attributes.reference = nextLabel
+    else delete attributes.reference
+    updated = updated.setNodeMarkup(position, undefined, { ...candidate.attrs, attributes })
+    return false
+  })
+  return updated
+}
+
 function labelUsedByAnotherNode(document: ProseMirrorNode, label: string, currentNodeId?: string) {
   let found = false
   if (!label) return found
@@ -2306,6 +2454,12 @@ function labelUsedByAnotherNode(document: ProseMirrorNode, label: string, curren
     return !found
   })
   return found
+}
+
+function semanticLabelUsedByAnotherObject(document: ProseMirrorNode, label: string, currentNodeId?: string) {
+  if (!label) return false
+  return semanticManuscriptObjects(document)
+    .some((object) => object.nodeId !== currentNodeId && object.label === label)
 }
 
 function positionForNodeId(document: ProseMirrorNode, nodeType: ProseMirrorNode['type'], id: string) {
@@ -2334,21 +2488,21 @@ function headingNodeView(
   const edit = document.createElement('button')
   edit.type = 'button'
   edit.className = 'structured-heading-edit'
-  edit.textContent = 'Section details'
+  edit.textContent = 'Object details'
   edit.contentEditable = 'false'
 
   const backdrop = document.createElement('div')
   backdrop.className = 'structured-heading-dialog-backdrop'
   const editor = document.createElement('div')
-  editor.className = 'structured-heading-editor'
+  editor.className = 'structured-heading-editor semantic-object-inspector'
   editor.contentEditable = 'false'
   editor.setAttribute('role', 'dialog')
   editor.setAttribute('aria-modal', 'true')
-  editor.setAttribute('aria-label', 'Section details')
+  editor.setAttribute('aria-label', 'Section object details')
   const editorHeader = document.createElement('div')
   editorHeader.className = 'structured-heading-dialog-head'
   const editorTitle = document.createElement('strong')
-  editorTitle.textContent = 'Section details'
+  editorTitle.textContent = 'Object details'
   const editorSubtitle = document.createElement('small')
   editorHeader.append(editorTitle, editorSubtitle)
   const label = document.createElement('label')
@@ -2363,6 +2517,7 @@ function headingNodeView(
   const hint = document.createElement('small')
   hint.textContent = 'Optional; changing it also updates matching section references.'
   label.append(labelText, input, hint)
+  const numbering = semanticNumberingField('Section numbering')
   const validation = document.createElement('p')
   validation.className = 'structured-heading-validation'
   validation.hidden = true
@@ -2376,7 +2531,7 @@ function headingNodeView(
   save.className = 'primary-button structured-heading-save'
   save.textContent = 'Save section'
   actions.append(cancel, save)
-  editor.append(editorHeader, label, validation, actions)
+  editor.append(editorHeader, label, numbering.field, validation, actions)
 
   const normalizedLabel = () => input.value.trim().replace(/^#/, '')
   const updateSave = () => {
@@ -2423,6 +2578,8 @@ function headingNodeView(
       ? `Edit section ${sectionLabel} details`
       : `Add a cross-reference label to ${node.textContent || 'this section'}`)
     if (!editing) input.value = sectionLabel
+    numbering.select.value = isExplicitlyUnnumbered(sourceAttributes) ? 'unnumbered' : 'numbered'
+    numbering.select.disabled = !isEditable()
     updateSave()
   }
   const closeEditor = () => {
@@ -2430,6 +2587,7 @@ function headingNodeView(
     backdrop.remove()
     edit.hidden = false
     input.value = node.attrs.label ? String(node.attrs.label) : ''
+    numbering.select.value = isExplicitlyUnnumbered(node.attrs.sourceAttributes) ? 'unnumbered' : 'numbered'
     updateSave()
     const escapedId = globalThis.CSS?.escape ? globalThis.CSS.escape(String(node.attrs.id)) : String(node.attrs.id).replace(/["\\]/g, '\\$&')
     const returnTarget = edit.isConnected
@@ -2453,7 +2611,11 @@ function headingNodeView(
     let transaction = view.state.tr.setNodeMarkup(position, undefined, {
       ...node.attrs,
       label: nextLabel || null,
-      sourceAttributes: updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
+      sourceAttributes: updatePortableAttributeClass(
+        updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
+        'unnumbered',
+        numbering.select.value === 'unnumbered',
+      ),
     })
     transaction = retargetCrossReferences(transaction, previousLabel, nextLabel)
     view.dispatch(transaction)
@@ -2475,6 +2637,7 @@ function headingNodeView(
   cancel.addEventListener('click', closeEditor)
   save.addEventListener('click', saveEditor)
   input.addEventListener('input', updateSave)
+  numbering.select.addEventListener('change', updateSave)
   input.addEventListener('keydown', (event) => {
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
       event.preventDefault()
@@ -2488,7 +2651,7 @@ function headingNodeView(
       return
     }
     if (event.key !== 'Tab') return
-    const focusable = [...editor.querySelectorAll<HTMLElement>('input, button:not([disabled])')]
+    const focusable = [...editor.querySelectorAll<HTMLElement>('input, select, button:not([disabled])')]
     if (!focusable.length) return
     const current = focusable.indexOf(document.activeElement as HTMLElement)
     const next = event.shiftKey
@@ -2571,7 +2734,7 @@ function imageNodeView(
   const edit = document.createElement('button')
   edit.type = 'button'
   edit.className = 'structured-figure-edit'
-  edit.textContent = 'Edit figure'
+  edit.textContent = 'Object details'
   header.append(descriptor, edit)
 
   const image = document.createElement('img')
@@ -2581,8 +2744,9 @@ function imageNodeView(
   numberline.className = 'structured-figure-numberline'
 
   const editor = document.createElement('div')
-  editor.className = 'structured-figure-editor'
+  editor.className = 'structured-figure-editor semantic-object-inspector'
   editor.hidden = true
+  const inspectorHead = semanticInspectorHeader('Object details', 'Figure')
   const fields = document.createElement('div')
   fields.className = 'structured-figure-fields'
   const field = (text: string, input: HTMLInputElement, note?: string) => {
@@ -2605,7 +2769,7 @@ function imageNodeView(
   const alt = document.createElement('input')
   alt.type = 'text'
   alt.className = 'structured-figure-input'
-  alt.setAttribute('aria-label', 'Figure alternative text')
+  alt.setAttribute('aria-label', 'Figure accessible description')
   const title = document.createElement('input')
   title.type = 'text'
   title.className = 'structured-figure-input'
@@ -2619,12 +2783,14 @@ function imageNodeView(
   labelInput.className = 'structured-figure-input'
   labelInput.setAttribute('aria-label', 'Figure label')
   labelInput.spellcheck = false
+  const numbering = semanticNumberingField('Figure numbering')
   fields.append(
-    field('Image source', source, 'Use a project-relative path.'),
-    field('Alternative text', alt, 'Leave blank only when the image is decorative.'),
-    field('Hover title', title, 'Optional.'),
     field('Caption', captionInput, 'Optional; shown below the numbered figure.'),
+    field('Accessible description', alt, 'Describe the visual meaning; leave blank only when decorative.'),
     field('Cross-reference label', labelInput, 'Optional; changing it also updates matching references.'),
+    numbering.field,
+    field('Image source', source, 'Use a project-relative path.'),
+    field('Hover title', title, 'Optional display hint.'),
   )
   const validation = document.createElement('p')
   validation.className = 'structured-figure-validation'
@@ -2639,7 +2805,7 @@ function imageNodeView(
   save.className = 'primary-button'
   save.textContent = 'Save figure'
   actions.append(cancel, save)
-  editor.append(fields, validation, actions)
+  editor.append(inspectorHead.header, fields, validation, actions)
 
   const normalizedLabel = () => labelInput.value.trim().replace(/^#/, '')
   const figureContext = () => {
@@ -2662,15 +2828,18 @@ function imageNodeView(
       || (nextLabel.startsWith('fig-') && isCrossReferenceTarget(nextLabel))
     const referenced = hasCrossReferences(view.state.doc, previousLabel)
     const keepsReferences = !referenced || (Boolean(nextLabel) && nextLabel.startsWith('fig-') && isCrossReferenceTarget(nextLabel))
+    const unique = !semanticLabelUsedByAnotherObject(view.state.doc, nextLabel, String(node.attrs.id))
     validation.textContent = !validLabelSyntax
       ? 'Labels must start with a letter and contain only letters, numbers, dots, colons, underscores, or hyphens.'
       : !validFigureLabel
         ? 'New figure labels must use the portable fig-… form.'
       : !keepsReferences
         ? 'This figure is referenced in the manuscript. Keep a valid fig-… label so those links remain portable.'
-        : ''
-    validation.hidden = validLabelSyntax && validFigureLabel && keepsReferences
-    save.disabled = !isEditable() || !source.value.trim() || !validLabelSyntax || !validFigureLabel || !keepsReferences
+        : !unique
+          ? 'That label already belongs to another manuscript object.'
+          : ''
+    validation.hidden = validLabelSyntax && validFigureLabel && keepsReferences && unique
+    save.disabled = !isEditable() || !source.value.trim() || !validLabelSyntax || !validFigureLabel || !keepsReferences || !unique
   }
   const updateDom = () => {
     const sourcePath = String(node.attrs.src)
@@ -2698,8 +2867,10 @@ function imageNodeView(
       title.value = imageTitle
       captionInput.value = context?.caption?.textContent ?? ''
       labelInput.value = figureLabel
+      numbering.select.value = isExplicitlyUnnumbered(node.attrs.sourceAttributes) ? 'unnumbered' : 'numbered'
     }
-    captionInput.readOnly = !isEditable()
+    for (const input of [source, alt, title, captionInput, labelInput]) input.readOnly = !isEditable()
+    numbering.select.disabled = !isEditable()
     updateSave()
   }
   const closeEditor = () => {
@@ -2711,6 +2882,7 @@ function imageNodeView(
     title.value = node.attrs.title ? String(node.attrs.title) : ''
     captionInput.value = figureContext()?.caption?.textContent ?? ''
     labelInput.value = node.attrs.label ? String(node.attrs.label) : ''
+    numbering.select.value = isExplicitlyUnnumbered(node.attrs.sourceAttributes) ? 'unnumbered' : 'numbered'
     updateSave()
     edit.focus()
   }
@@ -2727,6 +2899,7 @@ function imageNodeView(
       || (nextLabel && !/^[a-zA-Z][\w.:-]*$/.test(nextLabel))
       || (nextLabel !== previousLabel && nextLabel && (!nextLabel.startsWith('fig-') || !isCrossReferenceTarget(nextLabel)))
       || (referenced && (!nextLabel || !nextLabel.startsWith('fig-') || !isCrossReferenceTarget(nextLabel)))
+      || semanticLabelUsedByAnotherObject(view.state.doc, nextLabel, String(node.attrs.id))
     ) return
     const nextImage = node.type.createChecked({
       ...node.attrs,
@@ -2734,7 +2907,11 @@ function imageNodeView(
       alt: alt.value.trim(),
       title: title.value.trim() || null,
       label: nextLabel || null,
-      sourceAttributes: updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
+      sourceAttributes: updatePortableAttributeClass(
+        updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
+        'unnumbered',
+        numbering.select.value === 'unnumbered',
+      ),
     })
     const context = figureContext()
     const nextCaption = captionInput.value.trim()
@@ -2769,8 +2946,9 @@ function imageNodeView(
     edit.hidden = true
     editor.hidden = false
     updateDom()
-    source.focus()
-    source.select()
+    captionInput.focus()
+    captionInput.select()
+    revealSemanticInspector(editor)
   })
   cancel.addEventListener('click', closeEditor)
   save.addEventListener('click', saveEditor)
@@ -2786,6 +2964,16 @@ function imageNodeView(
       }
     })
   }
+  numbering.select.addEventListener('change', updateSave)
+  numbering.select.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeEditor()
+    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault()
+      saveEditor()
+    }
+  })
 
   dom.append(header, image, numberline, editor)
   updateDom()
@@ -2821,7 +3009,7 @@ function tableNodeView(
   const edit = document.createElement('button')
   edit.type = 'button'
   edit.className = 'structured-table-edit'
-  edit.textContent = 'Edit table details'
+  edit.textContent = 'Object details'
   header.append(descriptor, edit)
 
   const scroll = document.createElement('div')
@@ -2836,9 +3024,10 @@ function tableNodeView(
   preview.contentEditable = 'false'
 
   const editor = document.createElement('div')
-  editor.className = 'structured-table-editor'
+  editor.className = 'structured-table-editor semantic-object-inspector'
   editor.contentEditable = 'false'
   editor.hidden = true
+  const inspectorHead = semanticInspectorHeader('Object details', 'Table')
   const captionLabel = document.createElement('label')
   const captionDescriptor = document.createElement('span')
   captionDescriptor.textContent = 'Table caption'
@@ -2857,6 +3046,7 @@ function tableNodeView(
   const labelHint = document.createElement('small')
   labelHint.textContent = 'Optional; use tbl-… when the table is referenced.'
   labelLabel.append(labelDescriptor, labelInput, labelHint)
+  const numbering = semanticNumberingField('Table numbering')
   const validation = document.createElement('p')
   validation.className = 'structured-table-validation'
   validation.hidden = true
@@ -2870,31 +3060,30 @@ function tableNodeView(
   save.className = 'primary-button'
   save.textContent = 'Save table details'
   actions.append(cancel, save)
-  editor.append(captionLabel, labelLabel, validation, actions)
+  editor.append(inspectorHead.header, captionLabel, labelLabel, numbering.field, validation, actions)
 
   const normalizedLabel = () => labelInput.value.trim().replace(/^#/, '')
   const updateSave = () => {
-    const nextCaption = caption.value.trim()
     const nextLabel = normalizedLabel()
     const previousLabel = node.attrs.label ? String(node.attrs.label) : ''
     const validLabelSyntax = !nextLabel || /^[a-zA-Z][\w.:-]*$/.test(nextLabel)
     const validTableLabel = !nextLabel
       || nextLabel === previousLabel
       || (nextLabel.startsWith('tbl-') && isCrossReferenceTarget(nextLabel))
-    const captionedLabel = !nextLabel || Boolean(nextCaption)
     const referenced = hasCrossReferences(view.state.doc, previousLabel)
     const keepsReferences = !referenced || (Boolean(nextLabel) && nextLabel.startsWith('tbl-') && isCrossReferenceTarget(nextLabel))
+    const unique = !semanticLabelUsedByAnotherObject(view.state.doc, nextLabel, String(node.attrs.id))
     validation.textContent = !validLabelSyntax
       ? 'Labels must start with a letter and contain only letters, numbers, dots, colons, underscores, or hyphens.'
       : !validTableLabel
         ? 'New table labels must use the portable tbl-… form.'
-        : !captionedLabel
-          ? 'A labeled table needs a caption.'
-          : !keepsReferences
+        : !keepsReferences
             ? 'This table is referenced in the manuscript. Keep a valid tbl-… label so those links remain portable.'
-            : ''
-    validation.hidden = validLabelSyntax && validTableLabel && captionedLabel && keepsReferences
-    save.disabled = !isEditable() || !validLabelSyntax || !validTableLabel || !captionedLabel || !keepsReferences
+            : !unique
+              ? 'That label already belongs to another manuscript object.'
+              : ''
+    validation.hidden = validLabelSyntax && validTableLabel && keepsReferences && unique
+    save.disabled = !isEditable() || !validLabelSyntax || !validTableLabel || !keepsReferences || !unique
   }
   const updateDom = () => {
     const tableLabel = node.attrs.label ? String(node.attrs.label) : ''
@@ -2918,9 +3107,11 @@ function tableNodeView(
     if (!editing) {
       caption.value = captionMarkdown
       labelInput.value = tableLabel
+      numbering.select.value = isExplicitlyUnnumbered(node.attrs.sourceAttributes) ? 'unnumbered' : 'numbered'
     }
     caption.readOnly = !isEditable()
     labelInput.readOnly = !isEditable()
+    numbering.select.disabled = !isEditable()
     updateSave()
   }
   const closeEditor = () => {
@@ -2931,6 +3122,7 @@ function tableNodeView(
     edit.hidden = false
     caption.value = String(node.attrs.captionMarkdown ?? '')
     labelInput.value = node.attrs.label ? String(node.attrs.label) : ''
+    numbering.select.value = isExplicitlyUnnumbered(node.attrs.sourceAttributes) ? 'unnumbered' : 'numbered'
     updateSave()
     edit.focus()
   }
@@ -2945,14 +3137,18 @@ function tableNodeView(
       || !isEditable()
       || (nextLabel && !/^[a-zA-Z][\w.:-]*$/.test(nextLabel))
       || (nextLabel !== previousLabel && nextLabel && (!nextLabel.startsWith('tbl-') || !isCrossReferenceTarget(nextLabel)))
-      || (nextLabel && !nextCaption)
       || (referenced && (!nextLabel || !nextLabel.startsWith('tbl-') || !isCrossReferenceTarget(nextLabel)))
+      || semanticLabelUsedByAnotherObject(view.state.doc, nextLabel, String(node.attrs.id))
     ) return
     let transaction = view.state.tr.setNodeMarkup(position, undefined, {
       ...node.attrs,
       captionMarkdown: nextCaption,
       label: nextLabel || null,
-      sourceAttributes: updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
+      sourceAttributes: updatePortableAttributeClass(
+        updatePortableAttributeId(node.attrs.sourceAttributes, previousLabel, nextLabel),
+        'unnumbered',
+        numbering.select.value === 'unnumbered',
+      ),
     })
     transaction = retargetCrossReferences(transaction, previousLabel, nextLabel)
     view.dispatch(transaction)
@@ -2966,6 +3162,7 @@ function tableNodeView(
     updateDom()
     caption.focus()
     caption.select()
+    revealSemanticInspector(editor)
   })
   cancel.addEventListener('click', closeEditor)
   save.addEventListener('click', saveEditor)
@@ -2982,6 +3179,16 @@ function tableNodeView(
       }
     })
   }
+  numbering.select.addEventListener('change', updateSave)
+  numbering.select.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault()
+      closeEditor()
+    } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+      event.preventDefault()
+      saveEditor()
+    }
+  })
 
   dom.append(header, preview, scroll, editor)
   updateDom()

@@ -69,6 +69,8 @@ scatter(1:10)
     const changed: string[] = []
     const source = `## Results
 
+See @fig-makie-result for the generated response.
+
 \`\`\`julia {#fig-makie .execute output="figure"}
 scatter(1:10)
 \`\`\`
@@ -89,18 +91,30 @@ scatter(1:10)
     expect(output.dataset.cellId).toBe('fig-makie')
     expect(output.querySelector('.structured-output-caption')?.textContent).toBe('Figure 1. Original response.')
 
-    await act(async () => output.querySelector<HTMLButtonElement>('[aria-label="Edit figure caption"]')?.click())
+    await act(async () => output.querySelector<HTMLButtonElement>('[aria-label="Edit figure object details"]')?.click())
     const caption = output.querySelector<HTMLTextAreaElement>('[aria-label="Generated output caption"]')!
+    const alt = output.querySelector<HTMLTextAreaElement>('[aria-label="Generated figure accessible description"]')!
     const label = output.querySelector<HTMLInputElement>('[aria-label="Generated output label"]')!
+    const numbering = output.querySelector<HTMLSelectElement>('[aria-label="Generated output numbering"]')!
+    const provenance = output.querySelector<HTMLDetailsElement>('.semantic-object-provenance')!
+    expect(provenance.open).toBe(false)
+    expect(provenance.textContent).toContain('JULIA source cell · reproducible figure')
     caption.value = 'Revised **response**.'
     caption.dispatchEvent(new Event('input', { bubbles: true }))
+    alt.value = 'Accessible generated response'
+    alt.dispatchEvent(new Event('input', { bubbles: true }))
     label.value = 'fig-response'
     label.dispatchEvent(new Event('input', { bubbles: true }))
+    numbering.value = 'unnumbered'
+    numbering.dispatchEvent(new Event('change', { bubbles: true }))
     await act(async () => output.querySelector<HTMLButtonElement>('.structured-output-actions .primary-button')?.click())
 
-    expect(changed.at(-1)).toContain(`![Generated response](data:image/png;base64,${png}){#fig-response}`)
+    expect(changed.at(-1)).toContain(`![Accessible generated response](data:image/png;base64,${png}){#fig-response .unnumbered}`)
     expect(changed.at(-1)).toContain(': Revised **response**.')
-    expect(output.querySelector('.structured-output-caption')?.textContent).toBe('Figure 1. Revised response.')
+    expect(changed.at(-1)).toContain('output="figure" reference="fig-response"')
+    expect(changed.at(-1)).toContain('See @fig-response for the generated response.')
+    expect(output.querySelector('.structured-output-caption')?.textContent).toBe('Revised response.')
+    expect(output.querySelector('img')?.alt).toBe('Accessible generated response')
   })
 
   it('renders a retained Markdown table with its numbered caption above the rows', async () => {
