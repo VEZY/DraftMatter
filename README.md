@@ -2,6 +2,8 @@
 
 DraftMatter is a local-first research writing application: a calm rendered manuscript with citations, executable-cell provenance, review suggestions, comments, and portable Markdown/Quarto source.
 
+The repository has certified the local MVP and the repository-owned collaboration beta foundation. Current product work is an alpha-authoring milestone focused on friendly figure/table/equation identities, a searchable cross-reference workflow, a unified semantic-object inspector, reference diagnostics, and real article-sized dogfooding. This repository status does not imply that a signed public desktop release or operated paid collaboration service has completed its external deployment, security, privacy, and support gates. See the [product register](./draftmatter-app-design.md) and [implementation evidence](./docs/implementation-evidence.md).
+
 ## Run locally
 
 The browser build requires Node.js 20 or newer. The portable desktop build additionally requires the stable Rust toolchain and the platform prerequisites listed by Tauri 2.

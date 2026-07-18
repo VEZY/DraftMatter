@@ -1,10 +1,12 @@
 # DraftMatter implementation evidence
 
 This ledger consolidates the implementation and verification evidence for the
-task register in `draftmatter-app-design.md`. It intentionally does not change
-that canonical register: the design document currently contains uncommitted
-user edits and must be reconciled separately. The evidence below is suitable
-for copying into its completion log once those edits are approved.
+task register in `draftmatter-app-design.md`. The canonical register and this
+ledger were reconciled on 2026-07-18: DM-P0 through DM-P6 and AC-L01 through
+AC-C06 are checked, while the new DM-P7 alpha-authoring milestone remains open.
+The design document carries the product-level status and interaction decisions;
+this file remains the task-level source for tests, fixtures, and implementation
+commits.
 
 ## Certification snapshot
 
@@ -34,6 +36,39 @@ single-lane contention, restart generation and state clearing, interrupt, and
 post-interrupt recovery. Repository-wide removal checks found no legacy
 scalar-output protocol, namespaced value markup, alternative execution runner,
 execution-mode selector, or Python-side Jupyter control bridge.
+
+### Post-gate authoring audit
+
+Hands-on product review after the formal phase gates exposed several ordinary
+writing and reproducible-output issues that broad subsystem tests did not make
+prominent. The resulting refinements were verified through commit `597fc3c` on
+2026-07-18:
+
+| Verification | Result |
+| --- | --- |
+| `npm run check` plus the numbering, structured-manuscript, editor, CairoMakie, materializer, native-HTML, and DOCX suites | Passed: 7 files / 79 tests after automatic numbering, captions, and unified output controls. |
+| `npm test -- --run` plus an isolated permitted rerun of `services/collaboration/hocuspocusNetwork.test.ts` | Passed in aggregate: 124 files / 614 tests. The three network tests required loopback permission and then passed. |
+| `npm run build` | Passed for the collaboration service, clean-export CLI, TypeScript application, and browser bundle. |
+| Focused overlap follow-up | `npm run check`, 2 editor/CairoMakie files / 44 tests, and `npm run build` passed after the responsive control-shelf repair. |
+| Rendered visual inspection | Verified quiet at-rest figures, compact reference controls, the ProseMirror drag-handle adjacency case, and non-overlapping wide/narrow control geometry. |
+
+## Post-gate product refinements
+
+These changes were driven by direct use of the application. They refine already
+certified phase requirements without redefining their original gates.
+
+| Product decision or repair | Evidence | Implementation commit |
+| --- | --- | --- |
+| Structured publication authors support reusable profiles, ORCID, email, and affiliations rather than name-only metadata. | `src/authorBank.test.ts`, `src/publicationMetadata.test.ts`, `tests/e2e/author-settings.spec.ts`, and native HTML/DOCX export tests. | `b719d11` |
+| Starter sections remain conventional but sections and individual blocks can be added and reordered; rendered prose remains editable. | `src/StructuredManuscriptEditor.test.tsx`, `src/structuredManuscript.test.ts`, and `tests/e2e/generic-manuscript.spec.ts`. | `b719d11`, `e44eaea`, `250cea5` |
+| Track changes is an explicit editing mode; contextual comments and anchored-text markers connect manuscript text to the review rail. | Suggestion-capture, portable-review, balloon-alignment, and review end-to-end tests. | `9384409`, `4696f03`, `d483fd9` |
+| Project creation treats the chosen location as a parent and creates a sanitized project-name child directory. | Native temporary-directory tests in `src-tauri/src/lib.rs`. | `dc9e8d2` |
+| Export dialogs choose directory and filename; native PDF is bridged through desktop printing; DOCX/HTML/PDF/Markdown remain clean and output-only. | `tests/e2e/publication-export.spec.ts`, `src/nativeHtmlExport.test.ts`, `src/docxExport.test.ts`, and native export tests. | `e3b9637`, `db60044`, `39b4872`, `577da90` |
+| Executable code is supporting provenance, not publication content. Figures, tables, and named in-text values are published while source stays hidden by default. | `src/publishedValues.test.ts`, `src/executionWorkspaceApp.test.tsx`, `src/outputMaterializer.test.ts`, and exporter tests. | `347c174`, `d2443f2`, `0c2c134` |
+| CairoMakie HTML/base64 wrappers are recovered as retained image figures instead of exposed source text. | `src/cairoMakieOutput.test.tsx` and `src/outputMaterializer.test.ts`. | `5f2b254`, `0d85304` |
+| Figures, tables, and equations number independently; captions follow scientific placement conventions; references use current numbers across editor, HTML/PDF, and DOCX. | `src/numberedObjects.test.ts`, editor tests, `src/nativeHtmlExport.test.ts`, and `src/docxExport.test.ts`. | `15e4b63` |
+| Code and retained output form one quiet manuscript object with hover/focus controls, touch fallback, compact references, and responsive non-overlapping rows. | `src/cairoMakieOutput.test.tsx`, `src/StructuredManuscriptEditor.test.tsx`, rendered geometry inspection, and the focused authoring build. | `15e4b63`, `597fc3c` |
+| The White Graphite visual system and focused research/review surfaces replace the broad prototype styling. | Browser visual regression coverage and the application accessibility suites. | `a22554e`, `5920675`, `d483fd9` |
 
 ## Task evidence
 
@@ -132,6 +167,15 @@ also covered here.
 | DM-P6-05 | File/PostgreSQL persistence, maintenance, HTTP, restore, deletion, dashboard, load/cost-model tests and `docs/collaboration-operations.md` cover durable affordable operations. | `dfa4b6c` |
 | DM-P6-06 | `src/sharedEditor/collaborationCheckpoint.test.ts`, `src/collaborationCheckpointApp.test.tsx`, and the phase gate prove byte-identical owner-controlled checkpoints with no automatic Git action. | `551092f` |
 | DM-P6-GATE | `services/collaboration/phase6CollaborationGate.test.ts` and `services/collaboration/hocuspocusNetwork.test.ts` certify offline overlap, reconnect, explicit decision conflict resolution, attribution, checkpoint, revocation, restore, deletion, and metrics. | `2a7ed24` |
+
+### DM-P7 — Alpha authoring polish and semantic-object workflow
+
+DM-P7 was added on 2026-07-18 after the MVP evidence was reconciled with
+hands-on product review. It is the next active implementation milestone. No
+DM-P7 task is checked yet: existing numbering, caption, and cross-reference
+primitives are foundations, but they do not by themselves satisfy the friendly
+identity, searchable picker, unified inspector, reference-integrity, and
+real-manuscript dogfood requirements in the canonical register.
 
 ## Acceptance-criterion evidence
 

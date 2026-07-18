@@ -1,6 +1,6 @@
 # DraftMatter: product and architecture brief
 
-> Temporary design document — 2026-07-14  
+> Product and architecture record — created 2026-07-14; implementation status reconciled 2026-07-18
 > Working name, not a cleared trademark.
 
 ## Executive decision
@@ -18,7 +18,9 @@ The product combines six things that currently tend to live in separate tools:
 
 The recommended working name is **DraftMatter**: “draft” describes the authoring and review loop; “matter” evokes scientific subject matter, physical matter, and work that matters. A quick web screen found no obvious writing product with that exact name, but this is not domain or trademark clearance.
 
-The working licence decision is **MIT for the desktop application, reusable document/review libraries, CLI/export tooling, and public collaboration code**. The realistic local MVP is a macOS-first desktop app delivered in roughly 16–20 weeks by one experienced full-time engineer, or around 10–12 weeks with two engineers and focused product/design support. Git and local track changes belong in this open-source MVP. A paid managed collaboration service is the next product milestone and should be allowed for in the architecture from the beginning; it adds roughly 8–12 weeks for browser editing, identity, permissions, synchronization, billing integration, and production operations. Cloud execution and lossless Word round-tripping remain outside both milestones.
+The working licence decision is **MIT for the desktop application, reusable document/review libraries, CLI/export tooling, and public collaboration code**. The initial delivery assumption was a macOS-first local MVP, with Git and local track changes in the open-source product and a paid managed collaboration service as a later milestone. Cloud execution and lossless Word round-tripping remain outside the planned scope.
+
+As of 2026-07-18, the repository implements and certifies the local MVP in DM-P0 through DM-P5 and the repository-owned collaboration beta foundation in DM-P6. Windows, macOS, and Linux packaging paths are defined and tested in CI. The product is now in an **alpha refinement and real-manuscript dogfooding stage**, not an initial feature-spike stage. A public desktop release and operated paid service still depend on external signing, production infrastructure, security, privacy, support, and deployment gates that cannot be completed by repository code alone.
 
 ## Agent-executable implementation contract
 
@@ -26,26 +28,26 @@ This section is the canonical execution and status register for coding agents. T
 
 ### Goal
 
-Deliver the **open-source local MVP** described in this brief. The goal is complete only when:
+Deliver the **open-source local MVP** described in this brief. This goal is now repository-complete and certified: every DM-P0–P5 task and local acceptance criterion has evidence in [`docs/implementation-evidence.md`](docs/implementation-evidence.md). The original completion conditions were:
 
 1. every task in phases DM-P0 through DM-P5 is checked;
 2. every local acceptance criterion in this document is checked with evidence;
 3. the full verification suite passes from a clean checkout;
 4. a representative article-sized project can be opened, edited, reviewed, executed, checkpointed, exported, closed, and reopened without losing source, citations, outputs, or review state.
 
-DM-P6 is a separate post-MVP goal for paid online collaboration. It must influence interfaces and data models from the beginning, but it does not block completion of the local MVP.
+DM-P6 is a separate post-MVP goal for paid online collaboration. Its reusable editor, synchronization, authorization, persistence, and deterministic-checkpoint foundations are implemented and tested in the repository. This does not claim that a production service is deployed or externally security-reviewed. DM-P7 is the next active product milestone.
 
 ### Status and evidence rules
 
 - `[ ]` means incomplete or not yet verified. Partially implemented work remains unchecked.
-- `[x]` means implemented and verified. A checked task or acceptance criterion must have an entry in the completion log below.
+- `[x]` means implemented and verified. A checked task or acceptance criterion must have task-level evidence in [`docs/implementation-evidence.md`](docs/implementation-evidence.md); the completion log below records the certification batches and subsequent product refinements.
 - Never mark a task complete from visual resemblance, a mocked interaction, or source inspection alone when the task requires persistence, execution, round-tripping, or integration behavior.
 - Verification evidence must name the automated test, fixture, command, or reproducible manual scenario that proves the task. “Implemented” is not evidence.
 - A task is complete only on every operating system claimed by that task. Platform-specific exceptions must remain unchecked or be split into explicit follow-up tasks.
 - Preserve unrelated user changes. Prefer one coherent task or tightly coupled task group per commit, and include the task ID in the commit message.
-- After completing a task, update its checkbox and append its evidence and commit to the completion log in the same commit.
+- After completing a task, update its checkbox and append its test/fixture evidence and commit to the evidence ledger in the same commit; add a completion-log row when the task closes a gate or materially changes the product state.
 - If implementation reveals that a task is underspecified, update this register before or together with the code; do not silently choose a materially different product behavior.
-- This register starts **unverified**. Existing code may satisfy some tasks, but an agent must audit and test it before checking them.
+- Do not infer completion from an old checkbox. The evidence ledger and the current verification commands must still support the claim.
 
 ### Required verification commands
 
@@ -55,89 +57,100 @@ Run every command that applies to the current repository. Add missing test targe
 npm run check
 npm test
 npm run build
-cargo test --manifest-path src-tauri/Cargo.toml     # once the Tauri host exists
+cargo test --manifest-path src-tauri/Cargo.toml --locked
 ```
 
 Before a release candidate, also run the repository's Playwright/end-to-end suite, golden Markdown round-trip suite, exporter fixtures, licence audit, and platform packaging checks. A task-specific check may be narrower during development, but its milestone gate requires the complete relevant suite.
 
 ### DM-P0 — Portable format and editor-risk spike
 
-- [ ] **DM-P0-01 — Representative fixture corpus.** Add at least 30 `.md`/`.qmd` fixtures covering YAML, headings, lists, citations, equations, footnotes, raw blocks, executable fences, output markers, comments, identical/nested/crossing review anchors, and unknown syntax. **Check:** fixtures are enumerated by an automated test and no fixture is silently skipped.
-- [ ] **DM-P0-02 — Deterministic parse/serialize round-trip.** Parse, serialize, reopen, and serialize every fixture without semantic loss or byte changes to preserved raw nodes. **Check:** a golden test compares repeated serialization and reports a focused diff.
-- [ ] **DM-P0-03 — Semantic prototype nodes.** Implement rendered citation, code-cell, output, review-anchor, and raw-Markdown nodes with stable IDs. **Check:** editor transaction tests create, edit, save, and reopen each node type.
-- [ ] **DM-P0-04 — Portable review records.** Parse and serialize versioned authors, proposals, threads, decisions, and point/range anchors in DraftMatter Review Markup. **Check:** identical, nested, and crossing proposals round-trip independently.
-- [ ] **DM-P0-05 — Original and Final projector.** Produce clean projections that remove every `.dm-anchor` and `.draftmatter-reviews` structure. **Check:** golden Original and resolved-Final outputs contain no reserved review markup; unresolved overlap fails closed with an actionable conflict list.
-- [ ] **DM-P0-06 — First rendered vertical slice.** Demonstrate one semantic citation, one mocked code result, one comment, one replacement, and two overlapping alternatives without exposing Markdown during normal use. **Check:** an end-to-end interaction test and visual snapshot cover the complete slice.
-- [ ] **DM-P0-GATE — Phase 0 exit gate.** All 30 fixtures pass deterministic round-trip and clean-projection tests; unsupported constructs are visibly preserved as raw nodes. **Depends:** DM-P0-01 through DM-P0-06.
+- [x] **DM-P0-01 — Representative fixture corpus.** Add at least 30 `.md`/`.qmd` fixtures covering YAML, headings, lists, citations, equations, footnotes, raw blocks, executable fences, output markers, comments, identical/nested/crossing review anchors, and unknown syntax. **Check:** fixtures are enumerated by an automated test and no fixture is silently skipped.
+- [x] **DM-P0-02 — Deterministic parse/serialize round-trip.** Parse, serialize, reopen, and serialize every fixture without semantic loss or byte changes to preserved raw nodes. **Check:** a golden test compares repeated serialization and reports a focused diff.
+- [x] **DM-P0-03 — Semantic prototype nodes.** Implement rendered citation, code-cell, output, review-anchor, and raw-Markdown nodes with stable IDs. **Check:** editor transaction tests create, edit, save, and reopen each node type.
+- [x] **DM-P0-04 — Portable review records.** Parse and serialize versioned authors, proposals, threads, decisions, and point/range anchors in DraftMatter Review Markup. **Check:** identical, nested, and crossing proposals round-trip independently.
+- [x] **DM-P0-05 — Original and Final projector.** Produce clean projections that remove every `.dm-anchor` and `.draftmatter-reviews` structure. **Check:** golden Original and resolved-Final outputs contain no reserved review markup; unresolved overlap fails closed with an actionable conflict list.
+- [x] **DM-P0-06 — First rendered vertical slice.** Demonstrate one semantic citation, one mocked code result, one comment, one replacement, and two overlapping alternatives without exposing Markdown during normal use. **Check:** an end-to-end interaction test and visual snapshot cover the complete slice.
+- [x] **DM-P0-GATE — Phase 0 exit gate.** All 30 fixtures pass deterministic round-trip and clean-projection tests; unsupported constructs are visibly preserved as raw nodes. **Depends:** DM-P0-01 through DM-P0-06.
 
 ### DM-P1 — Manuscript foundation
 
-- [ ] **DM-P1-01 — Cross-platform desktop shell.** Add the Tauri 2 host, typed privileged commands, and Windows/macOS/Linux development and packaging configuration. **Check:** the app starts without a generic shell-command bridge and platform builds are exercised in CI.
-- [ ] **DM-P1-02 — Local project lifecycle.** Open an existing project folder, create a project, discover `.md`/`.qmd` and bibliography files, persist project configuration, and reopen the last project safely. **Check:** integration tests use temporary project directories and never execute document code.
-- [ ] **DM-P1-03 — Rendered structured editing.** Support headings, paragraphs, lists, links, emphasis, quotations, equations, tables, images, captions, footnotes, citations, cross-references, code cells, and preserved raw blocks. **Check:** keyboard and transaction tests edit each supported node without revealing source punctuation in normal mode.
-- [ ] **DM-P1-04 — Deterministic autosave and recovery.** Implement debounced atomic save, undo/redo, crash recovery, and bounded recovery history. **Check:** fault-injection tests interrupt writes and prove that either the old or new valid document survives.
-- [ ] **DM-P1-05 — External file changes.** Detect edits, renames, and deletions made outside DraftMatter; reload safe changes and surface conflicts without overwriting either version. **Check:** file-watcher integration tests cover clean reload and dirty-buffer conflict paths.
-- [ ] **DM-P1-06 — Outline and source inspector.** Provide document navigation and a read-only/editable escape hatch for unsupported raw syntax. **Check:** outline navigation follows structural edits and raw bytes survive inspector round-trips.
-- [ ] **DM-P1-07 — Accessibility baseline.** Provide keyboard access, visible focus, semantic labels, reduced-motion behavior, and usable contrast for the editor and project lifecycle. **Check:** automated accessibility scan plus a documented keyboard-only smoke test.
-- [ ] **DM-P1-GATE — Phase 1 exit gate.** A researcher can create or open a short structured article, edit it without seeing Markdown, close it, and reopen identical portable source with recovery available. **Depends:** DM-P1-01 through DM-P1-07.
+- [x] **DM-P1-01 — Cross-platform desktop shell.** Add the Tauri 2 host, typed privileged commands, and Windows/macOS/Linux development and packaging configuration. **Check:** the app starts without a generic shell-command bridge and platform builds are exercised in CI.
+- [x] **DM-P1-02 — Local project lifecycle.** Open an existing project folder, create a project, discover `.md`/`.qmd` and bibliography files, persist project configuration, and reopen the last project safely. **Check:** integration tests use temporary project directories and never execute document code.
+- [x] **DM-P1-03 — Rendered structured editing.** Support headings, paragraphs, lists, links, emphasis, quotations, equations, tables, images, captions, footnotes, citations, cross-references, code cells, and preserved raw blocks. **Check:** keyboard and transaction tests edit each supported node without revealing source punctuation in normal mode.
+- [x] **DM-P1-04 — Deterministic autosave and recovery.** Implement debounced atomic save, undo/redo, crash recovery, and bounded recovery history. **Check:** fault-injection tests interrupt writes and prove that either the old or new valid document survives.
+- [x] **DM-P1-05 — External file changes.** Detect edits, renames, and deletions made outside DraftMatter; reload safe changes and surface conflicts without overwriting either version. **Check:** file-watcher integration tests cover clean reload and dirty-buffer conflict paths.
+- [x] **DM-P1-06 — Outline and source inspector.** Provide document navigation and a read-only/editable escape hatch for unsupported raw syntax. **Check:** outline navigation follows structural edits and raw bytes survive inspector round-trips.
+- [x] **DM-P1-07 — Accessibility baseline.** Provide keyboard access, visible focus, semantic labels, reduced-motion behavior, and usable contrast for the editor and project lifecycle. **Check:** automated accessibility scan plus a documented keyboard-only smoke test.
+- [x] **DM-P1-GATE — Phase 1 exit gate.** A researcher can create or open a short structured article, edit it without seeing Markdown, close it, and reopen identical portable source with recovery available. **Depends:** DM-P1-01 through DM-P1-07.
 
 ### DM-P2 — Citations and bibliography
 
-- [ ] **DM-P2-01 — Local bibliography ingestion.** Parse BibTeX, BibLaTeX-compatible records within the supported subset, CSL JSON, RIS/RefMan, and EndNote tagged text into normalized citation records with provenance. **Check:** fixtures cover braces, quoted fields, Unicode, multi-record RIS and EndNote payloads, missing fields, duplicate keys, and malformed input.
-- [ ] **DM-P2-02 — Zotero local integration.** Detect Zotero's local API, search records, retain Zotero item identity, and degrade cleanly when Zotero is closed or its API is disabled. **Check:** mocked API integration tests cover available, unavailable, and version-change paths.
-- [ ] **DM-P2-03 — Crossref scholarly search.** Search Crossref from the citation picker with debouncing, cancellation, structured author/year/title extraction, bibliographic-query fallback, local reranking, and rate-limit-safe caching. **Check:** mocked provider tests cover structured, ambiguous, empty, stale-response, offline, and HTTP 429 paths; the query `vezy et al. 2020 DynACof` ranks DOI `10.1016/j.envsoft.2019.104609` first.
-- [ ] **DM-P2-04 — Paste/drop citation intake.** Provide one visible paste/drop box accepting DOI text/URLs, BibTeX/BibLaTeX, CSL JSON, RIS/RefMan, EndNote tagged text, and supported files; sniff content, preview one or many records, report per-record errors, and never discard the original payload on failure. **Check:** keyboard paste and drag/drop tests cover each format, multiple records, duplicates, malformed input, oversized files, DOI resolution failure, and offline metadata imports.
-- [ ] **DM-P2-05 — Unified citation picker.** Search attached files, Zotero, and Crossref in grouped results; expose paste/drop and an explicit Google Scholar handoff; insert one or several works; and edit locators, prefix/suffix text, and author suppression. **Check:** end-to-end tests complete local, Zotero, Crossref, and Scholar-export/paste flows entirely by keyboard except for the external Scholar interaction.
-- [ ] **DM-P2-06 — Portable acquisition transaction.** On acceptance—never merely on result display—resolve DOI metadata to CSL JSON when available, assign a stable collision-safe citekey, retain provider identity, materialize a deterministic record in the configured project bibliography, and update the citation lock/cache atomically. **Check:** failure injection proves that bibliography, lock, and manuscript either all advance to one valid state or remain unchanged; repeated acquisition is idempotent by DOI/provider identity.
-- [ ] **DM-P2-07 — Live CSL rendering.** Render in-text citations and bibliography with the configured style and locale. **Check:** golden outputs cover representative author counts, disambiguation, locators, and locales.
-- [ ] **DM-P2-08 — Citation lock, cache, and diagnostics.** Persist citekey-to-source mappings and cited CSL snapshots; report missing, duplicate, aliased, renamed, or unavailable records without merging automatically; and reopen cited works when Zotero or remote providers are unavailable. **Check:** rename, duplicate, offline-Crossref, and offline-Zotero fixtures retain the same readable citation and bibliography entry with actionable diagnostics.
-- [ ] **DM-P2-GATE — Phase 2 exit gate.** Find and cite the DynACof paper from Crossref, cite another record pasted or dropped in every supported interchange family, insert and edit a Zotero citation, close Zotero and disconnect the network, reopen the app, and export the same configured bibliography style. **Depends:** DM-P2-01 through DM-P2-08.
+- [x] **DM-P2-01 — Local bibliography ingestion.** Parse BibTeX, BibLaTeX-compatible records within the supported subset, CSL JSON, RIS/RefMan, and EndNote tagged text into normalized citation records with provenance. **Check:** fixtures cover braces, quoted fields, Unicode, multi-record RIS and EndNote payloads, missing fields, duplicate keys, and malformed input.
+- [x] **DM-P2-02 — Zotero local integration.** Detect Zotero's local API, search records, retain Zotero item identity, and degrade cleanly when Zotero is closed or its API is disabled. **Check:** mocked API integration tests cover available, unavailable, and version-change paths.
+- [x] **DM-P2-03 — Crossref scholarly search.** Search Crossref from the citation picker with debouncing, cancellation, structured author/year/title extraction, bibliographic-query fallback, local reranking, and rate-limit-safe caching. **Check:** mocked provider tests cover structured, ambiguous, empty, stale-response, offline, and HTTP 429 paths; the query `vezy et al. 2020 DynACof` ranks DOI `10.1016/j.envsoft.2019.104609` first.
+- [x] **DM-P2-04 — Paste/drop citation intake.** Provide one visible paste/drop box accepting DOI text/URLs, BibTeX/BibLaTeX, CSL JSON, RIS/RefMan, EndNote tagged text, and supported files; sniff content, preview one or many records, report per-record errors, and never discard the original payload on failure. **Check:** keyboard paste and drag/drop tests cover each format, multiple records, duplicates, malformed input, oversized files, DOI resolution failure, and offline metadata imports.
+- [x] **DM-P2-05 — Unified citation picker.** Search attached files, Zotero, and Crossref in grouped results; expose paste/drop and an explicit Google Scholar handoff; insert one or several works; and edit locators, prefix/suffix text, and author suppression. **Check:** end-to-end tests complete local, Zotero, Crossref, and Scholar-export/paste flows entirely by keyboard except for the external Scholar interaction.
+- [x] **DM-P2-06 — Portable acquisition transaction.** On acceptance—never merely on result display—resolve DOI metadata to CSL JSON when available, assign a stable collision-safe citekey, retain provider identity, materialize a deterministic record in the configured project bibliography, and update the citation lock/cache atomically. **Check:** failure injection proves that bibliography, lock, and manuscript either all advance to one valid state or remain unchanged; repeated acquisition is idempotent by DOI/provider identity.
+- [x] **DM-P2-07 — Live CSL rendering.** Render in-text citations and bibliography with the configured style and locale. **Check:** golden outputs cover representative author counts, disambiguation, locators, and locales.
+- [x] **DM-P2-08 — Citation lock, cache, and diagnostics.** Persist citekey-to-source mappings and cited CSL snapshots; report missing, duplicate, aliased, renamed, or unavailable records without merging automatically; and reopen cited works when Zotero or remote providers are unavailable. **Check:** rename, duplicate, offline-Crossref, and offline-Zotero fixtures retain the same readable citation and bibliography entry with actionable diagnostics.
+- [x] **DM-P2-GATE — Phase 2 exit gate.** Find and cite the DynACof paper from Crossref, cite another record pasted or dropped in every supported interchange family, insert and edit a Zotero citation, close Zotero and disconnect the network, reopen the app, and export the same configured bibliography style. **Depends:** DM-P2-01 through DM-P2-08.
 
 ### DM-P3 — Execution, figures, and tables
 
-- [ ] **DM-P3-01 — AST-based executable-cell extraction.** Extract executable fences and attributes without matching fences inside review payloads, raw regions, or literal examples. **Check:** adversarial Markdown fixtures prove correct extraction and stable cell IDs.
-- [ ] **DM-P3-02 — Runtime and kernel integration.** Discover Python, R, and Julia environments and Jupyter kernels independently, record health, never install or run anything on project open, and offer an explicit trust-gated setup/repair action for `ipykernel`, `IRkernel`, or `IJulia`. **Check:** mocked discovery covers every combination of present runtime, missing runtime, missing integration, failed startup, and healthy kernel.
-- [ ] **DM-P3-03 — Shared-kernel result contract.** Implement one normalized Jupyter result contract containing streams, errors, rich MIME metadata, artifacts, hashes, environment fingerprints, session generation, and execution sequence. **Check:** protocol and integration tests prove that same-language cells share state while different languages remain isolated.
-- [ ] **DM-P3-04 — Execution lifecycle and console.** Implement explicit run, run above, language run-all, interrupt, restart, terminate, fresh clean-run, setup-first execution, and the bottom console over the same kernels. **Check:** integration tests verify ordering, cancellation, restart invalidation, interactive dirty state, console-to-setup promotion, kernel isolation by language, and no implicit execution.
-- [ ] **DM-P3-05 — Output rendering and isolation.** Render supported image, HTML, Markdown, text, table, and error outputs; sanitize or isolate HTML from privileged APIs. **Check:** MIME fixtures include malicious HTML and prove it cannot access the desktop bridge.
-- [ ] **DM-P3-06 — Artifact materialization.** Write ordinary figure/table artifacts and idempotent output blocks without modifying author text outside reserved markers. **Check:** repeated materialization is byte-stable and missing declared artifacts fail clearly.
-- [ ] **DM-P3-07 — Freshness and provenance.** Track current, stale, running, failed, interrupted, and environment-changed states using code, input, environment, and artifact hashes. **Check:** edits invalidate the correct same-language suffix and clean run-all restores certification.
-- [ ] **DM-P3-08 — Missing runtime with retained output.** Keep existing images, tables, values, and MIME results visible when their runtime is absent; show quiet provenance, disable only execution, and distinguish current/stale from unavailable/missing output. **Check:** fixtures cover current+unavailable, stale+unavailable, missing-output+unavailable, and independent language availability.
-- [ ] **DM-P3-09 — Trust boundary.** Require explicit project trust before first execution and expose only typed execution commands to the UI. **Check:** opening an untrusted project cannot start a process, and browser collaborators have no execution capability.
-- [ ] **DM-P3-GATE — Phase 3 exit gate.** A clean restart reproduces at least one figure and table across Python, R, and Julia through selected shared Jupyter kernels; retained outputs remain readable when those runtimes are subsequently unavailable. **Depends:** DM-P3-01 through DM-P3-09.
+- [x] **DM-P3-01 — AST-based executable-cell extraction.** Extract executable fences and attributes without matching fences inside review payloads, raw regions, or literal examples. **Check:** adversarial Markdown fixtures prove correct extraction and stable cell IDs.
+- [x] **DM-P3-02 — Runtime and kernel integration.** Discover Python, R, and Julia environments and Jupyter kernels independently, record health, never install or run anything on project open, and offer an explicit trust-gated setup/repair action for `ipykernel`, `IRkernel`, or `IJulia`. **Check:** mocked discovery covers every combination of present runtime, missing runtime, missing integration, failed startup, and healthy kernel.
+- [x] **DM-P3-03 — Shared-kernel result contract.** Implement one normalized Jupyter result contract containing streams, errors, rich MIME metadata, artifacts, hashes, environment fingerprints, session generation, and execution sequence. **Check:** protocol and integration tests prove that same-language cells share state while different languages remain isolated.
+- [x] **DM-P3-04 — Execution lifecycle and console.** Implement explicit run, run above, language run-all, interrupt, restart, terminate, fresh clean-run, setup-first execution, and the bottom console over the same kernels. **Check:** integration tests verify ordering, cancellation, restart invalidation, interactive dirty state, console-to-setup promotion, kernel isolation by language, and no implicit execution.
+- [x] **DM-P3-05 — Output rendering and isolation.** Render supported image, HTML, Markdown, text, table, and error outputs; sanitize or isolate HTML from privileged APIs. **Check:** MIME fixtures include malicious HTML and prove it cannot access the desktop bridge.
+- [x] **DM-P3-06 — Artifact materialization.** Write ordinary figure/table artifacts and idempotent output blocks without modifying author text outside reserved markers. **Check:** repeated materialization is byte-stable and missing declared artifacts fail clearly.
+- [x] **DM-P3-07 — Freshness and provenance.** Track current, stale, running, failed, interrupted, and environment-changed states using code, input, environment, and artifact hashes. **Check:** edits invalidate the correct same-language suffix and clean run-all restores certification.
+- [x] **DM-P3-08 — Missing runtime with retained output.** Keep existing images, tables, values, and MIME results visible when their runtime is absent; show quiet provenance, disable only execution, and distinguish current/stale from unavailable/missing output. **Check:** fixtures cover current+unavailable, stale+unavailable, missing-output+unavailable, and independent language availability.
+- [x] **DM-P3-09 — Trust boundary.** Require explicit project trust before first execution and expose only typed execution commands to the UI. **Check:** opening an untrusted project cannot start a process, and browser collaborators have no execution capability.
+- [x] **DM-P3-GATE — Phase 3 exit gate.** A clean restart reproduces at least one figure and table across Python, R, and Julia through selected shared Jupyter kernels; retained outputs remain readable when those runtimes are subsequently unavailable. **Depends:** DM-P3-01 through DM-P3-09.
 
 ### DM-P4 — Comments and tracked suggestions
 
-- [ ] **DM-P4-01 — Comment threads.** Create range/point comments, replies, resolve/reopen/delete actions, attribution, and aligned review balloons. **Check:** persistence tests survive restart and moderate external edits.
-- [ ] **DM-P4-02 — Suggestion capture.** Convert grouped insertion, deletion, and replacement transactions into attributed proposal records without changing accepted base text. **Check:** typing, paste, delete, and replace scenarios create one deterministic proposal each.
-- [ ] **DM-P4-03 — Conflict graph.** Derive identical, nested, crossing, and alternative-range conflicts without storing a second source of truth. **Check:** interval fixtures enumerate the expected conflict components.
-- [ ] **DM-P4-04 — Atomic decisions.** Accept, reject, and rebase proposals exactly once; preserve intersecting work as Needs rebase or an explicit decision conflict. **Check:** concurrent and repeated-decision tests never silently discard or double-apply content.
-- [ ] **DM-P4-05 — Markup views and navigation.** Implement Simple Markup, All Markup, Original, Final, author filters, and next/previous change navigation. **Check:** visual and interaction tests verify the same underlying proposal set in every view.
-- [ ] **DM-P4-06 — Re-anchoring and unplaced queue.** Recover anchors using positions plus quote context and surface ambiguous/orphaned reviews for manual placement. **Check:** external-edit fixtures cover successful, ambiguous, and failed recovery.
-- [ ] **DM-P4-07 — Review export.** Generate Original, resolved Final, and a separate review report without leaking review structures into publication outputs. **Check:** golden exports assert the absence of every reserved `.dm-*` structure.
-- [ ] **DM-P4-GATE — Phase 4 exit gate.** Two authors' identical and crossing proposals survive restart and external edits; accepting one changes the base once and retains affected alternatives as Needs rebase. **Depends:** DM-P4-01 through DM-P4-07.
+- [x] **DM-P4-01 — Comment threads.** Create range/point comments, replies, resolve/reopen/delete actions, attribution, and aligned review balloons. **Check:** persistence tests survive restart and moderate external edits.
+- [x] **DM-P4-02 — Suggestion capture.** Convert grouped insertion, deletion, and replacement transactions into attributed proposal records without changing accepted base text. **Check:** typing, paste, delete, and replace scenarios create one deterministic proposal each.
+- [x] **DM-P4-03 — Conflict graph.** Derive identical, nested, crossing, and alternative-range conflicts without storing a second source of truth. **Check:** interval fixtures enumerate the expected conflict components.
+- [x] **DM-P4-04 — Atomic decisions.** Accept, reject, and rebase proposals exactly once; preserve intersecting work as Needs rebase or an explicit decision conflict. **Check:** concurrent and repeated-decision tests never silently discard or double-apply content.
+- [x] **DM-P4-05 — Markup views and navigation.** Implement Simple Markup, All Markup, Original, Final, author filters, and next/previous change navigation. **Check:** visual and interaction tests verify the same underlying proposal set in every view.
+- [x] **DM-P4-06 — Re-anchoring and unplaced queue.** Recover anchors using positions plus quote context and surface ambiguous/orphaned reviews for manual placement. **Check:** external-edit fixtures cover successful, ambiguous, and failed recovery.
+- [x] **DM-P4-07 — Review export.** Generate Original, resolved Final, and a separate review report without leaking review structures into publication outputs. **Check:** golden exports assert the absence of every reserved `.dm-*` structure.
+- [x] **DM-P4-GATE — Phase 4 exit gate.** Two authors' identical and crossing proposals survive restart and external edits; accepting one changes the base once and retains affected alternatives as Needs rebase. **Depends:** DM-P4-01 through DM-P4-07.
 
 ### DM-P5 — Export, Git, and release hardening
 
-- [ ] **DM-P5-01 — Native HTML export.** Render the clean semantic projection with citations, equations, cross-references, figures, tables, and safe styling. **Check:** golden HTML fixtures pass structural and visual comparison.
-- [ ] **DM-P5-02 — PDF and DOCX export.** Produce browser-printed PDF and clean DOCX with actionable diagnostics; do not claim Word tracked-change round-trip. **Check:** rendered page inspection and document-structure tests cover a representative article.
-- [ ] **DM-P5-03 — Optional Pandoc/Quarto adapters.** Detect separately installed tools and pass only clean projected source; neither tool executes DraftMatter cells. **Check:** adapter tests prove review data and executable side effects cannot leak into the external call.
-- [ ] **DM-P5-04 — Git status and semantic diff.** Detect repositories, show file status, and provide rendered prose/review diffs plus source diffs. **Check:** repository fixtures cover modified, added, deleted, renamed, binary, and conflicted files.
-- [ ] **DM-P5-05 — Explicit checkpoints.** Stage selected files and create named local commits without automatic commits or destructive history operations. **Check:** integration tests inspect the resulting tree and commit while preserving unrelated changes.
-- [ ] **DM-P5-06 — Guarded branches and remotes.** Create/switch branches safely and fetch, pull, or push only after explicit user actions; surface conflicts without discarding work. **Check:** local bare-remote fixtures cover success, divergence, authentication failure, and merge conflict.
-- [ ] **DM-P5-07 — Performance and resilience.** Keep a 50–100 page manuscript responsive, recover from crashes, and handle destructive edge cases without data loss. **Check:** recorded performance budgets, stress tests, and crash-recovery scenarios meet documented thresholds.
-- [ ] **DM-P5-08 — Release compliance.** Generate third-party notices and an SBOM, enforce the licence allowlist, package supported platforms, and document runtime diagnostics. **Check:** CI fails on unknown/disallowed licences and validates signed/notarized artifacts where applicable.
-- [ ] **DM-P5-GATE — Local MVP release gate.** Dogfood an article-sized project end to end, export clean HTML/PDF/DOCX/Markdown, reopen it intact, and create an explicit Git checkpoint. All local acceptance criteria are checked. **Depends:** DM-P5-01 through DM-P5-08 and every earlier phase gate.
+- [x] **DM-P5-01 — Native HTML export.** Render the clean semantic projection with citations, equations, cross-references, figures, tables, and safe styling. **Check:** golden HTML fixtures pass structural and visual comparison.
+- [x] **DM-P5-02 — PDF and DOCX export.** Produce browser-printed PDF and clean DOCX with actionable diagnostics; do not claim Word tracked-change round-trip. **Check:** rendered page inspection and document-structure tests cover a representative article.
+- [x] **DM-P5-03 — Optional Pandoc/Quarto adapters.** Detect separately installed tools and pass only clean projected source; neither tool executes DraftMatter cells. **Check:** adapter tests prove review data and executable side effects cannot leak into the external call.
+- [x] **DM-P5-04 — Git status and semantic diff.** Detect repositories, show file status, and provide rendered prose/review diffs plus source diffs. **Check:** repository fixtures cover modified, added, deleted, renamed, binary, and conflicted files.
+- [x] **DM-P5-05 — Explicit checkpoints.** Stage selected files and create named local commits without automatic commits or destructive history operations. **Check:** integration tests inspect the resulting tree and commit while preserving unrelated changes.
+- [x] **DM-P5-06 — Guarded branches and remotes.** Create/switch branches safely and fetch, pull, or push only after explicit user actions; surface conflicts without discarding work. **Check:** local bare-remote fixtures cover success, divergence, authentication failure, and merge conflict.
+- [x] **DM-P5-07 — Performance and resilience.** Keep a 50–100 page manuscript responsive, recover from crashes, and handle destructive edge cases without data loss. **Check:** recorded performance budgets, stress tests, and crash-recovery scenarios meet documented thresholds.
+- [x] **DM-P5-08 — Release compliance.** Generate third-party notices and an SBOM, enforce the licence allowlist, package supported platforms, and document runtime diagnostics. **Check:** CI fails on unknown/disallowed licences and validates signed/notarized artifacts where applicable.
+- [x] **DM-P5-GATE — Local MVP release gate.** Dogfood an article-sized project end to end, export clean HTML/PDF/DOCX/Markdown, reopen it intact, and create an explicit Git checkpoint. All local acceptance criteria are checked. **Depends:** DM-P5-01 through DM-P5-08 and every earlier phase gate.
 
 ### DM-P6 — Paid online collaboration beta
 
-- [ ] **DM-P6-01 — Browser-safe shared editor package.** Reuse the rendered editor/reviewer without filesystem, process, Git, or execution privileges. **Check:** capability tests prove privileged APIs are absent from browser builds.
-- [ ] **DM-P6-02 — Yjs synchronization.** Synchronize document structure, anchors, authors, proposals, threads, decisions, presence, and offline edits. **Check:** multi-client and reconnect tests converge deterministically without losing attribution.
-- [ ] **DM-P6-03 — Transactional review decisions.** Detect incompatible simultaneous accept/reject/rebase decisions using base revisions or state vectors. **Check:** offline concurrent-decision scenarios surface explicit conflicts rather than last-write-wins text.
-- [ ] **DM-P6-04 — Authenticated workspace service.** Implement roles, invitations, revocation, guest review, tenant isolation, rate limits, and activity audit. **Check:** authorization tests prove cross-tenant enumeration and access are impossible.
-- [ ] **DM-P6-05 — Durable and affordable operations.** Persist compact updates and snapshots, apply object-storage lifecycle policies, scale inactive infrastructure down, and verify backup/restore. **Check:** load/cost model, restore drill, retention/deletion test, and operational dashboards exist before charging users.
-- [ ] **DM-P6-06 — Deterministic local checkpoint.** Serialize live collaborative state into portable Markdown/review records and return it to the owner-controlled working tree without automatic Git actions. **Check:** two clients produce the same checkpoint bytes and the owner explicitly commits them.
-- [ ] **DM-P6-GATE — Collaboration beta gate.** Two editors create overlapping alternatives while one is offline, reconnect, explicitly resolve any decision conflict, retain attribution and threads, and create a deterministic owner-controlled checkpoint. Security, revocation, deletion, backup restoration, and monitoring checks pass. **Depends:** DM-P6-01 through DM-P6-06.
+- [x] **DM-P6-01 — Browser-safe shared editor package.** Reuse the rendered editor/reviewer without filesystem, process, Git, or execution privileges. **Check:** capability tests prove privileged APIs are absent from browser builds.
+- [x] **DM-P6-02 — Yjs synchronization.** Synchronize document structure, anchors, authors, proposals, threads, decisions, presence, and offline edits. **Check:** multi-client and reconnect tests converge deterministically without losing attribution.
+- [x] **DM-P6-03 — Transactional review decisions.** Detect incompatible simultaneous accept/reject/rebase decisions using base revisions or state vectors. **Check:** offline concurrent-decision scenarios surface explicit conflicts rather than last-write-wins text.
+- [x] **DM-P6-04 — Authenticated workspace service.** Implement roles, invitations, revocation, guest review, tenant isolation, rate limits, and activity audit. **Check:** authorization tests prove cross-tenant enumeration and access are impossible.
+- [x] **DM-P6-05 — Durable and affordable operations.** Persist compact updates and snapshots, apply object-storage lifecycle policies, scale inactive infrastructure down, and verify backup/restore. **Check:** load/cost model, restore drill, retention/deletion test, and operational dashboards exist before charging users.
+- [x] **DM-P6-06 — Deterministic local checkpoint.** Serialize live collaborative state into portable Markdown/review records and return it to the owner-controlled working tree without automatic Git actions. **Check:** two clients produce the same checkpoint bytes and the owner explicitly commits them.
+- [x] **DM-P6-GATE — Collaboration beta gate.** Two editors create overlapping alternatives while one is offline, reconnect, explicitly resolve any decision conflict, retain attribution and threads, and create a deterministic owner-controlled checkpoint. Security, revocation, deletion, backup restoration, and monitoring checks pass. **Depends:** DM-P6-01 through DM-P6-06.
+
+### DM-P7 — Alpha authoring polish and semantic-object workflow
+
+DM-P7 converts the technically complete MVP into a smoother article-writing product. It deliberately prioritizes discoverability, friendly manuscript concepts, and real-project validation over another large subsystem.
+
+- [ ] **DM-P7-01 — Friendly object identities.** Generate readable, stable labels for figures, tables, equations, and sections without exposing cell UUIDs as the normal interface. Preserve existing portable labels and resolve generated-name collisions deterministically. **Check:** transaction and round-trip tests cover creation, rename, duplicate captions, reorder, reopen, and legacy machine labels.
+- [ ] **DM-P7-02 — Searchable cross-reference picker.** Replace manual target entry with a keyboard-accessible picker grouped by figures, tables, equations, and sections, showing current number and caption. **Check:** interaction tests insert and retarget every object kind without typing a source label.
+- [ ] **DM-P7-03 — Unified semantic-object inspector.** Edit caption, accessible description, portable label, and supported display options from one contextual inspector for manual and reproducible objects. Keep code provenance available but secondary. **Check:** edits round-trip through Markdown and retain identical HTML, PDF, and DOCX semantics.
+- [ ] **DM-P7-04 — Reference integrity and navigation.** Diagnose missing, duplicate, wrong-kind, and orphaned targets; update visible numbering after drag-and-drop; and navigate between a reference and its object. **Check:** reorder/delete/rename fixtures never leave a silently misleading reference.
+- [ ] **DM-P7-05 — Article-sized alpha dogfood.** Exercise project creation, structured authors, citations, Python/R/Julia figures and tables, published values, comments, suggestions, checkpoints, clean exports, close, and reopen on representative real manuscripts. Convert every discovered loss, blocked workflow, or recurring visual collision into a regression test. **Check:** a documented macOS/Windows/Linux dogfood matrix and stored representative projects pass without manual source repair.
+- [ ] **DM-P7-GATE — Alpha authoring gate.** A researcher can build and revise an article with friendly semantic objects and cross-references without seeing machine identifiers, then export and reopen it with matching numbering, captions, references, outputs, and review state. **Depends:** DM-P7-01 through DM-P7-05.
 
 ### Global definition of done for a checked task
 
@@ -154,11 +167,36 @@ A task may be checked only when all applicable statements are true:
 
 ### Completion log
 
-Add one row for every checked task or acceptance criterion. Do not remove old evidence; if a regression invalidates it, uncheck the item and add a new row explaining why.
+Task-by-task evidence is maintained in [`docs/implementation-evidence.md`](docs/implementation-evidence.md). This summary records phase certification and later product-level refinements. Do not remove old evidence; if a regression invalidates it, uncheck the affected item and add a row explaining why.
 
 | Task ID | Evidence (tests, fixture, or reproducible scenario) | Commit | Verified on |
 | --- | --- | --- | --- |
-| _None verified by this planning edit_ | — | — | — |
+| DM-P0-GATE | Thirty-fixture deterministic round-trip suite and rendered vertical-slice end-to-end test. | `6fff187` | 2026-07-16 audit |
+| DM-P1-GATE | Cross-platform Tauri lifecycle, structured editing, autosave/recovery, file-change, outline, and accessibility gates. | `f6dd589` | 2026-07-16 audit |
+| DM-P2-GATE | Unified Crossref/Zotero/local/paste citation acquisition, offline reopen, and stable CSL output gate. | `2a308a3` | 2026-07-16 audit |
+| DM-P3-GATE | Shared Jupyter kernels, clean restart, retained outputs, figures/tables, and published-value gate. | `17e11a0` | 2026-07-17 audit |
+| DM-P4-GATE | Portable comments, tracked suggestions, overlap conflicts, decisions, re-anchoring, and clean review export gate. | `db90150` | 2026-07-16 audit |
+| DM-P5-GATE | Native/optional exports, explicit Git workflows, resilience, compliance, CLI, and desktop release gate. | `22f33cb` | 2026-07-16 audit |
+| DM-P6-GATE | Browser-safe collaboration, offline convergence, authorization, durable state, and deterministic checkpoint gate. | `2a7ed24` | 2026-07-16 audit |
+| AC-L01–AC-L17 | Criterion-level tests and commits are enumerated in the implementation evidence ledger. | `22f33cb`, `17e11a0` | 2026-07-17 audit |
+| AC-C01–AC-C06 | Criterion-level collaboration tests and commits are enumerated in the implementation evidence ledger. | `2a7ed24` | 2026-07-16 audit |
+| UX refinement batch | White Graphite visual system, structured author profiles, section/block drag-and-drop, focused code/review surfaces, and contextual comment markers. | `b719d11`, `a22554e`, `5920675`, `d483fd9` | 2026-07-18 |
+| Reproducible-output refinement batch | Child-folder project creation, shared-kernel console and published values, output-only export, CairoMakie image recovery, automatic numbering/captions, unified hover controls, and overlap repair. | `dc9e8d2`, `0c2c134`, `5f2b254`, `0d85304`, `15e4b63`, `597fc3c` | 2026-07-18 |
+
+### Current interaction decisions
+
+These decisions supersede earlier prototype behavior and capture the product direction established during hands-on app review:
+
+- **Project creation chooses a parent location.** DraftMatter creates a new child directory from the project name; users are not expected to select an already empty final directory.
+- **Authors are structured publication identities.** A name is only the minimum. Profiles support email, ORCID, and one or more affiliations, can be reused across projects, and remain distinct from review/collaboration identity where necessary.
+- **Document structure is flexible.** Starter projects include conventional research sections, but authors can add sections and reorder sections or individual blocks with drag-and-drop. Rendered prose blocks remain editable unless the current collaboration role is intentionally read-only.
+- **Rendered semantics own the ordinary writing experience.** Citations, links, equations, figures, tables, comments, suggestions, footnotes, and cross-references are edited through contextual controls. Typing after a semantic inline object resumes normal prose formatting instead of inheriting the object's presentation.
+- **Review follows a familiar word-processor model.** Track changes is an explicit editing mode. Insertions and deletions remain interactive and attributed. Comments can be created contextually from selected text or nearby objects, and anchored text has a visible local marker as well as an aligned review rail.
+- **Insertion commands must be operational, not decorative.** Sections, figures, tables, inline/display equations, code cells, footnotes, citations, cross-references, and published values insert structured portable nodes and reopen as the same objects.
+- **Exports are user-directed and publication-clean.** Users choose the destination directory and filename. Native Markdown, HTML, PDF, and DOCX exclude review storage and executable source by default; code exists to reproduce figures, tables, and explicitly published in-text values, not to turn the manuscript into a visible notebook.
+- **Computed manuscript values use explicit publication markup.** A values cell publishes named results, which prose inserts using portable `{{name}}` markup. Missing or stale values remain visible as diagnostics without exposing helper code in publication output.
+- **Reproducible outputs are manuscript objects.** Retained CairoMakie and other supported rich outputs render as figures or tables rather than source HTML/base64 text. Figures, tables, and display equations number independently in document order; figures caption below, tables caption above, and display equations may carry an explanatory caption. `.unnumbered` remains available for exceptions.
+- **Code and output read as one quiet object.** Source/run controls sit over the generated result, remain hidden until hover or keyboard focus on pointer-capable devices, stay available on touch layouts, and wrap without overlap in narrow manuscript columns. Full machine identifiers remain available to assistive technology and diagnostics but are not the primary visible interface.
 
 ## Product thesis
 
@@ -1131,36 +1169,46 @@ Git scope included across phases 1–5: repository discovery and safe status fir
 
 Exit test: two editors create overlapping alternatives while one is offline, reconnect without data loss, resolve a concurrent-decision conflict explicitly, preserve attribution and threads, create a deterministic local checkpoint, and commit it through Git. Authorization tests must prove that users cannot enumerate or access another workspace’s projects.
 
+### Phase 7 — alpha authoring and real-manuscript dogfooding (current)
+
+- Replace machine-facing figure/table/equation labels with readable stable identities.
+- Insert and retarget cross-references from a searchable semantic-object picker.
+- Consolidate caption, accessible description, label, and display controls into one object inspector.
+- Diagnose missing, duplicate, wrong-kind, and orphaned references, and navigate between references and targets.
+- Dogfood representative article-sized projects across supported operating systems and all three execution languages, converting every discovered workflow or rendering defect into a regression test.
+
+Exit test: a researcher can create, revise, review, reproduce, export, close, and reopen an article-sized project without seeing machine identifiers or repairing source manually; numbering, captions, references, outputs, citations, authors, and review state remain coherent.
+
 ## Local MVP acceptance criteria
 
 The first release is successful if all of the following are true:
 
-- [ ] **AC-L01 — Rendered writing.** The default writing surface is rendered and editable; ordinary users never need Markdown syntax.
-- [ ] **AC-L02 — Portable project.** A `.md`/`.qmd` project remains renderable through the open-source DraftMatter projector/native HTML pipeline; optional Quarto/Pandoc compatibility remains available.
-- [ ] **AC-L03 — Citations.** Project bibliography, Zotero, and Crossref results insert through one picker and render in a chosen CSL style; DOI, BibTeX/BibLaTeX, CSL JSON, RIS/RefMan, and EndNote tagged-text paste/drop plus the Google Scholar export handoff materialize portable, deduplicated project records before citation insertion.
-- [ ] **AC-L04 — Multi-language execution.** Python, R, and Julia cells can each produce inline figures/tables, explicitly published manuscript values, and ordinary disk artifacts without Quarto or a notebook server, through selected shared Jupyter kernels.
-- [ ] **AC-L05 — Materialized outputs.** Generated figures and tables can be materialized as idempotent normal Markdown/HTML output blocks without rewriting surrounding author text.
-- [ ] **AC-L06 — Execution state.** The app shows current/stale/failed execution state and can clean-run the manuscript.
-- [ ] **AC-L07 — Retained outputs.** If Python, R, Julia, a kernel, or a selected environment is unavailable, previously generated figures, tables, and values remain visible with a quiet **runtime unavailable — showing last generated output** provenance message.
-- [ ] **AC-L08 — Orthogonal availability and freshness.** A stale retained output stays visible, while a missing output shows an explicit placeholder and is never presented as a successful result.
-- [ ] **AC-L09 — Persistent review UI.** Comments and attributed suggestions render like document review markup and survive restart.
-- [ ] **AC-L10 — Deterministic review persistence.** Open proposals serialize deterministically as independent anchors plus documented in-file records; accept/reject resolves them exactly once and records the decision.
-- [ ] **AC-L11 — Overlapping proposals.** Two authors can create identical, nested, or crossing proposals without corrupting either proposal or the accepted base.
-- [ ] **AC-L12 — Safe overlap decisions.** Accepting one overlapping alternative preserves intersecting work as **Needs rebase** or a decision conflict; it never silently discards it.
-- [ ] **AC-L13 — Clean exports.** Original/resolved-Final HTML, PDF, DOCX, and clean Markdown exports contain no `.dm-anchor` spans or `.draftmatter-reviews` data section.
-- [ ] **AC-L14 — No implicit execution.** Opening a project never executes code.
-- [ ] **AC-L15 — Unknown-syntax safety.** Unsupported Markdown is preserved or explicitly flagged, never silently lost.
-- [ ] **AC-L16 — Local Git checkpoints.** Existing repositories are detected; users can inspect a rendered/source diff and create an explicit local Git checkpoint without using a terminal.
-- [ ] **AC-L17 — Non-destructive remotes.** Git fetch/pull/push never happens silently, and conflicts never discard local work.
+- [x] **AC-L01 — Rendered writing.** The default writing surface is rendered and editable; ordinary users never need Markdown syntax.
+- [x] **AC-L02 — Portable project.** A `.md`/`.qmd` project remains renderable through the open-source DraftMatter projector/native HTML pipeline; optional Quarto/Pandoc compatibility remains available.
+- [x] **AC-L03 — Citations.** Project bibliography, Zotero, and Crossref results insert through one picker and render in a chosen CSL style; DOI, BibTeX/BibLaTeX, CSL JSON, RIS/RefMan, and EndNote tagged-text paste/drop plus the Google Scholar export handoff materialize portable, deduplicated project records before citation insertion.
+- [x] **AC-L04 — Multi-language execution.** Python, R, and Julia cells can each produce inline figures/tables, explicitly published manuscript values, and ordinary disk artifacts without Quarto or a notebook server, through selected shared Jupyter kernels.
+- [x] **AC-L05 — Materialized outputs.** Generated figures and tables can be materialized as idempotent normal Markdown/HTML output blocks without rewriting surrounding author text.
+- [x] **AC-L06 — Execution state.** The app shows current/stale/failed execution state and can clean-run the manuscript.
+- [x] **AC-L07 — Retained outputs.** If Python, R, Julia, a kernel, or a selected environment is unavailable, previously generated figures, tables, and values remain visible with a quiet **runtime unavailable — showing last generated output** provenance message.
+- [x] **AC-L08 — Orthogonal availability and freshness.** A stale retained output stays visible, while a missing output shows an explicit placeholder and is never presented as a successful result.
+- [x] **AC-L09 — Persistent review UI.** Comments and attributed suggestions render like document review markup and survive restart.
+- [x] **AC-L10 — Deterministic review persistence.** Open proposals serialize deterministically as independent anchors plus documented in-file records; accept/reject resolves them exactly once and records the decision.
+- [x] **AC-L11 — Overlapping proposals.** Two authors can create identical, nested, or crossing proposals without corrupting either proposal or the accepted base.
+- [x] **AC-L12 — Safe overlap decisions.** Accepting one overlapping alternative preserves intersecting work as **Needs rebase** or a decision conflict; it never silently discards it.
+- [x] **AC-L13 — Clean exports.** Original/resolved-Final HTML, PDF, DOCX, and clean Markdown exports contain no `.dm-anchor` spans or `.draftmatter-reviews` data section.
+- [x] **AC-L14 — No implicit execution.** Opening a project never executes code.
+- [x] **AC-L15 — Unknown-syntax safety.** Unsupported Markdown is preserved or explicitly flagged, never silently lost.
+- [x] **AC-L16 — Local Git checkpoints.** Existing repositories are detected; users can inspect a rendered/source diff and create an explicit local Git checkpoint without using a terminal.
+- [x] **AC-L17 — Non-destructive remotes.** Git fetch/pull/push never happens silently, and conflicts never discard local work.
 
 The paid collaboration beta adds these acceptance criteria:
 
-- [ ] **AC-C01 — Role-aware collaboration.** Invited users can co-edit, comment, and suggest changes in real time from desktop or browser according to their roles.
-- [ ] **AC-C02 — Offline convergence.** Offline/reconnecting edits converge without losing review attribution.
-- [ ] **AC-C03 — Concurrent review safety.** Overlapping online alternatives remain independently reviewable, and incompatible simultaneous decisions surface as conflicts rather than silently overwriting text.
-- [ ] **AC-C04 — Portable collaboration checkpoint.** A live project can be serialized into deterministic portable review anchors/records plus its decision audit, then committed to Git explicitly.
-- [ ] **AC-C05 — Browser privilege boundary.** Browser collaborators cannot execute project code or access a desktop author’s filesystem.
-- [ ] **AC-C06 — Service readiness.** Tenant isolation, revocation, recovery history, deletion, backup restoration, and basic service monitoring are tested before charging customers.
+- [x] **AC-C01 — Role-aware collaboration.** Invited users can co-edit, comment, and suggest changes in real time from desktop or browser according to their roles.
+- [x] **AC-C02 — Offline convergence.** Offline/reconnecting edits converge without losing review attribution.
+- [x] **AC-C03 — Concurrent review safety.** Overlapping online alternatives remain independently reviewable, and incompatible simultaneous decisions surface as conflicts rather than silently overwriting text.
+- [x] **AC-C04 — Portable collaboration checkpoint.** A live project can be serialized into deterministic portable review anchors/records plus its decision audit, then committed to Git explicitly.
+- [x] **AC-C05 — Browser privilege boundary.** Browser collaborators cannot execute project code or access a desktop author’s filesystem.
+- [x] **AC-C06 — Service readiness.** Tenant isolation, revocation, recovery history, deletion, backup restoration, and basic service monitoring are tested before charging customers.
 
 ## Principal risks and mitigations
 
