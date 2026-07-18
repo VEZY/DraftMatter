@@ -240,12 +240,37 @@ describe('full structured manuscript editor', () => {
 
     await act(async () => introductionHandle.dispatchEvent(pointerEvent('pointerdown', 10, 10)))
     await act(async () => methodsBody.dispatchEvent(pointerEvent('pointermove', 30, 135)))
-    expect(container.querySelector<HTMLElement>('.structured-block-drop-indicator')?.hidden).toBe(false)
+    const indicator = container.querySelector<HTMLElement>('.structured-block-drop-indicator')
+    expect(indicator?.hidden).toBe(false)
+    expect(indicator?.textContent).toBe('After Methods')
+    expect(container.querySelector<HTMLElement>('.structured-block-drop-target')?.hidden).toBe(false)
     await act(async () => methodsBody.dispatchEvent(pointerEvent('pointerup', 30, 135)))
 
     expect(changed).toHaveLength(1)
     expect(changed[0].indexOf('Methods body.')).toBeLessThan(changed[0].indexOf('## Introduction'))
     expect(container.querySelector<HTMLElement>('.structured-block-drop-indicator')?.hidden).toBe(true)
+    expect(container.querySelector<HTMLElement>('.structured-block-drop-target')?.hidden).toBe(true)
+  })
+
+  it('presents publication authors after the title and distinguishes abstract and numbered sections', async () => {
+    await act(async () => root.render(
+      <StructuredManuscriptEditor
+        source={'# Canopy responses\n\n## Abstract\n\nA compact summary.\n\n## Introduction\n\nStudy context.\n'}
+        onChange={() => undefined}
+        publicationByline={{
+          authors: [{ name: 'Ada Lovelace', affiliations: ['Analytical Institute'], affiliationNumbers: [1], orcid: '0000-0000-0000-0001' }],
+          affiliations: ['Analytical Institute'],
+        }}
+      />,
+    ))
+
+    const title = container.querySelector<HTMLElement>('.structured-heading-card[data-level="1"]')!
+    const byline = container.querySelector<HTMLElement>('.structured-publication-byline')!
+    expect(title.compareDocumentPosition(byline) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(byline.textContent).toContain('Ada Lovelace')
+    expect(byline.textContent).toContain('Analytical Institute')
+    expect(container.querySelector('.structured-heading-card[data-section-kind="abstract"]')?.textContent).toContain('Abstract')
+    expect(container.querySelector('.structured-heading-card[data-section-kind="numbered"]')?.textContent).toContain('Introduction')
   })
 
   it('filters manuscript review marks by author and highlights the active navigable anchor', async () => {

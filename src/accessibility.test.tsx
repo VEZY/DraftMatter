@@ -63,6 +63,19 @@ describe('accessibility baseline', () => {
     expect(container.querySelector('[role="status"]')?.textContent).toContain('No matching commands')
   })
 
+  it('opens the command palette with Control or Command P and retires the K shortcut', async () => {
+    await act(async () => root.render(<App />))
+
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', ctrlKey: true, bubbles: true, cancelable: true })))
+    expect(container.querySelector('.command-menu')).not.toBeNull()
+
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', metaKey: true, bubbles: true, cancelable: true })))
+    expect(container.querySelector('.command-menu')).toBeNull()
+
+    await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true, cancelable: true })))
+    expect(container.querySelector('.command-menu')).toBeNull()
+  })
+
   it('labels the manuscript author editor and closes it from the keyboard', async () => {
     await act(async () => root.render(<App />))
     await act(async () => container.querySelector<HTMLButtonElement>('.publication-authors-trigger')!.click())

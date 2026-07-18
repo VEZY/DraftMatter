@@ -31,6 +31,7 @@ import type { ExecutionFreshnessStatus } from './executionFreshness'
 import { extractExecutableCells, type ExecutionLanguage } from './executionCells'
 import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
 import { motionAwareScrollBehavior } from './accessibility'
+import type { PublicationByline } from './publicationMetadata'
 import {
   createCollaborativeProseMirrorState,
   reconcileCollaborativeProseMirrorDocument,
@@ -57,10 +58,11 @@ interface StructuredBlockRange {
   start: number
   end: number
   headingLevel?: number
+  node: ProseMirrorNode
 }
 
 function structuredBlockRanges(document: ProseMirrorNode) {
-  const blocks: Array<StructuredBlockRange & { node: ProseMirrorNode }> = []
+  const blocks: StructuredBlockRange[] = []
   document.forEach((node, start) => {
     const id = node.attrs.id ? String(node.attrs.id) : ''
     if (id) blocks.push({
@@ -78,6 +80,16 @@ function structuredBlockRanges(document: ProseMirrorNode) {
     ))
     return { ...block, end: nextPeer?.start ?? document.content.size }
   })
+}
+
+function structuredBlockLabel(range: StructuredBlockRange) {
+  const isSection = range.headingLevel !== undefined
+  const nodeKind = range.node.type.name.replaceAll('_', ' ')
+  const preview = [range.node.textContent, range.node.attrs.alt, range.node.attrs.tex, range.node.attrs.code]
+    .find((candidate) => typeof candidate === 'string' && candidate.trim())?.trim()
+  return isSection
+    ? range.node.textContent || 'Untitled section'
+    : preview ? `${nodeKind} “${preview.slice(0, 54)}${preview.length > 54 ? '…' : ''}”` : nodeKind
 }
 
 export function moveStructuredBlock(
@@ -117,9 +129,9 @@ function structuredBlockDropTarget(document: ProseMirrorNode, target: EventTarge
           && range.start <= destination.start
           && destination.start < range.end
         )).at(-1)
-        if (containingSection) return { id: containingSection.id, element }
+        if (containingSection) return { id: containingSection.id, element, range: containingSection }
       }
-      return { id, element }
+      if (destination) return { id, element, range: destination }
     }
     element = element.parentElement?.closest<HTMLElement>('[data-block-id], [data-dm-id]') ?? null
   }
@@ -173,6 +185,7 @@ export interface StructuredManuscriptEditorHandle {
 export interface StructuredManuscriptEditorProps {
   source: string
   onChange: (source: string) => void
+  publicationByline?: PublicationByline
   onDiagnostics?: (diagnostics: DocumentDiagnostic[]) => void
   onOutlineChange?: (outline: StructuredOutlineItem[]) => void
   onInspectRaw?: (nodeId: string) => void
@@ -422,6 +435,60 @@ function reviewDecorations(
   return DecorationSet.create(document, decorations)
 }
 
+function publicationBylineDecorations(document: ProseMirrorNode, byline?: PublicationByline) {
+  if (!byline?.authors.length) return []
+  const title = structuredBlockRanges(document).find((range) => range.headingLevel === 1)
+  if (!title) return []
+  const signature = JSON.stringify(byline)
+  return [Decoration.widget(title.start + title.node.nodeSize, () => {
+    const container = globalThis.document.createElement('div')
+    container.className = 'structured-publication-byline'
+    container.contentEditable = 'false'
+    container.setAttribute('aria-label', 'Publication authors and affiliations')
+
+    const authors = globalThis.document.createElement('div')
+    authors.className = 'structured-publication-author-list'
+    for (const author of byline.authors) {
+      const item = globalThis.document.createElement('span')
+      const name = globalThis.document.createElement('strong')
+      name.textContent = author.name
+      item.append(name)
+      if (author.affiliationNumbers.length) {
+        const numbers = globalThis.document.createElement('sup')
+        numbers.textContent = author.affiliationNumbers.join(',')
+        numbers.setAttribute('aria-label', `Affiliation${author.affiliationNumbers.length === 1 ? '' : 's'} ${author.affiliationNumbers.join(', ')}`)
+        item.append(numbers)
+      }
+      if (author.orcid) {
+        const orcid = globalThis.document.createElement('small')
+        orcid.className = 'structured-author-orcid'
+        orcid.textContent = 'ORCID'
+        orcid.title = `ORCID ${author.orcid}`
+        item.append(orcid)
+      }
+      authors.append(item)
+    }
+    container.append(authors)
+
+    if (byline.affiliations.length) {
+      const affiliations = globalThis.document.createElement('ol')
+      affiliations.className = 'structured-publication-affiliations'
+      affiliations.setAttribute('aria-label', 'Author affiliations')
+      for (const [index, affiliation] of byline.affiliations.entries()) {
+        const item = globalThis.document.createElement('li')
+        const number = globalThis.document.createElement('sup')
+        const text = globalThis.document.createElement('span')
+        number.textContent = String(index + 1)
+        text.textContent = affiliation
+        item.append(number, text)
+        affiliations.append(item)
+      }
+      container.append(affiliations)
+    }
+    return container
+  }, { key: `dm-publication-byline-${signature}`, side: -1 })]
+}
+
 function blockHandleDecorations(
   document: ProseMirrorNode,
   readOnly: boolean,
@@ -435,12 +502,7 @@ function blockHandleDecorations(
   return structuredBlockRanges(document).filter((range) => range.headingLevel !== 1).map((range) => Decoration.widget(range.start, () => {
     const handle = globalThis.document.createElement('button')
     const isSection = range.headingLevel !== undefined
-    const nodeKind = range.node.type.name.replaceAll('_', ' ')
-    const preview = [range.node.textContent, range.node.attrs.alt, range.node.attrs.tex, range.node.attrs.code]
-      .find((candidate) => typeof candidate === 'string' && candidate.trim())?.trim()
-    const label = isSection
-      ? range.node.textContent || 'Untitled section'
-      : preview ? `${nodeKind} “${preview.slice(0, 54)}${preview.length > 54 ? '…' : ''}”` : nodeKind
+    const label = structuredBlockLabel(range)
     handle.type = 'button'
     handle.className = `structured-block-drag-handle${isSection ? ' structured-section-drag-handle' : ''}`
     handle.contentEditable = 'false'
@@ -1861,9 +1923,18 @@ function headingNodeView(
   }
   const updateDom = () => {
     const sectionLabel = node.attrs.label ? String(node.attrs.label) : ''
+    const sectionTitle = node.textContent.trim().toLocaleLowerCase()
+    const sourceAttributes = node.attrs.sourceAttributes ? String(node.attrs.sourceAttributes) : ''
     dom.dataset.dmId = String(node.attrs.id)
     dom.dataset.label = sectionLabel
     dom.dataset.level = String(node.attrs.level)
+    if (Number(node.attrs.level) === 2) {
+      dom.dataset.sectionKind = sectionTitle === 'abstract'
+        ? 'abstract'
+        : /(?:^|\s)\.unnumbered(?:\s|$)/.test(sourceAttributes) ? 'unnumbered' : 'numbered'
+    } else {
+      delete dom.dataset.sectionKind
+    }
     editorSubtitle.textContent = node.textContent || 'Untitled section'
     if (sectionLabel) heading.id = sectionLabel
     else heading.removeAttribute('id')
@@ -2399,6 +2470,7 @@ function editorState(document: ProseMirrorNode, collaboration?: CollaborativeEdi
 export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorHandle, StructuredManuscriptEditorProps>(function StructuredManuscriptEditor({
   source,
   onChange,
+  publicationByline,
   onDiagnostics,
   onOutlineChange,
   onInspectRaw,
@@ -2433,6 +2505,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const sourceRef = useRef(source)
   const loadedSourceRef = useRef(source)
   const onChangeRef = useRef(onChange)
+  const publicationBylineRef = useRef(publicationByline)
   const onDiagnosticsRef = useRef(onDiagnostics)
   const onOutlineRef = useRef(onOutlineChange)
   const onInspectRawRef = useRef(onInspectRaw)
@@ -2462,6 +2535,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const collaborationRef = useRef(collaboration)
   const reviewDecorationRef = useRef(reviewDecorationIndex(source))
   onChangeRef.current = onChange
+  publicationBylineRef.current = publicationByline
   onDiagnosticsRef.current = onDiagnostics
   onOutlineRef.current = onOutlineChange
   onInspectRawRef.current = onInspectRaw
@@ -2889,25 +2963,61 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     dropIndicator.className = 'structured-block-drop-indicator'
     dropIndicator.hidden = true
     dropIndicator.setAttribute('aria-hidden', 'true')
-    host.append(dropIndicator)
+    const dropIndicatorLabel = globalThis.document.createElement('span')
+    dropIndicator.append(dropIndicatorLabel)
+    const dropTargetHighlight = globalThis.document.createElement('div')
+    dropTargetHighlight.className = 'structured-block-drop-target'
+    dropTargetHighlight.hidden = true
+    dropTargetHighlight.setAttribute('aria-hidden', 'true')
+    host.append(dropTargetHighlight, dropIndicator)
+    const visualBounds = (editorView: EditorView, target: NonNullable<ReturnType<typeof structuredBlockDropTarget>>) => {
+      const ranges = target.range.headingLevel === undefined
+        ? [target.range]
+        : structuredBlockRanges(editorView.state.doc).filter((range) => range.start >= target.range.start && range.start < target.range.end)
+      const bounds = ranges.flatMap((range) => {
+        const escaped = globalThis.CSS?.escape ? globalThis.CSS.escape(range.id) : range.id.replace(/["\\]/g, '\\$&')
+        const element = host.querySelector<HTMLElement>(`[data-dm-id="${escaped}"]`)
+        if (!element) return []
+        const rect = element.getBoundingClientRect()
+        return rect.width || rect.height ? [rect] : []
+      })
+      if (!bounds.length) return target.element.getBoundingClientRect()
+      const left = Math.min(...bounds.map((rect) => rect.left))
+      const right = Math.max(...bounds.map((rect) => rect.right))
+      const top = Math.min(...bounds.map((rect) => rect.top))
+      const bottom = Math.max(...bounds.map((rect) => rect.bottom))
+      return { left, right, top, bottom, width: right - left, height: bottom - top }
+    }
     const pointerTarget = (editorView: EditorView, sourceId: string, clientX: number, clientY: number, fallback: EventTarget | null) => {
       const hit = host.ownerDocument.elementFromPoint?.(clientX, clientY) ?? fallback
       const target = structuredBlockDropTarget(editorView.state.doc, hit, sourceId)
       if (!target || target.id === sourceId) return undefined
-      const bounds = target.element.getBoundingClientRect()
+      const bounds = visualBounds(editorView, target)
       const placement: StructuredBlockMovePlacement = clientY > bounds.top + bounds.height / 2 ? 'after' : 'before'
-      return { ...target, bounds, placement }
+      return { ...target, bounds, placement, label: structuredBlockLabel(target.range) }
+    }
+    const hidePointerTarget = () => {
+      dropIndicator.hidden = true
+      dropTargetHighlight.hidden = true
     }
     const showPointerTarget = (editorView: EditorView, sourceId: string, clientX: number, clientY: number, fallback: EventTarget | null) => {
       const target = pointerTarget(editorView, sourceId, clientX, clientY, fallback)
       if (!target) {
-        dropIndicator.hidden = true
+        hidePointerTarget()
         return
       }
       const hostBounds = host.getBoundingClientRect()
-      dropIndicator.style.left = `${Math.max(0, target.bounds.left - hostBounds.left)}px`
+      const left = Math.max(0, target.bounds.left - hostBounds.left)
+      dropIndicator.style.left = `${left}px`
       dropIndicator.style.top = `${(target.placement === 'before' ? target.bounds.top : target.bounds.bottom) - hostBounds.top}px`
       dropIndicator.style.width = `${target.bounds.width}px`
+      dropIndicator.dataset.placement = target.placement
+      dropIndicatorLabel.textContent = `${target.placement === 'before' ? 'Before' : 'After'} ${target.label}`
+      dropTargetHighlight.style.left = `${left}px`
+      dropTargetHighlight.style.top = `${target.bounds.top - hostBounds.top}px`
+      dropTargetHighlight.style.width = `${target.bounds.width}px`
+      dropTargetHighlight.style.height = `${target.bounds.height}px`
+      dropTargetHighlight.hidden = false
       dropIndicator.hidden = false
     }
     const view = new EditorView(host, {
@@ -2921,6 +3031,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         class: 'structured-editor-content',
       },
       decorations: (state) => DecorationSet.create(state.doc, [
+        ...publicationBylineDecorations(state.doc, publicationBylineRef.current),
         ...reviewDecorations(
           state.doc,
           reviewDecorationRef.current,
@@ -2943,7 +3054,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           if (target) moveBlock(editorView, sourceId, target.id, target.placement)
         }, () => {
           draggedBlockIdRef.current = undefined
-          dropIndicator.hidden = true
+          hidePointerTarget()
           delete host.dataset.pointerBlockDragging
         }),
       ]),
@@ -3095,6 +3206,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       viewRef.current = null
       view.destroy()
       dropIndicator.remove()
+      dropTargetHighlight.remove()
     }
   }, [ariaLabel, collaboration])
 
@@ -3136,6 +3248,10 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     const view = viewRef.current
     if (view) view.dispatch(view.state.tr.setMeta('dm-decoration-refresh', true))
   }, [activeReviewAnchorId, activeReviewId, markupView, reviewAuthorId])
+
+  useEffect(() => {
+    viewRef.current?.dispatch(viewRef.current.state.tr.setMeta('dm-decoration-refresh', true))
+  }, [publicationByline])
 
   useEffect(() => {
     const view = viewRef.current

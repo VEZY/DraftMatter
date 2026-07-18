@@ -60,7 +60,7 @@ import type { CollaborationCheckpoint, CollaborationClientStatus, CollaborativeE
 import { motionAwareScrollBehavior } from './accessibility'
 import { normalizeProjectRelativePath, projectFilePath } from './projectPaths'
 import { authorInitials, readUserSettings, renameLocalAuthor, saveUserSettings } from './userSettings'
-import { parsePublicationMetadata, updatePublicationAuthorDetails, type PublicationAuthor } from './publicationMetadata'
+import { buildPublicationByline, parsePublicationMetadata, updatePublicationAuthorDetails, type PublicationAuthor, type PublicationByline } from './publicationMetadata'
 import { forgetAuthor, normalizeAuthorProfile, readAuthorBank, rememberAuthors, saveAuthorBank, type RememberedAuthor } from './authorBank'
 import { copyPlainText } from './clipboard'
 import { parseRetainedPublishedValues } from './publishedValues'
@@ -459,6 +459,28 @@ function CitationFormattingControls({
   )
 }
 
+function PublicationBylineView({ byline }: { byline: PublicationByline }) {
+  if (!byline.authors.length) return null
+  return (
+    <div className="structured-publication-byline" aria-label="Publication authors and affiliations">
+      <div className="structured-publication-author-list">
+        {byline.authors.map((author, index) => (
+          <span key={`${author.name}-${index}`}>
+            <strong>{author.name}</strong>
+            {author.affiliationNumbers.length > 0 && <sup aria-label={`Affiliation${author.affiliationNumbers.length === 1 ? '' : 's'} ${author.affiliationNumbers.join(', ')}`}>{author.affiliationNumbers.join(',')}</sup>}
+            {author.orcid && <small className="structured-author-orcid" title={`ORCID ${author.orcid}`}>ORCID</small>}
+          </span>
+        ))}
+      </div>
+      {byline.affiliations.length > 0 && (
+        <ol className="structured-publication-affiliations" aria-label="Author affiliations">
+          {byline.affiliations.map((affiliation, index) => <li key={`${affiliation}-${index}`}><sup>{index + 1}</sup><span>{affiliation}</span></li>)}
+        </ol>
+      )}
+    </div>
+  )
+}
+
 function App() {
   const initialProjectMeta = useMemo(getInitialProjectMeta, [])
   const initialDraftState = useMemo(getInitialDraftState, [])
@@ -821,6 +843,11 @@ function App() {
   const currentAuthorInitials = authorInitials(activeReviewAuthor.name)
   const publicationMetadata = useMemo(() => parsePublicationMetadata(manuscriptSource), [manuscriptSource])
   const publicationAuthors = publicationMetadata.authors
+  const publicationByline = useMemo(
+    () => buildPublicationByline(publicationMetadata.authorDetails, publicationAuthors),
+    [publicationAuthors, publicationMetadata.authorDetails],
+  )
+  const commandUsesMetaKey = useMemo(() => typeof navigator !== 'undefined' && /Mac|iPhone|iPad|iPod/.test(navigator.platform), [])
 
   const openSettings = () => {
     setSettingsName(userSettings.author.name)
@@ -1324,7 +1351,7 @@ function App() {
         event.preventDefault()
         redoDraft()
       }
-      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'k') {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'p') {
         event.preventDefault()
         setCommandOpen((open) => !open)
       }
@@ -4072,9 +4099,9 @@ function App() {
             <span>{collaborationStatus === 'connected' ? `Live${collaborationRole ? ` · ${collaborationRole[0].toUpperCase()}${collaborationRole.slice(1)}` : ''}` : 'Collaborate'}</span>
             <i />
           </button>
-          <button className="icon-button command-button" onClick={() => setCommandOpen(true)} aria-label="Open command menu">
+          <button className="icon-button command-button" onClick={() => setCommandOpen(true)} aria-label="Open command menu" title={`Open command menu (${commandUsesMetaKey ? 'Command' : 'Control'} P)`}>
             <Icon name="search" />
-            <span className="shortcut"><Icon name="command" size={12} />K</span>
+            <span className="shortcut">{commandUsesMetaKey ? <><Icon name="command" size={12} />P</> : 'Ctrl+P'}</span>
           </button>
           <button className="icon-button focus-mode-toggle" onClick={() => setFocusMode(true)} aria-label="Enter focus mode" title="Focus mode"><Icon name="focus" size={17} /></button>
           <span className="topbar-divider" />
@@ -4296,27 +4323,6 @@ function App() {
 
           {structuredMode ? (
           <article className="manuscript structured-manuscript" aria-label="Editable manuscript">
-            <div className="paper-meta-row">
-              <div className="paper-meta">RESEARCH MANUSCRIPT</div>
-              <button
-                className="publication-authors-trigger"
-                onClick={openPublicationAuthors}
-                disabled={!canEditManuscript}
-                aria-label={`Manage manuscript authors${publicationAuthors.length ? `, ${publicationAuthors.length} listed` : ''}`}
-                title={publicationAuthors.length ? publicationAuthors.join(' · ') : 'Add portable publication authors'}
-              >
-                <Icon name="users" size={13} />
-                {publicationAuthors.length ? `${publicationAuthors.length} author${publicationAuthors.length === 1 ? '' : 's'}` : 'Add authors'}
-              </button>
-            </div>
-            {publicationAuthors.length > 0 && (
-              <div className="publication-authors" aria-label="Publication authors">
-                {publicationAuthors.map((author, index) => <span key={`${author}-${index}`}>{author}</span>)}
-              </div>
-            )}
-            {!structuredOutline.some((item) => item.level === 1) && (
-              <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" readOnly={!canEditManuscript} />
-            )}
             {primaryCell && (
               <section className={`structured-execution-workspace ${executionWorkspaceOpen ? 'open' : 'collapsed'}`} aria-label="Reproducible outputs">
                 <div className="execution-summary-bar">
@@ -4376,10 +4382,30 @@ function App() {
                 <span><strong>{markupView === 'original' ? 'Original preview' : structuredReviewProjection.ok ? 'Final preview' : 'Final preview needs a decision'}</strong><small>{structuredReviewProjection.ok ? 'Read-only clean projection; return to a markup view to keep editing.' : `${structuredReviewProjection.conflicts.length} overlapping review conflict${structuredReviewProjection.conflicts.length === 1 ? '' : 's'} must be resolved or selected first.`}</small></span>
               </div>
             )}
+            <div className="paper-meta-row">
+              <div className="paper-meta">RESEARCH MANUSCRIPT</div>
+              <button
+                className="publication-authors-trigger"
+                onClick={openPublicationAuthors}
+                disabled={!canEditManuscript}
+                aria-label={`Manage manuscript authors${publicationAuthors.length ? `, ${publicationAuthors.length} listed` : ''}`}
+                title={publicationAuthors.length ? publicationAuthors.join(' · ') : 'Add portable publication authors'}
+              >
+                <Icon name="users" size={13} />
+                {publicationAuthors.length ? `${publicationAuthors.length} author${publicationAuthors.length === 1 ? '' : 's'}` : 'Add authors'}
+              </button>
+            </div>
+            {!structuredOutline.some((item) => item.level === 1) && (
+              <>
+                <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" readOnly={!canEditManuscript} />
+                <PublicationBylineView byline={publicationByline} />
+              </>
+            )}
             <StructuredManuscriptEditor
               ref={structuredEditorRef}
               source={structuredEditorSource}
               onChange={updateStructuredManuscript}
+              publicationByline={publicationByline}
               onDiagnostics={setDiagnostics}
               onOutlineChange={setStructuredOutline}
               onInspectRaw={openSourceInspector}
