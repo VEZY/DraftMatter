@@ -3,7 +3,7 @@
 This ledger consolidates the implementation and verification evidence for the
 task register in `draftmatter-app-design.md`. The canonical register and this
 ledger were reconciled on 2026-07-18: DM-P0 through DM-P6 and AC-L01 through
-AC-C06 and DM-P7-01 are checked, while the remaining DM-P7 alpha-authoring
+AC-C06 and DM-P7-01 through DM-P7-02 are checked, while the remaining DM-P7 alpha-authoring
 milestones remain open.
 The design document carries the product-level status and interaction decisions;
 this file remains the task-level source for tests, fixtures, and implementation
@@ -173,13 +173,14 @@ also covered here.
 
 DM-P7 was added on 2026-07-18 after the MVP evidence was reconciled with
 hands-on product review. It is the active implementation milestone. DM-P7-01
-is complete. The remaining searchable picker, unified inspector,
-reference-integrity, and real-manuscript dogfood requirements remain open in
+and DM-P7-02 are complete. The remaining unified inspector, reference-integrity,
+and real-manuscript dogfood requirements remain open in
 the canonical register.
 
 | Task | Automated or reproducible evidence | Implementation commit |
 | --- | --- | --- |
 | DM-P7-01 | `src/semanticObjects.test.ts`, `src/StructuredManuscriptEditor.test.tsx`, `src/outputMaterializer.test.ts`, `src/numberedObjects.test.ts`, and table/serializer/export regressions cover friendly creation, deterministic duplicate suffixes, section/object numbering, rename compatibility, reorder, reopen, captionless table identities, legacy machine-label preservation, and quiet UUID-free normal controls. `npm run check` and 9 focused files / 88 tests passed. The full run passed 621 non-network tests; all 3 loopback collaboration tests then passed in an isolated permitted rerun (125 files / 624 tests in aggregate). | `6b489fd` |
+| DM-P7-02 | `src/crossReferencePicker.test.ts`, `src/InsertBlockDialog.test.tsx`, and `src/StructuredManuscriptEditor.test.tsx` cover grouped current-number/caption choices, searching, Arrow-key focus transfer, insertion for figures/tables/equations/sections, retargeting, legacy-label concealment, and atomic labeling of older unlabeled targets. `npm run check`, 6 focused files / 66 tests, `npm run build`, and all 3 generic-manuscript Chromium tests passed. Wide and narrow rendered inspection verified non-overlapping geometry, visible focus, filtered selection, and a clean browser console. | `50f8f13` |
 
 ## Acceptance-criterion evidence
 
