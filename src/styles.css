@@ -5082,6 +5082,9 @@ kbd {
 .structured-cross-reference-validation { color: #9a5e4a; font-size: 8px; font-weight: 600; margin: 0; white-space: normal; }
 .structured-cross-reference-validation[hidden] { display: none; }
 .structured-cross-reference-editor button { font-size: 8px; padding: 4px 6px; }
+.structured-cross-reference[data-reference-status="missing"] > .structured-cross-reference-link { background: #fff0ef; box-shadow: inset 0 -2px #c75d54; color: #8a403b; }
+.structured-cross-reference[data-reference-status="duplicate"] > .structured-cross-reference-link,
+.structured-cross-reference[data-reference-status="wrong-kind"] > .structured-cross-reference-link { background: #fff6e9; box-shadow: inset 0 -2px #c88b3f; color: #795a2f; }
 .structured-editor-content table { border-collapse: collapse; font-family: Inter, ui-sans-serif, sans-serif; font-size: 13px; margin: 1.6em 0; width: 100%; }
 .structured-editor-content th,
 .structured-editor-content td { border-bottom: 1px solid var(--line); padding: 9px 10px; text-align: left; vertical-align: top; }
@@ -5514,6 +5517,12 @@ textarea.structured-output-input { min-height: 58px; }
 .semantic-object-provenance { border: 1px solid var(--line); border-radius: 6px; color: #6f7b75; font: 500 8px/1.5 Inter, ui-sans-serif, sans-serif; overflow: hidden; }
 .semantic-object-provenance > summary { background: #f7f9f7; color: #5d6a63; cursor: pointer; font-weight: 700; list-style-position: inside; padding: 7px 9px; }
 .semantic-object-provenance > p { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; margin: 0 !important; overflow-wrap: anywhere; padding: 8px 10px; }
+.semantic-object-references { background: transparent; border: 0; color: #66766e; font: 700 8px/1.3 Inter, ui-sans-serif, sans-serif; margin-left: auto; padding: 4px 5px; white-space: nowrap; }
+.semantic-object-references:hover { color: var(--sage-dark); text-decoration: underline; text-underline-offset: 2px; }
+.semantic-object-references[hidden] { display: none; }
+.structured-output-reference:not([hidden]) + .semantic-object-references { margin-left: 0; }
+.structured-heading-references { background: rgba(255, 255, 255, .94); border: 1px solid #e0e5e2; border-radius: 4px; position: absolute; right: 86px; top: 4px; }
+.semantic-navigation-target { outline: 2px solid #4d7d66 !important; outline-offset: 4px; }
 .structured-manuscript-editor { container-type: inline-size; }
 
 /* A collapsed computation and its retained result read as one manuscript object. */

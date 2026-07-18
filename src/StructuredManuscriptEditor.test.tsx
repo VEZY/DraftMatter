@@ -845,6 +845,121 @@ scatter(1:10)
     expect(document.activeElement).toBe(reference.querySelector('.structured-cross-reference-edit'))
   })
 
+  it('makes missing, ambiguous, and wrong-kind references explicit instead of silently linking them', async () => {
+    const integritySource = `# Reference integrity
+
+See @fig-valid, @fig-missing, @fig-duplicate, and @tbl-mislabeled.
+
+![Valid](valid.svg){#fig-valid}
+
+![First duplicate](one.svg){#fig-duplicate}
+
+![Second duplicate](two.svg){#fig-duplicate}
+
+![Actually a figure](wrong.svg){#tbl-mislabeled}
+`
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={integritySource} onChange={vi.fn()} />,
+    ))
+
+    const valid = container.querySelector<HTMLElement>('.structured-cross-reference[data-target="fig-valid"]')!
+    const missing = container.querySelector<HTMLElement>('.structured-cross-reference[data-target="fig-missing"]')!
+    const duplicate = container.querySelector<HTMLElement>('.structured-cross-reference[data-target="fig-duplicate"]')!
+    const wrongKind = container.querySelector<HTMLElement>('.structured-cross-reference[data-target="tbl-mislabeled"]')!
+
+    expect(valid.dataset.referenceStatus).toBe('valid')
+    expect(valid.querySelector('a')?.getAttribute('href')).toBe('#fig-valid')
+    expect(missing.dataset.referenceStatus).toBe('missing')
+    expect(missing.querySelector('a')?.hasAttribute('href')).toBe(false)
+    expect(missing.querySelector('a')?.getAttribute('aria-invalid')).toBe('true')
+    expect(missing.querySelector('a')?.title).toContain('Missing')
+    expect(duplicate.dataset.referenceStatus).toBe('duplicate')
+    expect(duplicate.querySelector('a')?.hasAttribute('href')).toBe(false)
+    expect(duplicate.querySelector('a')?.textContent).toContain('ambiguous')
+    expect(wrongKind.dataset.referenceStatus).toBe('wrong-kind')
+    expect(wrongKind.querySelector('a')?.getAttribute('href')).toBe('#tbl-mislabeled')
+    expect(wrongKind.querySelector('a')?.textContent).toMatch(/^Figure /)
+    expect(wrongKind.querySelector('a')?.title).toContain('wrong object kind')
+  })
+
+  it('navigates in both directions between a reference and its semantic object', async () => {
+    const scroll = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
+    const navigationSource = '# Results\n\nSee @fig-growth.\n\n![Growth](growth.svg){#fig-growth}\n: Growth response.\n'
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={navigationSource} onChange={vi.fn()} />,
+    ))
+
+    const reference = container.querySelector<HTMLElement>('.structured-cross-reference[data-target="fig-growth"]')!
+    const link = reference.querySelector<HTMLAnchorElement>('.structured-cross-reference-link')!
+    const figure = container.querySelector<HTMLElement>('.structured-figure-media#fig-growth')!
+    const reverse = figure.querySelector<HTMLButtonElement>('.semantic-object-references')!
+    expect(reverse.textContent).toBe('1 reference')
+
+    await act(async () => link.click())
+    expect(figure.classList.contains('semantic-navigation-target')).toBe(true)
+    expect(document.activeElement).toBe(figure)
+
+    await act(async () => reverse.click())
+    expect(reference.classList.contains('semantic-navigation-target')).toBe(true)
+    expect(document.activeElement).toBe(link)
+    expect(scroll).toHaveBeenCalledWith(expect.objectContaining({ block: 'center' }))
+  })
+
+  it('refreshes visible numbering and references immediately after block reordering', async () => {
+    const changed: string[] = []
+    const numberedSource = `# Results
+
+Compare @fig-first with @fig-second.
+
+![First response](first.svg){#fig-first}
+: First response.
+
+![Second response](second.svg){#fig-second}
+: Second response.
+`
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={numberedSource} onChange={(next) => changed.push(next)} />,
+    ))
+
+    const firstReference = container.querySelector<HTMLElement>('.structured-cross-reference[data-target="fig-first"]')!
+    const secondReference = container.querySelector<HTMLElement>('.structured-cross-reference[data-target="fig-second"]')!
+    expect(firstReference.querySelector('a')?.textContent).toBe('Figure 1')
+    expect(secondReference.querySelector('a')?.textContent).toBe('Figure 2')
+    const firstHandle = [...container.querySelectorAll<HTMLButtonElement>('.structured-block-drag-handle')]
+      .find((handle) => handle.getAttribute('aria-label')?.includes('figure “First response.'))!
+
+    await act(async () => firstHandle.dispatchEvent(new KeyboardEvent('keydown', {
+      altKey: true,
+      bubbles: true,
+      key: 'ArrowDown',
+    })))
+
+    expect(changed).toHaveLength(1)
+    expect(changed[0].indexOf('second.svg')).toBeLessThan(changed[0].indexOf('first.svg'))
+    expect(firstReference.querySelector('a')?.textContent).toBe('Figure 2')
+    expect(secondReference.querySelector('a')?.textContent).toBe('Figure 1')
+    expect(container.querySelector('#fig-first .structured-figure-label')?.textContent).toBe('Figure 2')
+    expect(container.querySelector('#fig-second .structured-figure-label')?.textContent).toBe('Figure 1')
+  })
+
+  it('marks a reference missing as soon as its object is deleted from an external source update', async () => {
+    const complete = '# Results\n\nSee @fig-growth.\n\n![Growth](growth.svg){#fig-growth}\n'
+    const deleted = '# Results\n\nSee @fig-growth.\n'
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={complete} onChange={vi.fn()} />,
+    ))
+    expect(container.querySelector<HTMLElement>('.structured-cross-reference')?.dataset.referenceStatus).toBe('valid')
+
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={deleted} onChange={vi.fn()} />,
+    ))
+
+    const reference = container.querySelector<HTMLElement>('.structured-cross-reference[data-target="fig-growth"]')!
+    expect(reference.dataset.referenceStatus).toBe('missing')
+    expect(reference.querySelector('a')?.hasAttribute('href')).toBe(false)
+    expect(reference.querySelector('a')?.getAttribute('aria-invalid')).toBe('true')
+  })
+
   it('edits rendered link metadata while preserving linked text', async () => {
     const changed: string[] = []
     const linkSource = '# Links\n\nRead the [field protocol](https://example.test/protocol "Original protocol") before sampling.\n'
@@ -1022,7 +1137,9 @@ scatter(1:10)
     expect(figure.querySelector('img')?.getAttribute('src')).toBe('asset://figures/growth-revised.svg')
     expect(figure.querySelector('img')?.getAttribute('title')).toBe('Measured canopy response')
     expect(container.querySelector('.structured-figure-caption')?.textContent).toBe('Figure 1. Revised figure legend.')
-    expect(container.querySelector('[data-dm-node="cross-reference"]')?.getAttribute('href')).toBe('#fig-response')
+    const updatedReference = container.querySelector<HTMLElement>('.structured-cross-reference[data-target="fig-response"]')!
+    expect(updatedReference.dataset.referenceStatus).toBe('valid')
+    expect(updatedReference.querySelector('[data-dm-node="cross-reference"]')?.getAttribute('href')).toBe('#fig-response')
   })
 
   it('edits semantic table details without losing column alignment or matching references', async () => {
@@ -1069,7 +1186,10 @@ scatter(1:10)
 
     const section = container.querySelector<HTMLElement>('.structured-heading-card[data-label="sec-background"]')!
     expect(section.querySelector('h2')?.id).toBe('sec-background')
-    await act(async () => section.querySelector<HTMLButtonElement>('.structured-heading-edit')?.click())
+    const sectionEdit = section.querySelector<HTMLButtonElement>('.structured-heading-edit')
+    expect(sectionEdit).not.toBeNull()
+    expect(sectionEdit?.disabled).toBe(false)
+    await act(async () => sectionEdit!.click())
     const dialog = document.querySelector<HTMLElement>('[role="dialog"][aria-label="Section object details"]')!
     expect(dialog.querySelector<HTMLSelectElement>('[aria-label="Section numbering"]')?.value).toBe('unnumbered')
     const label = dialog.querySelector<HTMLInputElement>('[aria-label="Section label"]')!
@@ -1088,7 +1208,10 @@ scatter(1:10)
     label.value = 'sec-context'
     label.dispatchEvent(new Event('input', { bubbles: true }))
     expect(save.disabled).toBe(false)
-    await act(async () => save.click())
+    await act(async () => {
+      save.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
 
     expect(changed.at(-1)).toContain('## Background {#sec-context .unnumbered}')
     expect(changed.at(-1)).toContain('See @sec-context for context.')
@@ -1096,7 +1219,9 @@ scatter(1:10)
     const updatedSection = container.querySelector<HTMLElement>('.structured-heading-card[data-label="sec-context"]')!
     expect(updatedSection.querySelector('h2')?.id).toBe('sec-context')
     expect(document.activeElement).toBe(updatedSection.querySelector('.structured-heading-edit'))
-    expect(container.querySelector<HTMLAnchorElement>('a[href="#sec-context"]')?.textContent).toBe('Section context')
+    const updatedReference = container.querySelector<HTMLElement>('.structured-cross-reference[data-target="sec-context"]')!
+    expect(updatedReference.dataset.referenceStatus).toBe('valid')
+    expect(updatedReference.querySelector<HTMLAnchorElement>('a[href="#sec-context"]')?.textContent).toBe('Section context')
   })
 
   it.each([

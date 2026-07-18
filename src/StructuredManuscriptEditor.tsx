@@ -35,6 +35,7 @@ import type { PublicationByline } from './publicationMetadata'
 import { embeddedExecutionImageFromHtml, safeEmbeddedImageDataUrl } from './outputRenderer'
 import { parseTableCaptionLine } from './tableSyntax'
 import { crossReferenceChoices, groupedCrossReferenceChoices, type CrossReferenceChoice } from './crossReferencePicker'
+import { resolveSemanticReference } from './referenceIntegrity'
 import {
   isExplicitlyUnnumbered,
   numberedCrossReferenceLabel,
@@ -1345,12 +1346,25 @@ function crossReferenceNodeView(initialNode: ProseMirrorNode, view: EditorView, 
   }
   const updateDom = () => {
     const target = String(node.attrs.target)
+    const resolution = resolveSemanticReference(view.state.doc, target)
     dom.dataset.dmId = String(node.attrs.id)
     dom.dataset.target = target
+    dom.dataset.referenceStatus = resolution.status
     link.dataset.dmId = String(node.attrs.id)
-    link.href = `#${target}`
-    link.textContent = semanticCrossReferenceLabel(view.state.doc, target) ?? numberedCrossReferenceLabel(view.state.doc, target)
-    link.title = `Go to ${link.textContent}`
+    link.tabIndex = 0
+    if (resolution.objects.length === 1) link.href = `#${target}`
+    else link.removeAttribute('href')
+    const resolvedLabel = semanticCrossReferenceLabel(view.state.doc, target) ?? numberedCrossReferenceLabel(view.state.doc, target)
+    link.textContent = resolution.status === 'duplicate' ? `${resolvedLabel} · ambiguous` : resolvedLabel
+    link.title = resolution.status === 'valid'
+      ? `Go to ${link.textContent}`
+      : resolution.status === 'missing'
+        ? `Missing cross-reference target @${target}`
+        : resolution.status === 'duplicate'
+          ? `Ambiguous cross-reference target @${target}`
+          : `Target @${target} resolves to the wrong object kind`
+    if (resolution.status === 'valid') link.removeAttribute('aria-invalid')
+    else link.setAttribute('aria-invalid', 'true')
     edit.disabled = !isEditable()
     edit.setAttribute('aria-label', `Change ${link.textContent} reference`)
     search.readOnly = !isEditable()
@@ -1386,6 +1400,12 @@ function crossReferenceNodeView(initialNode: ProseMirrorNode, view: EditorView, 
     closeEditor()
   }
   edit.addEventListener('mousedown', (event) => event.preventDefault())
+  link.addEventListener('click', (event) => {
+    event.preventDefault()
+    const resolution = resolveSemanticReference(view.state.doc, String(node.attrs.target))
+    if (resolution.objects.length === 1) navigateToSemanticObject(view, resolution.objects[0].nodeId)
+    else if (isEditable()) edit.click()
+  })
   edit.addEventListener('click', () => {
     if (!isEditable()) return
     editing = true
@@ -1426,6 +1446,7 @@ function crossReferenceNodeView(initialNode: ProseMirrorNode, view: EditorView, 
 
   dom.append(link, edit, editor)
   updateDom()
+  const stopSemanticRefresh = registerSemanticRefresh(view, updateDom)
   return {
     dom,
     stopEvent: (event) => dom.contains(event.target as Node),
@@ -1436,6 +1457,7 @@ function crossReferenceNodeView(initialNode: ProseMirrorNode, view: EditorView, 
       updateDom()
       return true
     },
+    destroy: stopSemanticRefresh,
   }
 }
 
@@ -1453,7 +1475,14 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   edit.type = 'button'
   edit.className = 'structured-equation-edit'
   edit.textContent = 'Edit'
-  if (displayMode) header.append(label, edit)
+  const references = document.createElement('button')
+  references.type = 'button'
+  references.className = 'semantic-object-references'
+  references.addEventListener('click', () => {
+    const target = node.attrs.label ? String(node.attrs.label) : ''
+    if (target) navigateToSemanticReference(view, target)
+  })
+  if (displayMode) header.append(label, references, edit)
 
   const rendered = document.createElement(displayMode ? 'div' : 'span')
   rendered.className = 'structured-equation-render'
@@ -1566,6 +1595,7 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
         ? `${numbered?.number ? `Equation ${numbered.number}. ` : ''}${inlineMarkdownPreviewText(equationCaption)}`
         : ''
       captionPreview.hidden = editing || !equationCaption
+      updateObjectReferenceButton(references, view, equationLabel, numbered?.number ? `Equation ${numbered.number}` : 'display equation')
     }
     rendered.innerHTML = result.html
     rendered.hidden = Boolean(result.error)
@@ -1672,6 +1702,7 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   if (displayMode) dom.append(header, rendered, number, error, captionPreview, editor)
   else dom.append(rendered, error, edit, editor)
   updateDom()
+  const stopSemanticRefresh = registerSemanticRefresh(view, updateDom)
   return {
     dom,
     stopEvent: (event) => dom.contains(event.target as Node),
@@ -1682,6 +1713,7 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
       updateDom()
       return true
     },
+    destroy: stopSemanticRefresh,
   }
 }
 
@@ -2105,11 +2137,14 @@ function outputNodeView(
   const copy = document.createElement('button')
   copy.type = 'button'
   copy.className = 'structured-output-reference'
+  const references = document.createElement('button')
+  references.type = 'button'
+  references.className = 'semantic-object-references'
   const edit = document.createElement('button')
   edit.type = 'button'
   edit.className = 'structured-output-edit'
   edit.textContent = 'Object details'
-  header.append(descriptor, copy, edit)
+  header.append(descriptor, copy, references, edit)
 
   const content = document.createElement('div')
   content.className = 'structured-output-content'
@@ -2204,6 +2239,7 @@ function outputNodeView(
     copy.setAttribute('aria-label', label
       ? `Copy ${kindLabel.toLowerCase()} reference${isLegacyMachineObjectLabel(label) ? '' : ` ${label}`}`
       : 'Copy output reference')
+    updateObjectReferenceButton(references, view, label ?? '', descriptor.textContent || kindLabel)
     edit.hidden = presentation.kind === 'markdown' || editing
     edit.disabled = !isEditable()
     edit.setAttribute('aria-label', `Edit ${kindLabel.toLowerCase()} object details`)
@@ -2309,6 +2345,10 @@ function outputNodeView(
     const label = retainedOutputPresentation(String(node.attrs.markdown), node.attrs.kind).label
     if (label) onCopyReference?.(label)
   })
+  references.addEventListener('click', () => {
+    const label = retainedOutputPresentation(String(node.attrs.markdown), node.attrs.kind).label
+    if (label) navigateToSemanticReference(view, label)
+  })
   edit.addEventListener('click', () => {
     if (!isEditable()) return
     editing = true
@@ -2338,6 +2378,7 @@ function outputNodeView(
   })
   dom.append(header, content, captionPreview, editor)
   updateDom()
+  const stopSemanticRefresh = registerSemanticRefresh(view, updateDom)
   return {
     dom,
     stopEvent: (event) => dom.contains(event.target as Node),
@@ -2348,6 +2389,7 @@ function outputNodeView(
       updateDom()
       return true
     },
+    destroy: stopSemanticRefresh,
   }
 }
 
@@ -2405,6 +2447,63 @@ function semanticNumberingField(ariaLabel: string) {
 
 function revealSemanticInspector(inspector: HTMLElement) {
   requestAnimationFrame(() => inspector.scrollIntoView?.({ block: 'center', behavior: motionAwareScrollBehavior() }))
+}
+
+const semanticRefreshCallbacks = new WeakMap<EditorView, Set<() => void>>()
+
+function registerSemanticRefresh(view: EditorView, callback: () => void) {
+  const callbacks = semanticRefreshCallbacks.get(view) ?? new Set<() => void>()
+  callbacks.add(callback)
+  semanticRefreshCallbacks.set(view, callbacks)
+  return () => callbacks.delete(callback)
+}
+
+function refreshSemanticPresentation(view: EditorView) {
+  semanticRefreshCallbacks.get(view)?.forEach((callback) => callback())
+}
+
+function semanticDomSelector(value: string) {
+  return globalThis.CSS?.escape ? globalThis.CSS.escape(value) : value.replace(/["\\]/g, '\\$&')
+}
+
+function emphasizeSemanticNavigationTarget(target: HTMLElement) {
+  target.classList.add('semantic-navigation-target')
+  const existingTabIndex = target.getAttribute('tabindex')
+  if (existingTabIndex === null) target.tabIndex = -1
+  target.scrollIntoView?.({ behavior: motionAwareScrollBehavior(), block: 'center' })
+  target.focus({ preventScroll: true })
+  window.setTimeout(() => {
+    target.classList.remove('semantic-navigation-target')
+    if (existingTabIndex === null) target.removeAttribute('tabindex')
+  }, 1_600)
+}
+
+function navigateToSemanticObject(view: EditorView, nodeId: string) {
+  const target = view.dom.querySelector<HTMLElement>(`[data-dm-id="${semanticDomSelector(nodeId)}"]`)
+  if (!target) return false
+  emphasizeSemanticNavigationTarget(target)
+  return true
+}
+
+function referenceElements(view: EditorView, target: string) {
+  return [...view.dom.querySelectorAll<HTMLElement>(`.structured-cross-reference[data-target="${semanticDomSelector(target)}"]`)]
+}
+
+function navigateToSemanticReference(view: EditorView, target: string) {
+  const reference = referenceElements(view, target)[0]
+  if (!reference) return false
+  emphasizeSemanticNavigationTarget(reference)
+  reference.querySelector<HTMLAnchorElement>('.structured-cross-reference-link')?.focus({ preventScroll: true })
+  return true
+}
+
+function updateObjectReferenceButton(button: HTMLButtonElement, view: EditorView, target: string, objectName: string) {
+  const count = target ? referenceElements(view, target).length : 0
+  button.hidden = count === 0
+  button.textContent = count === 1 ? '1 reference' : `${count} references`
+  button.setAttribute('aria-label', count
+    ? `Go to ${count === 1 ? 'the' : 'the first of'} ${count} reference${count === 1 ? '' : 's'} to ${objectName}`
+    : `No references to ${objectName}`)
 }
 
 function hasCrossReferences(document: ProseMirrorNode, target: string) {
@@ -2490,6 +2589,14 @@ function headingNodeView(
   edit.className = 'structured-heading-edit'
   edit.textContent = 'Object details'
   edit.contentEditable = 'false'
+  const references = document.createElement('button')
+  references.type = 'button'
+  references.className = 'semantic-object-references structured-heading-references'
+  references.contentEditable = 'false'
+  references.addEventListener('click', () => {
+    const target = node.attrs.label ? String(node.attrs.label) : ''
+    if (target) navigateToSemanticReference(view, target)
+  })
 
   const backdrop = document.createElement('div')
   backdrop.className = 'structured-heading-dialog-backdrop'
@@ -2578,6 +2685,7 @@ function headingNodeView(
       ? `Edit section ${sectionLabel} details`
       : `Add a cross-reference label to ${node.textContent || 'this section'}`)
     if (!editing) input.value = sectionLabel
+    updateObjectReferenceButton(references, view, sectionLabel, node.textContent || 'section')
     numbering.select.value = isExplicitlyUnnumbered(sourceAttributes) ? 'unnumbered' : 'numbered'
     numbering.select.disabled = !isEditable()
     updateSave()
@@ -2590,10 +2698,15 @@ function headingNodeView(
     numbering.select.value = isExplicitlyUnnumbered(node.attrs.sourceAttributes) ? 'unnumbered' : 'numbered'
     updateSave()
     const escapedId = globalThis.CSS?.escape ? globalThis.CSS.escape(String(node.attrs.id)) : String(node.attrs.id).replace(/["\\]/g, '\\$&')
-    const returnTarget = edit.isConnected
-      ? edit
-      : view.dom.querySelector<HTMLButtonElement>(`[data-dm-id="${escapedId}"] .structured-heading-edit`)
-    returnTarget?.focus()
+    const focusReturnTarget = () => {
+      const returnTarget = edit.isConnected
+        ? edit
+        : view.dom.querySelector<HTMLButtonElement>(`[data-dm-id="${escapedId}"] .structured-heading-edit`)
+      returnTarget?.focus()
+    }
+    focusReturnTarget()
+    queueMicrotask(focusReturnTarget)
+    window.setTimeout(focusReturnTarget, 0)
   }
   const saveEditor = () => {
     const position = getPos() ?? positionForNodeId(view.state.doc, node.type, String(node.attrs.id))
@@ -2662,8 +2775,9 @@ function headingNodeView(
   })
 
   backdrop.append(editor)
-  dom.append(heading, edit)
+  dom.append(heading, references, edit)
   updateDom()
+  const stopSemanticRefresh = registerSemanticRefresh(view, updateDom)
   return {
     dom,
     contentDOM: heading,
@@ -2676,6 +2790,7 @@ function headingNodeView(
       return true
     },
     destroy() {
+      stopSemanticRefresh()
       if (!editing) backdrop.remove()
     },
   }
@@ -2701,6 +2816,7 @@ function captionNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos:
     dom.dataset.dmId = String(node.attrs.id)
   }
   updateDom()
+  const stopSemanticRefresh = registerSemanticRefresh(view, updateDom)
   return {
     dom,
     contentDOM,
@@ -2711,6 +2827,7 @@ function captionNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos:
       updateDom()
       return true
     },
+    destroy: stopSemanticRefresh,
   }
 }
 
@@ -2731,11 +2848,18 @@ function imageNodeView(
   header.className = 'structured-figure-header'
   const descriptor = document.createElement('span')
   descriptor.className = 'structured-figure-label'
+  const references = document.createElement('button')
+  references.type = 'button'
+  references.className = 'semantic-object-references'
+  references.addEventListener('click', () => {
+    const target = node.attrs.label ? String(node.attrs.label) : ''
+    if (target) navigateToSemanticReference(view, target)
+  })
   const edit = document.createElement('button')
   edit.type = 'button'
   edit.className = 'structured-figure-edit'
   edit.textContent = 'Object details'
-  header.append(descriptor, edit)
+  header.append(descriptor, references, edit)
 
   const image = document.createElement('img')
   image.loading = 'lazy'
@@ -2853,6 +2977,7 @@ function imageNodeView(
     if (figureLabel) dom.id = figureLabel
     else dom.removeAttribute('id')
     descriptor.textContent = numbered?.number ? `Figure ${numbered.number}` : 'Figure'
+    updateObjectReferenceButton(references, view, figureLabel, descriptor.textContent)
     edit.disabled = !isEditable()
     edit.setAttribute('aria-label', figureLabel ? `Edit figure ${figureLabel}` : 'Edit figure')
     image.src = resolveAssetUrl(sourcePath)
@@ -2977,6 +3102,7 @@ function imageNodeView(
 
   dom.append(header, image, numberline, editor)
   updateDom()
+  const stopSemanticRefresh = registerSemanticRefresh(view, updateDom)
   return {
     dom,
     stopEvent: (event) => dom.contains(event.target as Node),
@@ -2987,6 +3113,7 @@ function imageNodeView(
       updateDom()
       return true
     },
+    destroy: stopSemanticRefresh,
   }
 }
 
@@ -3006,11 +3133,18 @@ function tableNodeView(
   header.contentEditable = 'false'
   const descriptor = document.createElement('span')
   descriptor.className = 'structured-table-label'
+  const references = document.createElement('button')
+  references.type = 'button'
+  references.className = 'semantic-object-references'
+  references.addEventListener('click', () => {
+    const target = node.attrs.label ? String(node.attrs.label) : ''
+    if (target) navigateToSemanticReference(view, target)
+  })
   const edit = document.createElement('button')
   edit.type = 'button'
   edit.className = 'structured-table-edit'
   edit.textContent = 'Object details'
-  header.append(descriptor, edit)
+  header.append(descriptor, references, edit)
 
   const scroll = document.createElement('div')
   scroll.className = 'structured-table-scroll'
@@ -3096,6 +3230,7 @@ function tableNodeView(
     if (tableLabel) dom.id = tableLabel
     else dom.removeAttribute('id')
     descriptor.textContent = numbered?.number ? `Table ${numbered.number}` : 'Table'
+    updateObjectReferenceButton(references, view, tableLabel, descriptor.textContent)
     edit.disabled = !isEditable()
     edit.setAttribute('aria-label', tableLabel ? `Edit table ${tableLabel} details` : 'Edit table details')
     preview.id = captionId
@@ -3192,6 +3327,7 @@ function tableNodeView(
 
   dom.append(header, preview, scroll, editor)
   updateDom()
+  const stopSemanticRefresh = registerSemanticRefresh(view, updateDom)
   return {
     dom,
     contentDOM,
@@ -3203,6 +3339,7 @@ function tableNodeView(
       updateDom()
       return true
     },
+    destroy: stopSemanticRefresh,
   }
 }
 
@@ -4033,6 +4170,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         }
         const next = view.state.apply(transaction)
         view.updateState(next)
+        refreshSemanticPresentation(view)
         refreshFootnotePresentation(view)
         emitReviewSelection(view)
         onOutlineRef.current?.(outlineFor(next.doc))
@@ -4058,6 +4196,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       },
     })
     viewRef.current = view
+    refreshSemanticPresentation(view)
     refreshFootnotePresentation(view)
     emitReviewSelection(view)
     return () => {
@@ -4094,6 +4233,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         reconcileCollaborativeProseMirrorDocument(collaborationRef.current, parsed.document)
       } else {
         view.updateState(editorState(parsed.document))
+        refreshSemanticPresentation(view)
       }
       refreshFootnotePresentation(view)
       emitReviewSelection(view)

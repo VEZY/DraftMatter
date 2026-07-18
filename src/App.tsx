@@ -10,6 +10,7 @@ import { ManuscriptTextEditor } from './ManuscriptTextEditor'
 import { StructuredManuscriptEditor, type StructuredManuscriptEditorHandle, type StructuredOutlineItem, type StructuredReviewSelection } from './StructuredManuscriptEditor'
 import { parseStructuredManuscript, structuredCitationClusters } from './structuredManuscript'
 import { semanticManuscriptObjects } from './semanticObjects'
+import { referenceIntegrityDiagnostics } from './referenceIntegrity'
 import { applyDraftCitationTransaction, applyDraftCodeTransaction, applyDraftTextTransaction, type ManuscriptTextField } from './manuscriptModel'
 import { downloadText, projectCurrentManuscriptSource, reviewedProjection } from './projections'
 import { sampleCitations } from './sampleCitations'
@@ -1463,10 +1464,9 @@ function App() {
     return projectPortableReviewSource(manuscriptSource, { view: markupView })
   }, [manuscriptSource, markupView, structuredMode])
   const structuredEditorSource = structuredReviewProjection?.ok ? structuredReviewProjection.source : manuscriptSource
-  const semanticObjects = useMemo(
-    () => semanticManuscriptObjects(parseStructuredManuscript(structuredEditorSource).document),
-    [structuredEditorSource],
-  )
+  const structuredDocument = useMemo(() => parseStructuredManuscript(structuredEditorSource).document, [structuredEditorSource])
+  const semanticObjects = useMemo(() => semanticManuscriptObjects(structuredDocument), [structuredDocument])
+  const semanticReferenceDiagnostics = useMemo(() => referenceIntegrityDiagnostics(structuredDocument), [structuredDocument])
   const demoAliceChange = reviewDocument.changes.find((change) => change.id === 'dm-c01')
   const demoMarcusChange = reviewDocument.changes.find((change) => change.id === 'dm-c02')
   const demoCommentThread = reviewDocument.threads.find((thread) => thread.id === 'dm-comment-01')
@@ -1489,7 +1489,7 @@ function App() {
   const retainedOutputs = retainedOutputParse.outputs
   const retainedPublishedValueParse = useMemo(() => parseRetainedPublishedValues(manuscriptSource), [manuscriptSource])
   const retainedPublishedValues = Object.values(retainedPublishedValueParse.values)
-  const allDiagnostics = [...diagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics, ...executionDiagnostics, ...retainedOutputParse.diagnostics, ...retainedPublishedValueParse.diagnostics]
+  const allDiagnostics = [...diagnostics, ...semanticReferenceDiagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics, ...executionDiagnostics, ...retainedOutputParse.diagnostics, ...retainedPublishedValueParse.diagnostics]
   const prioritizedDiagnostics = prioritizeProjectDiagnostics(allDiagnostics)
   const selectedKernelForLanguage = (language: ExecutionLanguage, inventory = runtimeInventory) => {
     const healthy = inventory ? healthyKernelsFor(inventory, language) : []
