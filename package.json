@@ -20,7 +20,7 @@
     "pack:cli": "npm pack ./dist-cli",
     "release:verify": "node scripts/verify-release.mjs",
     "test": "vitest run src services",
-    "test:alpha": "vitest run src/phase7AlphaDogfood.test.ts",
+    "test:alpha": "vitest run src/phase7AlphaDogfood.test.ts src/phase7AlphaAuthoringGate.test.ts",
     "test:cli": "node scripts/verify-cli.mjs",
     "test:e2e": "playwright test",
     "test:e2e:update": "playwright test --update-snapshots",
