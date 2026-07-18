@@ -186,6 +186,16 @@ describe('shared Jupyter execution workspace', () => {
     expect(container.querySelector('[aria-labelledby="execution-trust-title"]')).toBeNull()
   })
 
+  it('keeps the quick citation launcher available in a desktop project', async () => {
+    const launcher = container.querySelector<HTMLButtonElement>('.quick-cite')
+    expect(launcher).not.toBeNull()
+    expect(launcher?.disabled).toBe(false)
+
+    await act(async () => launcher!.click())
+
+    expect(container.querySelector('[role="dialog"][aria-label="Insert citation"]')).not.toBeNull()
+  })
+
   it('repairs a Julia project when its local IJulia integration is missing', async () => {
     await act(async () => appRoot.unmount())
     vi.mocked(desktopHost.listJuliaPackages).mockReset().mockResolvedValue({
