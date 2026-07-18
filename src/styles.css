@@ -5493,6 +5493,7 @@ textarea.structured-output-input { min-height: 58px; }
 .structured-output-validation[hidden] { display: none; }
 .structured-output-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .structured-output-actions button { font-size: 8px; padding: 6px 8px; }
+.structured-manuscript-editor { container-type: inline-size; }
 
 /* A collapsed computation and its retained result read as one manuscript object. */
 .structured-code-cell[data-expanded="false"]:is(
@@ -5512,20 +5513,20 @@ textarea.structured-output-input { min-height: 58px; }
   :has(+ .structured-output:not(.values-only)),
   :has(+ .structured-block-drag-handle + .structured-output:not(.values-only))
 ) .structured-code-cell-header {
-  backdrop-filter: blur(10px);
-  background: color-mix(in srgb, var(--paper) 92%, transparent);
-  border: 1px solid var(--line-strong);
-  border-radius: 8px;
-  box-shadow: var(--pencil-echo), 0 6px 18px rgba(36, 36, 36, .1);
+  backdrop-filter: none;
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  box-shadow: none;
   left: auto;
-  max-width: calc(100vw - 72px);
+  max-width: min(46%, 460px);
   min-height: 34px;
   opacity: 0;
-  padding: 3px 5px;
+  padding: 3px 0;
   pointer-events: none;
   position: absolute;
-  right: 12px;
-  top: 12px;
+  right: 18px;
+  top: 25px;
   transform: translateY(-3px);
   transition: opacity .14s ease, transform .14s ease;
   width: max-content;
@@ -5559,21 +5560,37 @@ textarea.structured-output-input { min-height: 58px; }
   backdrop-filter: blur(10px);
   background: color-mix(in srgb, var(--paper) 92%, transparent);
   border: 1px solid var(--line-strong);
-  border-radius: 7px;
-  box-shadow: var(--pencil-echo);
+  border-radius: 8px;
+  box-shadow: var(--pencil-echo), 0 6px 18px rgba(36, 36, 36, .1);
+  box-sizing: border-box;
   left: 12px;
   margin: 0;
   min-height: 32px;
   opacity: 0;
-  padding: 3px 5px 3px 9px;
+  overflow: hidden;
+  padding: 3px clamp(320px, 42%, 460px) 3px 9px;
   pointer-events: none;
   position: absolute;
+  right: 12px;
   top: 12px;
   transform: translateY(-3px);
   transition: opacity .14s ease, transform .14s ease;
-  width: max-content;
+  width: auto;
   z-index: 11;
 }
+.structured-code-cell[data-expanded="false"] + .structured-output:not(.values-only) .structured-output-reference,
+.structured-code-cell[data-expanded="false"] + .structured-block-drag-handle + .structured-output:not(.values-only) .structured-output-reference {
+  margin-left: 0;
+  white-space: nowrap;
+}
+.structured-code-cell[data-expanded="false"] + .structured-output:not(.values-only) .structured-output-label,
+.structured-code-cell[data-expanded="false"] + .structured-block-drag-handle + .structured-output:not(.values-only) .structured-output-label {
+  flex: 0 0 auto;
+}
+.structured-code-cell[data-expanded="false"]:hover + .structured-output:not(.values-only) .structured-output-header,
+.structured-code-cell[data-expanded="false"]:focus-within + .structured-output:not(.values-only) .structured-output-header,
+.structured-code-cell[data-expanded="false"]:hover + .structured-block-drag-handle + .structured-output:not(.values-only) .structured-output-header,
+.structured-code-cell[data-expanded="false"]:focus-within + .structured-block-drag-handle + .structured-output:not(.values-only) .structured-output-header,
 .structured-code-cell[data-expanded="false"] + .structured-output:not(.values-only):hover .structured-output-header,
 .structured-code-cell[data-expanded="false"] + .structured-output:not(.values-only):focus-within .structured-output-header,
 .structured-code-cell[data-expanded="false"] + .structured-block-drag-handle + .structured-output:not(.values-only):hover .structured-output-header,
@@ -5587,6 +5604,25 @@ textarea.structured-output-input { min-height: 58px; }
   margin: 0 auto;
   max-height: 640px;
   max-width: 100%;
+}
+@container (max-width: 760px) {
+  .structured-code-cell[data-expanded="false"]:is(
+    :has(+ .structured-output:not(.values-only)),
+    :has(+ .structured-block-drag-handle + .structured-output:not(.values-only))
+  ) .structured-code-cell-header {
+    justify-content: flex-end;
+    left: 21px;
+    max-width: none;
+    right: 21px;
+    top: 25px;
+    width: auto;
+  }
+  .structured-code-cell[data-expanded="false"] + .structured-output:not(.values-only) .structured-output-header,
+  .structured-code-cell[data-expanded="false"] + .structured-block-drag-handle + .structured-output:not(.values-only) .structured-output-header {
+    align-items: flex-end;
+    min-height: 74px;
+    padding: 40px 8px 4px;
+  }
 }
 @media (hover: none) {
   .structured-code-cell[data-expanded="false"]:is(:has(+ .structured-output:not(.values-only)), :has(+ .structured-block-drag-handle + .structured-output:not(.values-only))) .structured-code-cell-header,

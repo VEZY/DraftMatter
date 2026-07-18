@@ -719,7 +719,8 @@ plot(1:3)
     ))
 
     const copy = container.querySelector<HTMLButtonElement>('[aria-label="Copy figure reference @fig-growth-result"]')!
-    expect(copy.textContent).toBe('Copy @fig-growth-result')
+    expect(copy.textContent).toBe('Copy reference')
+    expect(copy.title).toBe('@fig-growth-result')
     await act(async () => copy.click())
     expect(copied).toHaveBeenCalledWith('fig-growth-result')
   })

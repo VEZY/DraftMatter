@@ -2037,7 +2037,8 @@ function outputNodeView(
     descriptor.textContent = numbered?.number ? `${kindLabel} ${numbered.number}` : kindLabel
     const label = presentation.label
     copy.hidden = !label || !onCopyReference
-    copy.textContent = label ? `Copy @${label}` : ''
+    copy.textContent = label ? 'Copy reference' : ''
+    copy.title = label ? `@${label}` : ''
     copy.setAttribute('aria-label', label ? `Copy ${kindLabel.toLowerCase()} reference @${label}` : 'Copy output reference')
     edit.hidden = presentation.kind === 'markdown' || editing
     edit.disabled = !isEditable()
