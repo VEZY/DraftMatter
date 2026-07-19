@@ -46,6 +46,22 @@ describe('in-app block insertion dialog', () => {
     expect(close).toHaveBeenCalledOnce()
   })
 
+  it('collects the language for a reproducible table', async () => {
+    const requests: InsertBlockRequest[] = []
+    const close = vi.fn()
+    await act(async () => root.render(<InsertBlockDialog kind="table-cell" onClose={close} onInsert={(request) => { requests.push(request); return true }} />))
+
+    const language = container.querySelector<HTMLSelectElement>('select')!
+    await act(async () => {
+      language.value = 'julia'
+      language.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await act(async () => container.querySelector<HTMLFormElement>('form')!.requestSubmit())
+
+    expect(requests).toEqual([{ kind: 'table-cell', language: 'julia' }])
+    expect(close).toHaveBeenCalledOnce()
+  })
+
   it('searches grouped manuscript objects by keyboard and keeps the dialog open when insertion fails', async () => {
     const insert = vi.fn(() => false)
     const close = vi.fn()

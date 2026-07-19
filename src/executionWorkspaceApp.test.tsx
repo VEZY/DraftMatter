@@ -170,6 +170,27 @@ describe('shared Jupyter execution workspace', () => {
     expect(container.querySelector('.structured-code-cell[data-dm-id="py-setup"]')).toBeNull()
   })
 
+  it('adds a reproducible table from the code panel', async () => {
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    const addTable = [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
+      .find((button) => button.textContent?.includes('Add reproducible table'))!
+    expect(addTable).toBeTruthy()
+    await act(async () => addTable.click())
+
+    const dialog = container.querySelector<HTMLElement>('[aria-labelledby="insert-block-title"]')!
+    expect(dialog.textContent).toContain('Add reproducible table')
+    const language = dialog.querySelector<HTMLSelectElement>('select')!
+    await act(async () => {
+      language.value = 'julia'
+      language.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    await act(async () => dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click())
+    await settle(950)
+
+    const savedSources = vi.mocked(desktopHost.saveDocument).mock.calls.map(([request]) => request.content)
+    expect(savedSources.join('\n')).toMatch(/```julia \{#cell-julia-[^}]+ \.execute output="table" reference="tbl-result"\}/)
+  })
+
   it('checks detected project languages automatically and restores remembered trust', async () => {
     await act(async () => appRoot.unmount())
     localStorage.setItem('draftmatter.trusted-project-roots.v1', JSON.stringify([rootPath]))

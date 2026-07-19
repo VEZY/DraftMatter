@@ -1259,6 +1259,7 @@ Compare @fig-first with @fig-second.
     await act(async () => { expect(editorRef.current?.insertTable()).toBe(true) })
     await act(async () => { expect(editorRef.current?.insertEquation('E = mc^2', true)).toBe(true) })
     await act(async () => { expect(editorRef.current?.insertCodeCell('julia', 'figure')).toBe(true) })
+    await act(async () => { expect(editorRef.current?.insertCodeCell('python', 'table')).toBe(true) })
 
     const portable = changed.at(-1)!
     expect(portable).toContain('## Growth response {#sec-growth-response}')
@@ -1268,6 +1269,7 @@ Compare @fig-first with @fig-second.
     expect(portable).toContain(': {#tbl-table}')
     expect(portable).toContain('$$ {#eq-e-mc-2}')
     expect(portable).toMatch(/```julia \{#cell-julia-[^}]+ \.execute output="figure" reference="fig-result"\}/)
+    expect(portable).toMatch(/```python \{#cell-python-[^}]+ \.execute output="table" reference="tbl-result"\}/)
 
     const reopened = parseStructuredManuscript(portable)
     const labels: string[] = []

@@ -4137,6 +4137,15 @@ function App() {
       action: () => { setCommandOpen(false); openInsertBlock('figure-cell') },
     },
     {
+      id: 'table-cell',
+      label: 'Add reproducible table',
+      description: desktopSession ? 'Create a hidden computation whose table is published' : 'View-only in the browser · desktop project required',
+      keywords: 'execute python r julia source table dataframe data frame',
+      icon: <span className="command-icon"><Icon name="table" size={17} /></span>,
+      disabled: !canEditManuscript || !desktopSession,
+      action: () => { setCommandOpen(false); openInsertBlock('table-cell') },
+    },
+    {
       id: 'run-cell',
       label: 'Run code cell',
       description: desktopSession ? 'Execute the current cell explicitly' : 'Desktop project required · unavailable to browser collaborators',
@@ -4813,6 +4822,7 @@ function App() {
               {desktopSession ? <div className="code-workspace-toolbar">
                 <button className="subtle" onClick={() => setupCell ? revealPanelManagedCell(setupCell.id) : openInsertBlock('setup-cell')} disabled={!canEditManuscript}><Icon name={setupCell ? 'code' : 'plus'} size={12} /> {setupCell ? 'Edit setup' : 'Add setup'}</button>
                 <button className="subtle" onClick={() => openInsertBlock('values-cell')} disabled={!canEditManuscript}><Icon name="plus" size={12} /> Add values</button>
+                <button className="subtle" onClick={() => openInsertBlock('table-cell')} disabled={!canEditManuscript}><Icon name="table" size={12} /> Add reproducible table</button>
                 {[...new Set(executableCells.map((cell) => cell.language))].map((language) => (
                   <button className="subtle" key={language} onClick={() => void requestExecution({ kind: 'language', language })} disabled={executionPlanBusy || Boolean(runtimeInventory && executableCells.filter((cell) => cell.language === language).some((cell) => !executionEnvironmentAvailable(cell)))}>
                     <Icon name="play" size={12} /> Run {runtimeName(language)}

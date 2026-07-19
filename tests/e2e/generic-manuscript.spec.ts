@@ -226,6 +226,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(commandMenu.getByRole('button', { name: /Insert figure/ })).toBeVisible()
     await expect(commandMenu.getByRole('button', { name: /Add language setup/ })).toBeVisible()
     await expect(commandMenu.getByRole('button', { name: /Add reproducible figure/ })).toBeVisible()
+    await expect(commandMenu.getByRole('button', { name: /Add reproducible table/ })).toBeVisible()
     await commandMenu.getByRole('button', { name: /Insert citation/ }).click()
     await page.getByRole('button', { name: /Growth coordination under fluctuating water availability/ }).click()
     await page.getByRole('button', { name: 'Insert selected · 1' }).click()
