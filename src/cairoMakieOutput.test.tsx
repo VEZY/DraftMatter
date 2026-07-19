@@ -140,4 +140,76 @@ scatter(1:10)
     expect(output.querySelector('.structured-output-caption')?.textContent).toBe('Table 1. Treatment summary.')
     expect(output.querySelector('.structured-output-caption')?.nextElementSibling).toBe(output.querySelector('.structured-output-content'))
   })
+
+  it('collapses a successful table computation into its hover-controlled retained output', async () => {
+    const run = vi.fn()
+    const source = `## Results
+
+\`\`\`julia {#tbl-summary .execute output="table"}
+[(group = "A", mean = 12)]
+\`\`\`
+
+<!-- dm-output:start cell="tbl-summary" run="sha256:table" -->
+| group | mean |
+| --- | ---: |
+| A | 12 |
+: Treatment summary. {#tbl-summary-result}
+<!-- dm-output:end -->
+`
+    const render = async (status: 'stale' | 'running' | 'current' | 'failed') => act(async () => root.render(
+      <StructuredManuscriptEditor
+        source={source}
+        onChange={vi.fn()}
+        codeCellActionsEnabled
+        codeCellStatuses={{ 'tbl-summary': status }}
+        onRunCodeCell={run}
+      />,
+    ))
+
+    await render('stale')
+    const code = container.querySelector<HTMLElement>('.structured-code-cell[data-output-kind="table"]')!
+    const output = container.querySelector<HTMLElement>('.structured-output-table')!
+    expect(code.nextElementSibling?.classList.contains('structured-block-drag-handle')).toBe(true)
+    expect(code.nextElementSibling?.nextElementSibling).toBe(output)
+
+    await act(async () => code.querySelector<HTMLButtonElement>('.structured-code-toggle')!.click())
+    expect(code.dataset.expanded).toBe('true')
+    await act(async () => code.querySelector<HTMLButtonElement>('.structured-code-run')!.click())
+    expect(run).toHaveBeenCalledWith('tbl-summary')
+
+    await render('running')
+    expect(code.dataset.expanded).toBe('true')
+    await render('current')
+    expect(code.dataset.expanded).toBe('false')
+    expect(output.querySelector('table')?.textContent).toContain('A12')
+  })
+
+  it('keeps a failed table computation open for diagnosis', async () => {
+    const run = vi.fn()
+    const source = `## Results
+
+\`\`\`julia {#tbl-failed .execute output="table"}
+error("fixture")
+\`\`\`
+`
+    const render = async (status: 'stale' | 'running' | 'failed') => act(async () => root.render(
+      <StructuredManuscriptEditor
+        source={source}
+        onChange={vi.fn()}
+        codeCellActionsEnabled
+        codeCellStatuses={{ 'tbl-failed': status }}
+        onRunCodeCell={run}
+      />,
+    ))
+
+    await render('stale')
+    const code = container.querySelector<HTMLElement>('.structured-code-cell[data-output-kind="table"]')!
+    await act(async () => code.querySelector<HTMLButtonElement>('.structured-code-toggle')!.click())
+    await act(async () => code.querySelector<HTMLButtonElement>('.structured-code-run')!.click())
+    await render('running')
+    await render('failed')
+
+    expect(code.dataset.expanded).toBe('true')
+    expect(code.dataset.status).toBe('failed')
+  })
 })

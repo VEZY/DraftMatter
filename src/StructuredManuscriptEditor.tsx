@@ -735,6 +735,8 @@ function codeCellNodeView(
   let needsFormat = false
   let destroyed = false
   let syncingEditor = false
+  let collapseAfterSuccessfulRun = false
+  let previousPresentedStatus: string | undefined
   const dom = document.createElement('section')
   dom.className = 'structured-code-cell'
 
@@ -890,14 +892,25 @@ function codeCellNodeView(
     const lines = code ? code.split(/\r\n|\r|\n/).length : 0
     const output = node.attrs.outputKind ? String(node.attrs.outputKind) : 'result'
     const objectName = output === 'values' ? 'published values' : output
+    const presentedStatus = presentationStatus(cellId) ?? String(node.attrs.status)
+    const completedOutputRun = ['figure', 'table'].includes(output)
+      && ['queued', 'running'].includes(previousPresentedStatus ?? '')
+      && presentedStatus === 'current'
+    if ((collapseAfterSuccessfulRun && presentedStatus === 'current') || completedOutputRun) {
+      expanded = false
+      collapseAfterSuccessfulRun = false
+    } else if (collapseAfterSuccessfulRun && ['failed', 'interrupted', 'output-missing'].includes(presentedStatus)) {
+      collapseAfterSuccessfulRun = false
+    }
+    previousPresentedStatus = presentedStatus
     dom.dataset.dmId = cellId
     dom.dataset.language = cellLanguage
+    dom.dataset.outputKind = output
     dom.dataset.expanded = expanded ? 'true' : 'false'
     dom.dataset.sourceStatus = String(node.attrs.status)
     language.textContent = cellLanguage === 'r' ? 'R' : cellLanguage
     label.textContent = `Reproducible ${objectName}`
     label.title = expanded ? `Computation cell ${cellId}` : ''
-    const presentedStatus = presentationStatus(cellId) ?? String(node.attrs.status)
     const viewOnly = browserViewOnly()
     dom.dataset.status = presentedStatus
     dom.dataset.executionMode = viewOnly ? 'browser-view-only' : 'desktop'
@@ -943,7 +956,10 @@ function codeCellNodeView(
   run.addEventListener('click', () => {
     const cellLanguage = String(node.attrs.language) as ExecutionLanguage
     if (dom.dataset.status === 'running') onInterrupt(cellLanguage)
-    else onRun(String(node.attrs.id))
+    else {
+      collapseAfterSuccessfulRun = ['figure', 'table'].includes(String(node.attrs.outputKind))
+      onRun(String(node.attrs.id))
+    }
   })
   dom.addEventListener('dm-code-read-only-change', syncEditable)
   dom.addEventListener('dm-code-presentation-change', updateDom)
