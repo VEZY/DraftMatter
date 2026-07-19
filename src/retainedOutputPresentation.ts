@@ -1,4 +1,4 @@
-import { embeddedExecutionImageFromHtml } from './outputRenderer'
+import { embeddedExecutionImageFromHtml, executionTableFromHtml } from './outputRenderer'
 import { parseTableCaptionLine } from './tableSyntax'
 
 export interface RetainedOutputPresentation {
@@ -63,5 +63,6 @@ export function retainedOutputPresentation(markdown: string, declaredKind?: unkn
   if (embeddedExecutionImageFromHtml(body)) return { kind: 'image', unnumbered: false }
   const table = tablePresentation(body)
   if (table) return table
+  if (executionTableFromHtml(body)) return { kind: 'table', unnumbered: false }
   return { kind: declaredKind === 'table' ? 'table' : declaredKind === 'image' ? 'image' : 'markdown', unnumbered: false }
 }

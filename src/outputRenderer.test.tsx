@@ -87,6 +87,26 @@ describe('isolated execution output rendering', () => {
     ])
   })
 
+  it('recognizes Julia DataFrames HTML as a native table without display scaffolding', () => {
+    const dataFrame = result()
+    dataFrame.streams = []
+    dataFrame.errors = []
+    dataFrame.artifacts = []
+    dataFrame.mime = [{
+      data: {
+        'text/html': `<div><span>2×2 DataFrame</span></div><div class = "data-frame"><table class = "data-frame"><thead><tr class = "columnLabelRow"><th class = "stubheadLabel">Row</th><th>time</th><th>lai</th></tr><tr class = "columnLabelRow"><th class = "stubheadLabel"></th><th title = "Int64">Int64</th><th title = "Float64">Float64</th></tr></thead><tbody><tr class = "dataRow"><td class = "rowLabel">1</td><td>1</td><td>2.71828</td></tr><tr class = "dataRow"><td class = "rowLabel">2</td><td>2</td><td>7.38906</td></tr></tbody></table></div>`,
+        'text/plain': '2×2 DataFrame',
+      },
+      metadata: {},
+    }]
+
+    expect(renderExecutionOutputs(dataFrame)).toEqual([{
+      kind: 'table',
+      columns: ['time', 'lai'],
+      rows: [['1', '2.71828'], ['2', '7.38906']],
+    }])
+  })
+
   it('mounts HTML only in a scriptless sandbox and keeps Markdown raw HTML inert', async () => {
     await act(async () => root.render(<ExecutionOutputView result={result()} artifactUrl={(path) => `asset://${path}`} />))
 

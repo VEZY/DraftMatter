@@ -97,6 +97,79 @@ function htmlAttribute(tag: string, name: string) {
   return match?.[1] ?? match?.[2]
 }
 
+function decodeHtmlText(value: string) {
+  const named: Record<string, string> = {
+    amp: '&', apos: "'", gt: '>', lt: '<', nbsp: ' ', quot: '"',
+  }
+  return value
+    .replace(/&#(x[0-9a-f]+|\d+);?/gi, (_match, code: string) => {
+      const numeric = code.toLowerCase().startsWith('x')
+        ? Number.parseInt(code.slice(1), 16)
+        : Number.parseInt(code, 10)
+      return Number.isFinite(numeric) && numeric >= 0 && numeric <= 0x10ffff
+        ? String.fromCodePoint(numeric)
+        : ''
+    })
+    .replace(/&([a-z]+);/gi, (match, entity: string) => named[entity.toLowerCase()] ?? match)
+}
+
+function htmlCellText(value: string) {
+  return decodeHtmlText(value
+    .replace(/<!--[^]*?-->/g, '')
+    .replace(/<br\s*\/?\s*>/gi, '\n')
+    .replace(/<[^>]+>/g, ' '))
+    .replace(/[\t\f\v ]+/g, ' ')
+    .replace(/ *\n */g, '\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+interface HtmlTableCell {
+  tag: 'th' | 'td'
+  className: string
+  value: string
+}
+
+function htmlTableRows(source: string) {
+  return [...source.matchAll(/<tr\b[^>]*>([^]*?)<\/tr\s*>/gi)].map((row) => (
+    [...row[1].matchAll(/<(th|td)\b([^>]*)>([^]*?)<\/\1\s*>/gi)].map((cell): HtmlTableCell => ({
+      tag: cell[1].toLowerCase() as HtmlTableCell['tag'],
+      className: htmlAttribute(`<${cell[1]} ${cell[2]}>`, 'class')?.toLowerCase() ?? '',
+      value: htmlCellText(cell[3]),
+    }))
+  )).filter((row) => row.length > 0)
+}
+
+export function executionTableFromHtml(source: string): Extract<RenderedExecutionOutput, { kind: 'table' }> | undefined {
+  const tableMatch = source.match(/<table\b([^>]*)>([^]*?)<\/table\s*>/i)
+  if (!tableMatch) return undefined
+  const tableClass = htmlAttribute(`<table ${tableMatch[1]}>`, 'class')?.toLowerCase() ?? ''
+  const head = tableMatch[2].match(/<thead\b[^>]*>([^]*?)<\/thead\s*>/i)?.[1]
+  const body = tableMatch[2].match(/<tbody\b[^>]*>([^]*?)<\/tbody\s*>/i)?.[1]
+  const allRows = htmlTableRows(tableMatch[2])
+  const headRows = head ? htmlTableRows(head) : allRows.filter((row) => row.some((cell) => cell.tag === 'th')).slice(0, 1)
+  const header = headRows[0]
+  if (!header) return undefined
+  const dataFrame = /(?:^|\s)data-frame(?:\s|$)/.test(tableClass)
+    || header.some((cell) => cell.className.split(/\s+/).includes('stubheadlabel'))
+  const keepHeader = header.map((cell) => !(dataFrame && cell.className.split(/\s+/).includes('stubheadlabel')))
+  const columns = header.filter((_cell, index) => keepHeader[index]).map((cell, index) => cell.value || `Column ${index + 1}`)
+  if (columns.length === 0) return undefined
+  const candidateRows = body
+    ? htmlTableRows(body)
+    : head
+      ? htmlTableRows(tableMatch[2].replace(/<thead\b[^>]*>[^]*?<\/thead\s*>/i, ''))
+      : allRows.slice(1)
+  const rows = candidateRows.map((row) => row
+    .filter((cell) => !(dataFrame && cell.className.split(/\s+/).includes('rowlabel')))
+    .slice(0, columns.length)
+    .map((cell) => cell.value))
+    .filter((row) => row.length > 0)
+    .map((row) => columns.map((_column, index) => row[index] ?? ''))
+  if (rows.length * columns.length > 100_000) return undefined
+  return { kind: 'table', columns, rows }
+}
+
 export function embeddedExecutionImageFromHtml(source: string): EmbeddedExecutionImage | undefined {
   for (const match of source.matchAll(/<img\b[^>]*>/gi)) {
     const dataUrl = safeEmbeddedImageDataUrl(htmlAttribute(match[0], 'src') ?? '')
@@ -151,13 +224,18 @@ function tableFromValue(value: JsonValue | undefined): Extract<RenderedExecution
   return { kind: 'table', columns, rows }
 }
 
+export function executionTableFromMimeBundle(bundle: MimeOutput): Extract<RenderedExecutionOutput, { kind: 'table' }> | undefined {
+  const html = stringValue(bundle.data['text/html'])
+  return tableFromValue(bundle.data['application/vnd.dataresource+json'])
+    ?? tableFromValue(bundle.data['application/json'])
+    ?? (html ? executionTableFromHtml(html) : undefined)
+}
+
 function renderMime(bundle: MimeOutput): RenderedExecutionOutput | undefined {
   const image = executionImageFromMimeBundle(bundle)
   if (image) return { kind: 'image', ...image }
-  const dataResource = tableFromValue(bundle.data['application/vnd.dataresource+json'])
-  if (dataResource) return dataResource
-  const jsonTable = tableFromValue(bundle.data['application/json'])
-  if (jsonTable) return jsonTable
+  const table = executionTableFromMimeBundle(bundle)
+  if (table) return table
   const html = stringValue(bundle.data['text/html'])
   if (html) return { kind: 'html', sourceDocument: isolatedHtmlDocument(html), sandbox: '' }
   const markdown = stringValue(bundle.data['text/markdown'])

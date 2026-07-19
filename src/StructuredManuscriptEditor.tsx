@@ -32,7 +32,7 @@ import { extractExecutableCells, type ExecutionLanguage } from './executionCells
 import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
 import { motionAwareScrollBehavior } from './accessibility'
 import type { PublicationByline } from './publicationMetadata'
-import { embeddedExecutionImageFromHtml, safeEmbeddedImageDataUrl } from './outputRenderer'
+import { embeddedExecutionImageFromHtml, executionTableFromHtml, safeEmbeddedImageDataUrl } from './outputRenderer'
 import { parseTableCaptionLine } from './tableSyntax'
 import { crossReferenceChoices, groupedCrossReferenceChoices, type CrossReferenceChoice } from './crossReferencePicker'
 import { resolveSemanticReference } from './referenceIntegrity'
@@ -2281,24 +2281,30 @@ function outputNodeView(
       content.append(element)
     } else if (presentation.kind === 'table') {
       const retainedTable = retainedMarkdownTable(markdown)
-      if (retainedTable) {
+      const retainedHtmlTable = retainedTable ? undefined : executionTableFromHtml(markdown)
+      const tableData = retainedTable ?? (retainedHtmlTable ? {
+        headers: retainedHtmlTable.columns,
+        alignments: retainedHtmlTable.columns.map(() => 'left'),
+        rows: retainedHtmlTable.rows.map((row) => row.map((value) => String(value ?? ''))),
+      } : undefined)
+      if (tableData) {
         const table = document.createElement('table')
         const head = document.createElement('thead')
         const headRow = document.createElement('tr')
-        retainedTable.headers.forEach((value, index) => {
+        tableData.headers.forEach((value, index) => {
           const cell = document.createElement('th')
           cell.textContent = inlineMarkdownPreviewText(value)
-          cell.style.textAlign = retainedTable.alignments[index]
+          cell.style.textAlign = tableData.alignments[index]
           headRow.append(cell)
         })
         head.append(headRow)
         const body = document.createElement('tbody')
-        retainedTable.rows.forEach((values) => {
+        tableData.rows.forEach((values) => {
           const row = document.createElement('tr')
-          retainedTable.headers.forEach((_header, index) => {
+          tableData.headers.forEach((_header, index) => {
             const cell = document.createElement('td')
             cell.textContent = inlineMarkdownPreviewText(values[index] ?? '')
-            cell.style.textAlign = retainedTable.alignments[index]
+            cell.style.textAlign = tableData.alignments[index]
             row.append(cell)
           })
           body.append(row)

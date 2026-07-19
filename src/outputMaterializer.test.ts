@@ -127,6 +127,29 @@ describe('portable output materialization', () => {
     expect(materialized.source).toContain(': Weekly area summary. {#tbl-summary-result}')
   })
 
+  it('materializes Julia DataFrames HTML as an ordinary portable table', () => {
+    const tableSource = source.replace('produces="figures/generated/growth.svg"', 'output="table" reference="tbl-growth"')
+    const dataFrame = result({
+      language: 'julia',
+      artifacts: [],
+      mime: [{
+        data: {
+          'text/html': `<div><span>2×2 DataFrame</span></div><div class="data-frame"><table class="data-frame"><thead><tr class="columnLabelRow"><th class="stubheadLabel">Row</th><th>time</th><th>lai</th></tr><tr class="columnLabelRow"><th class="stubheadLabel"></th><th title="Int64">Int64</th><th title="Float64">Float64</th></tr></thead><tbody><tr class="dataRow"><td class="rowLabel">1</td><td>1</td><td>2.71828</td></tr><tr class="dataRow"><td class="rowLabel">2</td><td>2</td><td>7.38906</td></tr></tbody></table></div>`,
+          'text/plain': '2×2 DataFrame',
+        },
+        metadata: {},
+      }],
+    })
+    const materialized = materializeExecutionOutput({ source: tableSource, cellId: 'fig-growth', result: dataFrame })
+
+    expect(materialized.ok).toBe(true)
+    expect(materialized.source).toContain('| time | lai |\n| --- | --- |\n| 1 | 2.71828 |\n| 2 | 7.38906 |')
+    expect(materialized.source).toContain(': Generated table. {#tbl-growth}')
+    expect(materialized.source).not.toContain('<table')
+    expect(materialized.source).not.toContain('rowLabel')
+    expect(materialized.source).not.toContain('Float64')
+  })
+
   it('materializes CairoMakie HTML image output as a retained figure', () => {
     const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZlY4AAAAASUVORK5CYII='
     const figureSource = source.replace('produces="figures/generated/growth.svg"', 'output="figure"')

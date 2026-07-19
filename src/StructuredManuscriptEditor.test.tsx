@@ -739,6 +739,30 @@ plot(1:3)
     expect(copied).toHaveBeenCalledWith('fig-growth-result')
   })
 
+  it('renders already-retained Julia DataFrames HTML as a manuscript table', async () => {
+    const dataFrameOutput = `# Results
+
+\`\`\`julia {#cell-julia-table .execute output="table" reference="tbl-growth"}
+DataFrame(:time => 1:2, :lai => exp.(1:2))
+\`\`\`
+
+<!-- dm-output:start cell="cell-julia-table" run="sha256:one" -->
+<div><span>2×2 DataFrame</span></div><div class = "data-frame"><table class = "data-frame"><thead><tr class = "columnLabelRow"><th class = "stubheadLabel">Row</th><th>time</th><th>lai</th></tr><tr class = "columnLabelRow"><th class = "stubheadLabel"></th><th>Int64</th><th>Float64</th></tr></thead><tbody><tr><td class = "rowLabel">1</td><td>1</td><td>2.71828</td></tr><tr><td class = "rowLabel">2</td><td>2</td><td>7.38906</td></tr></tbody></table></div>
+<!-- dm-output:end -->
+`
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={dataFrameOutput} onChange={vi.fn()} />,
+    ))
+
+    const output = container.querySelector<HTMLElement>('.structured-output-table')!
+    expect(output).toBeTruthy()
+    expect(output.querySelector('.structured-output-label')?.textContent).toBe('Table 1')
+    expect([...output.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['time', 'lai'])
+    expect([...output.querySelectorAll('td')].map((cell) => cell.textContent)).toEqual(['1', '2.71828', '2', '7.38906'])
+    expect(output.textContent).not.toContain('Float64')
+    expect(output.textContent).not.toContain('<table')
+  })
+
   it('keeps legacy cell UUIDs out of the normal reproducible-object controls', async () => {
     const copied = vi.fn()
     const uuid = '359c1638-441c-4ae7-bc9b-93835c37ab9c'

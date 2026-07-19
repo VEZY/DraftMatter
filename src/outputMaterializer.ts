@@ -2,7 +2,7 @@ import type { ExecutableCell } from './executionCells'
 import { extractExecutableCells, isSetupCell } from './executionCells'
 import type { JsonValue, MimeOutput, NormalizedExecutionResult } from './kernelExecution'
 import { retainedPublishedValueDirectives } from './publishedValues'
-import { executionImageFromMimeBundle, sanitizeExecutionHtml } from './outputRenderer'
+import { executionImageFromMimeBundle, executionTableFromMimeBundle, sanitizeExecutionHtml } from './outputRenderer'
 import { retainedOutputPresentation } from './numberedObjects'
 import { parseLosslessPortableSource } from './portableSource'
 import type { DocumentDiagnostic } from './types'
@@ -67,29 +67,12 @@ function markdownValue(value: JsonValue) {
 }
 
 function tableMarkdown(bundle: MimeOutput) {
-  const resource = bundle.data['application/vnd.dataresource+json']
-  if (!resource || Array.isArray(resource) || typeof resource !== 'object') return undefined
-  const object = resource as Record<string, JsonValue>
-  const schema = object.schema
-  const data = object.data
-  if (!schema || Array.isArray(schema) || typeof schema !== 'object' || !Array.isArray(data)) return undefined
-  const fields = (schema as Record<string, JsonValue>).fields
-  if (!Array.isArray(fields)) return undefined
-  const columns = fields.flatMap((field) => {
-    if (!field || Array.isArray(field) || typeof field !== 'object') return []
-    const name = (field as Record<string, JsonValue>).name
-    return typeof name === 'string' ? [name] : []
-  })
-  if (columns.length === 0) return undefined
-  const rows = data.map((row) => {
-    if (Array.isArray(row)) return columns.map((_, index) => row[index] ?? null)
-    if (row && typeof row === 'object') return columns.map((column) => (row as Record<string, JsonValue>)[column] ?? null)
-    return columns.map(() => null)
-  })
+  const table = executionTableFromMimeBundle(bundle)
+  if (!table) return undefined
   return [
-    `| ${columns.map(markdownValue).join(' | ')} |`,
-    `| ${columns.map(() => '---').join(' | ')} |`,
-    ...rows.map((row) => `| ${row.map(markdownValue).join(' | ')} |`),
+    `| ${table.columns.map(markdownValue).join(' | ')} |`,
+    `| ${table.columns.map(() => '---').join(' | ')} |`,
+    ...table.rows.map((row) => `| ${row.map(markdownValue).join(' | ')} |`),
   ].join('\n')
 }
 

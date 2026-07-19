@@ -77,7 +77,7 @@ export function ExecutionOutputView({
       if (output.kind === 'html') return <iframe key={index} className="execution-html" title={`Isolated HTML output ${index + 1}`} sandbox={output.sandbox} referrerPolicy="no-referrer" srcDoc={output.sourceDocument} />
       if (output.kind === 'markdown') return <SafeMarkdown key={index} source={output.source} />
       if (output.kind === 'text') return <pre key={index} className="execution-text">{output.source}</pre>
-      if (output.kind === 'table') return <div key={index} className="execution-table-wrap"><table><thead><tr>{output.columns.map((column) => <th key={column}>{column}</th>)}</tr></thead><tbody>{output.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((value, columnIndex) => <td key={output.columns[columnIndex]}>{tableCell(value)}</td>)}</tr>)}</tbody></table></div>
+      if (output.kind === 'table') return <div key={index} className="execution-table-wrap"><table><thead><tr>{output.columns.map((column, columnIndex) => <th key={`${column}-${columnIndex}`}>{column}</th>)}</tr></thead><tbody>{output.rows.map((row, rowIndex) => <tr key={rowIndex}>{row.map((value, columnIndex) => <td key={columnIndex}>{tableCell(value)}</td>)}</tr>)}</tbody></table></div>
       return <div key={index} className="execution-artifact"><span>{output.artifact.path}</span><small>{output.artifact.mediaType ?? 'file'} · {output.artifact.bytes.toLocaleString()} bytes</small></div>
     })}
   </div>

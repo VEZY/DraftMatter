@@ -4,6 +4,7 @@ import { formatCrossReferenceTarget } from './crossReference'
 import { parseDisplayEquation } from './displayEquation'
 import { sourceHash } from './document'
 import { extractExecutableCells, type ExecutionLanguage } from './executionCells'
+import { executionTableFromHtml } from './outputRenderer'
 import { inferPublishedValueLanguage } from './publishedValueHints'
 import { parseRetainedPublishedValues, publishedValueNamesInMarkup, type RetainedPublishedValue } from './publishedValues'
 import { manuscriptSchema } from './manuscriptSchema'
@@ -250,7 +251,11 @@ function parseBlocks(
       const raw = lines.slice(index, end).map((line) => line.raw).join('')
       const cellId = raw.match(/\bcell="([^"]+)"/)?.[1] ?? id('output-cell', raw)
       const runHash = raw.match(/\brun="([^"]+)"/)?.[1] ?? null
-      const kind = /!\[[^\]]*\]\([^)]+\)/.test(raw) ? 'image' : /\|[^\n]+\|/.test(raw) ? 'table' : 'markdown'
+      const kind = /!\[[^\]]*\]\([^)]+\)/.test(raw)
+        ? 'image'
+        : /\|[^\n]+\|/.test(raw) || executionTableFromHtml(raw)
+          ? 'table'
+          : 'markdown'
       blocks.push(manuscriptSchema.nodes.output_block.createChecked({ id: id('output', raw), cellId, kind, markdown: raw, runHash }))
       index = end
       continue
