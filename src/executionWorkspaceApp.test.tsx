@@ -138,6 +138,18 @@ describe('shared Jupyter execution workspace', () => {
     expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('ready')
   })
 
+  it('runs preceding computations from the manuscript hover toolbar', async () => {
+    const pythonCell = container.querySelector<HTMLElement>('.structured-code-cell[data-dm-id="py-value"]')!
+    const runAbove = pythonCell.querySelector<HTMLButtonElement>('.structured-code-run-above')!
+    expect(runAbove.hidden).toBe(false)
+    expect(runAbove.disabled).toBe(false)
+
+    await act(async () => runAbove.click())
+    await settle()
+
+    expect(vi.mocked(desktopHost.executeKernel).mock.calls.map(([request]) => request.cellId)).toEqual(['py-setup'])
+  })
+
   it('retains a one-letter Julia publication in the opened document', async () => {
     const published = container.querySelector<HTMLElement>('[data-dm-node="published-value"][data-name="a"]')!
     expect(published.dataset.status).toBe('missing')

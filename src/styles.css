@@ -5445,9 +5445,13 @@ img.ProseMirror-separator { border: 0 !important; display: inline !important; he
 .structured-code-cell[data-status="interrupted"] .structured-cell-status,
 .structured-code-cell[data-status="output-missing"] .structured-cell-status { color: #9a5e4a; }
 .structured-code-toggle,
+.structured-code-run-above,
 .structured-code-run { border: 0; border-radius: 5px; font-size: 9px; font-weight: 700; min-height: 27px; padding: 4px 7px; }
 .structured-code-toggle { background: transparent; color: #5f7067; padding-right: 2px; }
 .structured-code-toggle:hover { color: var(--sage-dark); text-decoration: underline; text-underline-offset: 2px; }
+.structured-code-run-above { background: #edf2ef; color: #53675d; }
+.structured-code-run-above:hover:not(:disabled) { background: #e2eae5; color: var(--sage-dark); }
+.structured-code-run-above:disabled { cursor: default; opacity: .45; }
 .structured-code-run { background: var(--sage-dark); color: #fff; }
 .structured-code-run[data-action="interrupt"] { background: #98604e; }
 .structured-code-run:hover:not(:disabled) { filter: brightness(.96); }

@@ -1500,6 +1500,11 @@ function App() {
     if (!inventory) return false
     return Boolean(selectedKernelForLanguage(cell.language, inventory))
   }
+  const codeCellRunAboveEnabled = Object.fromEntries(executableCells.flatMap((cell, index) => (
+    index === 0
+      ? []
+      : [[cell.id, !runtimeInventory || executableCells.slice(0, index).every((candidate) => executionEnvironmentAvailable(candidate))]]
+  )))
   const executionViews = buildExecutionAvailability({
     cells: executableCells,
     states: executionCellStates,
@@ -4599,7 +4604,9 @@ function App() {
               codeCellStatuses={Object.fromEntries(executionCellStates.map((state) => [state.cellId, state.status] as const))}
               codeCellActionsEnabled={Boolean(desktopSession) && !executionPlanBusy}
               codeCellBrowserViewOnly={!desktopSession}
+              codeCellRunAboveEnabled={codeCellRunAboveEnabled}
               onRunCodeCell={(cellId) => void requestExecution({ kind: 'cell', cellId })}
+              onRunCodeCellAbove={(cellId) => void requestExecution({ kind: 'above', cellId })}
               onInterruptCodeCell={(language) => void interruptExecution(language)}
               onFormatCodeCell={formatJuliaCodeCell}
               markupView={markupView}

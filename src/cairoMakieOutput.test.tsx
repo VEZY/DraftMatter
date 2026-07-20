@@ -143,7 +143,12 @@ scatter(1:10)
 
   it('collapses a successful table computation into its hover-controlled retained output', async () => {
     const run = vi.fn()
+    const runAbove = vi.fn()
     const source = `## Results
+
+\`\`\`julia {#prepare-table .execute output="values"}
+prepared = true
+\`\`\`
 
 \`\`\`julia {#tbl-summary .execute output="table"}
 [(group = "A", mean = 12)]
@@ -162,7 +167,9 @@ scatter(1:10)
         onChange={vi.fn()}
         codeCellActionsEnabled
         codeCellStatuses={{ 'tbl-summary': status }}
+        codeCellRunAboveEnabled={{ 'tbl-summary': true }}
         onRunCodeCell={run}
+        onRunCodeCellAbove={runAbove}
       />,
     ))
 
@@ -171,6 +178,11 @@ scatter(1:10)
     const output = container.querySelector<HTMLElement>('.structured-output-table')!
     expect(code.nextElementSibling?.classList.contains('structured-block-drag-handle')).toBe(true)
     expect(code.nextElementSibling?.nextElementSibling).toBe(output)
+    const runAboveButton = code.querySelector<HTMLButtonElement>('.structured-code-run-above')!
+    expect(runAboveButton.hidden).toBe(false)
+    expect(runAboveButton.textContent).toBe('Run above')
+    await act(async () => runAboveButton.click())
+    expect(runAbove).toHaveBeenCalledWith('tbl-summary')
 
     await act(async () => code.querySelector<HTMLButtonElement>('.structured-code-toggle')!.click())
     expect(code.dataset.expanded).toBe('true')

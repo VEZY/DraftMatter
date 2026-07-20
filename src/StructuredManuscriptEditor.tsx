@@ -263,7 +263,9 @@ export interface StructuredManuscriptEditorProps {
   codeCellStatuses?: Record<string, ExecutionFreshnessStatus>
   codeCellActionsEnabled?: boolean
   codeCellBrowserViewOnly?: boolean
+  codeCellRunAboveEnabled?: Record<string, boolean>
   onRunCodeCell?: (cellId: string) => void
+  onRunCodeCellAbove?: (cellId: string) => void
   onInterruptCodeCell?: (language: ExecutionLanguage) => void
   onFormatCodeCell?: (cellId: string, code: string) => Promise<string | undefined>
   markupView?: MarkupView
@@ -723,7 +725,9 @@ function codeCellNodeView(
   presentationStatus: (cellId: string) => ExecutionFreshnessStatus | undefined,
   actionsEnabled: () => boolean,
   browserViewOnly: () => boolean,
+  runAboveEnabled: (cellId: string) => boolean | undefined,
   onRun: (cellId: string) => void,
+  onRunAbove: (cellId: string) => void,
   onInterrupt: (language: ExecutionLanguage) => void,
   onFormat: (cellId: string, code: string) => Promise<string | undefined>,
 ): NodeView {
@@ -754,7 +758,11 @@ function codeCellNodeView(
   const run = document.createElement('button')
   run.type = 'button'
   run.className = 'structured-code-run'
-  header.append(language, label, status, run, toggle)
+  const runAbove = document.createElement('button')
+  runAbove.type = 'button'
+  runAbove.className = 'structured-code-run-above'
+  runAbove.textContent = 'Run above'
+  header.append(language, label, status, runAbove, run, toggle)
 
   const summary = document.createElement('p')
   summary.className = 'structured-code-summary'
@@ -912,6 +920,7 @@ function codeCellNodeView(
     label.textContent = `Reproducible ${objectName}`
     label.title = expanded ? `Computation cell ${cellId}` : ''
     const viewOnly = browserViewOnly()
+    const canRunAbove = runAboveEnabled(cellId)
     dom.dataset.status = presentedStatus
     dom.dataset.executionMode = viewOnly ? 'browser-view-only' : 'desktop'
     status.textContent = viewOnly ? 'Browser view only' : codeCellStatusLabel(presentedStatus)
@@ -925,6 +934,9 @@ function codeCellNodeView(
     toggle.setAttribute('aria-label', `${expanded ? 'Close' : viewOnly ? 'View' : 'Edit'} saved computation source for reproducible ${objectName}`)
     toggle.setAttribute('aria-controls', editorHost.id)
     toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false')
+    runAbove.hidden = viewOnly || canRunAbove === undefined
+    runAbove.disabled = !actionsEnabled() || canRunAbove === false
+    runAbove.setAttribute('aria-label', `Run all computations above reproducible ${objectName}`)
     updateCodeCellStatus(dom, presentedStatus)
     if (viewOnly) {
       status.textContent = 'Browser view only'
@@ -960,6 +972,9 @@ function codeCellNodeView(
       collapseAfterSuccessfulRun = ['figure', 'table'].includes(String(node.attrs.outputKind))
       onRun(String(node.attrs.id))
     }
+  })
+  runAbove.addEventListener('click', () => {
+    if (!runAbove.disabled) onRunAbove(String(node.attrs.id))
   })
   dom.addEventListener('dm-code-read-only-change', syncEditable)
   dom.addEventListener('dm-code-presentation-change', updateDom)
@@ -3432,7 +3447,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   codeCellStatuses,
   codeCellActionsEnabled = false,
   codeCellBrowserViewOnly = false,
+  codeCellRunAboveEnabled,
   onRunCodeCell,
+  onRunCodeCellAbove,
   onInterruptCodeCell,
   onFormatCodeCell,
   markupView = 'all',
@@ -3470,7 +3487,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const codeCellStatusesRef = useRef(codeCellStatuses)
   const codeCellActionsEnabledRef = useRef(codeCellActionsEnabled)
   const codeCellBrowserViewOnlyRef = useRef(codeCellBrowserViewOnly)
+  const codeCellRunAboveEnabledRef = useRef(codeCellRunAboveEnabled)
   const onRunCodeCellRef = useRef(onRunCodeCell)
+  const onRunCodeCellAboveRef = useRef(onRunCodeCellAbove)
   const onInterruptCodeCellRef = useRef(onInterruptCodeCell)
   const onFormatCodeCellRef = useRef(onFormatCodeCell)
   const readOnlyRef = useRef(readOnly)
@@ -3498,7 +3517,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   codeCellStatusesRef.current = codeCellStatuses
   codeCellActionsEnabledRef.current = codeCellActionsEnabled
   codeCellBrowserViewOnlyRef.current = codeCellBrowserViewOnly
+  codeCellRunAboveEnabledRef.current = codeCellRunAboveEnabled
   onRunCodeCellRef.current = onRunCodeCell
+  onRunCodeCellAboveRef.current = onRunCodeCellAbove
   onInterruptCodeCellRef.current = onInterruptCodeCell
   onFormatCodeCellRef.current = onFormatCodeCell
   readOnlyRef.current = readOnly
@@ -4142,7 +4163,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
             (cellId) => codeCellStatusesRef.current?.[cellId],
             () => codeCellActionsEnabledRef.current,
             () => codeCellBrowserViewOnlyRef.current,
+            (cellId) => codeCellRunAboveEnabledRef.current?.[cellId],
             (cellId) => onRunCodeCellRef.current?.(cellId),
+            (cellId) => onRunCodeCellAboveRef.current?.(cellId),
             (language) => onInterruptCodeCellRef.current?.(language),
             (cellId, code) => onFormatCodeCellRef.current?.(cellId, code) ?? Promise.resolve(undefined),
           ),
@@ -4339,7 +4362,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       cell.dispatchEvent(new Event('dm-code-read-only-change'))
       cell.dispatchEvent(new Event('dm-code-presentation-change'))
     })
-  }, [codeCellActionsEnabled, codeCellBrowserViewOnly])
+  }, [codeCellActionsEnabled, codeCellBrowserViewOnly, codeCellRunAboveEnabled])
 
   useEffect(() => {
     const view = viewRef.current
