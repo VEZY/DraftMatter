@@ -631,6 +631,12 @@ button:disabled {
   gap: 4px;
 }
 
+.rail-footer-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
 .app-rail button {
   align-items: center;
   background: transparent;
@@ -5710,38 +5716,26 @@ textarea.structured-output-input { min-height: 58px; }
 .structured-raw-actions .primary-button { background: var(--sage-dark); border-color: var(--sage-dark); color: #fff; }
 .structured-manuscript-editor[data-read-only="true"] .structured-editor-content { cursor: default; }
 
-.kernel-console-toggle {
-  align-items: center;
-  background: rgba(31, 38, 34, .96);
-  border: 1px solid rgba(255, 255, 255, .14);
-  border-radius: 999px;
-  bottom: 15px;
-  box-shadow: var(--shadow-sm);
-  color: #d8e3dc;
-  display: flex;
-  font-size: 10px;
-  font-weight: 700;
-  gap: 9px;
-  left: 15px;
-  min-width: 122px;
-  padding: 8px 12px 8px 9px;
-  position: fixed;
-  z-index: 48;
+.rail-terminal-button .terminal-status-indicator {
+  background: #9da8a2;
+  border: 1.5px solid var(--paper);
+  border-radius: 50%;
+  bottom: 3px;
+  box-shadow: 0 0 0 1px rgba(50, 64, 57, .12);
+  height: 9px;
+  position: absolute;
+  right: 3px;
+  width: 9px;
 }
-.kernel-console-toggle:hover { background: #29332d; color: #fff; }
-.kernel-console-toggle.dirty { color: #e2bd7e; }
-.kernel-console-toggle-copy { display: grid; gap: 2px; text-align: left; }
-.kernel-console-toggle-copy strong { color: #f3f7f4; font-size: 9px; line-height: 1; }
-.kernel-console-toggle-copy small { color: #aab7b0; font-size: 7.5px; line-height: 1; }
-.terminal-status-indicator { background: #a7b0ab; border: 2px solid rgba(193, 219, 204, .28); border-radius: 50%; box-shadow: inset 0 0 0 3px #29322d; height: 14px; width: 14px; }
-.kernel-console-toggle[data-status="starting"] .terminal-status-indicator,
-.kernel-console-toggle[data-status="busy"] .terminal-status-indicator,
-.kernel-console-toggle[data-status="running"] .terminal-status-indicator { animation: spin .9s linear infinite; background: transparent; border-top-color: #9bc3ab; box-shadow: none; }
-.kernel-console-toggle[data-status="ready"] .terminal-status-indicator,
-.kernel-console-toggle[data-status="succeeded"] .terminal-status-indicator { background: #78ae8d; border-color: #78ae8d; }
-.kernel-console-toggle[data-status="interrupted"] .terminal-status-indicator,
-.kernel-console-toggle[data-status="failed"] .terminal-status-indicator { background: #c98373; border-color: #c98373; }
-.kernel-console-toggle > i { background: #b98535; border-radius: 50%; box-shadow: 0 0 0 3px rgba(185, 133, 53, .13); height: 6px; margin-left: auto; width: 6px; }
+.rail-terminal-button[data-status="starting"] .terminal-status-indicator,
+.rail-terminal-button[data-status="busy"] .terminal-status-indicator,
+.rail-terminal-button[data-status="running"] .terminal-status-indicator { animation: spin .9s linear infinite; background: var(--paper); border-color: #c7d8ce; border-top-color: #557b67; }
+.rail-terminal-button[data-status="ready"] .terminal-status-indicator,
+.rail-terminal-button[data-status="succeeded"] .terminal-status-indicator { background: #69907d; }
+.rail-terminal-button[data-status="interrupted"] .terminal-status-indicator,
+.rail-terminal-button[data-status="failed"] .terminal-status-indicator { background: #b96f5e; }
+.rail-terminal-button > i { background: #b98535; border: 1px solid var(--paper); border-radius: 50%; height: 7px; position: absolute; right: 2px; top: 2px; width: 7px; }
+.rail-terminal-button.dirty { color: #8a662c; }
 .kernel-console {
   background: #171c19;
   border-top: 1px solid rgba(255, 255, 255, .12);

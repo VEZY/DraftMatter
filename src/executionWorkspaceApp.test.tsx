@@ -306,8 +306,10 @@ describe('shared Jupyter execution workspace', () => {
     expect(container.querySelector('[aria-label="Shared kernel terminal"]')?.textContent).toContain('Julia REPL · shared document kernel')
     expect(container.querySelector('[aria-label="Shared kernel terminal"]')?.textContent).toContain('julia --project=.')
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close kernel terminal"]')!.click())
-    expect(container.querySelector('.kernel-console-toggle')?.textContent).toContain('TerminalReady')
-    expect(container.querySelector('.kernel-console-toggle')?.getAttribute('data-status')).toBe('succeeded')
+    const terminalLauncher = container.querySelector<HTMLButtonElement>('.app-rail .rail-terminal-button')!
+    expect(terminalLauncher.getAttribute('aria-label')).toContain('Open shared kernel terminal, Ready')
+    expect(terminalLauncher.getAttribute('data-label')).toBe('Terminal · Ready')
+    expect(terminalLauncher.getAttribute('data-status')).toBe('succeeded')
   })
 
   it('opens failed Julia manuscript cells in the terminal with their traceback', async () => {
@@ -338,7 +340,7 @@ describe('shared Jupyter execution workspace', () => {
 
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close kernel terminal"]')!.click())
     const reopen = container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel terminal"]')!
-    expect(reopen.textContent).toContain('Needs attention')
+    expect(reopen.getAttribute('aria-label')).toContain('Needs attention')
     await act(async () => reopen.click())
     expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Julia')
     expect(container.querySelector('[aria-label="Shared kernel terminal"]')?.textContent).toContain('Figure at Makie/src/figureplotting.jl:117')

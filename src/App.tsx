@@ -4374,7 +4374,23 @@ function App() {
             <button className={activeNav === 'sources' ? 'active' : ''} onClick={() => { setActiveNav('sources'); openCitationPicker() }} data-label="Sources" aria-label="Sources" aria-current={activeNav === 'sources' ? 'page' : undefined}><Icon name="book" /></button>
             <button className={activeNav === 'history' ? 'active' : ''} onClick={() => setActiveNav('history')} data-label="History" aria-label="History" aria-current={activeNav === 'history' ? 'page' : undefined}><Icon name="history" /></button>
           </div>
-          <button data-label="Settings" aria-label="Settings" onClick={openSettings} aria-haspopup="dialog" aria-expanded={settingsOpen}><Icon name="settings" /></button>
+          <div className="rail-footer-actions">
+            {desktopSession && !kernelConsoleOpen && (
+              <button
+                className={`rail-terminal-button ${kernelConsoleDirty ? 'dirty' : ''}`}
+                data-status={terminalLauncherStatus}
+                data-label={`Terminal · ${terminalLauncherStatusLabel}`}
+                onClick={() => openKernelTerminal(terminalLauncherLanguage)}
+                aria-label={`Open shared kernel terminal, ${terminalLauncherStatusLabel}${kernelConsoleDirty ? ', interactive state present' : ''}`}
+                title={setupActivity?.title}
+              >
+                <Icon name="code" size={17} />
+                <span className="terminal-status-indicator" aria-hidden="true" />
+                {kernelConsoleDirty && <i title="Interactive state present" />}
+              </button>
+            )}
+            <button data-label="Settings" aria-label="Settings" onClick={openSettings} aria-haspopup="dialog" aria-expanded={settingsOpen}><Icon name="settings" /></button>
+          </div>
         </nav>
 
         {leftPanelOpen && (activeNav === 'history' ? (
@@ -5640,20 +5656,6 @@ function App() {
             onClose={() => setKernelConsoleOpen(false)}
           />
         </div>
-      )}
-
-      {desktopSession && !kernelConsoleOpen && (
-        <button
-          className={`kernel-console-toggle ${kernelConsoleDirty ? 'dirty' : ''}`}
-          data-status={terminalLauncherStatus}
-          onClick={() => openKernelTerminal(terminalLauncherLanguage)}
-          aria-label={`Open shared kernel terminal, ${terminalLauncherStatusLabel}${kernelConsoleDirty ? ', interactive state present' : ''}`}
-          title={setupActivity?.title}
-        >
-          <span className="terminal-status-indicator" aria-hidden="true" />
-          <span className="kernel-console-toggle-copy"><strong>Terminal</strong><small>{terminalLauncherStatusLabel}</small></span>
-          {kernelConsoleDirty && <i title="Interactive state present" />}
-        </button>
       )}
 
       {toast && <div className="toast" role="status"><Icon name="check" size={16} /> {toast}</div>}

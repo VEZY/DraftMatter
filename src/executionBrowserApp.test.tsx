@@ -50,7 +50,7 @@ describe('browser execution boundary', () => {
     const banner = container.querySelector<HTMLElement>('.browser-execution-banner')
     expect(banner?.textContent).toContain('Execution is unavailable in this browser')
     expect(banner?.textContent).toContain('Code is view-only here')
-    expect(container.querySelector('.kernel-console-toggle')).toBeNull()
+    expect(container.querySelector('.rail-terminal-button')).toBeNull()
     expect(container.querySelector('[aria-label="Shared kernel terminal"]')).toBeNull()
 
     const manuscriptCell = container.querySelector<HTMLElement>('.structured-code-cell')
