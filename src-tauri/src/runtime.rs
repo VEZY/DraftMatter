@@ -86,7 +86,7 @@ pub struct KernelIntegrationSetupResult {
     pub inventory: JupyterKernelInventory,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 struct KernelSpec {
     argv: Vec<String>,
     display_name: String,
@@ -306,6 +306,9 @@ fn push_kernel_root(roots: &mut Vec<PathBuf>, path: Option<PathBuf>) {
 
 fn kernel_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
+    if let Some(path) = env::var_os("JUPYTER_DATA_DIR") {
+        push_kernel_root(&mut roots, Some(PathBuf::from(path).join("kernels")));
+    }
     if let Some(paths) = env::var_os("JUPYTER_PATH") {
         for path in env::split_paths(&paths) {
             push_kernel_root(&mut roots, Some(path.join("kernels")));
@@ -515,8 +518,13 @@ fn setup_failure(language: RuntimeLanguage, stderr: &[u8], stdout: &[u8]) -> Hos
     let lines = text.lines().collect::<Vec<_>>();
     let diagnostic = lines
         .iter()
-        .find(|line| line.trim_start().starts_with("ERROR:"))
-        .copied()
+        .find_map(|line| {
+            let trimmed = line.trim();
+            ["ERROR:", "Error", "Erreur", "Fehler", "Errore", "Erro", "Fout"]
+                .iter()
+                .any(|prefix| trimmed.starts_with(prefix))
+                .then_some(trimmed)
+        })
         .or_else(|| {
             lines.iter().rev().find_map(|line| {
                 let trimmed = line.trim();
@@ -524,6 +532,9 @@ fn setup_failure(language: RuntimeLanguage, stderr: &[u8], stdout: &[u8]) -> Hos
                     && !trimmed.starts_with('@')
                     && !trimmed.starts_with('[')
                     && trimmed != "Stacktrace:"
+                    && trimmed != "Execution halted"
+                    && trimmed != "Exécution arrêtée"
+                    && !trimmed.starts_with("Calls:")
                     && !trimmed.starts_with("in expression starting at"))
                 .then_some(trimmed)
             })
@@ -698,6 +709,115 @@ fn julia_setup_expression(root: &Path, display_name: &str) -> String {
     )
 }
 
+fn user_jupyter_kernel_root() -> Result<PathBuf, HostError> {
+    if let Some(path) = env::var_os("JUPYTER_DATA_DIR") {
+        return Ok(PathBuf::from(path).join("kernels"));
+    }
+    if cfg!(target_os = "macos") {
+        return env::var_os("HOME")
+            .map(PathBuf::from)
+            .map(|path| path.join("Library/Jupyter/kernels"))
+            .ok_or_else(|| {
+                HostError::Integration(
+                    "Could not locate the current macOS user directory for R kernel registration."
+                        .to_string(),
+                )
+            });
+    }
+    if cfg!(windows) {
+        return env::var_os("APPDATA")
+            .map(PathBuf::from)
+            .map(|path| path.join("jupyter/kernels"))
+            .ok_or_else(|| HostError::Integration(
+                "Could not locate the current Windows application-data directory for R kernel registration."
+                    .to_string(),
+            ));
+    }
+    env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .or_else(|| {
+            env::var_os("HOME")
+                .map(PathBuf::from)
+                .map(|path| path.join(".local/share"))
+        })
+        .map(|path| path.join("jupyter/kernels"))
+        .ok_or_else(|| {
+            HostError::Integration(
+                "Could not locate the current user data directory for R kernel registration."
+                    .to_string(),
+            )
+        })
+}
+
+fn r_kernel_executable(rscript: &Path) -> Result<PathBuf, HostError> {
+    let executable_name = if cfg!(windows) { "R.exe" } else { "R" };
+    let candidate = rscript.with_file_name(executable_name);
+    let executable = fs::canonicalize(&candidate).map_err(|error| {
+        HostError::Integration(format!(
+            "IRkernel is available, but its R executable was not found beside Rscript at {}: {error}",
+            candidate.display()
+        ))
+    })?;
+    if !executable_file(&executable) {
+        return Err(HostError::Integration(format!(
+            "IRkernel is available, but its R executable is not runnable: {}",
+            executable.display()
+        )));
+    }
+    Ok(executable)
+}
+
+fn write_r_kernel_spec_in(
+    kernel_root: &Path,
+    rscript: &Path,
+    kernel_name: &str,
+    display_name: &str,
+) -> Result<(), HostError> {
+    let executable = r_kernel_executable(rscript)?;
+    let resource_dir = kernel_root.join(kernel_name);
+    fs::create_dir_all(&resource_dir).map_err(|error| {
+        HostError::Integration(format!(
+            "IRkernel was installed, but DraftMatter could not create {}: {error}",
+            resource_dir.display()
+        ))
+    })?;
+    let spec = KernelSpec {
+        argv: vec![
+            executable.to_string_lossy().into_owned(),
+            "--slave".to_string(),
+            "-e".to_string(),
+            "IRkernel::main()".to_string(),
+            "--args".to_string(),
+            "{connection_file}".to_string(),
+        ],
+        display_name: display_name.to_string(),
+        language: Some("R".to_string()),
+    };
+    let encoded = serde_json::to_vec_pretty(&spec).map_err(|error| {
+        HostError::Integration(format!("Could not encode the R kernelspec: {error}"))
+    })?;
+    let spec_path = resource_dir.join("kernel.json");
+    fs::write(&spec_path, encoded).map_err(|error| {
+        HostError::Integration(format!(
+            "IRkernel was installed, but DraftMatter could not write {}: {error}",
+            spec_path.display()
+        ))
+    })
+}
+
+fn write_r_kernel_spec(
+    rscript: &Path,
+    kernel_name: &str,
+    display_name: &str,
+) -> Result<(), HostError> {
+    write_r_kernel_spec_in(
+        &user_jupyter_kernel_root()?,
+        rscript,
+        kernel_name,
+        display_name,
+    )
+}
+
 pub fn setup_kernel_integration_with_progress_impl(
     raw_root: &str,
     language: RuntimeLanguage,
@@ -740,10 +860,7 @@ pub fn setup_kernel_integration_with_progress_impl(
             )?;
         }
         RuntimeLanguage::R => {
-            let expression = format!(
-                "if (!requireNamespace('IRkernel', quietly=TRUE)) install.packages('IRkernel', repos='https://cloud.r-project.org'); IRkernel::installspec(name='{}', displayname='{}', user=TRUE)",
-                kernel_name, display_name
-            );
+            let expression = "user_lib <- path.expand(Sys.getenv('R_LIBS_USER')); if (nzchar(user_lib)) { dir.create(user_lib, recursive=TRUE, showWarnings=FALSE); .libPaths(c(user_lib, .libPaths())) }; if (!requireNamespace('IRkernel', quietly=TRUE)) install.packages('IRkernel', repos='https://cloud.r-project.org', lib=if (nzchar(user_lib)) user_lib else NULL); if (!requireNamespace('IRkernel', quietly=TRUE)) stop('IRkernel could not be loaded after installation')";
             run_setup_command(
                 &executable,
                 &[
@@ -755,6 +872,10 @@ pub fn setup_kernel_integration_with_progress_impl(
                 language,
                 progress.clone(),
             )?;
+            if let Some(report) = &progress {
+                report("status", "Registering the R kernel with DraftMatter…\n");
+            }
+            write_r_kernel_spec(&executable, &kernel_name, &display_name)?;
         }
         RuntimeLanguage::Julia => {
             let expression = julia_setup_expression(&root, &display_name);
@@ -938,6 +1059,68 @@ mod tests {
 
         assert!(error.contains("IJulia could not be installed"));
         assert!(!error.contains("client.jl:550"));
+    }
+
+    #[test]
+    fn setup_errors_prefer_the_r_error_over_execution_halted() {
+        let error = setup_failure(
+            RuntimeLanguage::R,
+            "Erreur dans IRkernel::installspec() : jupyter-client has to be installed\nAppels : <Anonymous>\nExécution arrêtée\n".as_bytes(),
+            b"",
+        )
+        .to_string();
+
+        assert!(error.contains("jupyter-client has to be installed"));
+        assert!(!error.ends_with("Exécution arrêtée"));
+    }
+
+    #[test]
+    fn writes_a_discoverable_r_kernel_without_a_jupyter_launcher() {
+        let temporary = tempdir().unwrap();
+        let bin = temporary.path().join("bin");
+        let kernels = temporary.path().join("kernels");
+        fs::create_dir_all(&bin).unwrap();
+        let rscript = bin.join(if cfg!(windows) {
+            "Rscript.exe"
+        } else {
+            "Rscript"
+        });
+        let r = bin.join(if cfg!(windows) { "R.exe" } else { "R" });
+        make_executable(&rscript);
+        make_executable(&r);
+
+        write_r_kernel_spec_in(
+            &kernels,
+            &rscript,
+            "draftmatter-r-fixture",
+            "R · DraftMatter",
+        )
+        .unwrap();
+        let inventory = discover_jupyter_kernels_in(&[kernels.clone()], &[]);
+        let kernel = inventory
+            .kernels
+            .iter()
+            .find(|kernel| kernel.name == "draftmatter-r-fixture")
+            .unwrap();
+        let spec = serde_json::from_slice::<KernelSpec>(
+            &fs::read(kernels.join("draftmatter-r-fixture/kernel.json")).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(kernel.language, Some(RuntimeLanguage::R));
+        assert_eq!(kernel.health, RuntimeHealth::Available);
+        assert_eq!(spec.argv[0], fs::canonicalize(r).unwrap().to_string_lossy());
+        assert_eq!(
+            spec.argv[1..],
+            [
+                "--slave",
+                "-e",
+                "IRkernel::main()",
+                "--args",
+                "{connection_file}"
+            ]
+        );
+        assert_eq!(spec.display_name, "R · DraftMatter");
     }
 
     #[test]
