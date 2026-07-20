@@ -10,6 +10,12 @@ export function pipeTableCells(value: string) {
   return value.trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim())
 }
 
+export function isPipeTableSeparator(value: string) {
+  const trimmed = value.trim()
+  return trimmed.includes('|')
+    && pipeTableCells(trimmed).every((cell) => /^:?-{3,}:?$/.test(cell))
+}
+
 export function pipeTableAlignments(value: string): TableAlignment[] {
   return pipeTableCells(value).map((cell) => {
     const left = cell.startsWith(':')

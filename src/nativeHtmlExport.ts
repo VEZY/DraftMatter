@@ -3,7 +3,7 @@ import { formatCrossReferenceTarget } from './crossReference'
 import { parseDisplayEquation } from './displayEquation'
 import { resolveFootnotes, type ResolvedFootnoteDocument } from './footnotes'
 import { buildPublicationByline, normalizePublicationOrcid, parsePublicationMetadata, removeDuplicateLeadingTitle, type PublicationMetadata } from './publicationMetadata'
-import { parseTableCaptionLine, pipeTableAlignments, pipeTableCells } from './tableSyntax'
+import { isPipeTableSeparator, parseTableCaptionLine, pipeTableAlignments, pipeTableCells } from './tableSyntax'
 import { projectComputationsForPublication } from './publicationComputation'
 import { isExplicitlyUnnumbered, numberedManuscriptObjects } from './numberedObjects'
 import { parseStructuredManuscript } from './structuredManuscript'
@@ -121,14 +121,10 @@ function renderInline(value: string, options: NativeHtmlExportOptions, footnotes
     })
 }
 
-function isTableSeparator(line: string) {
-  return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line)
-}
-
 function startsBlock(lines: string[], index: number) {
   const line = lines[index] ?? ''
   return /^\s*(?:#{1,6}\s+|```|~~~|>\s?|[-+*]\s+|\d+[.)]\s+|\$\$|!\[[^\]]*\]\([^)]*\))/.test(line)
-    || (line.includes('|') && isTableSeparator(lines[index + 1] ?? ''))
+    || (line.includes('|') && isPipeTableSeparator(lines[index + 1] ?? ''))
 }
 
 function renderBody(source: string, options: NativeHtmlExportOptions, footnotes: FootnoteRenderContext) {
@@ -210,7 +206,7 @@ function renderBody(source: string, options: NativeHtmlExportOptions, footnotes:
       index += caption ? 2 : 1
       continue
     }
-    if (line.includes('|') && isTableSeparator(lines[index + 1] ?? '')) {
+    if (line.includes('|') && isPipeTableSeparator(lines[index + 1] ?? '')) {
       const headers = pipeTableCells(line)
       const alignments = pipeTableAlignments(lines[index + 1])
       index += 2

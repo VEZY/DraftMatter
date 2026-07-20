@@ -3,7 +3,7 @@ import { formatCrossReferenceTarget } from './crossReference'
 import { parseDisplayEquation } from './displayEquation'
 import { resolveFootnotes, type ResolvedFootnote } from './footnotes'
 import { buildPublicationByline, parsePublicationMetadata, removeDuplicateLeadingTitle, type PublicationMetadata } from './publicationMetadata'
-import { parseTableCaptionLine, pipeTableAlignments, pipeTableCells, type TableAlignment } from './tableSyntax'
+import { isPipeTableSeparator, parseTableCaptionLine, pipeTableAlignments, pipeTableCells, type TableAlignment } from './tableSyntax'
 import { projectComputationsForPublication } from './publicationComputation'
 import { createStoredZip } from './zipArchive'
 import { isExplicitlyUnnumbered, numberedManuscriptObjects } from './numberedObjects'
@@ -40,10 +40,6 @@ function paragraph(value: string, style?: string) {
   const lines = value.split('\n')
   const runs = lines.map((line, index) => `${index ? '<w:r><w:br/></w:r>' : ''}<w:r><w:t xml:space="preserve">${xml(line)}</w:t></w:r>`).join('')
   return `<w:p>${properties}${runs}</w:p>`
-}
-
-function isTableSeparator(line: string) {
-  return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line)
 }
 
 function table(rows: string[][], alignments: TableAlignment[], numbers: Record<string, number>, options: DocxExportOptions) {
@@ -178,7 +174,7 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
       index += caption ? 2 : 1
       continue
     }
-    if (line.includes('|') && isTableSeparator(lines[index + 1] ?? '')) {
+    if (line.includes('|') && isPipeTableSeparator(lines[index + 1] ?? '')) {
       const rows = [pipeTableCells(line)]
       const alignments = pipeTableAlignments(lines[index + 1])
       index += 2

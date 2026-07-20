@@ -9,7 +9,7 @@ import { inferPublishedValueLanguage } from './publishedValueHints'
 import { parseRetainedPublishedValues, publishedValueNamesInMarkup, type RetainedPublishedValue } from './publishedValues'
 import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
-import { parseTableCaptionLine, pipeTableAlignments, pipeTableCells } from './tableSyntax'
+import { isPipeTableSeparator, parseTableCaptionLine, pipeTableAlignments, pipeTableCells } from './tableSyntax'
 import type { CitationItem, DocumentDiagnostic } from './types'
 
 interface SourceLine {
@@ -180,10 +180,6 @@ function outputEnd(lines: SourceLine[], start: number) {
   return lines.length
 }
 
-function isTableSeparator(value: string) {
-  return /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(value)
-}
-
 function isBlockStart(lines: SourceLine[], index: number) {
   const value = lines[index]?.content ?? ''
   return !value.trim()
@@ -199,7 +195,7 @@ function isBlockStart(lines: SourceLine[], index: number) {
     || /^\s*(?:---+|\*\*\*+)\s*$/.test(value)
     || /^\s*</.test(value)
     || /\{\{<\s*/.test(value)
-    || Boolean(lines[index + 1] && isTableSeparator(lines[index + 1].content))
+    || Boolean(lines[index + 1] && isPipeTableSeparator(lines[index + 1].content))
 }
 
 function parseCodeAttributes(cell: ReturnType<typeof extractExecutableCells>['cells'][number]) {
@@ -329,7 +325,7 @@ function parseBlocks(
       continue
     }
 
-    if (lines[index + 1] && isTableSeparator(lines[index + 1].content)) {
+    if (lines[index + 1] && isPipeTableSeparator(lines[index + 1].content)) {
       const rows: ProseMirrorNode[] = []
       const tableStart = index
       const headerValues = pipeTableCells(value)

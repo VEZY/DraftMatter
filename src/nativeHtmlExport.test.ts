@@ -80,6 +80,22 @@ describe('native HTML export', () => {
     expect(() => renderNativeHtmlExport('Text []{#a .dm-anchor data-anchor="a"}.')).toThrow(/clean DraftMatter projection/)
   })
 
+  it('exports a one-column retained R table', () => {
+    const html = renderNativeHtmlExport(`# Study
+
+| a |
+| --- |
+| 1 |
+| 2 |
+| 3 |
+: Generated table. {#tbl-result}
+`)
+
+    expect(html).toContain('<table id="tbl-result"><caption><strong>Table 1.</strong> Generated table.</caption>')
+    expect(html).toContain('<th>a</th>')
+    expect(html).toContain('<td>3</td>')
+  })
+
   it('publishes ORCID identities and deduplicated affiliation references', () => {
     const html = renderNativeHtmlExport(`---
 title: "Author metadata study"

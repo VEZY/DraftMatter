@@ -87,6 +87,23 @@ describe('native DOCX export', () => {
     expect(first.diagnostics).toEqual([expect.objectContaining({ code: 'figure-reference', level: 'warning' })])
   })
 
+  it('exports a one-column retained R table as a real Word table', () => {
+    const readable = new TextDecoder().decode(renderDocxExport(`# Study
+
+| a |
+| --- |
+| 1 |
+| 2 |
+| 3 |
+: Generated table. {#tbl-result}
+`).bytes)
+
+    expect(readable).toContain('<w:tbl>')
+    expect(readable).toContain('Table 1. Generated table.')
+    expect(readable).toContain('<w:t xml:space="preserve">a</w:t>')
+    expect(readable).toContain('<w:t xml:space="preserve">3</w:t>')
+  })
+
   it('blocks review storage instead of representing it as tracked changes', () => {
     expect(() => renderDocxExport('Text\n\n::::: {.draftmatter-reviews .hidden}\n:::::\n')).toThrow(/clean DraftMatter projection/)
   })

@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { parseTableCaptionLine, pipeTableAlignments, pipeTableCells } from './tableSyntax'
+import { isPipeTableSeparator, parseTableCaptionLine, pipeTableAlignments, pipeTableCells } from './tableSyntax'
 
 describe('portable pipe-table syntax', () => {
   it('parses cells and semantic column alignment', () => {
     expect(pipeTableCells('| Treatment | Mean | Range |')).toEqual(['Treatment', 'Mean', 'Range'])
     expect(pipeTableAlignments('| :--- | ---: | :---: |')).toEqual(['left', 'right', 'center'])
+  })
+
+  it('recognizes both one-column and multi-column separators without treating a thematic break as a table', () => {
+    expect(isPipeTableSeparator('| --- |')).toBe(true)
+    expect(isPipeTableSeparator('| :--- | ---: |')).toBe(true)
+    expect(isPipeTableSeparator('---')).toBe(false)
+    expect(isPipeTableSeparator('| not-a-separator |')).toBe(false)
   })
 
   it('separates a caption from exact Pandoc attributes', () => {

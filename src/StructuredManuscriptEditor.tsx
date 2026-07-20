@@ -33,7 +33,7 @@ import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
 import { motionAwareScrollBehavior } from './accessibility'
 import type { PublicationByline } from './publicationMetadata'
 import { embeddedExecutionImageFromHtml, executionTableFromHtml, safeEmbeddedImageDataUrl } from './outputRenderer'
-import { parseTableCaptionLine } from './tableSyntax'
+import { isPipeTableSeparator, parseTableCaptionLine } from './tableSyntax'
 import { crossReferenceChoices, groupedCrossReferenceChoices, type CrossReferenceChoice } from './crossReferencePicker'
 import { resolveSemanticReference } from './referenceIntegrity'
 import {
@@ -761,7 +761,6 @@ function codeCellNodeView(
   const runAbove = document.createElement('button')
   runAbove.type = 'button'
   runAbove.className = 'structured-code-run-above'
-  runAbove.textContent = 'Run above'
   header.append(language, label, status, runAbove, run, toggle)
 
   const summary = document.createElement('p')
@@ -935,6 +934,7 @@ function codeCellNodeView(
     toggle.setAttribute('aria-controls', editorHost.id)
     toggle.setAttribute('aria-expanded', expanded ? 'true' : 'false')
     runAbove.hidden = viewOnly || canRunAbove === undefined
+    runAbove.textContent = runAbove.hidden ? '' : 'Run above'
     runAbove.disabled = !actionsEnabled() || canRunAbove === false
     runAbove.setAttribute('aria-label', `Run all computations above reproducible ${objectName}`)
     updateCodeCellStatus(dom, presentedStatus)
@@ -2054,7 +2054,7 @@ function retainedMarkdownImage(markdown: string) {
 
 function retainedMarkdownTable(markdown: string) {
   const lines = markdown.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n')
-  const separator = lines.findIndex((line) => /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line))
+  const separator = lines.findIndex(isPipeTableSeparator)
   if (separator < 1) return undefined
   const headers = lines[separator - 1].trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => cell.trim())
   const alignments = lines[separator].trim().replace(/^\|/, '').replace(/\|$/, '').split('|').map((cell) => {
@@ -2109,7 +2109,7 @@ export function rewriteRetainedOutputPresentation(
     nextBody = `![${alt.replaceAll(']', '\\]')}](${portableSource})${nextAttributes ? `{${nextAttributes}}` : ''}${nextCaption ? `${ending}: ${nextCaption}` : ''}`
   } else if (presentation.kind === 'table') {
     const lines = body.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n')
-    const separator = lines.findIndex((line) => /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line))
+    const separator = lines.findIndex(isPipeTableSeparator)
     if (separator < 1) return markdown
     let index = separator + 1
     while (index < lines.length && lines[index].includes('|') && lines[index].trim()) index += 1

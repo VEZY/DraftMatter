@@ -1,5 +1,5 @@
 import { embeddedExecutionImageFromHtml, executionTableFromHtml } from './outputRenderer'
-import { parseTableCaptionLine } from './tableSyntax'
+import { isPipeTableSeparator, parseTableCaptionLine } from './tableSyntax'
 
 export interface RetainedOutputPresentation {
   kind: 'image' | 'table' | 'markdown'
@@ -41,7 +41,7 @@ function imagePresentation(body: string): RetainedOutputPresentation | undefined
 
 function tablePresentation(body: string): RetainedOutputPresentation | undefined {
   const lines = body.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n')
-  const separator = lines.findIndex((line) => /^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$/.test(line))
+  const separator = lines.findIndex(isPipeTableSeparator)
   if (separator < 1) return undefined
   let index = separator + 1
   while (index < lines.length && lines[index].includes('|') && lines[index].trim()) index += 1

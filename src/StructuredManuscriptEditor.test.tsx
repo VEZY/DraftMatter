@@ -763,6 +763,32 @@ DataFrame(:time => 1:2, :lai => exp.(1:2))
     expect(output.textContent).not.toContain('<table')
   })
 
+  it('renders a one-column table retained from an R data frame', async () => {
+    const rOutput = `## Methods
+
+\`\`\`r {#cell-r-table .execute output="table" reference="tbl-result"}
+data.frame(a = c(1, 2, 3))
+\`\`\`
+
+<!-- dm-output:start cell="cell-r-table" run="sha256:r-table" -->
+| a |
+| --- |
+| 1 |
+| 2 |
+| 3 |
+: Generated table. {#tbl-result}
+<!-- dm-output:end -->
+`
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={rOutput} onChange={vi.fn()} />,
+    ))
+
+    const output = container.querySelector<HTMLElement>('.structured-output-table')!
+    expect(output.querySelector('.structured-output-caption')?.textContent).toBe('Table 1. Generated table.')
+    expect([...output.querySelectorAll('th')].map((cell) => cell.textContent)).toEqual(['a'])
+    expect([...output.querySelectorAll('td')].map((cell) => cell.textContent)).toEqual(['1', '2', '3'])
+  })
+
   it('keeps legacy cell UUIDs out of the normal reproducible-object controls', async () => {
     const copied = vi.fn()
     const uuid = '359c1638-441c-4ae7-bc9b-93835c37ab9c'
