@@ -46,7 +46,7 @@ import { discoverRuntimeInventory, healthyKernelsFor, runtimeExecutableForKernel
 import { PortableReviewItems } from './PortableReviewItems'
 import { AlignedReviewRail } from './AlignedReviewRail'
 import { GitHistoryPanel } from './GitHistoryPanel'
-import { ProjectDiagnostics, prioritizeProjectDiagnostics } from './ProjectDiagnostics'
+import { ProjectChecksDialog, ProjectDiagnostics, prioritizeProjectDiagnostics, type ProjectCheckAction } from './ProjectDiagnostics'
 import { buildReviewQueue } from './reviewQueue'
 import { projectPortableReviewSource } from './reviewProjector'
 import { renderReviewReport } from './reviewExport'
@@ -571,6 +571,7 @@ function App() {
   const [saveProblem, setSaveProblem] = useState('')
   const [toast, setToast] = useState('')
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
+  const [projectChecksOpen, setProjectChecksOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsName, setSettingsName] = useState(userSettings.author.name)
   const [settingsProblem, setSettingsProblem] = useState('')
@@ -673,6 +674,7 @@ function App() {
   const [setupActivity, setSetupActivity] = useState<SetupActivity>()
   const fileInputRef = useRef<HTMLInputElement>(null)
   const bibliographyInputRef = useRef<HTMLInputElement>(null)
+  const projectChecksTriggerRef = useRef<HTMLButtonElement>(null)
   const structuredEditorRef = useRef<StructuredManuscriptEditorHandle>(null)
   const editorAreaRef = useRef<HTMLElement>(null)
   const draftRef = useRef(draft)
@@ -3742,6 +3744,26 @@ function App() {
     setCitationSearchOpen(true)
   }
 
+  const openProjectChecks = () => {
+    setProjectMenuOpen(false)
+    setProjectChecksOpen(true)
+  }
+
+  const closeProjectChecks = () => {
+    setProjectChecksOpen(false)
+    window.setTimeout(() => projectChecksTriggerRef.current?.focus(), 0)
+  }
+
+  const runProjectCheckAction = (action: ProjectCheckAction) => {
+    setProjectChecksOpen(false)
+    if (action === 'source') openSourceInspector()
+    else if (action === 'citations') {
+      setActiveNav('sources')
+      openCitationPicker()
+    } else if (action === 'computation') setExecutionWorkspaceOpen(true)
+    else setExportOpen(true)
+  }
+
   const showCitationIntake = (payload: string, intakeFilename = 'pasted-citations.txt') => {
     const preview = previewCitationIntake(payload, citations, intakeFilename)
     setCitationIntakeText(payload)
@@ -4402,7 +4424,7 @@ function App() {
                   <button onClick={() => { setRecoveryOpen(true); setProjectMenuOpen(false) }}><Icon name="history" size={16} /><span><strong>Recovery history</strong><small>{recoveries.length ? `${recoveries.length} local version${recoveries.length === 1 ? '' : 's'}` : 'No local versions yet'}</small></span><span className="menu-count">{recoveries.length}</span></button>
                   <button onClick={() => download('reviewed')}><Icon name="download" size={16} /><span><strong>Download portable source</strong><small>Save {filename} to this computer</small></span></button>
                 </div>
-                <ProjectDiagnostics diagnostics={allDiagnostics} />
+                <ProjectDiagnostics diagnostics={allDiagnostics} onViewAll={openProjectChecks} />
               </div>
             )}
           </div>
@@ -4603,7 +4625,15 @@ function App() {
               <div className="project-health-title"><Icon name="spark" size={16} /> Project health</div>
               <div><span><i className={`health-dot ${cslState === 'error' ? 'warning' : 'okay'}`} /> Citations</span><small>{documentCitationKeys.length} cited · {citations.length} indexed{cslState === 'loading' ? ' · formatting' : ''}{citations.some((record) => record.availability === 'cached') ? ' · offline cache active' : ''}</small></div>
               <div><span><i className={`health-dot ${draft.cellStatus === 'current' ? 'okay' : 'warning'}`} /> Figures</span><small>{draft.cellStatus === 'current' ? 'Up to date' : cellStatusLabel(draft.cellStatus)}</small></div>
-              <div><span><i className={`health-dot ${prioritizedDiagnostics.some((item) => item.level !== 'info') ? 'warning' : 'okay'}`} /> Source</span><small>{prioritizedDiagnostics.length ? `${prioritizedDiagnostics.length} check${prioritizedDiagnostics.length === 1 ? '' : 's'} · ${prioritizedDiagnostics[0].level}` : 'Portable'}</small></div>
+              <button
+                className="project-health-checks"
+                type="button"
+                ref={projectChecksTriggerRef}
+                onClick={openProjectChecks}
+                aria-haspopup="dialog"
+                aria-expanded={projectChecksOpen}
+                aria-label={`Project checks, ${prioritizedDiagnostics.length ? `${prioritizedDiagnostics.length} check${prioritizedDiagnostics.length === 1 ? '' : 's'}, highest severity ${prioritizedDiagnostics[0].level}` : 'no project issues detected'}`}
+              ><span><i className={`health-dot ${prioritizedDiagnostics.some((item) => item.level !== 'info') ? 'warning' : 'okay'}`} /> Project checks</span><small>{prioritizedDiagnostics.length ? `${prioritizedDiagnostics.length} check${prioritizedDiagnostics.length === 1 ? '' : 's'} · ${prioritizedDiagnostics[0].level}` : 'No issues'}</small></button>
             </div>
 
             <div className="panel-footer">
@@ -5662,6 +5692,10 @@ function App() {
             </div>
           </div>
         </div>
+      )}
+
+      {projectChecksOpen && (
+        <ProjectChecksDialog diagnostics={allDiagnostics} onClose={closeProjectChecks} onAction={runProjectCheckAction} />
       )}
 
       {recoveryOpen && (
