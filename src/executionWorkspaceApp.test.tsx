@@ -87,6 +87,19 @@ describe('shared Jupyter execution workspace', () => {
       packages: [{ name: 'DataFrames', version: '1.7.0', kind: 'package' }], projectFile: true, manifestFile: true,
     })
     vi.spyOn(desktopHost, 'removeJuliaPackage').mockResolvedValue({ packages: [], projectFile: true, manifestFile: true })
+    vi.spyOn(desktopHost, 'probeCodeFormatter').mockImplementation(async (request) => ({
+      language: request.language,
+      package: request.language === 'python' ? 'Ruff' : 'styler',
+      available: true,
+      version: request.language === 'python' ? '0.12.0' : '1.10.3',
+    }))
+    vi.spyOn(desktopHost, 'installCodeFormatter').mockImplementation(async (request) => ({
+      language: request.language,
+      package: request.language === 'python' ? 'Ruff' : 'styler',
+      available: true,
+      version: request.language === 'python' ? '0.12.0' : '1.10.3',
+    }))
+    vi.spyOn(desktopHost, 'formatCode').mockImplementation(async (request) => ({ code: request.code, changed: false }))
     vi.spyOn(desktopHost, 'setupKernelIntegration').mockRejectedValue(new Error('Setup should not run when every detected environment is ready.'))
     vi.spyOn(desktopHost, 'fingerprintExecutionInputs').mockResolvedValue([])
     vi.spyOn(desktopHost, 'executeKernel').mockImplementation(async (request) => ({
@@ -378,6 +391,31 @@ describe('shared Jupyter execution workspace', () => {
     await act(async () => environments.click())
     const dialog = container.querySelector<HTMLElement>('[aria-labelledby="execution-environment-title"]')!
     expect(dialog.textContent).toContain('shared Jupyter kernel, no notebook server')
+  })
+
+  it('keeps Python and R formatter packages outside the application bundle', async () => {
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    const environments = [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
+      .find((button) => button.textContent?.includes('Environments'))!
+    await act(async () => environments.click())
+    await settle(140)
+
+    let dialog = container.querySelector<HTMLElement>('[aria-labelledby="execution-environment-title"]')!
+    expect(dialog.querySelector('.formatter-package-callout')?.textContent).toContain('Ruff 0.12.0 is available')
+    expect(dialog.querySelector('.formatter-package-callout')?.textContent).toContain('Repair Ruff')
+    await act(async () => dialog.querySelector<HTMLButtonElement>('.formatter-package-callout button')!.click())
+    await settle(140)
+    expect(desktopHost.installCodeFormatter).toHaveBeenCalledWith(
+      expect.objectContaining({ root: rootPath, language: 'python' }),
+      expect.any(String),
+    )
+
+    dialog = container.querySelector<HTMLElement>('[aria-labelledby="execution-environment-title"]')!
+    const rRuntime = [...dialog.querySelectorAll<HTMLButtonElement>('.execution-environment-list button')]
+      .find((button) => button.querySelector('strong')?.textContent === 'R')!
+    await act(async () => rRuntime.click())
+    await settle(140)
+    expect(dialog.querySelector('.formatter-package-callout')?.textContent).toContain('styler 1.10.3 is available')
   })
 
   it('keeps terminal history and shared kernel status when the bottom panel closes', async () => {

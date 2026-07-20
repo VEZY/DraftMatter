@@ -655,7 +655,7 @@ fn setup_kernel_name(language: RuntimeLanguage, executable: &Path, root: &Path) 
     )
 }
 
-fn setup_runtime_executable(
+pub(crate) fn setup_runtime_executable(
     language: RuntimeLanguage,
     selected: Option<&str>,
 ) -> Result<PathBuf, HostError> {

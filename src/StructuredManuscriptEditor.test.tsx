@@ -702,6 +702,7 @@ plot(1:3)
     })
     expect(formatCell).toHaveBeenCalled()
     expect(formatCell.mock.calls.at(-1)?.[0]).toBe('cell-format')
+    expect(formatCell.mock.calls.at(-1)?.[1]).toBe('julia')
     expect(changed.at(-1)).toContain('x = 1')
 
     await act(async () => root.render(
@@ -718,6 +719,33 @@ plot(1:3)
     expect(container.querySelector('.structured-code-run')?.textContent).toBe('Interrupt')
     await act(async () => container.querySelector<HTMLButtonElement>('.structured-code-run')!.click())
     expect(interruptCell).toHaveBeenCalledWith('julia')
+  })
+
+  it.each([
+    ['python', 'x=1', 'x = 1'],
+    ['r', 'x<-1', 'x <- 1'],
+  ] as const)('formats an edited %s cell through its runtime formatter', async (language, sourceCode, formattedCode) => {
+    const changed: string[] = []
+    const formatCell = vi.fn().mockResolvedValue(`${formattedCode}\n`)
+    await act(async () => root.render(
+      <StructuredManuscriptEditor
+        source={`\`\`\`${language} {#cell-${language} .execute}\n${sourceCode}\n\`\`\`\n`}
+        onChange={(next) => changed.push(next)}
+        codeCellActionsEnabled
+        onFormatCodeCell={formatCell}
+      />,
+    ))
+
+    await act(async () => container.querySelector<HTMLButtonElement>('.structured-code-toggle')!.click())
+    const codeView = CodeMirrorView.findFromDOM(container.querySelector<HTMLElement>('.cm-editor')!)!
+    await act(async () => {
+      codeView.dispatch({ changes: { from: codeView.state.doc.length, insert: ' ' } })
+      container.querySelector<HTMLButtonElement>('.structured-code-toggle')!.click()
+      await Promise.resolve()
+    })
+
+    expect(formatCell).toHaveBeenCalledWith(`cell-${language}`, language, `${sourceCode} `)
+    expect(changed.at(-1)).toContain(formattedCode)
   })
 
   it('offers a portable reference action for labeled retained figure output', async () => {

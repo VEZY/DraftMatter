@@ -267,7 +267,7 @@ export interface StructuredManuscriptEditorProps {
   onRunCodeCell?: (cellId: string) => void
   onRunCodeCellAbove?: (cellId: string) => void
   onInterruptCodeCell?: (language: ExecutionLanguage) => void
-  onFormatCodeCell?: (cellId: string, code: string) => Promise<string | undefined>
+  onFormatCodeCell?: (cellId: string, language: ExecutionLanguage, code: string) => Promise<string | undefined>
   markupView?: MarkupView
   reviewAuthorId?: string
   activeReviewId?: string
@@ -729,7 +729,7 @@ function codeCellNodeView(
   onRun: (cellId: string) => void,
   onRunAbove: (cellId: string) => void,
   onInterrupt: (language: ExecutionLanguage) => void,
-  onFormat: (cellId: string, code: string) => Promise<string | undefined>,
+  onFormat: (cellId: string, language: ExecutionLanguage, code: string) => Promise<string | undefined>,
 ): NodeView {
   let node = initialNode
   let expanded = false
@@ -799,7 +799,7 @@ function codeCellNodeView(
           if (!update.docChanged || syncingEditor || !isEditable()) return
           const position = getPos()
           if (typeof position !== 'number') return
-          needsFormat = String(node.attrs.language) === 'julia'
+          needsFormat = ['python', 'r', 'julia'].includes(String(node.attrs.language))
           view.dispatch(view.state.tr.setNodeMarkup(position, undefined, {
             ...node.attrs,
             code: update.state.doc.toString(),
@@ -821,7 +821,7 @@ function codeCellNodeView(
           {
             key: 'Mod-Shift-f',
             run: () => {
-              if (String(node.attrs.language) !== 'julia' || formatting || !isEditable()) return false
+              if (!['python', 'r', 'julia'].includes(String(node.attrs.language)) || formatting || !isEditable()) return false
               void formatCode(true)
               return true
             },
@@ -852,7 +852,7 @@ function codeCellNodeView(
 
   const scheduleFormat = () => {
     clearScheduledFormat()
-    if (!needsFormat || String(node.attrs.language) !== 'julia') return
+    if (!needsFormat || !['python', 'r', 'julia'].includes(String(node.attrs.language))) return
     formatTimer = window.setTimeout(() => {
       formatTimer = undefined
       void formatCode()
@@ -862,7 +862,8 @@ function codeCellNodeView(
   const formatCode = async (force = false): Promise<void> => {
     clearScheduledFormat()
     if (formattingPromise) return formattingPromise
-    if ((!needsFormat && !force) || !isEditable() || !actionsEnabled() || String(node.attrs.language) !== 'julia') return
+    const cellLanguage = String(node.attrs.language) as ExecutionLanguage
+    if ((!needsFormat && !force) || !isEditable() || !actionsEnabled() || !['python', 'r', 'julia'].includes(cellLanguage)) return
 
     formatting = true
     needsFormat = false
@@ -870,7 +871,7 @@ function codeCellNodeView(
     const source = editor.state.doc.toString()
     formattingPromise = (async () => {
       try {
-        const formatted = await onFormat(String(node.attrs.id), source)
+        const formatted = await onFormat(String(node.attrs.id), cellLanguage, source)
         const position = getPos()
         if (destroyed || formatted === undefined || typeof position !== 'number' || !isEditable()) return
         if (editor.state.doc.toString() !== source) {
@@ -4167,7 +4168,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
             (cellId) => onRunCodeCellRef.current?.(cellId),
             (cellId) => onRunCodeCellAboveRef.current?.(cellId),
             (language) => onInterruptCodeCellRef.current?.(language),
-            (cellId, code) => onFormatCodeCellRef.current?.(cellId, code) ?? Promise.resolve(undefined),
+            (cellId, language, code) => onFormatCodeCellRef.current?.(cellId, language, code) ?? Promise.resolve(undefined),
           ),
         raw_block: (node, editorView, getPos) => rawNodeView(node, editorView, getPos, () => !readOnlyRef.current, (nodeId) => onInspectRawRef.current?.(nodeId)),
         citation: (node, editorView, getPos) => citationNodeView(node, editorView, getPos, (id, items) => onCitationSelectRef.current?.(id, items)),

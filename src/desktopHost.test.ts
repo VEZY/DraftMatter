@@ -75,6 +75,9 @@ describe('desktop host adapter', () => {
     await host.addJuliaPackage({ root: '/research/canopy', name: 'JuliaFormatter' }, 'packages-add-1')
     await host.removeJuliaPackage({ root: '/research/canopy', name: 'DataFrames' }, 'packages-remove-1')
     await host.formatJuliaCode({ root: '/research/canopy', code: 'x=1' })
+    await host.probeCodeFormatter({ root: '/research/canopy', language: 'python', executable: '/envs/python/bin/python' })
+    await host.installCodeFormatter({ root: '/research/canopy', language: 'r', executable: '/usr/bin/Rscript' }, 'formatter-install-1')
+    await host.formatCode({ root: '/research/canopy', language: 'python', executable: '/envs/python/bin/python', code: 'x=1' })
     await host.gitStatus('/research/canopy')
     await host.gitInitialize('/research/canopy')
     await host.gitDiff({ root: '/research/canopy', path: 'paper.qmd', staged: false })
@@ -143,6 +146,9 @@ describe('desktop host adapter', () => {
       ['add_julia_package', { request: { root: '/research/canopy', name: 'JuliaFormatter' }, taskId: 'packages-add-1' }],
       ['remove_julia_package', { request: { root: '/research/canopy', name: 'DataFrames' }, taskId: 'packages-remove-1' }],
       ['format_julia_code', { request: { root: '/research/canopy', code: 'x=1' } }],
+      ['probe_code_formatter', { request: { root: '/research/canopy', language: 'python', executable: '/envs/python/bin/python' } }],
+      ['install_code_formatter', { request: { root: '/research/canopy', language: 'r', executable: '/usr/bin/Rscript' }, taskId: 'formatter-install-1' }],
+      ['format_code', { request: { root: '/research/canopy', language: 'python', executable: '/envs/python/bin/python', code: 'x=1' } }],
       ['git_status', { root: '/research/canopy' }],
       ['git_initialize', { root: '/research/canopy' }],
       ['git_diff', { request: { root: '/research/canopy', path: 'paper.qmd', staged: false } }],
@@ -174,6 +180,9 @@ describe('desktop host adapter', () => {
     await expect(host.trustProjectForSession('/project', 'run-project-code-with-user-permissions')).rejects.toMatchObject({ kind: 'integration' })
     await expect(host.listJuliaPackages('/project')).rejects.toMatchObject({ kind: 'integration' })
     await expect(host.formatJuliaCode({ root: '/project', code: 'x=1' })).rejects.toMatchObject({ kind: 'integration' })
+    await expect(host.probeCodeFormatter({ root: '/project', language: 'python' })).rejects.toMatchObject({ kind: 'integration' })
+    await expect(host.installCodeFormatter({ root: '/project', language: 'r' })).rejects.toMatchObject({ kind: 'integration' })
+    await expect(host.formatCode({ root: '/project', language: 'python', code: 'x=1' })).rejects.toMatchObject({ kind: 'integration' })
     await expect(host.gitStatus('/project')).rejects.toMatchObject({ kind: 'integration', message: expect.stringContaining('browser') })
     expect(picker).not.toHaveBeenCalled()
     expect(invoke).not.toHaveBeenCalled()

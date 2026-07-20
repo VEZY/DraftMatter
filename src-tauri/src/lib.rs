@@ -12,6 +12,7 @@ use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 
+mod code_formatting;
 mod execution_artifacts;
 mod execution_manifests;
 mod execution_trust;
@@ -20,6 +21,10 @@ mod git_adapter;
 mod julia_tools;
 mod jupyter_execution;
 mod jupyter_publishing;
+use code_formatting::{
+    format_code_impl, install_code_formatter_with_progress_impl, probe_code_formatter_impl,
+    CodeFormatRequest, CodeFormatResult, CodeFormatterRequest, CodeFormatterStatus,
+};
 use execution_artifacts::{
     fingerprint_execution_inputs_impl, inspect_execution_artifacts_impl,
     ExecutionArtifactFingerprint, ExecutionInput,
@@ -2999,6 +3004,44 @@ async fn format_julia_code(
 }
 
 #[tauri::command]
+async fn probe_code_formatter(
+    request: CodeFormatterRequest,
+    trust: tauri::State<'_, ExecutionTrustStore>,
+) -> Result<CodeFormatterStatus, HostError> {
+    let trust = trust.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || probe_code_formatter_impl(request, &trust))
+        .await
+        .map_err(|error| HostError::Integration(format!("The formatter probe failed: {error}")))?
+}
+
+#[tauri::command]
+async fn install_code_formatter(
+    app: tauri::AppHandle,
+    request: CodeFormatterRequest,
+    task_id: Option<String>,
+    trust: tauri::State<'_, ExecutionTrustStore>,
+) -> Result<CodeFormatterStatus, HostError> {
+    let trust = trust.inner().clone();
+    let progress = task_progress_reporter(app, task_id);
+    tauri::async_runtime::spawn_blocking(move || {
+        install_code_formatter_with_progress_impl(request, &trust, progress)
+    })
+    .await
+    .map_err(|error| HostError::Integration(format!("The formatter setup failed: {error}")))?
+}
+
+#[tauri::command]
+async fn format_code(
+    request: CodeFormatRequest,
+    trust: tauri::State<'_, ExecutionTrustStore>,
+) -> Result<CodeFormatResult, HostError> {
+    let trust = trust.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || format_code_impl(request, &trust))
+        .await
+        .map_err(|error| HostError::Integration(format!("The formatter task failed: {error}")))?
+}
+
+#[tauri::command]
 fn git_status(root: String) -> Result<GitRepositoryStatus, HostError> {
     git_status_impl(&root)
 }
@@ -3165,6 +3208,9 @@ pub fn run() {
             add_julia_package,
             remove_julia_package,
             format_julia_code,
+            probe_code_formatter,
+            install_code_formatter,
+            format_code,
             git_status,
             git_initialize,
             git_diff,

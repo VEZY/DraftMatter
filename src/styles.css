@@ -3633,6 +3633,13 @@ button:disabled {
 .julia-formatter-callout strong { color: #674f74; font-size: 9px; }
 .julia-formatter-callout small { color: #897a91; font-size: 8px; }
 .julia-formatter-callout button { background: #755887; border-color: #755887; min-height: 29px; }
+.formatter-package-callout { align-items: center; background: #f6f9f7; border: 1px solid #dce7e0; border-radius: 7px; display: flex; gap: 12px; margin: 0 16px 10px; padding: 9px 10px; }
+.formatter-package-callout > span { display: grid; flex: 1; gap: 3px; }
+.formatter-package-callout strong { color: #405a4c; font-size: 9px; }
+.formatter-package-callout small { color: #718078; font-size: 8px; }
+.formatter-package-callout button { background: #fff; border: 1px solid #bdccc3; border-radius: 5px; color: #486253; font-size: 8px; font-weight: 700; min-height: 29px; padding: 0 10px; }
+.formatter-package-callout button:hover:not(:disabled) { background: #edf4ef; border-color: #9db1a5; }
+.formatter-package-callout button:disabled { cursor: default; opacity: .5; }
 .julia-package-list { display: grid; max-height: min(330px, 42vh); min-height: 72px; overflow: auto; padding: 5px 10px 10px; }
 .julia-package-list > p { align-self: center; color: #849089; font-size: 9px; margin: 0; padding: 18px; text-align: center; }
 .julia-package-list > div { align-items: center; border-radius: 6px; display: flex; gap: 12px; min-height: 48px; padding: 7px 8px; }
@@ -3649,7 +3656,8 @@ button:disabled {
   .julia-package-files { align-items: flex-start; flex-wrap: wrap; }
   .julia-package-files small { flex-basis: 100%; margin-left: 0; }
   .julia-package-add { grid-template-columns: 1fr; }
-  .julia-formatter-callout { align-items: flex-start; flex-direction: column; }
+  .julia-formatter-callout,
+  .formatter-package-callout { align-items: flex-start; flex-direction: column; }
 }
 
 .execution-environment-list { display: grid; gap: 1px; padding: 10px; }

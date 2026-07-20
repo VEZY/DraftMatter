@@ -48,7 +48,7 @@ export function ManagedCodeCellEditor({
     const view = viewRef.current
     if (!view) return false
     let source = view.state.doc.toString()
-    if (cell.language === 'julia' && onFormatRef.current) {
+    if (onFormatRef.current) {
       setFormatting(true)
       try {
         const formatted = await onFormatRef.current(cell.id, source)

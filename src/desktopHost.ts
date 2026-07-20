@@ -133,6 +133,28 @@ export interface JuliaFormatResult {
   changed: boolean
 }
 
+export interface CodeFormatterRequest {
+  root: string
+  language: Exclude<ExecutionLanguage, 'julia'>
+  executable?: string
+}
+
+export interface CodeFormatRequest extends CodeFormatterRequest {
+  code: string
+}
+
+export interface CodeFormatterStatus {
+  language: Exclude<ExecutionLanguage, 'julia'>
+  package: string
+  available: boolean
+  version?: string
+}
+
+export interface CodeFormatResult {
+  code: string
+  changed: boolean
+}
+
 export type GitChangeKind = 'modified' | 'added' | 'deleted' | 'renamed' | 'copied' | 'untracked' | 'conflicted'
 
 export interface GitStatusEntry {
@@ -619,6 +641,21 @@ export function createDesktopHost(
     formatJuliaCode(request: JuliaFormatRequest) {
       return available
         ? invokeBridge<JuliaFormatResult>('format_julia_code', { request })
+        : executionUnavailable()
+    },
+    probeCodeFormatter(request: CodeFormatterRequest) {
+      return available
+        ? invokeBridge<CodeFormatterStatus>('probe_code_formatter', { request })
+        : executionUnavailable()
+    },
+    installCodeFormatter(request: CodeFormatterRequest, taskId?: string) {
+      return available
+        ? invokeBridge<CodeFormatterStatus>('install_code_formatter', { request, ...(taskId ? { taskId } : {}) })
+        : executionUnavailable()
+    },
+    formatCode(request: CodeFormatRequest) {
+      return available
+        ? invokeBridge<CodeFormatResult>('format_code', { request })
         : executionUnavailable()
     },
     gitStatus(root: string) {

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, searchCitations } from './bibliography'
-import { desktopHost, normaliseHostFailure, resolveMainDocument, type JuliaEnvironment, type ProjectExecutionPreferences, type ProjectSnapshot, type ZoteroAttachment } from './desktopHost'
+import { desktopHost, normaliseHostFailure, resolveMainDocument, type CodeFormatterStatus, type JuliaEnvironment, type ProjectExecutionPreferences, type ProjectSnapshot, type ZoteroAttachment } from './desktopHost'
 import { parsePortableDocument, parseReviewMarkup } from './sharedEditor'
 import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
@@ -659,9 +659,12 @@ function App() {
   const [executionTrustOpen, setExecutionTrustOpen] = useState(false)
   const [executionTrustWarning, setExecutionTrustWarning] = useState('')
   const [executionTrustBusy, setExecutionTrustBusy] = useState(false)
-  const [executionTrustPurpose, setExecutionTrustPurpose] = useState<'run' | 'packages' | 'format' | 'console' | 'kernel-setup' | 'project-open'>('run')
+  const [executionTrustPurpose, setExecutionTrustPurpose] = useState<'run' | 'packages' | 'format' | 'formatter-setup' | 'console' | 'kernel-setup' | 'project-open'>('run')
   const [kernelSetupLanguage, setKernelSetupLanguage] = useState<ExecutionLanguage>()
   const [kernelSetupBusy, setKernelSetupBusy] = useState(false)
+  const [formatterSetupLanguage, setFormatterSetupLanguage] = useState<Exclude<ExecutionLanguage, 'julia'>>()
+  const [formatterSetupBusy, setFormatterSetupBusy] = useState(false)
+  const [formatterStatuses, setFormatterStatuses] = useState<Partial<Record<Exclude<ExecutionLanguage, 'julia'>, CodeFormatterStatus>>>({})
   const [juliaPackagesOpen, setJuliaPackagesOpen] = useState(false)
   const [juliaEnvironment, setJuliaEnvironment] = useState<JuliaEnvironment>()
   const [juliaPackageName, setJuliaPackageName] = useState('')
@@ -970,6 +973,7 @@ function App() {
     if (desktopSessionRef.current?.root !== next?.root) {
       setJuliaEnvironment(undefined)
       setJuliaPackageProblem('')
+      setFormatterStatuses({})
     }
     desktopSessionRef.current = next
     setDesktopSession(next)
@@ -2744,30 +2748,143 @@ function App() {
     }
   }
 
-  const formatJuliaCodeCell = async (_cellId: string, code: string) => {
+  const formatCodeCell = async (_cellId: string, language: ExecutionLanguage, code: string) => {
     const session = desktopSessionRef.current
     if (!session) {
-      setToast('Julia formatting is available only in an opened desktop project')
+      setToast('Code formatting is available only in an opened desktop project')
       return undefined
     }
+    if (language !== 'julia' && formatterStatuses[language]?.available === false) return undefined
     try {
       const trust = await desktopHost.executionTrustStatus(session.root)
       if (!trust.trusted) {
         setExecutionTrustPurpose('format')
         setExecutionTrustWarning(trust.warning)
         setExecutionTrustOpen(true)
-        setToast('Trust this project to enable automatic Julia formatting')
+        setToast(`Trust this project to enable automatic ${runtimeName(language)} formatting`)
         return undefined
       }
-      const result = await desktopHost.formatJuliaCode({ root: session.root, code })
+      const result = language === 'julia'
+        ? await desktopHost.formatJuliaCode({ root: session.root, code })
+        : await desktopHost.formatCode({
+          root: session.root,
+          language,
+          executable: runtimeExecutableForKernelSetup(
+            selectedKernelForLanguage(language),
+            selectedEnvironmentPaths[language],
+            runtimeInventory?.executables[language],
+          ),
+          code,
+        })
       return result.code
     } catch (error) {
       const message = normaliseHostFailure(error).message
+      if (language !== 'julia') {
+        setFormatterStatuses((current) => ({
+          ...current,
+          [language]: { language, package: language === 'python' ? 'Ruff' : 'styler', available: false },
+        }))
+      }
       setExecutionProblem(message)
       setToast(message)
       return undefined
     }
   }
+
+  const formatterRequest = (language: Exclude<ExecutionLanguage, 'julia'>) => ({
+    root: desktopSessionRef.current?.root ?? '',
+    language,
+    executable: runtimeExecutableForKernelSetup(
+      selectedKernelForLanguage(language),
+      selectedEnvironmentPaths[language],
+      runtimeInventory?.executables[language],
+    ),
+  })
+
+  const probeCodeFormatter = async (language: Exclude<ExecutionLanguage, 'julia'>) => {
+    const session = desktopSessionRef.current
+    if (!session || !formatterRequest(language).executable) return
+    try {
+      const trust = await desktopHost.executionTrustStatus(session.root)
+      if (!trust.trusted) return
+      const status = await desktopHost.probeCodeFormatter(formatterRequest(language))
+      if (desktopSessionRef.current?.root === session.root) {
+        setFormatterStatuses((current) => ({ ...current, [language]: status }))
+      }
+    } catch {
+      if (desktopSessionRef.current?.root === session.root) {
+        setFormatterStatuses((current) => ({
+          ...current,
+          [language]: { language, package: language === 'python' ? 'Ruff' : 'styler', available: false },
+        }))
+      }
+    }
+  }
+
+  const installCodeFormatterTrusted = async (language: Exclude<ExecutionLanguage, 'julia'>) => {
+    const session = desktopSessionRef.current
+    if (!session || formatterSetupBusy) return
+    const packageName = language === 'python' ? 'Ruff' : 'styler'
+    setEnvironmentOpen(false)
+    setFormatterSetupBusy(true)
+    setExecutionProblem('')
+    const taskId = startSetupActivity(
+      `Installing ${packageName}`,
+      `Installing ${packageName} in the selected ${runtimeName(language)} environment…`,
+      language,
+    )
+    try {
+      const status = await desktopHost.installCodeFormatter(formatterRequest(language), taskId)
+      if (desktopSessionRef.current?.root !== session.root) {
+        finishSetupActivity(taskId, 'failed', 'The project changed before formatter setup finished.')
+        return
+      }
+      setFormatterStatuses((current) => ({ ...current, [language]: status }))
+      finishSetupActivity(taskId, 'succeeded', `${packageName} ${status.version ?? ''} is ready.`.trim())
+      setToast(`${packageName} is ready · ${runtimeName(language)} cells will format automatically`)
+    } catch (error) {
+      const message = normaliseHostFailure(error).message
+      finishSetupActivity(taskId, 'failed', message)
+      setExecutionProblem(message)
+      setToast(`${packageName} setup needs attention`)
+    } finally {
+      setFormatterSetupBusy(false)
+      setFormatterSetupLanguage(undefined)
+      if (desktopSessionRef.current?.root === session.root) setEnvironmentOpen(true)
+    }
+  }
+
+  const requestCodeFormatterSetup = async (language: Exclude<ExecutionLanguage, 'julia'>) => {
+    const session = desktopSessionRef.current
+    if (!session) return
+    const request = formatterRequest(language)
+    const packageName = language === 'python' ? 'Ruff' : 'styler'
+    if (!request.executable) {
+      setExecutionProblem(`Select or set up a ${runtimeName(language)} environment before installing ${packageName}.`)
+      return
+    }
+    setFormatterSetupLanguage(language)
+    try {
+      const trust = await desktopHost.executionTrustStatus(session.root)
+      if (!trust.trusted) {
+        setExecutionTrustPurpose('formatter-setup')
+        setExecutionTrustWarning(`${trust.warning} DraftMatter will install ${packageName} into the selected ${runtimeName(language)} environment; it is not bundled with the application.`)
+        setExecutionTrustOpen(true)
+        return
+      }
+      await installCodeFormatterTrusted(language)
+    } catch (error) {
+      const message = normaliseHostFailure(error).message
+      setExecutionProblem(message)
+      setToast(message)
+    }
+  }
+
+  useEffect(() => {
+    if (!environmentOpen || selectedEnvironmentLanguage === 'julia' || formatterSetupBusy) return
+    const timeout = window.setTimeout(() => void probeCodeFormatter(selectedEnvironmentLanguage), 100)
+    return () => window.clearTimeout(timeout)
+  }, [environmentOpen, selectedEnvironmentLanguage, selectedEnvironmentSetupExecutable, formatterSetupBusy])
 
   const executeConsoleTrusted = async (language: ExecutionLanguage, code: string) => {
     const session = desktopSessionRef.current
@@ -2812,6 +2929,7 @@ function App() {
       pendingConsoleRef.current = undefined
     }
     if (executionTrustPurpose === 'kernel-setup') setKernelSetupLanguage(undefined)
+    if (executionTrustPurpose === 'formatter-setup') setFormatterSetupLanguage(undefined)
     if (executionTrustPurpose === 'project-open') pendingSetupLanguagesRef.current = []
     setExecutionTrustOpen(false)
   }
@@ -2836,7 +2954,12 @@ function App() {
         return
       }
       if (executionTrustPurpose === 'format') {
-        setToast('Project trusted · Julia cells will format automatically after edits')
+        setToast('Project trusted · supported code cells will format automatically after edits')
+        return
+      }
+      if (executionTrustPurpose === 'formatter-setup') {
+        const language = formatterSetupLanguage
+        if (language) await installCodeFormatterTrusted(language)
         return
       }
       if (executionTrustPurpose === 'kernel-setup') {
@@ -4227,7 +4350,7 @@ function App() {
             readOnlyMessage={!desktopSession ? 'Portable source · view only in browser' : undefined}
             initiallyOpen={cell.role === 'setup'}
             onSave={savePanelManagedCell}
-            onFormat={cell.language === 'julia' ? formatJuliaCodeCell : undefined}
+            onFormat={(cellId, source) => formatCodeCell(cellId, cell.language, source)}
           />
         )}
         {view?.provenance.length ? <p className="execution-cell-provenance">{view.provenance.join(' · ')}</p> : null}
@@ -4608,7 +4731,7 @@ function App() {
               onRunCodeCell={(cellId) => void requestExecution({ kind: 'cell', cellId })}
               onRunCodeCellAbove={(cellId) => void requestExecution({ kind: 'above', cellId })}
               onInterruptCodeCell={(language) => void interruptExecution(language)}
-              onFormatCodeCell={formatJuliaCodeCell}
+              onFormatCodeCell={formatCodeCell}
               markupView={markupView}
               reviewAuthorId={reviewAuthorFilter === 'all' ? undefined : reviewAuthorFilter}
               activeReviewId={activeReviewId}
@@ -5167,7 +5290,7 @@ function App() {
           <div className="execution-trust-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="execution-trust-title">
             <div className="execution-dialog-head">
               <span className="execution-shield"><Icon name="code" size={19} /></span>
-              <div><span className="eyebrow">Local project trust</span><h2 id="execution-trust-title">{executionTrustPurpose === 'project-open' ? 'Trust and prepare this project?' : executionTrustPurpose === 'packages' ? 'Manage this project’s Julia packages?' : executionTrustPurpose === 'format' ? 'Format this project’s Julia code?' : executionTrustPurpose === 'console' ? 'Run code in the shared kernel terminal?' : executionTrustPurpose === 'kernel-setup' ? `Set up ${runtimeName(kernelSetupLanguage ?? selectedEnvironmentLanguage)} integration?` : 'Run this project’s code?'}</h2></div>
+              <div><span className="eyebrow">Local project trust</span><h2 id="execution-trust-title">{executionTrustPurpose === 'project-open' ? 'Trust and prepare this project?' : executionTrustPurpose === 'packages' ? 'Manage this project’s Julia packages?' : executionTrustPurpose === 'format' ? 'Format this project’s code?' : executionTrustPurpose === 'formatter-setup' ? `Install the ${formatterSetupLanguage === 'python' ? 'Ruff' : 'styler'} formatter?` : executionTrustPurpose === 'console' ? 'Run code in the shared kernel terminal?' : executionTrustPurpose === 'kernel-setup' ? `Set up ${runtimeName(kernelSetupLanguage ?? selectedEnvironmentLanguage)} integration?` : 'Run this project’s code?'}</h2></div>
               <button className="icon-button" onClick={cancelExecutionTrust} disabled={executionTrustBusy} aria-label="Close execution trust dialog"><Icon name="close" /></button>
             </div>
             <div className="execution-trust-body">
@@ -5259,11 +5382,32 @@ function App() {
                     : runtimeInventory ? `${selectedEnvironmentKernels.length} ready ${runtimeName(selectedEnvironmentLanguage)} environment${selectedEnvironmentKernels.length === 1 ? '' : 's'}` : 'Check local environments to choose one'}</span>
               </label>
             </div>
+            {selectedEnvironmentLanguage !== 'julia' && selectedEnvironmentSetupExecutable && (() => {
+              const status = formatterStatuses[selectedEnvironmentLanguage]
+              const packageName = selectedEnvironmentLanguage === 'python' ? 'Ruff' : 'styler'
+              return <div className="formatter-package-callout" data-language={selectedEnvironmentLanguage}>
+                <span>
+                  <strong>Format {runtimeName(selectedEnvironmentLanguage)} cells automatically</strong>
+                  <small>{status?.available
+                    ? `${packageName} ${status.version ?? ''} is available in the selected environment.`.trim()
+                    : `Install ${packageName} into the selected environment; nothing is bundled with DraftMatter.`}</small>
+                </span>
+                <button onClick={() => void requestCodeFormatterSetup(selectedEnvironmentLanguage)} disabled={formatterSetupBusy || kernelSetupBusy}>
+                  {formatterSetupBusy && formatterSetupLanguage === selectedEnvironmentLanguage ? 'Installing…' : status?.available ? `Repair ${packageName}` : `Install ${packageName}`}
+                </button>
+              </div>
+            })()}
+            {selectedEnvironmentLanguage === 'julia' && selectedEnvironmentSetupExecutable && (
+              <div className="formatter-package-callout" data-language="julia">
+                <span><strong>Format Julia cells automatically</strong><small>JuliaFormatter remains a project dependency and does not increase the DraftMatter application size.</small></span>
+                <button onClick={() => { setEnvironmentOpen(false); void openJuliaPackages() }} disabled={juliaPackageBusy || kernelSetupBusy}>Manage Julia packages</button>
+              </div>
+            )}
             {!selectedEnvironmentSetupExecutable && selectedEnvironmentRuntime?.health === 'missing' && <div className="execution-environment-help" role="status">{runtimeInstallationGuidance(selectedEnvironmentLanguage)}</div>}
             {executionProblem && <div className="execution-environment-help" role="alert">{executionProblem}</div>}
             <div className="execution-dialog-actions environment-actions">
-              {desktopSession && <button onClick={() => void forgetCurrentProjectTrust()} disabled={kernelSetupBusy}>Forget project trust</button>}
-              {selectedEnvironmentSetupExecutable && <button onClick={() => void requestKernelIntegrationSetup(selectedEnvironmentLanguage)} disabled={kernelSetupBusy || runtimeDiscoveryState === 'discovering'}>{kernelSetupBusy && kernelSetupLanguage === selectedEnvironmentLanguage ? 'Setting up…' : selectedEnvironmentKernel ? 'Repair integration' : `Set up ${runtimeName(selectedEnvironmentLanguage)}`}</button>}
+              {desktopSession && <button onClick={() => void forgetCurrentProjectTrust()} disabled={kernelSetupBusy || formatterSetupBusy}>Forget project trust</button>}
+              {selectedEnvironmentSetupExecutable && <button onClick={() => void requestKernelIntegrationSetup(selectedEnvironmentLanguage)} disabled={kernelSetupBusy || formatterSetupBusy || runtimeDiscoveryState === 'discovering'}>{kernelSetupBusy && kernelSetupLanguage === selectedEnvironmentLanguage ? 'Setting up…' : selectedEnvironmentKernel ? 'Repair integration' : `Set up ${runtimeName(selectedEnvironmentLanguage)}`}</button>}
               <button onClick={() => void restartExecution(selectedEnvironmentLanguage)} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}>Restart {runtimeName(selectedEnvironmentLanguage)}</button>
               <button onClick={() => void terminateExecution(selectedEnvironmentLanguage)} disabled={!desktopSession}>Terminate {runtimeName(selectedEnvironmentLanguage)}</button>
               <span />
