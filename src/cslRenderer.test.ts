@@ -82,6 +82,48 @@ describe('CSL rendering', () => {
     expect(french.clusters.french).toBe('(Martin et Chen, 2024)')
   })
 
+  it('normalizes provider-style scalar arrays before handing records to the CSL processor', async () => {
+    const record: CitationRecord = {
+      citekey: 'arrayMetadata2025',
+      type: 'article-journal',
+      title: 'Metadata from a provider response',
+      authors: ['Alice Martin'],
+      year: '2025',
+      source: 'csl-json',
+      cslData: {
+        id: ['provider-id'],
+        type: ['article-journal'],
+        title: ['Metadata from a provider response'],
+        'container-title': ['Journal of Portable Metadata'],
+        ISSN: ['1234-5678', '8765-4321'],
+        volume: [12],
+        issued: { 'date-parts': [['2025']] },
+        _draftmatter: { provider: 'import' },
+      },
+    }
+
+    expect(citationRecordToCsl(record)).toMatchObject({
+      id: 'arrayMetadata2025',
+      type: 'article-journal',
+      title: 'Metadata from a provider response',
+      'container-title': 'Journal of Portable Metadata',
+      ISSN: '1234-5678',
+      volume: 12,
+      issued: { 'date-parts': [[2025]] },
+    })
+    expect(citationRecordToCsl(record)).not.toHaveProperty('_draftmatter')
+
+    const result = await renderCslDocument({
+      records: [record],
+      clusters: [{ id: 'array-metadata', items: [{ citekey: record.citekey }] }],
+      style: 'draftmatter-author-date',
+      locale: 'en-US',
+    })
+
+    expect(result.clusters['array-metadata']).toBe('(Martin, 2025)')
+    expect(result.bibliography[0].value).toContain('Journal of Portable Metadata')
+  })
+
   it('disambiguates same-author, same-year works with stable year suffixes', async () => {
     const sameYear: CitationRecord[] = [
       { ...records[0], citekey: 'martin2024field', title: 'Field methods' },
