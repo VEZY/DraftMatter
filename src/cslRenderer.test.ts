@@ -124,6 +124,41 @@ describe('CSL rendering', () => {
     expect(result.bibliography[0].value).toContain('Journal of Portable Metadata')
   })
 
+  it('normalizes legacy top-level scalar arrays before handing cached records to the CSL processor', async () => {
+    const legacyRecord = {
+      citekey: 'legacyMetadata2025',
+      type: ['article-journal'],
+      title: ['Metadata retained by an earlier DraftMatter version'],
+      authors: [['Alice Martin']],
+      year: ['2025'],
+      container: ['Journal of Portable Metadata'],
+      doi: ['10.1000/legacy.2025'],
+      url: ['https://example.test/legacy'],
+      source: 'csl-json',
+    } as unknown as CitationRecord
+
+    expect(citationRecordToCsl(legacyRecord)).toMatchObject({
+      id: 'legacyMetadata2025',
+      type: 'article-journal',
+      title: 'Metadata retained by an earlier DraftMatter version',
+      author: [{ family: 'Martin', given: 'Alice' }],
+      issued: { 'date-parts': [[2025]] },
+      'container-title': 'Journal of Portable Metadata',
+      DOI: '10.1000/legacy.2025',
+      URL: 'https://example.test/legacy',
+    })
+
+    const result = await renderCslDocument({
+      records: [legacyRecord],
+      clusters: [{ id: 'legacy-metadata', items: [{ citekey: 'legacyMetadata2025' }] }],
+      style: 'draftmatter-author-date',
+      locale: 'en-US',
+    })
+
+    expect(result.clusters['legacy-metadata']).toBe('(Martin, 2025)')
+    expect(result.bibliography[0].value).toContain('Journal of Portable Metadata')
+  })
+
   it('maps provider-specific publication types to legal CSL types', async () => {
     const providerRecords: CitationRecord[] = [
       {

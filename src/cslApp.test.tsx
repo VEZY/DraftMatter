@@ -52,4 +52,26 @@ describe('live CSL bibliography', () => {
       citationLocale: 'en-US',
     })
   })
+
+  it('keeps formatting when an older citation cache contains scalar arrays', async () => {
+    localStorage.setItem('draftmatter.citations.v1', JSON.stringify([{
+      citekey: 'vezy2024',
+      type: ['article-journal'],
+      title: ['Plant modelling as a reproducible research practice'],
+      authors: ['Remi Vezy', 'Loïc Coutellier', 'Alice Martin'],
+      year: ['2024'],
+      container: ['in silico Plants'],
+      doi: '10.1093/insilicoplants/diae012',
+      source: 'csl-json',
+    }]))
+
+    await act(async () => root.render(<App />))
+    await waitFor(() => container.querySelectorAll('.bibliography-entries p').length === 2)
+
+    expect(container.querySelector('[aria-label="Edit citation @vezy2024"]')?.textContent).toBe('(Vezy et al., 2024)')
+    expect([...container.querySelectorAll('.bibliography-entries p')].some((entry) => (
+      entry.textContent?.includes('Plant modelling as a reproducible research practice')
+    ))).toBe(true)
+    expect(container.textContent).not.toContain('JSON Deserialization Error')
+  })
 })

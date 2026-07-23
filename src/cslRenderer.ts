@@ -169,8 +169,8 @@ async function loadCiteproc() {
   return browserCiteproc
 }
 
-function authorToCsl(author: string) {
-  const value = author.trim()
+function authorToCsl(author: unknown) {
+  const value = cslString(author)?.trim() ?? ''
   if (!value) return undefined
   if (value.includes(',')) {
     const [family, ...given] = value.split(',').map((part) => part.trim())
@@ -215,19 +215,29 @@ function cslType(type: string) {
 }
 
 export function citationRecordToCsl(record: CitationRecord): Record<string, unknown> {
-  const base = normalizeCslData(record.cslData ?? {})
-  const authors = record.authors.map(authorToCsl).filter(Boolean)
-  const year = record.year?.match(/\d{4}/)?.[0]
+  const base = normalizeCslData(
+    record.cslData && typeof record.cslData === 'object' && !Array.isArray(record.cslData)
+      ? record.cslData
+      : {},
+  )
+  const authors = (Array.isArray(record.authors) ? record.authors : []).map(authorToCsl).filter(Boolean)
+  const citekey = cslString(record.citekey) ?? 'unidentified-reference'
+  const type = cslString(record.type) ?? 'article'
+  const title = cslString(record.title) ?? 'Untitled reference'
+  const year = cslString(record.year)?.match(/\d{4}/)?.[0]
+  const container = cslString(record.container)
+  const doi = cslString(record.doi)
+  const url = cslString(record.url)
   return {
     ...base,
-    id: record.citekey,
-    type: cslType(record.type),
-    title: record.title,
+    id: citekey,
+    type: cslType(type),
+    title,
     ...(authors.length ? { author: authors } : {}),
     ...(year ? { issued: { 'date-parts': [[Number(year)]] } } : {}),
-    ...(record.container ? { 'container-title': record.container } : {}),
-    ...(record.doi ? { DOI: record.doi } : {}),
-    ...(record.url ? { URL: record.url } : {}),
+    ...(container ? { 'container-title': container } : {}),
+    ...(doi ? { DOI: doi } : {}),
+    ...(url ? { URL: url } : {}),
   }
 }
 
