@@ -1,0 +1,15 @@
+week,treatment,n,mean_cm2,se_cm2
+0,Control,24,4.2,0.4
+2,Control,24,12.6,0.8
+4,Control,24,26.9,1.3
+6,Control,24,43.8,1.9
+8,Control,24,58.9,2.4
+10,Control,24,70.4,2.8
+12,Control,24,78.6,3.2
+0,Drought,24,4.1,0.4
+2,Drought,24,11.9,0.7
+4,Drought,24,24.8,1.2
+6,Drought,24,37.2,1.7
+8,Drought,24,48.7,2.2
+10,Drought,24,57.5,2.9
+12,Drought,24,64.1,3.5

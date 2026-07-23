@@ -1,0 +1,4 @@
+component,estimate,conf_low,conf_high,p_value
+Leaf,-0.08,-0.15,-0.01,0.032
+Stem,-0.01,-0.06,0.04,0.681
+Root,0.09,0.02,0.16,0.018

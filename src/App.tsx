@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, searchCitations } from './bibliography'
+import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, parseBibliographyFile, searchCitations } from './bibliography'
 import { desktopHost, normaliseHostFailure, resolveMainDocument, type CodeFormatterStatus, type JuliaEnvironment, type ProjectExecutionPreferences, type ProjectSnapshot, type ZoteroAttachment } from './desktopHost'
 import { parsePortableDocument, parseReviewMarkup } from './sharedEditor'
 import { useDraftHistory } from './draftHistory'
@@ -58,6 +58,7 @@ import { ExportFileDialog } from './ExportFileDialog'
 import { SubmissionPackageDialog } from './SubmissionPackageDialog'
 import { saveGeneratedFileInBrowser, type GeneratedFileExport } from './fileExport'
 import { InsertBlockDialog, type InsertBlockKind, type InsertBlockRequest } from './InsertBlockDialog'
+import { LinkDialog } from './LinkDialog'
 import { CollaborationDialog } from './CollaborationDialog'
 import type { CollaborationCheckpoint, CollaborationClientStatus, CollaborativeEditorBinding } from './sharedEditor'
 import { motionAwareScrollBehavior } from './accessibility'
@@ -74,16 +75,44 @@ import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
 import { workspaceRoleCapabilities, type WorkspaceRole } from './collaboration/workspaceService'
 import { KernelConsole, type KernelCellFailure, type KernelConsoleRestartEpochs, type KernelConsoleStatus, type KernelConsoleStatuses } from './KernelConsole'
 import { ManagedCodeCellEditor } from './ManagedCodeCellEditor'
+import completeExampleSource from './fixtures/projects/alpha-article/paper.qmd?raw'
+import completeExampleReferences from './fixtures/projects/alpha-article/references.json?raw'
+import completeExamplePythonFigure from './fixtures/projects/alpha-article/figures/python-canopy.svg?raw'
+import completeExampleRFigure from './fixtures/projects/alpha-article/figures/r-allocation.svg?raw'
+import completeExampleJuliaFigure from './fixtures/projects/alpha-article/figures/julia-model.svg?raw'
 
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
 const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
 const PROJECT_META_KEY = 'draftmatter.project-meta.v1'
 const CITATIONS_KEY = 'draftmatter.citations.v1'
+const BUILT_IN_PROJECT_KEY = 'draftmatter.built-in-project.v1'
 const LAST_PROJECT_ROOT_KEY = 'draftmatter.last-project-root.v1'
 const TRUSTED_PROJECT_ROOTS_KEY = 'draftmatter.trusted-project-roots.v1'
 const ZOTERO_VERSION_KEY = 'draftmatter.zotero-version.v1'
 const PRIMARY_EXECUTION_CELL = 'fig-canopy'
 const LEGACY_SAMPLE_CODE = 'weeks = [0, 2, 4, 6, 8, 10, 12]\ncontrol = [0, 8, 21, 39, 58, 76, 91]\ndrought = [0, 7, 19, 33, 47, 60, 72]\nplot_response(weeks, control, drought)'
+const COMPLETE_EXAMPLE_FILENAME = 'complete-example.qmd'
+const COMPLETE_EXAMPLE_PROJECT_NAME = 'Complete example paper'
+const completeExampleBibliography = parseBibliographyFile('references.json', completeExampleReferences, 'project-file')
+const completeExampleCitations = completeExampleBibliography.records.map((record) => ({
+  ...record,
+  availability: 'cached' as const,
+}))
+const completeExampleAssetUrls: Record<string, string> = {
+  'figures/python-canopy.svg': `data:image/svg+xml;charset=utf-8,${encodeURIComponent(completeExamplePythonFigure)}`,
+  'figures/r-allocation.svg': `data:image/svg+xml;charset=utf-8,${encodeURIComponent(completeExampleRFigure)}`,
+  'figures/julia-model.svg': `data:image/svg+xml;charset=utf-8,${encodeURIComponent(completeExampleJuliaFigure)}`,
+}
+
+interface PortableFileOpenOptions {
+  projectName?: string
+  citations?: CitationRecord[]
+  bibliographyDiagnostics?: DocumentDiagnostic[]
+  citationStyle?: CitationStyleId
+  citationLocale?: CitationLocale
+  builtInProject?: 'complete-example'
+  successMessage?: string
+}
 
 function executionObjectPresentation(cell: ExecutableCell) {
   const reference = typeof cell.attributes.reference === 'string' ? cell.attributes.reference : undefined
@@ -333,6 +362,7 @@ function getInitialProjectMeta() {
 }
 
 function getInitialCitations(): CitationRecord[] {
+  if (localStorage.getItem(BUILT_IN_PROJECT_KEY) === 'complete-example') return completeExampleCitations
   try {
     const saved = JSON.parse(localStorage.getItem(CITATIONS_KEY) ?? '[]')
     return Array.isArray(saved) && saved.length ? mergeCitationRecords(sampleCitations, saved) : sampleCitations
@@ -544,7 +574,7 @@ function App() {
   const [citationSearchOpen, setCitationSearchOpen] = useState(false)
   const [citationPickerItems, setCitationPickerItems] = useState<CitationItem[]>([])
   const [citationPickerTarget, setCitationPickerTarget] = useState<'legacy-cluster' | 'structured-selection' | 'structured-citation'>('legacy-cluster')
-  const [structuredCitationSelection, setStructuredCitationSelection] = useState<{ id: string; items: CitationItem[] } | null>(null)
+  const [structuredCitationSelection, setStructuredCitationSelection] = useState<{ id: string; items: CitationItem[]; anchor: HTMLElement } | null>(null)
   const [citationActiveIndex, setCitationActiveIndex] = useState(0)
   const [citationEditKey, setCitationEditKey] = useState('')
   const [citationAttachments, setCitationAttachments] = useState<ZoteroAttachment[]>([])
@@ -566,11 +596,15 @@ function App() {
   const [commandQuery, setCommandQuery] = useState('')
   const [commandActiveIndex, setCommandActiveIndex] = useState(0)
   const [insertBlockKind, setInsertBlockKind] = useState<InsertBlockKind>()
+  const [linkDialogOpen, setLinkDialogOpen] = useState(false)
   const [reply, setReply] = useState('')
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'conflict' | 'error'>('saved')
   const [saveProblem, setSaveProblem] = useState('')
   const [toast, setToast] = useState('')
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
+  const [builtInProject, setBuiltInProject] = useState<'complete-example' | null>(() =>
+    localStorage.getItem(BUILT_IN_PROJECT_KEY) === 'complete-example' ? 'complete-example' : null,
+  )
   const [projectChecksOpen, setProjectChecksOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsName, setSettingsName] = useState(userSettings.author.name)
@@ -676,6 +710,7 @@ function App() {
   const bibliographyInputRef = useRef<HTMLInputElement>(null)
   const projectChecksTriggerRef = useRef<HTMLButtonElement>(null)
   const structuredEditorRef = useRef<StructuredManuscriptEditorHandle>(null)
+  const structuredCitationDetailRef = useRef<HTMLDivElement>(null)
   const editorAreaRef = useRef<HTMLElement>(null)
   const draftRef = useRef(draft)
   const manuscriptSourceRef = useRef(manuscriptSource)
@@ -981,6 +1016,12 @@ function App() {
     setDesktopSession(next)
   }
 
+  const replaceBuiltInProject = (next: 'complete-example' | null) => {
+    if (next) localStorage.setItem(BUILT_IN_PROJECT_KEY, next)
+    else localStorage.removeItem(BUILT_IN_PROJECT_KEY)
+    setBuiltInProject(next)
+  }
+
   const replaceManuscriptSource = (next: string) => {
     manuscriptSourceRef.current = next
     setManuscriptSource(next)
@@ -1061,6 +1102,69 @@ function App() {
     })
     return () => { disposed = true }
   }, [activeZoteroItemKey, citationOpen])
+
+  useLayoutEffect(() => {
+    const panel = structuredCitationDetailRef.current
+    const anchor = structuredCitationSelection?.anchor
+    const boundary = editorAreaRef.current
+    const manuscript = anchor?.closest<HTMLElement>('.manuscript')
+    if (!citationOpen || !panel || !anchor || !boundary || !manuscript) return
+
+    let frame: number | undefined
+    const place = () => {
+      if (!anchor.isConnected) return
+      const anchorRect = anchor.getBoundingClientRect()
+      const boundaryRect = boundary.getBoundingClientRect()
+      const manuscriptRect = manuscript.getBoundingClientRect()
+      const viewportWidth = globalThis.innerWidth || boundaryRect.right
+      const viewportHeight = globalThis.innerHeight || boundaryRect.bottom
+      const margin = 12
+      const gap = 8
+      const boundaryHasSize = boundaryRect.width > 0 && boundaryRect.height > 0
+      const visibleLeft = (boundaryHasSize ? Math.max(0, boundaryRect.left) : 0) + margin
+      const visibleRight = (boundaryHasSize ? Math.min(viewportWidth, boundaryRect.right) : viewportWidth) - margin
+      const visibleTop = (boundaryHasSize ? Math.max(0, boundaryRect.top) : 0) + margin
+      const visibleBottom = (boundaryHasSize ? Math.min(viewportHeight, boundaryRect.bottom) : viewportHeight) - margin
+      const maxWidth = Math.max(0, visibleRight - visibleLeft)
+      const maxHeight = Math.max(0, visibleBottom - visibleTop)
+
+      panel.style.maxWidth = `${Math.round(maxWidth)}px`
+      panel.style.maxHeight = `${Math.round(maxHeight)}px`
+      const panelRect = panel.getBoundingClientRect()
+      const panelWidth = panelRect.width || panel.offsetWidth || 395
+      const panelHeight = Math.min(panelRect.height || panel.offsetHeight, maxHeight)
+      const maxLeft = Math.max(visibleLeft, visibleRight - panelWidth)
+      const viewportLeft = Math.min(Math.max(anchorRect.left, visibleLeft), maxLeft)
+      const spaceBelow = visibleBottom - anchorRect.bottom - gap
+      const spaceAbove = anchorRect.top - visibleTop - gap
+      const viewportTop = spaceBelow >= panelHeight || spaceBelow >= spaceAbove
+        ? Math.max(visibleTop, Math.min(anchorRect.bottom + gap, visibleBottom - panelHeight))
+        : Math.max(visibleTop, anchorRect.top - gap - panelHeight)
+
+      panel.style.left = `${Math.round(viewportLeft - manuscriptRect.left)}px`
+      panel.style.top = `${Math.round(viewportTop - manuscriptRect.top)}px`
+      panel.dataset.positioned = 'true'
+    }
+    const schedule = () => {
+      if (frame !== undefined) cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        frame = undefined
+        place()
+      })
+    }
+
+    place()
+    const ResizeObserverConstructor = globalThis.ResizeObserver
+    const resizeObserver = ResizeObserverConstructor ? new ResizeObserverConstructor(schedule) : undefined
+    resizeObserver?.observe(panel)
+    resizeObserver?.observe(boundary)
+    globalThis.addEventListener('resize', schedule)
+    return () => {
+      if (frame !== undefined) cancelAnimationFrame(frame)
+      resizeObserver?.disconnect()
+      globalThis.removeEventListener('resize', schedule)
+    }
+  }, [citationOpen, structuredCitationSelection?.id, structuredCitationSelection?.anchor])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -1407,6 +1511,7 @@ function App() {
         setCreateProjectOpen(false)
         setPendingProject(null)
         setEnvironmentOpen(false)
+        setLinkDialogOpen(false)
         if (!juliaPackageBusy) setJuliaPackagesOpen(false)
         setOutlineOptionsOpen(false)
         setPublicationAuthorsOpen(false)
@@ -1915,9 +2020,20 @@ function App() {
   }
 
   const addStructuredLink = () => {
-    const href = window.prompt('Link destination (https://… or a project-relative path)')?.trim()
-    if (href) runStructuredCommand((editor) => editor.setLink(href), 'Add link')
+    if (!canEditManuscript) {
+      setToast('Your collaboration role has read-only manuscript access')
+      return
+    }
+    if (!structuredMode || !structuredEditorRef.current) {
+      setToast('Add link is available in the full portable manuscript editor')
+      return
+    }
+    setLinkDialogOpen(true)
   }
+
+  const insertStructuredLink = (href: string, title?: string) => (
+    runStructuredCommand((editor) => editor.setLink(href, title), 'Add link')
+  )
 
   const insertStructuredRequest = (request: InsertBlockRequest) => {
     if (request.kind === 'section') {
@@ -3409,7 +3525,7 @@ function App() {
     requestAnimationFrame(() => globalThis.document.getElementById(`review-item-${item.id}`)?.scrollIntoView({ block: 'nearest' }))
   }
 
-  const openPortableFile = async (file: File) => {
+  const openPortableFile = async (file: File, options: PortableFileOpenOptions = {}) => {
     if (!/\.(qmd|md)$/i.test(file.name)) {
       setToast('Choose a Markdown or Quarto manuscript (.md or .qmd)')
       return
@@ -3448,7 +3564,7 @@ function App() {
     setRuntimeDiscoveryState('idle')
     setEnvironmentOpen(false)
     setExecutionTrustOpen(false)
-    citationLockRef.current = buildCitationLock([])
+    citationLockRef.current = buildCitationLock(options.citations ?? [])
     citationLockHashRef.current = null
     citationLockSavedContentRef.current = null
     citationLockLoadDiagnosticsRef.current = []
@@ -3460,20 +3576,50 @@ function App() {
     citationCacheLoadDiagnosticsRef.current = cacheResult.diagnostics
     citationBibliographyRef.current = { path: DEFAULT_ACQUISITION_BIBLIOGRAPHY, hash: null }
     setCitationCacheDiagnostics(cacheResult.diagnostics)
-    setCitations((current) => hydrateCitationsFromCache(current, cacheResult.cache))
+    if (options.citations) setCitations(options.citations)
+    else setCitations((current) => hydrateCitationsFromCache(current, cacheResult.cache))
+    if (options.bibliographyDiagnostics) setBibliographyDiagnostics(options.bibliographyDiagnostics)
     desktopSaveBlockedRef.current = false
     resetDraftRevision()
+    replaceBuiltInProject(options.builtInProject ?? null)
     replaceManuscriptSource(source)
     setStructuredMode(true)
     resetDraftHistory(parsed.draft)
     setFilename(file.name)
-    setProjectName(nextName.replaceAll(/[-_]+/g, ' '))
+    setProjectName(options.projectName ?? nextName.replaceAll(/[-_]+/g, ' '))
+    if (options.citationStyle) setCitationStyle(options.citationStyle)
+    if (options.citationLocale) setCitationLocale(options.citationLocale)
     setDiagnostics(parsed.diagnostics)
     setProjectMenuOpen(false)
     setSaveState('saved')
     const recoveryAvailable = writeRecoverySnapshot(parsed.draft, file.name, source) !== null
     const warnings = parsed.diagnostics.filter((item) => item.level !== 'info').length
-    setToast(`${warnings ? `Opened ${file.name} · ${warnings} check${warnings === 1 ? '' : 's'} to review` : `Opened ${file.name}`}${recoveryAvailable ? '' : ' · local recovery unavailable'}`)
+    setToast(options.successMessage
+      ?? `${warnings ? `Opened ${file.name} · ${warnings} check${warnings === 1 ? '' : 's'} to review` : `Opened ${file.name}`}${recoveryAvailable ? '' : ' · local recovery unavailable'}`)
+  }
+
+  const openCompleteExample = async () => {
+    if (projectBusy) return
+    setProjectBusy(true)
+    try {
+      await openPortableFile({
+        name: COMPLETE_EXAMPLE_FILENAME,
+        size: new TextEncoder().encode(completeExampleSource).byteLength,
+        text: async () => completeExampleSource,
+      } as File, {
+        projectName: COMPLETE_EXAMPLE_PROJECT_NAME,
+        citations: completeExampleCitations,
+        bibliographyDiagnostics: completeExampleBibliography.diagnostics,
+        citationStyle: 'draftmatter-author-date',
+        citationLocale: 'en-US',
+        builtInProject: 'complete-example',
+        successMessage: 'Opened the complete example · editable browser copy',
+      })
+    } catch (error) {
+      setToast(`Could not open the complete example · ${readableError(error)}`)
+    } finally {
+      setProjectBusy(false)
+    }
   }
 
   const applyDesktopProject = async (project: ProjectSnapshot, announce = true, selectedPath?: string) => {
@@ -3578,6 +3724,7 @@ function App() {
       path: acquisitionPath,
       hash: project.bibliographies.find((entry) => entry.path === acquisitionPath)?.hash ?? null,
     }
+    replaceBuiltInProject(null)
     replaceDesktopSession({ root: project.root, path: mainPath, hash: document.hash, savedRevision: 0 })
     replaceManuscriptSource(document.content)
     setStructuredMode(true)
@@ -3714,6 +3861,7 @@ function App() {
   }
 
   const restoreSnapshot = (snapshot: RecoverySnapshot) => {
+    replaceBuiltInProject(null)
     replaceManuscriptSource(snapshot.source)
     setStructuredMode(true)
     commitDraftHistory(snapshot.draft)
@@ -4066,8 +4214,8 @@ function App() {
     setCitationOpen(true)
   }
 
-  const openStructuredCitationDetails = (id: string, items: CitationItem[]) => {
-    setStructuredCitationSelection({ id, items })
+  const openStructuredCitationDetails = (id: string, items: CitationItem[], anchor: HTMLElement) => {
+    setStructuredCitationSelection({ id, items, anchor })
     setCitationEditKey(items[0]?.citekey ?? '')
     setCitationOpen(true)
   }
@@ -4142,7 +4290,7 @@ function App() {
   const changeCitationLocale = (locale: CitationLocale) => updateCitationPreferences(citationStyle, locale)
 
   useEffect(() => {
-    if (!desktopHost.available || reopenAttemptedRef.current) return
+    if (!desktopHost.available || builtInProject || reopenAttemptedRef.current) return
     reopenAttemptedRef.current = true
     const root = localStorage.getItem(LAST_PROJECT_ROOT_KEY)
     if (root) void openDesktopProject(root, false)
@@ -4408,7 +4556,11 @@ function App() {
               <div className="project-menu popover">
                 <div className="project-menu-current">
                   <span className="project-file-icon"><Icon name="document" size={17} /></span>
-                  <span><strong>{desktopSession?.path ?? filename}</strong><small title={desktopSession?.root}>{desktopSession ? 'Project folder · saved on disk' : 'Portable manuscript · saved in this browser'}</small></span>
+                  <span><strong>{desktopSession?.path ?? filename}</strong><small title={desktopSession?.root}>{desktopSession
+                    ? 'Project folder · saved on disk'
+                    : builtInProject === 'complete-example'
+                      ? 'Built-in example · editable browser copy'
+                      : 'Portable manuscript · saved in this browser'}</small></span>
                 </div>
                 <div className="project-menu-actions">
                   {desktopHost.available ? (
@@ -4419,6 +4571,7 @@ function App() {
                   ) : (
                     <button onClick={() => fileInputRef.current?.click()}><Icon name="document" size={16} /><span><strong>Open manuscript…</strong><small>DraftMatter manuscript, up to 5 MB</small></span></button>
                   )}
+                  <button className="project-menu-example" onClick={() => void openCompleteExample()} disabled={projectBusy}><Icon name="spark" size={16} /><span><strong>Open complete example</strong><small>Citations, review, figures, tables, Python, R, and Julia</small></span></button>
                   <button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={16} /><span><strong>Attach bibliography…</strong><small>BibTeX, CSL JSON, RIS, or EndNote · {citations.length} indexed</small></span></button>
                   <button onClick={createSnapshot}><Icon name="clock" size={16} /><span><strong>Save recovery snapshot</strong><small>Keep a private safety copy on this device</small></span></button>
                   <button onClick={() => { setRecoveryOpen(true); setProjectMenuOpen(false) }}><Icon name="history" size={16} /><span><strong>Recovery history</strong><small>{recoveries.length ? `${recoveries.length} local version${recoveries.length === 1 ? '' : 's'}` : 'No local versions yet'}</small></span><span className="menu-count">{recoveries.length}</span></button>
@@ -4674,7 +4827,7 @@ function App() {
             <span className="toolbar-divider" />
             <button aria-label="Bold" onClick={() => runStructuredCommand((editor) => editor.toggleBold(), 'Bold')} disabled={!canEditManuscript}><strong>B</strong></button>
             <button aria-label="Italic" onClick={() => runStructuredCommand((editor) => editor.toggleItalic(), 'Italic')} disabled={!canEditManuscript}><em>I</em></button>
-            <button aria-label="Add link" onClick={addStructuredLink} disabled={!canEditManuscript}><Icon name="link" size={16} /></button>
+            <button aria-label="Add link" aria-haspopup="dialog" aria-expanded={linkDialogOpen} onClick={addStructuredLink} disabled={!canEditManuscript}><Icon name="link" size={16} /></button>
             <span className="toolbar-divider" />
             <div className="toolbar-insert-wrap">
               <button className="toolbar-insert-button" aria-label="Insert" aria-expanded={insertMenuOpen} onClick={() => setInsertMenuOpen((open) => !open)} disabled={!canEditManuscript}><Icon name="plus" size={15} /><span>Insert</span><Icon name="chevronDown" size={12} /></button>
@@ -4770,10 +4923,12 @@ function App() {
               readOnly={Boolean(structuredReviewProjection) || !canEditManuscript}
               resolveAssetUrl={(path) => desktopSession
                 ? projectArtifactUrl(desktopSession.root, path) ?? 'data:,'
-                : path === 'figures/generated/fig-canopy.svg' ? '/fixtures/canopy-response.svg' : path}
+                : builtInProject === 'complete-example'
+                  ? completeExampleAssetUrls[path] ?? path
+                  : path === 'figures/generated/fig-canopy.svg' ? '/fixtures/canopy-response.svg' : path}
             />
             {citationOpen && structuredCitationSelection && (
-              <div className="citation-detail popover structured-citation-detail">
+              <div className="citation-detail popover structured-citation-detail" ref={structuredCitationDetailRef}>
                 <div className="citation-detail-top">
                   <span className={`source-icon ${activeCitationBadge.className}`}>{activeCitationBadge.label}</span>
                   <div><strong>Citation cluster · {detailCitationItems.length} source{detailCitationItems.length === 1 ? '' : 's'}</strong><p>{detailCitationLabel}</p></div>
@@ -5246,6 +5401,13 @@ function App() {
           onInsert={insertStructuredRequest}
           publishedValues={retainedPublishedValues}
           semanticObjects={semanticObjects}
+        />
+      )}
+
+      {linkDialogOpen && (
+        <LinkDialog
+          onClose={() => setLinkDialogOpen(false)}
+          onInsert={insertStructuredLink}
         />
       )}
 

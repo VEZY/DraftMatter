@@ -24,11 +24,11 @@ const fixtureRoot = join(process.cwd(), 'src/fixtures/projects/alpha-article')
 const source = readFileSync(join(fixtureRoot, 'paper.qmd'), 'utf8')
 const referencesSource = readFileSync(join(fixtureRoot, 'references.json'), 'utf8')
 const citationLabels = {
-  '[@vezy2024; @chen2025]': '(Vezy & Martin, 2024; Chen, 2025)',
+  '[@vezy2024; @chen2025]': '(Vezy & Martin, 2024; Chen & Silva, 2025)',
 }
 const bibliography = [
-  { id: 'vezy2024', value: 'Vezy, R., & Martin, A. (2024). Reproducible canopy analysis across research environments.' },
-  { id: 'chen2025', value: 'Chen, L. (2025). Portable evidence for drought-response synthesis.' },
+  { id: 'vezy2024', value: 'Vezy, R., & Martin, A. (2024). Portable evidence chains in multilingual plant phenotyping.' },
+  { id: 'chen2025', value: 'Chen, L., & Silva, M. (2025). Review-aware drought analysis in executable manuscripts.' },
 ]
 
 describe('DM-P7-05 article-sized alpha dogfood', () => {
@@ -58,6 +58,7 @@ describe('DM-P7-05 article-sized alpha dogfood', () => {
         affiliations: ['Open Methods Laboratory', 'Field Phenotyping Institute'],
       },
       { name: 'Lin Chen', affiliations: ['Field Phenotyping Institute'] },
+      { name: 'Marta Silva', affiliations: ['Open Methods Laboratory', 'Reproducible Research Unit'] },
     ])
     expect(references.diagnostics.filter((diagnostic) => diagnostic.level === 'error')).toEqual([])
     expect(references.records.map((record) => record.citekey)).toEqual(['vezy2024', 'chen2025'])
@@ -74,13 +75,14 @@ describe('DM-P7-05 article-sized alpha dogfood', () => {
     expect(retained.outputs).toHaveLength(9)
     expect(retained.diagnostics).toEqual([])
     expect(Object.fromEntries(Object.entries(values.values).map(([name, value]) => [name, value.rendered]))).toEqual({
-      python_mean: '18.4 cm',
-      r_p_value: '0.032',
-      julia_r2: '0.91',
+      canopy_reduction: '18.4 %',
+      allocation_p: '0.032',
+      prediction_r2: '0.99',
     })
     expect(values.diagnostics).toEqual([])
     expect(semanticObjects.filter((object) => object.kind === 'figure')).toHaveLength(3)
     expect(semanticObjects.filter((object) => object.kind === 'table')).toHaveLength(3)
+    expect(semanticObjects.filter((object) => object.kind === 'equation')).toHaveLength(1)
     expect(referenceIntegrityDiagnostics(parsed.document)).toEqual([])
     expect(review.changes).toEqual([expect.objectContaining({ id: 'dm-alpha-suggestion', status: 'open' })])
     expect(review.threads).toEqual([expect.objectContaining({ id: 'dm-alpha-thread', status: 'open' })])
@@ -91,16 +93,16 @@ describe('DM-P7-05 article-sized alpha dogfood', () => {
   it('creates a deterministic clean publication with output-only computations in every export', () => {
     const resolved = buildReviewExportBundle(source, ['dm-alpha-suggestion'])
     expect(resolved.finalProjection.ok).toBe(true)
-    expect(resolved.final).toContain('drought reduced mean canopy expansion by 18%')
-    expect(resolved.report).toContain('Please retain the diagnostic threshold')
+    expect(resolved.final).toContain('drought treatment reduced canopy expansion by 18.4%')
+    expect(resolved.report).toContain('Please confirm that the ±3.0 cm² diagnostic threshold')
 
     const publication = projectComputationsForPublication(resolved.final!)
     expect(validateCleanProjection(publication)).toEqual([])
-    expect(publication).toContain('mean drought canopy area was 18.4 cm')
-    expect(publication).toContain('the R contrast had *p* = 0.032')
-    expect(publication).toContain('the Julia fit reached $R^2$ = 0.91')
+    expect(publication).toContain('Final canopy area was 18.4 % lower under drought')
+    expect(publication).toContain('the allocation contrast had *p* = 0.032')
+    expect(publication).toContain('prediction performance reached $R^2$ = 0.99')
     expect(publication).not.toMatch(/```(?:python|r|julia)|@publish|\bpublish\(|dm-published-value|\.dm-anchor|\.draftmatter-reviews/)
-    for (const target of ['fig-python-canopy', 'tbl-python-means', 'fig-r-allocation', 'tbl-r-coefficients', 'fig-julia-model', 'tbl-julia-predictions']) {
+    for (const target of ['eq-canopy-response', 'fig-python-canopy', 'tbl-python-means', 'fig-r-allocation', 'tbl-r-coefficients', 'fig-julia-model', 'tbl-julia-predictions']) {
       expect(publication).toContain(`#${target}`)
     }
 
@@ -109,16 +111,17 @@ describe('DM-P7-05 article-sized alpha dogfood', () => {
     const readableDocx = new TextDecoder().decode(docx.bytes)
     expect(html).toContain('<span class="author-name">Ada Researcher</span>')
     expect(html).toContain('ORCID 0000-0002-1825-0097')
-    expect(html).toContain('(Vezy &amp; Martin, 2024; Chen, 2025)')
+    expect(html).toContain('(Vezy &amp; Martin, 2024; Chen &amp; Silva, 2025)')
+    expect(html).toContain('<span class="author-name">Marta Silva</span>')
     expect(html).toContain('<figure id="fig-python-canopy">')
     expect(html).toContain('<table id="tbl-r-coefficients">')
-    expect(html).toContain('Julia grouped predictions.')
+    expect(html).toContain('Observed and fitted canopy means generated in Julia.')
     expect(html).toContain('@media print')
     expect(html).not.toMatch(/cell-python|cell-r-|cell-julia|write_text|writeLines|println\(|dm-published-value|\.dm-anchor|\.draftmatter-reviews|<script/)
     expect(readableDocx).toContain('word/document.xml')
-    expect(readableDocx).toContain('Ada Researcher; Lin Chen')
-    expect(readableDocx).toContain('18.4 cm')
-    expect(readableDocx).toContain('Julia grouped predictions.')
+    expect(readableDocx).toContain('Ada Researcher; Lin Chen; Marta Silva')
+    expect(readableDocx).toContain('18.4 %')
+    expect(readableDocx).toContain('Observed and fitted canopy means generated in Julia.')
     expect(readableDocx).not.toMatch(/cell-python|cell-r-|cell-julia|write_text|writeLines|println\(|dm-published-value|\.dm-anchor|\.draftmatter-reviews|<w:(?:ins|del)\b/)
     expect(sourceHash(publication)).toBe(sourceHash(projectComputationsForPublication(buildReviewExportBundle(source, ['dm-alpha-suggestion']).final!)))
   })

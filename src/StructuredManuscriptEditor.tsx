@@ -36,6 +36,7 @@ import { embeddedExecutionImageFromHtml, executionTableFromHtml, safeEmbeddedIma
 import { isPipeTableSeparator, parseTableCaptionLine } from './tableSyntax'
 import { crossReferenceChoices, groupedCrossReferenceChoices, type CrossReferenceChoice } from './crossReferencePicker'
 import { resolveSemanticReference } from './referenceIntegrity'
+import { isSafePortableLinkDestination } from './portableLink'
 import {
   isExplicitlyUnnumbered,
   numberedCrossReferenceLabel,
@@ -249,7 +250,7 @@ export interface StructuredManuscriptEditorProps {
   onDiagnostics?: (diagnostics: DocumentDiagnostic[]) => void
   onOutlineChange?: (outline: StructuredOutlineItem[]) => void
   onInspectRaw?: (nodeId: string) => void
-  onCitationSelect?: (id: string, items: CitationItem[]) => void
+  onCitationSelect?: (id: string, items: CitationItem[], anchor: HTMLElement) => void
   onReviewSelectionChange?: (selection: StructuredReviewSelection | null) => void
   onReviewContextMenu?: (selection: StructuredReviewSelection, point: { x: number; y: number }) => void
   onReviewAnchorSelect?: (anchorId: string, reviewId?: string) => void
@@ -1113,7 +1114,7 @@ function rawNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () 
   }
 }
 
-function citationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () => number | undefined, onSelect: (id: string, items: CitationItem[]) => void): NodeView {
+function citationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos: () => number | undefined, onSelect: (id: string, items: CitationItem[], anchor: HTMLElement) => void): NodeView {
   let node = initialNode
   const dom = document.createElement('button')
   dom.type = 'button'
@@ -1131,7 +1132,7 @@ function citationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
   dom.addEventListener('click', () => {
     const position = getPos()
     if (typeof position === 'number') view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, position)))
-    onSelect(String(node.attrs.id), Array.isArray(node.attrs.items) ? node.attrs.items : [])
+    onSelect(String(node.attrs.id), Array.isArray(node.attrs.items) ? node.attrs.items : [], dom)
   })
   return {
     dom,
@@ -1143,13 +1144,6 @@ function citationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
       return true
     },
   }
-}
-
-function isSafePortableLinkDestination(value: string) {
-  const destination = value.trim()
-  return Boolean(destination)
-    && !/[\u0000-\u001f\u007f\s]/.test(destination)
-    && !/^(?:javascript|vbscript|data):/i.test(destination)
 }
 
 function linkMarkView(initialMark: ProseMirrorMark, view: EditorView, isEditable: () => boolean): MarkView {
@@ -3672,7 +3666,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     focus: () => viewRef.current?.focus(),
     toggleBold: () => run(toggleMark(manuscriptSchema.marks.strong)),
     toggleItalic: () => run(toggleMark(manuscriptSchema.marks.emphasis)),
-    setLink: (href, title) => run(toggleMark(manuscriptSchema.marks.link, { href, title: title ?? null })),
+    setLink: (href, title) => {
+      const view = viewRef.current
+      if (!view || view.state.selection.empty) return false
+      return run(toggleMark(manuscriptSchema.marks.link, { href, title: title ?? null }))
+    },
     setParagraph: () => run(setBlockType(manuscriptSchema.nodes.paragraph)),
     setHeading: (level) => {
       const view = viewRef.current
@@ -4171,7 +4169,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
             (cellId, language, code) => onFormatCodeCellRef.current?.(cellId, language, code) ?? Promise.resolve(undefined),
           ),
         raw_block: (node, editorView, getPos) => rawNodeView(node, editorView, getPos, () => !readOnlyRef.current, (nodeId) => onInspectRawRef.current?.(nodeId)),
-        citation: (node, editorView, getPos) => citationNodeView(node, editorView, getPos, (id, items) => onCitationSelectRef.current?.(id, items)),
+        citation: (node, editorView, getPos) => citationNodeView(node, editorView, getPos, (id, items, anchor) => onCitationSelectRef.current?.(id, items, anchor)),
         cross_reference: (node, editorView, getPos) => crossReferenceNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         equation_inline: (node, editorView, getPos) => equationNodeView(node, editorView, getPos, false, () => !readOnlyRef.current),
         equation_block: (node, editorView, getPos) => equationNodeView(node, editorView, getPos, true, () => !readOnlyRef.current),

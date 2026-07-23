@@ -355,6 +355,40 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
       .toContain('[sampling protocol](notes/field-protocol.md "Field evidence protocol")')
   })
 
+  test('adds a link from the formatting toolbar without a native browser prompt', async ({ page }) => {
+    const linkSource = '# Field links\n\nOpen the field protocol before sampling.\n'
+    await page.evaluate((portableSource) => localStorage.setItem('draftmatter.structured-source.v1', portableSource), linkSource)
+    await page.reload()
+
+    const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
+    await manuscript.getByText('Open the field protocol before sampling.', { exact: true }).evaluate((element) => {
+      const editor = element.closest<HTMLElement>('[contenteditable="true"]')
+      const text = element.firstChild
+      const selection = window.getSelection()
+      if (!editor || !text || !selection) throw new Error('Rendered editor selection is unavailable')
+      editor.focus()
+      const range = document.createRange()
+      range.setStart(text, 'Open the '.length)
+      range.setEnd(text, 'Open the field protocol'.length)
+      selection.removeAllRanges()
+      selection.addRange(range)
+      document.dispatchEvent(new Event('selectionchange'))
+    })
+
+    await page.getByRole('button', { name: 'Add link' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Add link' })
+    await expect(dialog).toBeVisible()
+    await dialog.getByLabel('Link destination').fill('notes/field-protocol.md')
+    await dialog.getByLabel('Link title').fill('Field protocol')
+    await dialog.getByRole('button', { name: 'Add link' }).click()
+
+    const link = manuscript.getByRole('link', { name: 'field protocol' })
+    await expect(link).toHaveAttribute('href', 'notes/field-protocol.md')
+    await expect(link).toHaveAttribute('title', 'Field protocol')
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1')))
+      .toContain('[field protocol](notes/field-protocol.md "Field protocol")')
+  })
+
   test('edits one preserved raw block through an explicit focused inspector', async ({ page }) => {
     const rawSource = '# Raw syntax\n\n::: {.future-widget data-owner="lab"}\nOriginal opaque payload.\n:::\n'
     await page.evaluate((portableSource) => localStorage.setItem('draftmatter.structured-source.v1', portableSource), rawSource)

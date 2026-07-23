@@ -54,4 +54,16 @@ describe('focused authoring workspace', () => {
     expect(container.querySelector('.code-workspace-drawer')?.textContent).toContain('Execution is unavailable in this browser')
     expect(container.querySelector('.code-workspace-drawer')?.textContent).toContain('Open project folder…')
   })
+
+  it('opens an in-app dialog from the link toolbar button', async () => {
+    await act(async () => root.render(<App />))
+    const button = container.querySelector<HTMLButtonElement>('.format-toolbar [aria-label="Add link"]')!
+
+    expect(button.getAttribute('aria-expanded')).toBe('false')
+    await act(async () => button.click())
+
+    expect(button.getAttribute('aria-expanded')).toBe('true')
+    expect(container.querySelector('[role="dialog"][aria-labelledby="add-link-title"]')).not.toBeNull()
+    expect(document.activeElement).toBe(container.querySelector('[aria-labelledby="add-link-title"] input'))
+  })
 })

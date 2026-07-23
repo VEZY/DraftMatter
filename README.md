@@ -56,4 +56,8 @@ Useful implementation notes:
 
 The collaboration path includes a tested browser-safe editor/reviewer, offline-capable Yjs state, OIDC and tenant-scoped PostgreSQL authorization, authenticated Hocuspocus transport, S3-compatible immutable snapshots, durable entitlements, and a portable self-hosted service image. Browser builds intentionally have no filesystem, process, execution, Git, or external-renderer capability. See [the collaboration boundary](docs/collaboration-boundary.md).
 
+## Complete example project
+
+Choose **Open complete example** from the project menu to open an editable browser copy of [`src/fixtures/projects/alpha-article`](src/fixtures/projects/alpha-article/README.md), a self-contained synthetic research article that exercises the complete portable workflow. It includes rich author and affiliation metadata, citations, an equation, Python/R/Julia figures and tables, published in-text values, retained outputs, tracked review, all conventional manuscript sections, CSV inputs, and clean-export coverage. The menu action is always available, resets the example to its pristine bundled source when chosen again, and never executes its code. You can also copy the fixture folder anywhere and open it as a trusted desktop project when you want to run the cells.
+
 Production desktop installers are built from version tags as signed/notarized draft releases for Windows x64, Linux x64, and both macOS architectures. Manual workflow runs produce unsigned release candidates only; see [the release gate](docs/release-compliance.md).

@@ -2,24 +2,29 @@
   {
     "id": "vezy2024",
     "type": "article-journal",
-    "title": "Reproducible canopy analysis across research environments",
+    "title": "Portable evidence chains in multilingual plant phenotyping",
     "author": [
       { "family": "Vezy", "given": "Remi" },
       { "family": "Martin", "given": "Ada" }
     ],
     "issued": { "date-parts": [[2024]] },
-    "container-title": "Open Plant Science",
-    "DOI": "10.5555/draftmatter.2024.1"
+    "container-title": "Journal of Synthetic Plant Methods",
+    "volume": "12",
+    "issue": "2",
+    "page": "101-118"
   },
   {
     "id": "chen2025",
     "type": "article-journal",
-    "title": "Portable evidence for drought-response synthesis",
+    "title": "Review-aware drought analysis in executable manuscripts",
     "author": [
-      { "family": "Chen", "given": "Lin" }
+      { "family": "Chen", "given": "Lin" },
+      { "family": "Silva", "given": "Marta" }
     ],
     "issued": { "date-parts": [[2025]] },
     "container-title": "Methods and Evidence",
-    "DOI": "10.5555/draftmatter.2025.2"
+    "volume": "7",
+    "issue": "1",
+    "page": "44-59"
   }
 ]

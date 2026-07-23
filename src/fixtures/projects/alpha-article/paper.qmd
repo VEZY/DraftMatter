@@ -1,5 +1,6 @@
 ---
-title: "Cross-language canopy responses to intermittent drought"
+title: "A reproducible cross-language analysis of synthetic canopy drought responses"
+subtitle: "A complete DraftMatter example manuscript"
 author:
   - name: "Ada Researcher"
     orcid: "0000-0002-1825-0097"
@@ -9,148 +10,357 @@ author:
   - name: "Lin Chen"
     affiliations:
       - "Field Phenotyping Institute"
+  - name: "Marta Silva"
+    affiliations:
+      - "Open Methods Laboratory"
+      - "Reproducible Research Unit"
+date: "2026-07-21"
+keywords:
+  - reproducible research
+  - executable manuscripts
+  - drought phenotyping
+  - Julia
+  - Python
+  - R
 bibliography: references.json
-format: html
+format:
+  html:
+    toc: true
+    number-sections: true
 ---
 
-# Cross-language canopy responses to intermittent drought
+# A reproducible cross-language analysis of synthetic canopy drought responses
 
 ## Abstract {.unnumbered}
 
-Intermittent drought changed canopy expansion before final biomass diverged. This article-sized fixture keeps its authors, citations, computations, semantic objects, and review history in one portable project.
+**Background:** Reproducible manuscripts should connect narrative claims, analysis code, retained outputs, citations, and peer review without making the published article read like a computational notebook. **Objective:** We created a complete, synthetic drought-phenotyping study to demonstrate that workflow across Python, R, and Julia. **Methods:** Forty-eight virtual plants were assigned to control or intermittent-drought treatments and measured over 12 weeks. Python summarized canopy trajectories, R estimated allocation contrasts, and Julia evaluated model predictions. **Results:** Final canopy area was {{canopy_reduction}} lower under drought, the allocation contrast had *p* = {{allocation_p}}, and prediction performance reached $R^2$ = {{prediction_r2}}. Each language produced one retained figure, one retained table, and one in-text value. **Conclusion:** A portable manuscript can preserve inspectable computation and review history while exporting clean prose, numbered objects, and a conventional bibliography.
+
+**Keywords:** reproducible research; executable manuscripts; drought phenotyping; Julia; Python; R
+
+> **Example notice.** This manuscript is a product demonstration. The data, people, affiliations, study, and cited articles are synthetic; the ORCID is a checksum-valid example identifier.
 
 ## Introduction {#sec-introduction}
 
-Reproducible scientific writing should connect claims to inspectable evidence without publishing analysis source by default [@vezy2024; @chen2025]. We therefore compared matching Python, R, and Julia summaries while retaining clean publication outputs.
+Research articles often separate the prose that communicates a result from the code and decisions that produced it. That separation can make an apparently small revision—such as changing an exclusion threshold or figure label—difficult to audit. Portable research environments instead keep claims close to inspectable evidence while leaving computation source out of ordinary reading and clean exports [@vezy2024; @chen2025].
+
+Drought phenotyping is a useful demonstration because it combines repeated measurements, treatment contrasts, model diagnostics, and several kinds of publication object. It also makes cross-language reproducibility concrete: a trajectory can be summarized in Python, an inferential contrast in R, and a predictive check in Julia without forcing the manuscript into a single runtime.
+
+We asked whether a synthetic intermittent-drought treatment altered canopy expansion before final biomass diverged. Our goals were to (1) present a complete scientific article structure, (2) retain figures, tables, and values from all three supported languages, and (3) preserve attributed editorial suggestions and comments in the same portable source.
 
 ## Methods {#sec-methods}
 
-We observed 48 plants across six measurements and used the same treatment summaries in three language sessions. Calibration and exclusion rules were fixed before analysis.[^protocol]
+### Study design
 
-[^protocol]: The portable protocol records weekly image calibration, treatment assignment, and exclusion criteria.
+We generated records for 48 virtual plants in two balanced treatment groups: well-watered control and intermittent drought. Canopy area was measured at weeks 0, 2, 4, 6, 8, 10, and 12. Destructive allocation measurements were represented at weeks 4, 8, and 12. Treatment assignment, calibration rules, and the analysis plan were fixed before inspecting the final contrasts.[^protocol]
+
+[^protocol]: The bundled CSV files are deliberately small and human-readable. They are intended to test the complete authoring workflow, not to support biological inference.
+
+### Measurements
+
+Canopy area was expressed in square centimetres and summarized as a treatment mean with its standard error. Allocation was expressed as the fraction of dry mass assigned to leaves, stems, and roots. The fitted response used the normalized form in Equation @eq-canopy-response, where $A_{i,t}$ is canopy area for plant $i$ at week $t$, $T_i$ is the drought indicator, and $\varepsilon_{i,t}$ is residual variation.
+
+$$
+A_{i,t} = \beta_0 + \beta_1 t + \beta_2 T_i + \beta_3(t \times T_i) + \varepsilon_{i,t}
+$$ {#eq-canopy-response}
+: Linear treatment-by-time response used for the synthetic prediction check.
+
+### Statistical analysis
+
+Python 3 generated the longitudinal summary from `data/canopy.csv`. Base R generated allocation contrasts and confidence intervals from `data/allocation.csv`. Julia generated observed-versus-predicted diagnostics from `data/model-predictions.csv`. The example uses only standard-library or base-language functionality so that no project-specific packages are required. Reported values are descriptive demonstrations rather than estimates from a real experiment.
+
+### Reproducibility and review
+
+Every executable cell has a stable identifier and an explicit output role. DraftMatter stores publication-ready outputs beside the source and records enough provenance to mark them stale when code or inputs change. Opening the project does not execute any cell. The review markup at the end of this file is portable, attributed, and excluded from clean publication exports.
 
 ## Results {#sec-results}
 
-The retained Python trajectory is shown in @fig-python-canopy, with its numerical summary in @tbl-python-means.
+### Canopy development summarized in Python
+
+Control and drought trajectories began together and separated after week 4. By week 12, mean canopy area reached 78.6 cm² in the control and 64.1 cm² under drought, a relative reduction of {{canopy_reduction}} (@fig-python-canopy; @tbl-python-means).
 
 ```python {#cell-python-figure .execute output="figure" reference="fig-python-canopy" produces="figures/python-canopy.svg"}
+from csv import DictReader
 from pathlib import Path
+
+rows = list(DictReader(Path("data/canopy.csv").open(encoding="utf-8")))
+width, height = 720, 420
+left, right, top, bottom = 86, 686, 38, 350
+x = lambda week: left + float(week) / 12 * (right - left)
+y = lambda mean: bottom - float(mean) / 90 * (bottom - top)
+colors = {"Control": "#0072B2", "Drought": "#D55E00"}
+
+parts = [
+    '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" role="img" aria-labelledby="title desc">',
+    '<title id="title">Canopy area trajectories by water treatment</title>',
+    '<desc id="desc">Control and drought means are similar through week four, then diverge through week twelve.</desc>',
+    '<rect width="720" height="420" fill="white"/>',
+]
+for tick in range(0, 91, 15):
+    py = y(tick)
+    parts.append(f'<path d="M{left} {py:.1f}H{right}" stroke="#D9E1DE"/>')
+    parts.append(f'<text x="70" y="{py + 5:.1f}" text-anchor="end">{tick}</text>')
+for week in range(0, 13, 2):
+    px = x(week)
+    parts.append(f'<text x="{px:.1f}" y="376" text-anchor="middle">{week}</text>')
+for treatment in ("Control", "Drought"):
+    group = [row for row in rows if row["treatment"] == treatment]
+    points = " ".join(f'{x(row["week"]):.1f},{y(row["mean_cm2"]):.1f}' for row in group)
+    parts.append(f'<polyline points="{points}" fill="none" stroke="{colors[treatment]}" stroke-width="4"/>')
+    for row in group:
+        px, py = x(row["week"]), y(row["mean_cm2"])
+        parts.append(f'<circle cx="{px:.1f}" cy="{py:.1f}" r="5" fill="white" stroke="{colors[treatment]}" stroke-width="3"/>')
+parts.extend([
+    '<path d="M86 38V350H686" fill="none" stroke="#25332D" stroke-width="2"/>',
+    '<text x="386" y="408" text-anchor="middle">Week</text>',
+    '<text x="20" y="194" transform="rotate(-90 20 194)" text-anchor="middle">Canopy area (cm²)</text>',
+    '<path d="M455 28h28" stroke="#0072B2" stroke-width="4"/><text x="491" y="33">Control</text>',
+    '<path d="M565 28h28" stroke="#D55E00" stroke-width="4"/><text x="601" y="33">Drought</text>',
+    '<style>text{font:14px system-ui,sans-serif;fill:#25332D}</style></svg>',
+])
 Path("figures").mkdir(exist_ok=True)
-Path("figures/python-canopy.svg").write_text("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'><path d='M0 9L9 1'/></svg>", encoding="utf-8")
+Path("figures/python-canopy.svg").write_text("\n".join(parts), encoding="utf-8")
 ```
 
 <!-- dm-output:start cell="cell-python-figure" run="sha256:python-figure" -->
-![Two treatment trajectories across six measurements](figures/python-canopy.svg){#fig-python-canopy}
-: Python canopy trajectories across the measurement period.
+![Line chart of mean canopy area for control and drought treatments from week 0 to week 12](figures/python-canopy.svg){#fig-python-canopy}
+: Canopy area trajectories generated in Python. Points are treatment means; the synthetic series contains 24 plants per treatment.
 <!-- dm-output:end -->
 
 ```python {#cell-python-table .execute output="table" reference="tbl-python-means"}
-print("| Treatment | Mean |\n| --- | ---: |\n| Control | 21.8 |\n| Drought | 18.4 |")
+from csv import DictReader
+from pathlib import Path
+
+rows = [row for row in DictReader(Path("data/canopy.csv").open(encoding="utf-8")) if row["week"] == "12"]
+print("| Treatment | n | Mean (cm²) | SE (cm²) |")
+print("| :--- | ---: | ---: | ---: |")
+for row in rows:
+    print(f'| {row["treatment"]} | {row["n"]} | {float(row["mean_cm2"]):.1f} | {float(row["se_cm2"]):.1f} |')
 ```
 
 <!-- dm-output:start cell="cell-python-table" run="sha256:python-table" -->
-| Treatment | Mean canopy area |
-| :--- | ---: |
-| Control | 21.8 |
-| Drought | 18.4 |
-: Python treatment means. {#tbl-python-means}
+| Treatment | n | Mean (cm²) | SE (cm²) |
+| :--- | ---: | ---: | ---: |
+| Control | 24 | 78.6 | 3.2 |
+| Drought | 24 | 64.1 | 3.5 |
+: Week-12 canopy summaries generated in Python. {#tbl-python-means}
 <!-- dm-output:end -->
 
-The R interval view in @fig-r-allocation and coefficient table in @tbl-r-coefficients preserve the inferential summary.
+### Allocation contrasts estimated in R
+
+The drought treatment shifted allocation toward roots and away from leaves. The root-allocation contrast was 0.09 (95% CI 0.02–0.16), while the leaf contrast was −0.08 (95% CI −0.15 to −0.01; @fig-r-allocation). The model summary in @tbl-r-coefficients retained the exact demonstration value *p* = {{allocation_p}}.
 
 ```r {#cell-r-figure .execute output="figure" reference="fig-r-allocation" produces="figures/r-allocation.svg"}
+allocation <- read.csv("data/allocation.csv", stringsAsFactors = FALSE)
 dir.create("figures", showWarnings = FALSE)
-writeLines("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'><circle cx='5' cy='5' r='3'/></svg>", "figures/r-allocation.svg")
+scale_x <- function(value) 110 + (value + 0.2) / 0.4 * 540
+positions <- c(105, 205, 305)
+grid <- paste(vapply(seq(-0.2, 0.2, 0.1), function(tick) {
+  sprintf('<path d="M%.1f 55V340"/><text x="%.1f" y="370" text-anchor="middle">%.1f</text>',
+          scale_x(tick), scale_x(tick), tick)
+}, character(1)), collapse = "")
+intervals <- paste(vapply(seq_len(nrow(allocation)), function(i) {
+  row <- allocation[i, ]
+  sprintf(paste0('<text x="92" y="%d" text-anchor="end">%s</text>',
+                 '<path d="M%.1f %dH%.1f" stroke="#25332D" stroke-width="4"/>',
+                 '<circle cx="%.1f" cy="%d" r="7" fill="#009E73" stroke="#25332D" stroke-width="2"/>'),
+          positions[i] + 5, row$component,
+          scale_x(row$conf_low), positions[i], scale_x(row$conf_high),
+          scale_x(row$estimate), positions[i])
+}, character(1)), collapse = "")
+svg <- paste0(
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" role="img" aria-labelledby="title desc">',
+  '<title id="title">Drought allocation contrasts</title>',
+  '<desc id="desc">Leaf, stem, and root allocation estimates with 95 percent confidence intervals.</desc>',
+  '<rect width="720" height="420" fill="white"/>',
+  '<g stroke="#E4EAE7" font-family="system-ui,sans-serif" font-size="14" fill="#25332D">', grid, '</g>',
+  '<path d="M380 55V340" stroke="#7B8782" stroke-width="2" stroke-dasharray="7 7"/>',
+  '<g font-family="system-ui,sans-serif" font-size="16" fill="#25332D">', intervals, '</g>',
+  '<text x="380" y="405" text-anchor="middle" font-family="system-ui,sans-serif" font-size="15" fill="#25332D">Drought − control allocation contrast</text>',
+  '</svg>')
+writeLines(svg, "figures/r-allocation.svg", useBytes = TRUE)
 ```
 
 <!-- dm-output:start cell="cell-r-figure" run="sha256:r-figure" -->
-![Three interval estimates with central points](figures/r-allocation.svg){#fig-r-allocation}
-: R interval estimates for the allocation contrast.
+![Forest plot of drought allocation contrasts for leaves, stems, and roots](figures/r-allocation.svg){#fig-r-allocation}
+: Allocation contrasts generated in R. Points are drought-minus-control estimates and horizontal lines are 95% confidence intervals.
 <!-- dm-output:end -->
 
 ```r {#cell-r-table .execute output="table" reference="tbl-r-coefficients"}
-cat("| Term | Estimate |\n| --- | ---: |\n| Intercept | 0.71 |\n| Drought | -0.18 |")
+allocation <- read.csv("data/allocation.csv", stringsAsFactors = FALSE)
+cat("| Component | Estimate | 95% CI | p-value |\n")
+cat("| :--- | ---: | :---: | ---: |\n")
+for (i in seq_len(nrow(allocation))) {
+  row <- allocation[i, ]
+  cat(sprintf("| %s | %.2f | %.2f to %.2f | %.3f |\n",
+              row$component, row$estimate, row$conf_low, row$conf_high, row$p_value))
+}
 ```
 
 <!-- dm-output:start cell="cell-r-table" run="sha256:r-table" -->
-| Term | Estimate |
-| :--- | ---: |
-| Intercept | 0.71 |
-| Drought | -0.18 |
-: R model coefficients. {#tbl-r-coefficients}
+| Component | Estimate | 95% CI | p-value |
+| :--- | ---: | :---: | ---: |
+| Leaf | -0.08 | -0.15 to -0.01 | 0.032 |
+| Stem | -0.01 | -0.06 to 0.04 | 0.681 |
+| Root | 0.09 | 0.02 to 0.16 | 0.018 |
+: Drought-minus-control allocation contrasts generated in R. {#tbl-r-coefficients}
 <!-- dm-output:end -->
 
-The Julia fit in @fig-julia-model agrees with the grouped predictions in @tbl-julia-predictions.
+### Prediction diagnostics evaluated in Julia
+
+Predictions followed the observed mean response across the measurement period (@fig-julia-model). Residuals remained within 3.0 cm² at every displayed week, and the retained diagnostic table reports $R^2$ = {{prediction_r2}} (@tbl-julia-predictions).
 
 ```julia {#cell-julia-figure .execute output="figure" reference="fig-julia-model" produces="figures/julia-model.svg"}
+lines = readlines("data/model-predictions.csv")[2:end]
+fields = split.(lines, ',')
+week = parse.(Int, getindex.(fields, 1))
+observed = parse.(Float64, getindex.(fields, 2))
+predicted = parse.(Float64, getindex.(fields, 3))
+
+left, right, top, bottom = 86.0, 686.0, 38.0, 350.0
+x(value) = left + value / 12 * (right - left)
+y(value) = bottom - value / 90 * (bottom - top)
+polyline = join(["$(round(x(w), digits=1)),$(round(y(v), digits=1))" for (w, v) in zip(week, predicted)], " ")
+points = join(["<circle cx='$(round(x(w), digits=1))' cy='$(round(y(v), digits=1))' r='6'/>" for (w, v) in zip(week, observed)], "")
+svg = """<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" role="img" aria-labelledby="title desc">
+<title id="title">Observed and predicted canopy response</title>
+<desc id="desc">Observed points closely follow the Julia prediction line from week zero to week twelve.</desc>
+<rect width="720" height="420" fill="white"/>
+<g stroke="#D9E1DE"><path d="M86 298H686"/><path d="M86 246H686"/><path d="M86 194H686"/><path d="M86 142H686"/><path d="M86 90H686"/></g>
+<path d="M86 38V350H686" fill="none" stroke="#25332D" stroke-width="2"/>
+<polyline points="$polyline" fill="none" stroke="#CC79A7" stroke-width="4"/>
+<g fill="white" stroke="#0072B2" stroke-width="3">$points</g>
+<g font-family="system-ui,sans-serif" font-size="14" fill="#25332D"><text x="386" y="408" text-anchor="middle">Week</text><text x="20" y="194" transform="rotate(-90 20 194)" text-anchor="middle">Canopy area (cm²)</text><text x="490" y="30">Observed</text><text x="595" y="30">Predicted</text></g>
+</svg>"""
 mkpath("figures")
-write("figures/julia-model.svg", "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 10 10'><path d='M0 8Q5 1 10 2'/></svg>")
+write("figures/julia-model.svg", svg)
 ```
 
 <!-- dm-output:start cell="cell-julia-figure" run="sha256:julia-figure" -->
-![Observed points following a fitted response curve](figures/julia-model.svg){#fig-julia-model}
-: Julia model fit against the observed canopy response.
+![Observed canopy means as points and Julia model predictions as a line](figures/julia-model.svg){#fig-julia-model}
+: Observed and predicted canopy response generated in Julia. Points show synthetic observations and the line shows fitted values.
 <!-- dm-output:end -->
 
 ```julia {#cell-julia-table .execute output="table" reference="tbl-julia-predictions"}
-println("| Week | Predicted |\n| ---: | ---: |\n| 4 | 18.2 |\n| 8 | 42.7 |")
+lines = readlines("data/model-predictions.csv")[2:end]
+fields = split.(lines, ',')
+println("| Week | Observed (cm²) | Predicted (cm²) | Residual (cm²) |")
+println("| ---: | ---: | ---: | ---: |")
+for row in fields
+    week, observed, predicted, residual = row
+    println("| $week | $observed | $predicted | $residual |")
+end
 ```
 
 <!-- dm-output:start cell="cell-julia-table" run="sha256:julia-table" -->
-| Week | Predicted canopy area |
-| ---: | ---: |
-| 4 | 18.2 |
-| 8 | 42.7 |
-: Julia grouped predictions. {#tbl-julia-predictions}
+| Week | Observed (cm²) | Predicted (cm²) | Residual (cm²) |
+| ---: | ---: | ---: | ---: |
+| 0 | 4.2 | 5.0 | -0.8 |
+| 4 | 24.8 | 22.9 | 1.9 |
+| 8 | 48.7 | 51.4 | -2.7 |
+| 12 | 71.4 | 69.6 | 1.8 |
+: Observed and fitted canopy means generated in Julia. {#tbl-julia-predictions}
 <!-- dm-output:end -->
 
-Published in-text results remain ordinary prose: mean drought canopy area was {{python_mean}}, the R contrast had *p* = {{r_p_value}}, and the Julia fit reached $R^2$ = {{julia_r2}}.
+### Published values in prose
+
+The result sentences above contain ordinary prose placeholders whose retained values came from language-specific cells. Readers see a final reduction of {{canopy_reduction}}, an allocation *p*-value of {{allocation_p}}, and a prediction $R^2$ of {{prediction_r2}}; clean exports omit the following computation source and provenance directives.
 
 ```python {#cell-python-values .execute output="values"}
-publish("python_mean", 18.4, unit="cm", digits=1)
+control, drought = 78.6, 64.1
+reduction = 100 * (control - drought) / control
+publish("canopy_reduction", reduction, unit="%", digits=1)
 ```
 
 <!-- dm-output:start cell="cell-python-values" run="sha256:cell-python-values" -->
-<!-- dm-published-value data="%7B%22version%22%3A1%2C%22name%22%3A%22python_mean%22%2C%22value%22%3A18.4%2C%22unit%22%3A%22cm%22%2C%22formatting%22%3A%7B%22digits%22%3A1%7D%2C%22rendered%22%3A%22%22%2C%22provenance%22%3A%7B%22cellId%22%3A%22cell-python-values%22%2C%22language%22%3A%22python%22%2C%22runHash%22%3A%22sha256%3Acell-python-values%22%2C%22codeHash%22%3A%22sha256%3Acode-cell-python-values%22%2C%22environmentFingerprint%22%3A%22sha256%3Aalpha-python%22%2C%22sessionGeneration%22%3A1%2C%22executionSequence%22%3A3%2C%22retainedOutputHashes%22%3A%5B%22sha256%3Acell-python-values%22%5D%7D%7D" -->
+<!-- dm-published-value data="%7B%22version%22%3A1%2C%22name%22%3A%22canopy_reduction%22%2C%22value%22%3A18.4%2C%22unit%22%3A%22%25%22%2C%22formatting%22%3A%7B%22digits%22%3A1%7D%2C%22rendered%22%3A%22%22%2C%22provenance%22%3A%7B%22cellId%22%3A%22cell-python-values%22%2C%22language%22%3A%22python%22%2C%22runHash%22%3A%22sha256%3Acell-python-values%22%2C%22codeHash%22%3A%22sha256%3Acode-cell-python-values%22%2C%22environmentFingerprint%22%3A%22sha256%3Aalpha-python%22%2C%22sessionGeneration%22%3A1%2C%22executionSequence%22%3A3%2C%22retainedOutputHashes%22%3A%5B%22sha256%3Acell-python-values%22%5D%7D%7D" -->
 <!-- dm-output:end -->
 
 ```r {#cell-r-values .execute output="values"}
-publish("r_p_value", 0.032, digits = 3)
+allocation <- read.csv("data/allocation.csv", stringsAsFactors = FALSE)
+allocation_p <- allocation$p_value[allocation$component == "Leaf"]
+publish("allocation_p", allocation_p, digits = 3)
 ```
 
 <!-- dm-output:start cell="cell-r-values" run="sha256:cell-r-values" -->
-<!-- dm-published-value data="%7B%22version%22%3A1%2C%22name%22%3A%22r_p_value%22%2C%22value%22%3A0.032%2C%22formatting%22%3A%7B%22digits%22%3A3%7D%2C%22rendered%22%3A%22%22%2C%22provenance%22%3A%7B%22cellId%22%3A%22cell-r-values%22%2C%22language%22%3A%22r%22%2C%22runHash%22%3A%22sha256%3Acell-r-values%22%2C%22codeHash%22%3A%22sha256%3Acode-cell-r-values%22%2C%22environmentFingerprint%22%3A%22sha256%3Aalpha-r%22%2C%22sessionGeneration%22%3A1%2C%22executionSequence%22%3A3%2C%22retainedOutputHashes%22%3A%5B%22sha256%3Acell-r-values%22%5D%7D%7D" -->
+<!-- dm-published-value data="%7B%22version%22%3A1%2C%22name%22%3A%22allocation_p%22%2C%22value%22%3A0.032%2C%22formatting%22%3A%7B%22digits%22%3A3%7D%2C%22rendered%22%3A%22%22%2C%22provenance%22%3A%7B%22cellId%22%3A%22cell-r-values%22%2C%22language%22%3A%22r%22%2C%22runHash%22%3A%22sha256%3Acell-r-values%22%2C%22codeHash%22%3A%22sha256%3Acode-cell-r-values%22%2C%22environmentFingerprint%22%3A%22sha256%3Aalpha-r%22%2C%22sessionGeneration%22%3A1%2C%22executionSequence%22%3A3%2C%22retainedOutputHashes%22%3A%5B%22sha256%3Acell-r-values%22%5D%7D%7D" -->
 <!-- dm-output:end -->
 
 ```julia {#cell-julia-values .execute output="values"}
-@publish julia_r2 digits=2
+observed = [4.2, 24.8, 48.7, 71.4]
+predicted = [5.0, 22.9, 51.4, 69.6]
+prediction_r2 = 1 - sum((observed .- predicted) .^ 2) / sum((observed .- sum(observed) / length(observed)) .^ 2)
+@publish prediction_r2 digits=2
 ```
 
 <!-- dm-output:start cell="cell-julia-values" run="sha256:cell-julia-values" -->
-<!-- dm-published-value data="%7B%22version%22%3A1%2C%22name%22%3A%22julia_r2%22%2C%22value%22%3A0.91%2C%22formatting%22%3A%7B%22digits%22%3A2%7D%2C%22rendered%22%3A%22%22%2C%22provenance%22%3A%7B%22cellId%22%3A%22cell-julia-values%22%2C%22language%22%3A%22julia%22%2C%22runHash%22%3A%22sha256%3Acell-julia-values%22%2C%22codeHash%22%3A%22sha256%3Acode-cell-julia-values%22%2C%22environmentFingerprint%22%3A%22sha256%3Aalpha-julia%22%2C%22sessionGeneration%22%3A1%2C%22executionSequence%22%3A3%2C%22retainedOutputHashes%22%3A%5B%22sha256%3Acell-julia-values%22%5D%7D%7D" -->
+<!-- dm-published-value data="%7B%22version%22%3A1%2C%22name%22%3A%22prediction_r2%22%2C%22value%22%3A0.99%2C%22formatting%22%3A%7B%22digits%22%3A2%7D%2C%22rendered%22%3A%22%22%2C%22provenance%22%3A%7B%22cellId%22%3A%22cell-julia-values%22%2C%22language%22%3A%22julia%22%2C%22runHash%22%3A%22sha256%3Acell-julia-values%22%2C%22codeHash%22%3A%22sha256%3Acode-cell-julia-values%22%2C%22environmentFingerprint%22%3A%22sha256%3Aalpha-julia%22%2C%22sessionGeneration%22%3A1%2C%22executionSequence%22%3A3%2C%22retainedOutputHashes%22%3A%5B%22sha256%3Acell-julia-values%22%5D%7D%7D" -->
 <!-- dm-output:end -->
 
-The []{#dm-alpha-suggestion-start .dm-anchor data-anchor="dm-alpha-suggestion-range" data-edge="start"}drought reduced mean canopy expansion[]{#dm-alpha-suggestion-end .dm-anchor data-anchor="dm-alpha-suggestion-range" data-edge="end"}.
+The []{#dm-alpha-suggestion-start .dm-anchor data-anchor="dm-alpha-suggestion-range" data-edge="start"}drought treatment reduced canopy expansion[]{#dm-alpha-suggestion-end .dm-anchor data-anchor="dm-alpha-suggestion-range" data-edge="end"}.
 
-Model diagnostics remained within the pre-registered bounds[]{#dm-alpha-comment .dm-anchor data-anchor="dm-alpha-comment" data-edge="point" data-affinity="after"}.
+All residuals remained within the pre-registered ±3.0 cm² diagnostic bound[]{#dm-alpha-comment .dm-anchor data-anchor="dm-alpha-comment" data-edge="point" data-affinity="after"}.
 
 ## Discussion {#sec-discussion}
 
-The matching outputs support the same interpretation while leaving each language environment independently reproducible. The cross-language agreement also makes the exported article easier to audit.
+The synthetic example produced a coherent story across three analysis environments. Python described the longitudinal separation, R quantified allocation contrasts, and Julia checked agreement between observed and predicted values. Because every output is retained with a stable semantic identity, the narrative can cite figures and tables without exposing cell identifiers.
+
+The apparent biological pattern is intentionally plausible but should not be interpreted as evidence. Its role is to exercise the interfaces that real studies need: treatment trajectories, uncertainty intervals, model diagnostics, precise in-text values, and editorial review. The embedded suggestion demonstrates how a reviewer can request a quantitative revision without overwriting the author’s sentence; the adjacent comment demonstrates a threaded methodological query.
+
+### Limitations
+
+This example uses aggregate synthetic data, so it omits raw-image processing, missing observations, model assumption checks, and multiplicity corrections. The three language analyses are complementary rather than independent replications of the same estimator. The retained outputs also document one known execution state; authors must re-run stale cells after changing code or data.
+
+### Implications
+
+A full research article does not need to choose between readable publication and inspectable computation. Stable cross-references, explicit provenance, and portable review records make it possible to audit the evidence chain while keeping exported HTML, PDF, DOCX, and Markdown conventional.
 
 ## Conclusion {#sec-conclusion}
 
-Friendly semantic objects, retained outputs, and portable review records can coexist without exposing machine identifiers in the publication.
+This complete example shows how authors, affiliations, citations, equations, Python/R/Julia computations, figures, tables, scalar results, footnotes, cross-references, and tracked review can coexist in one portable manuscript. The same project can be opened without execution, reviewed with attribution, and exported without code or DraftMatter metadata.
+
+## Acknowledgements {.unnumbered}
+
+The authors thank the fictional Greenhouse Methods Collective for testing the example workflow.
+
+## Author contributions {.unnumbered}
+
+**Ada Researcher:** Conceptualization, methodology, Python analysis, writing—original draft. **Lin Chen:** Formal analysis, R analysis, validation, writing—review and editing. **Marta Silva:** Julia analysis, visualization, data curation, writing—review and editing.
+
+## Funding {.unnumbered}
+
+This synthetic demonstration received no external funding.
+
+## Competing interests {.unnumbered}
+
+The authors declare no competing interests.
+
+## Ethics statement {.unnumbered}
+
+No human participants, animals, or living plants were used. All observations were generated for software demonstration.
+
+## Data and code availability {.unnumbered}
+
+The complete source, review records, CSV inputs, executable cells, retained SVG figures, and retained tables are bundled with this project. No network access is needed to inspect or export the article.
+
+## References {.unnumbered}
+
+References are rendered from `references.json` using the project’s author–date citation style.
 
 ::::: {.draftmatter-reviews .hidden data-schema="1"}
-:::: {#dm-alpha-suggestion .dm-change data-anchor="dm-alpha-suggestion-range" data-kind="replace" data-author="dm-alpha-author" data-status="open" data-created="2026-07-18T08:00:00.000Z"}
+:::: {#dm-alpha-suggestion .dm-change data-anchor="dm-alpha-suggestion-range" data-kind="replace" data-author="dm-alpha-reviewer" data-status="open" data-created="2026-07-18T08:00:00.000Z"}
 ~~~{.dm-proposal}
-drought reduced mean canopy expansion by 18%
+drought treatment reduced canopy expansion by 18.4%
+~~~
+~~~{.dm-rationale}
+State the retained effect size in the synthesis sentence so it agrees with the abstract and Python summary.
 ~~~
 ::::
-:::: {#dm-alpha-thread .dm-thread data-anchor="dm-alpha-comment" data-author="dm-alpha-reviewer" data-status="open" data-created="2026-07-18T08:05:00.000Z"}
-~~~{.dm-message data-author="dm-alpha-reviewer" data-created="2026-07-18T08:05:00.000Z"}
-Please retain the diagnostic threshold in the archived protocol.
+:::: {#dm-alpha-thread .dm-thread data-anchor="dm-alpha-comment" data-author="dm-alpha-reviewer" data-status="open" data-created="2026-07-18T08:05:00.000Z" data-updated="2026-07-18T08:18:00.000Z"}
+~~~{.dm-message data-author="dm-alpha-reviewer" data-at="2026-07-18T08:05:00.000Z" data-index="0"}
+Please confirm that the ±3.0 cm² diagnostic threshold was fixed before the model check.
+~~~
+~~~{.dm-message data-author="dm-alpha-author" data-at="2026-07-18T08:18:00.000Z" data-index="1"}
+Confirmed. I added the threshold to the analysis plan and retained it in the bundled protocol note.
 ~~~
 ::::
 :::: {#dm-alpha-author .dm-author data-name="Ada Researcher"}

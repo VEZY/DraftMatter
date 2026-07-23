@@ -528,9 +528,10 @@ describe('full structured manuscript editor', () => {
     ))
 
     await act(async () => (container.querySelector('.structured-citation') as HTMLButtonElement).click())
-    const [id, items] = selected.mock.calls[0] as [string, Array<{ citekey: string }>]
+    const [id, items, anchor] = selected.mock.calls[0] as [string, Array<{ citekey: string }>, HTMLElement]
     expect(id).toContain('citation')
     expect(items).toEqual([{ citekey: 'vezy2024' }])
+    expect(anchor).toBe(container.querySelector('.structured-citation'))
 
     const replacement = [{ citekey: 'vezy2024', locator: 'pp. 8–9', suppressAuthor: true }]
     expect(editorRef.current?.citationReplacementSource(id, replacement, '(2024, pp. 8–9)')).toContain('[-@vezy2024, pp. 8–9]')
@@ -1073,6 +1074,17 @@ Compare @fig-first with @fig-second.
     expect(linkMark.querySelector<HTMLAnchorElement>('a')?.getAttribute('href')).toBe('notes/field-protocol.md')
     expect(linkMark.querySelector<HTMLAnchorElement>('a')?.getAttribute('title')).toBe('Field evidence protocol')
     expect(document.activeElement).toBe(linkMark.querySelector('.structured-link-edit'))
+  })
+
+  it('does not silently create a stored link mark when no text is selected', async () => {
+    const changed = vi.fn()
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    await act(async () => root.render(
+      <StructuredManuscriptEditor ref={editorRef} source={shortSource} onChange={changed} />,
+    ))
+
+    expect(editorRef.current?.setLink('https://example.org')).toBe(false)
+    expect(changed).not.toHaveBeenCalled()
   })
 
   it('numbers repeated references by first use and edits definitions without exposing punctuation', async () => {

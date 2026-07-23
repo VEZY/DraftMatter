@@ -124,6 +124,40 @@ describe('CSL rendering', () => {
     expect(result.bibliography[0].value).toContain('Journal of Portable Metadata')
   })
 
+  it('maps provider-specific publication types to legal CSL types', async () => {
+    const providerRecords: CitationRecord[] = [
+      {
+        citekey: 'duursma2012maespa',
+        type: 'posted-content',
+        title: 'MAESPA: a model to study interactions between water limitation and vegetation function',
+        authors: ['R. A. Duursma', 'B. E. Medlyn'],
+        year: '2012',
+        source: 'csl-json',
+      },
+      {
+        citekey: 'vezy2020dynacof',
+        type: 'journal-article',
+        title: 'DynACof: a process-based model of coffee agroforestry systems',
+        authors: ['Rémi Vezy'],
+        year: '2020',
+        source: 'csl-json',
+      },
+    ]
+
+    expect(citationRecordToCsl(providerRecords[0]).type).toBe('article')
+    expect(citationRecordToCsl(providerRecords[1]).type).toBe('article-journal')
+
+    const result = await renderCslDocument({
+      records: providerRecords,
+      clusters: [{ id: 'provider-types', items: providerRecords.map((record) => ({ citekey: record.citekey })) }],
+      style: 'draftmatter-author-date',
+      locale: 'en-US',
+    })
+
+    expect(result.clusters['provider-types']).toBe('(Duursma and Medlyn, 2012; Vezy, 2020)')
+    expect(result.bibliography).toHaveLength(2)
+  })
+
   it('disambiguates same-author, same-year works with stable year suffixes', async () => {
     const sameYear: CitationRecord[] = [
       { ...records[0], citekey: 'martin2024field', title: 'Field methods' },

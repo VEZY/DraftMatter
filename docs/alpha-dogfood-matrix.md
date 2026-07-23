@@ -11,13 +11,17 @@ never repaired or rewritten by a test.
 The project deliberately combines the ordinary workflows that had previously
 been tested in isolation:
 
-- two structured publication authors, two affiliations, and one ORCID;
+- three structured publication authors, three deduplicated affiliations, and one example ORCID;
 - two cached citations and a portable project bibliography;
+- a complete IMRAD manuscript plus acknowledgements, contributions, funding,
+  competing interests, ethics, availability, and references sections;
+- one numbered display equation with a valid semantic cross-reference;
 - Python, R, and Julia figure, table, and published-value cells;
 - three retained figures, three retained tables, and the published values
-  `18.4 cm`, `0.032`, and `0.91`;
-- six valid cross-references with friendly figure and table identities;
-- one attributed suggestion and one point-anchored comment;
+  `18.4 %`, `0.032`, and `0.99`;
+- seven valid cross-references with friendly equation, figure, and table identities;
+- one attributed suggestion with rationale and one two-message point comment;
+- three bundled CSV inputs and accessible colorblind-safe SVG outputs;
 - a DraftMatter project descriptor and normal relative figure assets.
 
 The fixture represents an article after its computations have been retained.
@@ -61,12 +65,14 @@ checkpoint, clean status, close, and byte-identical reopen.
 
 ## Local verification record
 
-On 2026-07-18 the focused gate passed on Darwin arm64 with Node 24:
+On 2026-07-21 the expanded example gate passed on Darwin arm64 with Node 24:
 
 - `npm run test:alpha`: 2 files / 4 tests;
 - `npx playwright test tests/e2e/alpha-dogfood.spec.ts --reporter=line`:
   1 Chromium test;
 - `npm run check`: passed.
+- the dependency-free Python and R figure/table cells executed against the
+  bundled CSV files and reproduced their retained outputs.
 
 The completed DM-P7 certification also passed 130 Vitest files / 645 tests,
 all 32 Chromium tests, the production browser/service/CLI build, release
@@ -88,15 +94,16 @@ automated matrix:
 
 1. Copy `src/fixtures/projects/alpha-article` outside the repository and open
    the copy in DraftMatter.
-2. Confirm all three figures and tables render, all three in-text values are
-   ordinary prose, and source stays closed until explicitly requested.
+2. Confirm the equation, all three figures and tables render, all three in-text
+   values are ordinary prose, and source stays closed until explicitly requested.
 3. Open each reference and return from its target; no machine cell identifier
    should be the primary label.
 4. Accept the suggestion, resolve the comment, and create a local checkpoint.
 5. Export HTML, DOCX, and PDF to author-chosen names and locations. Confirm the
    documents contain outputs but no Python, R, or Julia source.
 6. Quit, reopen the project, and confirm numbering, captions, references,
-   outputs, citations, authors, and review state match without source edits.
+   equation, outputs, citations, authors, and review state match without source
+   edits.
 
 Record any platform-specific loss, blocked action, accessibility problem, or
 visual collision as a reproducible fixture/test before changing this matrix.

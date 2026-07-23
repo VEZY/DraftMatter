@@ -10,6 +10,20 @@ async function click(element: Element) {
   await act(async () => element.dispatchEvent(new MouseEvent('click', { bubbles: true })))
 }
 
+function bounds(left: number, top: number, width: number, height: number) {
+  return {
+    x: left,
+    y: top,
+    left,
+    top,
+    right: left + width,
+    bottom: top + height,
+    width,
+    height,
+    toJSON: () => ({}),
+  } as DOMRect
+}
+
 describe('rendered citation metadata inspector', () => {
   let container: HTMLDivElement
   let root: ReturnType<typeof createRoot>
@@ -93,5 +107,23 @@ describe('rendered citation metadata inspector', () => {
     const openAttachment = [...attachmentRegion.querySelectorAll('button')].find((button) => button.textContent?.includes('Accepted manuscript'))!
     await click(openAttachment)
     expect(openLink).toHaveBeenCalledWith('zotero-attachment', 'ATTACH01')
+  })
+
+  it('positions citation details beside the clicked citation instead of after the editor', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains('editor-area')) return bounds(0, 50, 1000, 700)
+      if (this.classList.contains('manuscript')) return bounds(100, 80, 760, 1400)
+      if (this.classList.contains('structured-citation')) return bounds(400, 300, 130, 28)
+      if (this.classList.contains('structured-citation-detail')) return bounds(0, 0, 395, 300)
+      return bounds(0, 0, 0, 0)
+    })
+    await act(async () => root.render(<App />))
+
+    await click(container.querySelector('.structured-citation')!)
+
+    const details = container.querySelector<HTMLElement>('.structured-citation-detail')!
+    expect(details.dataset.positioned).toBe('true')
+    expect(details.style.left).toBe('300px')
+    expect(details.style.top).toBe('256px')
   })
 })

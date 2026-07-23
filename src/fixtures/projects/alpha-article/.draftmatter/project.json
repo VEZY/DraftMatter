@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "name": "Cross-language canopy alpha",
+  "name": "Complete cross-language manuscript",
   "mainDocument": "paper.qmd",
   "citationStyle": "draftmatter-author-date",
   "citationLocale": "en-US",

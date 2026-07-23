@@ -69,18 +69,20 @@ describe('DM-P7-GATE alpha authoring workflow', () => {
     const semanticObjects = semanticManuscriptObjects(parsed.document)
 
     expect(referenceIntegrityDiagnostics(parsed.document)).toEqual([])
-    expect(semanticObjects.filter((object) => object.kind !== 'section')).toHaveLength(6)
+    expect(semanticObjects.filter((object) => object.kind !== 'section')).toHaveLength(7)
     expect(semanticObjects.every((object) => !object.legacyMachineLabel)).toBe(true)
     expect(semanticObjects.filter((object) => object.kind !== 'section').every((object) => object.label === object.suggestedLabel)).toBe(true)
     expect(numberedManuscriptObjects(parsed.document).map((object) => [object.kind, object.label, object.number, object.caption])).toEqual([
-      ['figure', 'fig-python-canopy', 1, 'Python canopy trajectories across the measurement period.'],
-      ['table', 'tbl-python-means', 1, 'Python treatment means.'],
-      ['figure', 'fig-r-allocation', 2, 'R interval estimates for the allocation contrast.'],
-      ['table', 'tbl-r-coefficients', 2, 'R model coefficients.'],
-      ['figure', 'fig-julia-model', 3, 'Julia model fit against the observed canopy response.'],
-      ['table', 'tbl-julia-predictions', 3, 'Julia grouped predictions.'],
+      ['equation', 'eq-canopy-response', 1, 'Linear treatment-by-time response used for the synthetic prediction check.'],
+      ['figure', 'fig-python-canopy', 1, 'Canopy area trajectories generated in Python. Points are treatment means; the synthetic series contains 24 plants per treatment.'],
+      ['table', 'tbl-python-means', 1, 'Week-12 canopy summaries generated in Python.'],
+      ['figure', 'fig-r-allocation', 2, 'Allocation contrasts generated in R. Points are drought-minus-control estimates and horizontal lines are 95% confidence intervals.'],
+      ['table', 'tbl-r-coefficients', 2, 'Drought-minus-control allocation contrasts generated in R.'],
+      ['figure', 'fig-julia-model', 3, 'Observed and predicted canopy response generated in Julia. Points show synthetic observations and the line shows fitted values.'],
+      ['table', 'tbl-julia-predictions', 3, 'Observed and fitted canopy means generated in Julia.'],
     ])
     expect(semanticReferenceOccurrences(parsed.document).map((reference) => [reference.target, reference.status, semanticCrossReferenceLabel(parsed.document, reference.target)])).toEqual([
+      ['eq-canopy-response', 'valid', 'Equation 1'],
       ['fig-python-canopy', 'valid', 'Figure 1'],
       ['tbl-python-means', 'valid', 'Table 1'],
       ['fig-r-allocation', 'valid', 'Figure 2'],
@@ -95,8 +97,11 @@ describe('DM-P7-GATE alpha authoring workflow', () => {
     expect(serializeStructuredManuscript(reopened.document, reopened.metadata)).toBe(serialized)
     expect(authoringSnapshot(serialized)).toEqual(authoringSnapshot(revisedSource))
     expect(authoringSnapshot(serialized).reviews).toEqual({
-      changes: [{ id: 'dm-alpha-suggestion', status: 'accepted', proposal: 'drought reduced mean canopy expansion by 18%' }],
-      threads: [{ id: 'dm-alpha-thread', status: 'resolved', messages: ['Please retain the diagnostic threshold in the archived protocol.'] }],
+      changes: [{ id: 'dm-alpha-suggestion', status: 'accepted', proposal: 'drought treatment reduced canopy expansion by 18.4%' }],
+      threads: [{ id: 'dm-alpha-thread', status: 'resolved', messages: [
+        'Please confirm that the ±3.0 cm² diagnostic threshold was fixed before the model check.',
+        'Confirmed. I added the threshold to the analysis plan and retained it in the bundled protocol note.',
+      ] }],
       decisions: [{ changeId: 'dm-alpha-suggestion', action: 'accepted' }],
     })
 
@@ -107,15 +112,16 @@ describe('DM-P7-GATE alpha authoring workflow', () => {
     expect(referenceIntegrityDiagnostics(cleanParsed.document)).toEqual([])
     expect(parseRetainedOutputs(clean!).outputs.map((output) => output.markdown)).toEqual(parseRetainedOutputs(serialized).outputs.map((output) => output.markdown))
 
-    const citationLabels = { '[@vezy2024; @chen2025]': '(Vezy & Martin, 2024; Chen, 2025)' }
+    const citationLabels = { '[@vezy2024; @chen2025]': '(Vezy & Martin, 2024; Chen & Silva, 2025)' }
     const bibliography = [
-      { id: 'vezy2024', value: 'Vezy, R., & Martin, A. (2024). Reproducible canopy analysis across research environments.' },
-      { id: 'chen2025', value: 'Chen, L. (2025). Portable evidence for drought-response synthesis.' },
+      { id: 'vezy2024', value: 'Vezy, R., & Martin, A. (2024). Portable evidence chains in multilingual plant phenotyping.' },
+      { id: 'chen2025', value: 'Chen, L., & Silva, M. (2025). Review-aware drought analysis in executable manuscripts.' },
     ]
     const html = renderNativeHtmlExport(clean!, { citationLabels, bibliography })
     const docx = new TextDecoder().decode(renderDocxExport(clean!, { citationLabels, bibliography }).bytes)
 
     for (const [label, visible] of [
+      ['eq-canopy-response', 'Equation 1'],
       ['fig-python-canopy', 'Figure 1'],
       ['tbl-python-means', 'Table 1'],
       ['fig-r-allocation', 'Figure 2'],
@@ -125,13 +131,13 @@ describe('DM-P7-GATE alpha authoring workflow', () => {
     ]) {
       expect(html).toContain(`href="#${label}">${visible}</a>`)
     }
-    expect(html).toContain('<figcaption><strong>Figure 1.</strong> Python canopy trajectories across the measurement period.</figcaption>')
-    expect(html).toContain('<caption><strong>Table 3.</strong> Julia grouped predictions.</caption>')
-    expect(html).toContain('The drought reduced mean canopy expansion by 18%.')
+    expect(html).toContain('<figcaption><strong>Figure 1.</strong> Canopy area trajectories generated in Python. Points are treatment means; the synthetic series contains 24 plants per treatment.</figcaption>')
+    expect(html).toContain('<caption><strong>Table 3.</strong> Observed and fitted canopy means generated in Julia.</caption>')
+    expect(html).toContain('The drought treatment reduced canopy expansion by 18.4%.')
     expect(html).not.toMatch(/cell-python|cell-r-|cell-julia|write_text|writeLines|println\(|@publish|\.dm-anchor|\.draftmatter-reviews|<script/)
-    expect(docx).toContain('Ada Researcher; Lin Chen')
-    expect(docx).toContain('Python canopy trajectories across the measurement period.')
-    expect(docx).toContain('Julia grouped predictions.')
+    expect(docx).toContain('Ada Researcher; Lin Chen; Marta Silva')
+    expect(docx).toContain('Canopy area trajectories generated in Python.')
+    expect(docx).toContain('Observed and fitted canopy means generated in Julia.')
     expect(docx).not.toMatch(/cell-python|cell-r-|cell-julia|write_text|writeLines|println\(|@publish|\.dm-anchor|\.draftmatter-reviews|<w:(?:ins|del)\b/)
   })
 })

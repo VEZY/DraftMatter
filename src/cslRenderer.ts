@@ -181,14 +181,37 @@ function authorToCsl(author: string) {
   return { family: parts.at(-1), given: parts.slice(0, -1).join(' ') }
 }
 
+const CSL_TYPES = new Set([
+  'article', 'article-journal', 'article-magazine', 'article-newspaper', 'bill', 'book', 'broadcast', 'chapter',
+  'classic', 'collection', 'dataset', 'document', 'entry', 'entry-dictionary', 'entry-encyclopedia', 'event',
+  'figure', 'graphic', 'hearing', 'interview', 'legal_case', 'legislation', 'manuscript', 'map', 'motion_picture',
+  'musical_score', 'pamphlet', 'paper-conference', 'patent', 'performance', 'periodical', 'personal_communication',
+  'post', 'post-weblog', 'regulation', 'report', 'review', 'review-book', 'software', 'song', 'speech', 'standard',
+  'thesis', 'treaty', 'webpage',
+])
+
+const CSL_TYPE_ALIASES: Record<string, string> = {
+  article: 'article-journal',
+  'book-chapter': 'chapter',
+  booksection: 'chapter',
+  conference: 'paper-conference',
+  conferencepaper: 'paper-conference',
+  incollection: 'chapter',
+  inproceedings: 'paper-conference',
+  'journal-article': 'article-journal',
+  journalarticle: 'article-journal',
+  mastersthesis: 'thesis',
+  'peer-review': 'review',
+  phdthesis: 'thesis',
+  'posted-content': 'article',
+  'proceedings-article': 'paper-conference',
+  techreport: 'report',
+}
+
 function cslType(type: string) {
-  const normalized = type.toLowerCase()
-  if (['article', 'article-journal', 'journalarticle'].includes(normalized)) return 'article-journal'
-  if (['inproceedings', 'conferencepaper', 'paper-conference'].includes(normalized)) return 'paper-conference'
-  if (['incollection', 'chapter', 'booksection'].includes(normalized)) return 'chapter'
-  if (['phdthesis', 'mastersthesis', 'thesis'].includes(normalized)) return 'thesis'
-  if (['techreport', 'report'].includes(normalized)) return 'report'
-  return normalized || 'article'
+  const normalized = type.trim().toLowerCase().replaceAll(/\s+/g, '-')
+  const aliased = CSL_TYPE_ALIASES[normalized] ?? normalized
+  return CSL_TYPES.has(aliased) ? aliased : 'article'
 }
 
 export function citationRecordToCsl(record: CitationRecord): Record<string, unknown> {

@@ -1,8 +1,47 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 280" role="img" aria-labelledby="title description">
-  <title id="title">Python canopy trajectory</title>
-  <desc id="description">Two green trajectories increase over six measurements.</desc>
-  <rect width="640" height="280" fill="#ffffff"/>
-  <g stroke="#e4e9e6" stroke-width="1"><path d="M55 45H610"/><path d="M55 105H610"/><path d="M55 165H610"/><path d="M55 225H610"/></g>
-  <polyline points="60,225 165,197 270,156 375,119 480,82 585,48" fill="none" stroke="#456f5d" stroke-width="5"/>
-  <polyline points="60,225 165,204 270,175 375,149 480,122 585,95" fill="none" stroke="#9b6b54" stroke-width="5"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 420" role="img" aria-labelledby="title desc">
+<title id="title">Canopy area trajectories by water treatment</title>
+<desc id="desc">Control and drought means are similar through week four, then diverge through week twelve.</desc>
+<rect width="720" height="420" fill="white"/>
+<path d="M86 350.0H686" stroke="#D9E1DE"/>
+<text x="70" y="355.0" text-anchor="end">0</text>
+<path d="M86 298.0H686" stroke="#D9E1DE"/>
+<text x="70" y="303.0" text-anchor="end">15</text>
+<path d="M86 246.0H686" stroke="#D9E1DE"/>
+<text x="70" y="251.0" text-anchor="end">30</text>
+<path d="M86 194.0H686" stroke="#D9E1DE"/>
+<text x="70" y="199.0" text-anchor="end">45</text>
+<path d="M86 142.0H686" stroke="#D9E1DE"/>
+<text x="70" y="147.0" text-anchor="end">60</text>
+<path d="M86 90.0H686" stroke="#D9E1DE"/>
+<text x="70" y="95.0" text-anchor="end">75</text>
+<path d="M86 38.0H686" stroke="#D9E1DE"/>
+<text x="70" y="43.0" text-anchor="end">90</text>
+<text x="86.0" y="376" text-anchor="middle">0</text>
+<text x="186.0" y="376" text-anchor="middle">2</text>
+<text x="286.0" y="376" text-anchor="middle">4</text>
+<text x="386.0" y="376" text-anchor="middle">6</text>
+<text x="486.0" y="376" text-anchor="middle">8</text>
+<text x="586.0" y="376" text-anchor="middle">10</text>
+<text x="686.0" y="376" text-anchor="middle">12</text>
+<polyline points="86.0,335.4 186.0,306.3 286.0,256.7 386.0,198.2 486.0,145.8 586.0,105.9 686.0,77.5" fill="none" stroke="#0072B2" stroke-width="4"/>
+<circle cx="86.0" cy="335.4" r="5" fill="white" stroke="#0072B2" stroke-width="3"/>
+<circle cx="186.0" cy="306.3" r="5" fill="white" stroke="#0072B2" stroke-width="3"/>
+<circle cx="286.0" cy="256.7" r="5" fill="white" stroke="#0072B2" stroke-width="3"/>
+<circle cx="386.0" cy="198.2" r="5" fill="white" stroke="#0072B2" stroke-width="3"/>
+<circle cx="486.0" cy="145.8" r="5" fill="white" stroke="#0072B2" stroke-width="3"/>
+<circle cx="586.0" cy="105.9" r="5" fill="white" stroke="#0072B2" stroke-width="3"/>
+<circle cx="686.0" cy="77.5" r="5" fill="white" stroke="#0072B2" stroke-width="3"/>
+<polyline points="86.0,335.8 186.0,308.7 286.0,264.0 386.0,221.0 486.0,181.2 586.0,150.7 686.0,127.8" fill="none" stroke="#D55E00" stroke-width="4"/>
+<circle cx="86.0" cy="335.8" r="5" fill="white" stroke="#D55E00" stroke-width="3"/>
+<circle cx="186.0" cy="308.7" r="5" fill="white" stroke="#D55E00" stroke-width="3"/>
+<circle cx="286.0" cy="264.0" r="5" fill="white" stroke="#D55E00" stroke-width="3"/>
+<circle cx="386.0" cy="221.0" r="5" fill="white" stroke="#D55E00" stroke-width="3"/>
+<circle cx="486.0" cy="181.2" r="5" fill="white" stroke="#D55E00" stroke-width="3"/>
+<circle cx="586.0" cy="150.7" r="5" fill="white" stroke="#D55E00" stroke-width="3"/>
+<circle cx="686.0" cy="127.8" r="5" fill="white" stroke="#D55E00" stroke-width="3"/>
+<path d="M86 38V350H686" fill="none" stroke="#25332D" stroke-width="2"/>
+<text x="386" y="408" text-anchor="middle">Week</text>
+<text x="20" y="194" transform="rotate(-90 20 194)" text-anchor="middle">Canopy area (cm²)</text>
+<path d="M455 28h28" stroke="#0072B2" stroke-width="4"/><text x="491" y="33">Control</text>
+<path d="M565 28h28" stroke="#D55E00" stroke-width="4"/><text x="601" y="33">Drought</text>
+<style>text{font:14px system-ui,sans-serif;fill:#25332D}</style></svg>
