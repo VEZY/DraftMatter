@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 test.describe('DM-P4-01 review thread actions', () => {
   test('copies an ordinary portable figure reference', async ({ context, page }) => {
     await context.grantPermissions(['clipboard-read', 'clipboard-write'])
-    await page.goto('/')
+    await page.goto('/draft')
 
     const output = page.locator('.structured-output-image')
     const copyReference = page.getByRole('button', { name: 'Copy figure reference fig-canopy-result' })
@@ -15,7 +15,7 @@ test.describe('DM-P4-01 review thread actions', () => {
   })
 
   test('persists reply and resolve activity timestamps across reload', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/draft')
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Review feedback' })
     const comment = review.locator('#review-item-dm-comment-01')
@@ -47,7 +47,7 @@ test.describe('DM-P4-01 review thread actions', () => {
   })
 
   test('removes a sample comment from the active queue and reopens its deleted audit record', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/draft')
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Review feedback' })
     const topbar = page.locator('.topbar')

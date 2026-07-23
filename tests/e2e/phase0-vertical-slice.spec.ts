@@ -6,7 +6,7 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
     await page.addInitScript(() => {
       Object.defineProperty(window, 'showSaveFilePicker', { configurable: true, value: undefined })
     })
-    await page.goto('/')
+    await page.goto('/draft')
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
 
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
@@ -85,7 +85,7 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
   })
 
   test('keeps the primary writing and review controls keyboard reachable', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/draft')
 
     await page.keyboard.press('Control+p')
     const palette = page.getByRole('dialog', { name: 'Command menu' })

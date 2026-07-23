@@ -46,7 +46,7 @@ test.describe('local review identity settings', () => {
         localStorage.setItem('draftmatter.structured-mode.v1', 'true')
       }
     }, source)
-    await page.goto('/')
+    await page.goto('/draft')
 
     await page.getByRole('button', { name: 'Settings' }).click()
     const settings = page.getByRole('dialog', { name: 'Review identity' })

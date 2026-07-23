@@ -10,7 +10,7 @@ interface AxeViolationSummary {
 
 test.describe('DM-P1-07 accessibility baseline', () => {
   test('passes a rendered WCAG A/AA scan including color contrast', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/draft')
     await page.addScriptTag({ content: axe.source })
 
     const violations = await page.evaluate(async () => {
@@ -46,7 +46,7 @@ test.describe('DM-P1-07 accessibility baseline', () => {
 
   test('keeps keyboard focus visible and suppresses nonessential motion', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' })
-    await page.goto('/')
+    await page.goto('/draft')
 
     expect(await page.evaluate(() => matchMedia('(prefers-reduced-motion: reduce)').matches)).toBe(true)
     await expect(page.locator('.editor-area')).toHaveCSS('scroll-behavior', 'auto')

@@ -6,7 +6,7 @@ test('opens a pre-filled portable comment from the manuscript context menu', asy
     localStorage.setItem('draftmatter.structured-source.v1', portableSource)
     localStorage.setItem('draftmatter.structured-mode.v1', 'true')
   }, source)
-  await page.goto('/')
+  await page.goto('/draft')
 
   await page.getByText('Attach the review directly to this sentence.', { exact: true }).click({ button: 'right' })
   const menu = page.getByRole('menu', { name: 'Review selection' })
@@ -30,7 +30,7 @@ test('opens a pre-filled comment from a retained figure', async ({ page }) => {
     localStorage.setItem('draftmatter.structured-source.v1', portableSource)
     localStorage.setItem('draftmatter.structured-mode.v1', 'true')
   }, source)
-  await page.goto('/')
+  await page.goto('/draft')
 
   await page.getByRole('img', { name: 'Growth response over time' }).click({ button: 'right' })
   const menu = page.getByRole('menu', { name: 'Review selection' })

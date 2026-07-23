@@ -23,7 +23,7 @@ test.describe('section and block drag handles', () => {
       localStorage.setItem('draftmatter.structured-source.v1', portableSource)
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     }, source)
-    await page.goto('/')
+    await page.goto('/draft')
   })
 
   test('moves a section with its content and moves one paragraph independently', async ({ page }) => {

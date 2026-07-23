@@ -30,7 +30,7 @@ test.describe('DM-P4-02 rendered suggestion transactions', () => {
       localStorage.setItem('draftmatter.structured-source.v1', portableSource)
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     }, source)
-    await page.goto('/')
+    await page.goto('/draft')
     await page.getByRole('button', { name: 'Turn on track changes' }).click()
     await expect(page.getByRole('button', { name: 'Turn off track changes' })).toHaveAttribute('aria-pressed', 'true')
   })

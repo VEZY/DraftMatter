@@ -28,7 +28,7 @@ test.describe('portable manuscript authors', () => {
         localStorage.setItem('draftmatter.structured-mode.v1', 'true')
       }
     }, source)
-    await page.goto('/')
+    await page.goto('/draft')
   })
 
   test('edits the portable byline without transferring removed metadata and exports it after reload', async ({ page }) => {

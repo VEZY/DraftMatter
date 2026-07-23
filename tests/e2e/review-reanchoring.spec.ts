@@ -30,7 +30,7 @@ test.describe('DM-P4-06 external review recovery', () => {
       localStorage.setItem('draftmatter.structured-source.v1', source)
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     }, ambiguousReviewSource)
-    await page.goto('/')
+    await page.goto('/draft')
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
 
     const reviewPanel = page.getByRole('complementary', { name: 'Review feedback' })

@@ -3,7 +3,7 @@ import { expect, test } from '@playwright/test'
 const continuation = 'Reproducible writing environments can shorten the path between an observation, its supporting analysis, and the claim that enters the literature. This manuscript keeps those elements close without exposing the mechanics during ordinary reading.'
 
 test('migrates the second sample introduction paragraph into an editable block', async ({ page }) => {
-  await page.goto('/')
+  await page.goto('/draft')
   await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).not.toBe('')
   const legacySource = await page.evaluate((text) => {
     const key = 'draftmatter.structured-source.v1'

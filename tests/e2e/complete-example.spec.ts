@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 test.describe('built-in complete example', () => {
   test('keeps long-outline click and keyboard navigation inside their panels', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/draft')
     await page.evaluate(() => localStorage.clear())
     await page.reload()
 
@@ -29,7 +29,7 @@ test.describe('built-in complete example', () => {
   })
 
   test('opens from the project menu and remains complete after reload', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/draft')
     await page.evaluate(() => localStorage.clear())
     await page.reload()
 

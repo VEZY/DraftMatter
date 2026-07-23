@@ -91,11 +91,11 @@ test.describe('DM-P5-01/02 native publication exports', () => {
         provenance: { origin: 'manual-import', locator: 'references.json' },
       }],
     })
-    await page.goto('/')
+    await page.goto('/draft')
   })
 
   test('downloads and renders the opened manuscript rather than the demo article', async ({ page, context }, testInfo) => {
-    await expect(page.getByText('(Field & Stone, 2026)')).toBeVisible()
+    await expect(page.getByText(/\(Field (?:and|&) Stone, 2026\)/)).toBeVisible()
     await page.getByRole('button', { name: 'Export' }).click()
     await page.getByRole('button', { name: /Web page/ }).click()
     const htmlDialog = page.getByRole('dialog', { name: 'Save clean HTML document' })

@@ -57,7 +57,7 @@ test.describe('DM-P7-05 article-sized rendered dogfood', () => {
         localStorage.setItem('draftmatter.citations.v1', JSON.stringify(citationRecords))
       }
     }, { portableSource: source, citationRecords: citations })
-    await page.goto('/')
+    await page.goto('/draft')
   })
 
   test('reviews, exports, closes, and reopens the representative project without exposing computation source', async ({ page }) => {

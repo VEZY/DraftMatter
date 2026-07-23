@@ -19,7 +19,7 @@ test.describe('DM-P1-03 rendered block formatting', () => {
         localStorage.setItem('draftmatter.structured-mode.v1', 'true')
       }
     }, source)
-    await page.goto('/')
+    await page.goto('/draft')
   })
 
   test('applies heading, list, and quotation styles and reopens their portable source', async ({ page }) => {

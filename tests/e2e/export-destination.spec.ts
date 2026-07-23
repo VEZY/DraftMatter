@@ -17,7 +17,7 @@ test('chooses an export filename before opening the platform save picker', async
       }
     }
   })
-  await page.goto('/')
+  await page.goto('/draft')
 
   await page.getByRole('button', { name: 'Export' }).click()
   await page.getByText('Advanced options', { exact: true }).click()

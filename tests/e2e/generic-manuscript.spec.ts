@@ -56,7 +56,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
         localStorage.setItem('draftmatter.structured-mode.v1', 'true')
       }
     }, source)
-    await page.goto('/')
+    await page.goto('/draft')
   })
 
   test('renders, edits, and reopens an arbitrary QMD without exposing opaque source', async ({ page }) => {

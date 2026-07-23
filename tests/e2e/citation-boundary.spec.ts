@@ -6,7 +6,7 @@ test('typing after a terminal citation resumes ordinary paragraph formatting', a
     localStorage.setItem('draftmatter.structured-source.v1', portableSource)
     localStorage.setItem('draftmatter.structured-mode.v1', 'true')
   }, source)
-  await page.goto('/')
+  await page.goto('/draft')
 
   const paragraph = page.locator('.structured-editor-content p').filter({ hasText: 'Evidence ends with a source' })
   const bounds = await paragraph.boundingBox()
@@ -38,7 +38,7 @@ test('citation details open beside the clicked citation and remain in view', asy
     localStorage.setItem('draftmatter.structured-source.v1', portableSource)
     localStorage.setItem('draftmatter.structured-mode.v1', 'true')
   }, source)
-  await page.goto('/')
+  await page.goto('/draft')
 
   const citation = page.locator('.structured-citation')
   await citation.click()

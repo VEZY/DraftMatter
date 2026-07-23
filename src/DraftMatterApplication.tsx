@@ -153,6 +153,7 @@ function ApplicationRouter() {
   if (route.destination === 'example') return <App initialExperience="complete-example" onOpenLearn={() => navigate({ destination: 'learn' })} onNavigateHome={() => navigate({ destination: 'home' })} />
   if (route.destination === 'learn') return <Learn onBack={() => navigate({ destination: 'home' })} onStartTutorial={() => navigate({ destination: 'tutorial' })} />
   if (route.destination === 'tutorial') return <App browserDocumentLaunch={{ source: buildTutorialSource(), filename: 'my-draftmatter-tutorial.qmd', projectName: 'My DraftMatter tutorial' }} onOpenLearn={() => navigate({ destination: 'learn' })} onNavigateHome={() => navigate({ destination: 'home' })} />
+  if (route.destination === 'browser-editor') return <App onOpenLearn={() => navigate({ destination: 'learn' })} onNavigateHome={() => navigate({ destination: 'home' })} />
 
   return home(route.workspaceId)
 }

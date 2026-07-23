@@ -30,7 +30,7 @@ test.describe('DM-P4-05 markup filtering and navigation', () => {
       localStorage.setItem('draftmatter.structured-source.v1', portableSource)
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     }, source)
-    await page.goto('/')
+    await page.goto('/draft')
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Review feedback' })
     await expect(review.getByRole('button', { name: /In panel/ })).toHaveAttribute('aria-pressed', 'true')
@@ -74,7 +74,7 @@ test.describe('DM-P4-05 markup filtering and navigation', () => {
 
 test.describe('DM-P4-05 modeled review alternatives', () => {
   test('renders the alternative selected by next and previous navigation', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/draft')
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Review feedback' })
     await review.getByRole('button', { name: /In text/ }).click()

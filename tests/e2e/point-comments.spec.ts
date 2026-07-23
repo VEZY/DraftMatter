@@ -13,7 +13,7 @@ test.describe('DM-P4-01 rendered point comments', () => {
         localStorage.setItem('draftmatter.structured-mode.v1', 'true')
       }
     }, source)
-    await page.goto('/')
+    await page.goto('/draft')
 
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()

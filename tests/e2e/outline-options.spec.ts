@@ -33,7 +33,7 @@ test.describe('DM-P1-06 manuscript outline', () => {
       localStorage.setItem('draftmatter.structured-source.v1', portableSource)
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     }, structuredSource)
-    await page.goto('/')
+    await page.goto('/draft')
 
     const outline = page.getByRole('complementary', { name: 'Manuscript outline' })
     const tree = outline.locator('.outline-tree')
@@ -73,7 +73,7 @@ test.describe('DM-P1-06 manuscript outline', () => {
   })
 
   test('creates the first sample-mode section before portable review metadata and reopens it', async ({ page }) => {
-    await page.goto('/')
+    await page.goto('/draft')
     const outline = page.getByRole('complementary', { name: 'Manuscript outline' })
     await outline.getByRole('button', { name: /Add section/ }).click()
     const insertion = page.getByRole('dialog', { name: 'Add section' })

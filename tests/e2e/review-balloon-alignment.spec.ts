@@ -34,7 +34,7 @@ test.describe('DM-P4-01 aligned review balloons', () => {
       localStorage.setItem('draftmatter.structured-source.v1', portableSource)
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     }, source)
-    await page.goto('/')
+    await page.goto('/draft')
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
   })
 
