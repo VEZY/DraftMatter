@@ -73,6 +73,7 @@ import { countWords, measurePortableManuscript } from './manuscriptMetrics'
 import { ReviewTimestamp } from './ReviewTimestamp'
 import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
 import { workspaceRoleCapabilities, type WorkspaceRole } from './collaboration/workspaceService'
+import type { CollaborationProjectLaunch } from './collaboration/sessionContext'
 import { KernelConsole, type KernelCellFailure, type KernelConsoleRestartEpochs, type KernelConsoleStatus, type KernelConsoleStatuses } from './KernelConsole'
 import { ManagedCodeCellEditor } from './ManagedCodeCellEditor'
 import completeExampleSource from './fixtures/projects/alpha-article/paper.qmd?raw'
@@ -543,9 +544,30 @@ function PublicationBylineView({ byline }: { byline: PublicationByline }) {
   )
 }
 
-function App() {
-  const initialProjectMeta = useMemo(getInitialProjectMeta, [])
-  const initialDraftState = useMemo(getInitialDraftState, [])
+export interface AppProps {
+  collaborationLaunch?: CollaborationProjectLaunch
+  onNavigateHome?: () => void
+  initialExperience?: 'complete-example'
+}
+
+function emptyCollaborativeSource(name: string) {
+  return `---\ntitle: "${name.replaceAll('"', '\\"')}"\n---\n\n`
+}
+
+function App({ collaborationLaunch, onNavigateHome, initialExperience }: AppProps = {}) {
+  const collaborativeProject = collaborationLaunch?.projects.find((project) => project.id === collaborationLaunch.projectId)
+  const collaborativeInitialSource = collaborationLaunch
+    ? collaborationLaunch.bootstrapSource ?? emptyCollaborativeSource(collaborativeProject?.name ?? 'Untitled draft')
+    : null
+  const initialProjectMeta = useMemo(() => collaborationLaunch ? {
+    filename: `${collaborationLaunch.projectId}.qmd`,
+    projectName: collaborativeProject?.name ?? collaborationLaunch.projectId,
+    citationStyle: 'draftmatter-author-date' as CitationStyleId,
+    citationLocale: 'en-US' as CitationLocale,
+  } : getInitialProjectMeta(), [collaborationLaunch, collaborativeProject?.name])
+  const initialDraftState = useMemo(() => collaborativeInitialSource
+    ? parsePortableDocument(collaborativeInitialSource, initialDraft).draft
+    : getInitialDraftState(), [collaborativeInitialSource])
   const [userSettings, setUserSettings] = useState(() => readUserSettings(localStorage))
   const {
     draft,
@@ -614,7 +636,8 @@ function App() {
   const [publicationAuthorsProblem, setPublicationAuthorsProblem] = useState('')
   const [authorBank, setAuthorBank] = useState(() => readAuthorBank(localStorage))
   const [recoveryOpen, setRecoveryOpen] = useState(false)
-  const [collaborationOpen, setCollaborationOpen] = useState(false)
+  const [collaborationOpen, setCollaborationOpen] = useState(Boolean(collaborationLaunch))
+  const initialExperienceOpenedRef = useRef(false)
   const [collaborationStatus, setCollaborationStatus] = useState<CollaborationClientStatus>('disconnected')
   const [collaborationSessionActive, setCollaborationSessionActive] = useState(false)
   const [collaborationRole, setCollaborationRole] = useState<WorkspaceRole | null>(null)
@@ -644,7 +667,7 @@ function App() {
   const [doiLookupState, setDoiLookupState] = useState<'idle' | 'resolving'>('idle')
   const [scholarHelpOpen, setScholarHelpOpen] = useState(false)
   const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>(() => readRecoverySnapshots(localStorage))
-  const [citations, setCitations] = useState<CitationRecord[]>(getInitialCitations)
+  const [citations, setCitations] = useState<CitationRecord[]>(() => collaborationLaunch ? [] : getInitialCitations())
   const [stagedCitationRecords, setStagedCitationRecords] = useState<CitationRecord[]>([])
   const [citationQuery, setCitationQuery] = useState('')
   const [citationAcquisitionState, setCitationAcquisitionState] = useState<'idle' | 'saving'>('idle')
@@ -665,6 +688,7 @@ function App() {
   const [selectedKernelNames, setSelectedKernelNames] = useState<Partial<Record<ExecutionLanguage, string>>>({})
   const [selectedEnvironmentPaths, setSelectedEnvironmentPaths] = useState<Partial<Record<ExecutionLanguage, string>>>({})
   const [manuscriptSource, setManuscriptSource] = useState(() => {
+    if (collaborativeInitialSource) return collaborativeInitialSource
     const saved = localStorage.getItem(STRUCTURED_SOURCE_KEY)
     if (saved) return upgradeSampleIntroduction(saved)
     return reviewedProjection(initialDraftState)
@@ -3622,6 +3646,14 @@ function App() {
     }
   }
 
+  useEffect(() => {
+    if (initialExperience !== 'complete-example' || initialExperienceOpenedRef.current) return
+    initialExperienceOpenedRef.current = true
+    void openCompleteExample()
+  // This is a one-time route intent; opening the example updates the editor state itself.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialExperience])
+
   const applyDesktopProject = async (project: ProjectSnapshot, announce = true, selectedPath?: string) => {
     automaticSetupSignatureRef.current = ''
     pendingSetupLanguagesRef.current = []
@@ -4541,7 +4573,12 @@ function App() {
           <button className="icon-button panel-toggle" aria-label={leftPanelOpen ? 'Hide manuscript outline' : 'Show manuscript outline'} aria-pressed={leftPanelOpen} onClick={() => setLeftPanelOpen((open) => !open)}>
             <Icon name="panelLeft" />
           </button>
-          <div className="wordmark" aria-label="DraftMatter home">
+          <div className={`wordmark ${onNavigateHome ? 'wordmark-action' : ''}`} aria-label="DraftMatter home" role={onNavigateHome ? 'button' : undefined} tabIndex={onNavigateHome ? 0 : undefined} onClick={onNavigateHome} onKeyDown={onNavigateHome ? (event) => {
+            if (event.key === 'Enter' || event.key === ' ') {
+              event.preventDefault()
+              onNavigateHome()
+            }
+          } : undefined}>
             <span className="brand-mark" aria-hidden="true"><img src="/draftmatter-pencil-mark.svg" alt="" /></span>
             <span>DraftMatter</span>
           </div>
@@ -5623,7 +5660,9 @@ function App() {
       <CollaborationDialog
         open={collaborationOpen}
         source={manuscriptSource}
+        launch={collaborationLaunch}
         onClose={() => setCollaborationOpen(false)}
+        onConnected={() => setCollaborationOpen(false)}
         onRemoteSource={applyCollaborativeSource}
         onStatus={updateCollaborationStatus}
         onSessionStateChange={updateCollaborationSessionState}

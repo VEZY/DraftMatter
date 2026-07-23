@@ -13,6 +13,7 @@ import {
 } from './collaboration/invitationLink'
 import { completeOidcAuthorization, hasOidcCallback, prepareOidcAuthorization } from './collaboration/oidcBrowser'
 import type { CollaborationSessionProfile, WorkspaceProject, WorkspaceRole } from './collaboration/workspaceService'
+import type { CollaborationProjectLaunch } from './collaboration/sessionContext'
 import { Icon } from './Icon'
 import {
   HocuspocusCollaborationClient,
@@ -40,6 +41,8 @@ export interface CollaborationDialogProps {
   onRequestOpen?: () => void
   navigateToIdentity?: (url: string) => void
   localAuthor?: LocalAuthorIdentity
+  launch?: CollaborationProjectLaunch
+  onConnected?: () => void
 }
 
 function portableId(value: string, fallback: string) {
@@ -64,6 +67,8 @@ export function CollaborationDialog({
   onRequestOpen,
   navigateToIdentity,
   localAuthor = DEFAULT_USER_SETTINGS.author,
+  launch,
+  onConnected,
 }: CollaborationDialogProps) {
   const [url, setUrl] = useState('https://')
   const [workspaceId, setWorkspaceId] = useState('')
@@ -91,7 +96,23 @@ export function CollaborationDialog({
   const clientRef = useRef<HocuspocusCollaborationClient | null>(null)
   const accessTokenRef = useRef<CollaborationAccessToken | null>(null)
   const oidcCallbackStartedRef = useRef(false)
+  const launchStartedRef = useRef('')
   const checkpointedSourceRef = useRef(source)
+
+  useEffect(() => {
+    if (!launch) return
+    setUrl(launch.serviceUrl)
+    accessTokenRef.current = launch.token
+    setServiceClient(launch.client)
+    setProfile(launch.profile)
+    setUserId(launch.profile.userId)
+    if (launch.profile.displayName) setName(launch.profile.displayName)
+    setWorkspaces(launch.workspaces)
+    setWorkspaceId(launch.workspaceId)
+    setProjects(launch.projects)
+    setProjectId(launch.projectId)
+    setServiceState('ready')
+  }, [launch])
 
   useEffect(() => {
     if (profile || status !== 'disconnected') return
@@ -305,8 +326,8 @@ export function CollaborationDialog({
         workspaceId,
         projectId,
         token: accessToken,
-        bootstrapSource: source,
-        canBootstrap: role === 'owner',
+        bootstrapSource: launch?.bootstrapSource ?? source,
+        canBootstrap: launch ? launch.canBootstrap === true : role === 'owner',
         presence: { userId, name, color: '#617f73' },
         onStatus: (next, message) => {
           updateStatus(next, message)
@@ -335,6 +356,7 @@ export function CollaborationDialog({
       if (!serviceClient) setServiceClient(apiClient)
       setToken('')
       updateStatus('connected')
+      onConnected?.()
     } catch (error) {
       onEditorBindingChange?.(null)
       setActiveRole(null)
@@ -343,6 +365,16 @@ export function CollaborationDialog({
       updateStatus('error', error instanceof Error ? error.message : String(error))
     }
   }
+
+  useEffect(() => {
+    if (!open || !launch || !serviceClient || serviceState !== 'ready' || status !== 'disconnected') return
+    const key = `${launch.workspaceId}:${launch.projectId}`
+    if (launchStartedRef.current === key) return
+    launchStartedRef.current = key
+    void connect()
+  // connect intentionally reads the state hydrated from this launch.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [launch, open, serviceClient, serviceState, status])
 
   const disconnect = () => {
     if (uncheckpointed && !window.confirm('Leave this live session without checkpointing its latest changes?')) return
