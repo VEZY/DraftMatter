@@ -24,6 +24,7 @@ export interface CollaborationClientOptions {
   token: string | (() => string | Promise<string>)
   bootstrapSource: string
   canBootstrap?: boolean
+  requireEmptyForBootstrap?: boolean
   presence: CollaboratorPresence
   timeoutMs?: number
   onStatus?: (status: CollaborationClientStatus, detail?: string) => void
@@ -55,8 +56,11 @@ function documentName(workspaceId: string, projectId: string) {
   return `${workspaceId}:${projectId}`
 }
 
-export function bootstrapCollaborationSource(collaboration: CollaborativeDocument, source: string, canBootstrap = true) {
-  if (collaboration.source || collaboration.snapshot().authors.length > 0) return false
+export function bootstrapCollaborationSource(collaboration: CollaborativeDocument, source: string, canBootstrap = true, requireEmpty = false) {
+  if (collaboration.source || collaboration.snapshot().authors.length > 0) {
+    if (requireEmpty) throw new Error('The collaborative draft already contains content. DraftMatter did not overwrite it.')
+    return false
+  }
   if (!canBootstrap) throw new Error('The manuscript has not been initialized by its owner yet.')
   collaboration.reconcilePortableSource(source, 'collaboration-bootstrap')
   return true
@@ -134,7 +138,7 @@ export class HocuspocusCollaborationClient {
     try {
       await synced
       window.clearTimeout(timeout)
-      bootstrapCollaborationSource(collaboration, options.bootstrapSource, options.canBootstrap !== false)
+      bootstrapCollaborationSource(collaboration, options.bootstrapSource, options.canBootstrap !== false, options.requireEmptyForBootstrap === true)
       const source = projectCollaborationPortableSource(collaboration)
       client.lastPortableSource = source
       options.onPortableSource?.(source)

@@ -328,6 +328,7 @@ export function CollaborationDialog({
         token: accessToken,
         bootstrapSource: launch?.bootstrapSource ?? source,
         canBootstrap: launch ? launch.canBootstrap === true : role === 'owner',
+        requireEmptyForBootstrap: launch?.requireEmptyForBootstrap,
         presence: { userId, name, color: '#617f73' },
         onStatus: (next, message) => {
           updateStatus(next, message)

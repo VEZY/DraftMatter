@@ -39,6 +39,8 @@ describe('browser collaboration client boundary', () => {
     expect(empty.source).toBe('# Shared draft\n')
     expect(bootstrapCollaborationSource(empty, '# Replaced draft\n', false)).toBe(false)
     expect(empty.source).toBe('# Shared draft\n')
+    expect(() => bootstrapCollaborationSource(empty, '# Collision\n', true, true)).toThrow(/did not overwrite/)
+    expect(empty.source).toBe('# Shared draft\n')
     empty.destroy()
   })
 })

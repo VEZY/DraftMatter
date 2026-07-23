@@ -1,0 +1,332 @@
+.new-draft-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  padding: 24px;
+  box-sizing: border-box;
+  background: rgba(31, 43, 38, .28);
+  display: grid;
+  place-items: center;
+  overflow: auto;
+  font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.new-draft-dialog {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 48px);
+  padding: 28px;
+  box-sizing: border-box;
+  border: 1px solid #d7dfdb;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 28px 90px rgba(31, 43, 38, .18);
+  color: #25302c;
+  overflow: auto;
+}
+
+.new-draft-dialog > header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 22px;
+}
+
+.new-draft-dialog h1 {
+  margin: 0;
+  font: 500 32px/1.2 Georgia, "Times New Roman", serif;
+}
+
+.new-draft-close {
+  width: 36px;
+  height: 36px;
+  border: 1px solid #d4dcd8;
+  border-radius: 8px;
+  background: white;
+  display: grid;
+  place-items: center;
+}
+
+.new-draft-progress {
+  margin: 25px 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.new-draft-progress span {
+  height: 3px;
+  border-radius: 99px;
+  background: #e3e9e6;
+}
+
+.new-draft-progress span.current {
+  background: #4c7867;
+}
+
+.new-draft-options {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 12px;
+}
+
+.new-draft-options button {
+  min-height: 170px;
+  padding: 22px;
+  border: 1px solid #d5ded9;
+  border-radius: 10px;
+  background: #fff;
+  color: inherit;
+  display: flex;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 9px;
+  text-align: left;
+}
+
+.new-draft-options button.selected,
+.new-draft-templates label.selected {
+  border-color: #6f9485;
+  background: #f4f8f6;
+  box-shadow: inset 0 0 0 1px #6f9485;
+}
+
+.new-draft-options button > span {
+  width: 39px;
+  height: 39px;
+  margin-bottom: 9px;
+  border-radius: 8px;
+  background: #e8f0ec;
+  color: #3f715e;
+  display: grid;
+  place-items: center;
+}
+
+.new-draft-options strong,
+.new-draft-templates strong {
+  font-size: 15px;
+}
+
+.new-draft-options small,
+.new-draft-templates small {
+  color: #69756f;
+  line-height: 1.45;
+}
+
+.new-draft-templates {
+  display: grid;
+  gap: 8px;
+}
+
+.new-draft-templates > label {
+  min-height: 58px;
+  padding: 11px 13px;
+  border: 1px solid #d8dfdc;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.new-draft-templates > label > span {
+  flex: 1;
+  display: grid;
+  gap: 4px;
+}
+
+.new-draft-templates input[type="radio"] {
+  accent-color: #3f715e;
+}
+
+.new-draft-import {
+  margin-top: 6px;
+  background: #fafcfb;
+}
+
+.new-draft-import > span {
+  flex: 0 0 auto !important;
+  font-weight: 700;
+}
+
+.new-draft-details {
+  display: grid;
+  gap: 16px;
+}
+
+.new-draft-details label,
+.new-draft-location-details {
+  display: grid;
+  gap: 6px;
+}
+
+.new-draft-details label > span,
+.new-draft-location-details > span {
+  color: #5f6b65;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.new-draft-details input:not([type="checkbox"]),
+.new-draft-details select,
+.new-draft-details textarea {
+  width: 100%;
+  min-height: 40px;
+  padding: 8px 10px;
+  box-sizing: border-box;
+  border: 1px solid #ccd6d1;
+  border-radius: 7px;
+  background: white;
+  color: #25302c;
+  font: inherit;
+}
+
+.new-draft-details textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.new-draft-field-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 13px;
+}
+
+.new-draft-field-row.compact {
+  grid-template-columns: 160px minmax(200px, 1fr);
+}
+
+.new-draft-details details {
+  padding: 9px 11px;
+  border: 1px solid #e0e6e3;
+  border-radius: 8px;
+}
+
+.new-draft-details details summary {
+  color: #69756f;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.new-draft-details details label {
+  margin-top: 10px;
+}
+
+.new-draft-location-details {
+  padding: 14px;
+  border: 1px solid #dce3df;
+  border-radius: 9px;
+  background: #f8faf9;
+}
+
+.new-draft-check {
+  display: flex !important;
+  align-items: center;
+  gap: 8px !important;
+}
+
+.new-draft-check input {
+  accent-color: #3f715e;
+}
+
+.new-draft-folder {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.new-draft-folder code {
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid #d6ded9;
+  border-radius: 7px;
+  background: white;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.new-draft-folder button {
+  padding: 9px 12px;
+}
+
+.new-draft-location-details > small {
+  color: #69756f;
+}
+
+.new-draft-summary {
+  margin: 0;
+  padding: 12px 14px;
+  border-radius: 8px;
+  background: #edf3f0;
+  color: #3f715e;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.new-draft-summary > span {
+  display: grid;
+  gap: 3px;
+}
+
+.new-draft-summary small {
+  color: #69756f;
+}
+
+.new-draft-problem {
+  margin: 18px 0 0;
+  padding: 10px 12px;
+  border: 1px solid #e8c5be;
+  border-radius: 8px;
+  background: #fff8f6;
+  color: #87493c;
+  font-size: 13px;
+}
+
+.new-draft-dialog > footer {
+  margin-top: 25px;
+  padding-top: 18px;
+  border-top: 1px solid #e1e6e3;
+  display: flex;
+  justify-content: space-between;
+}
+
+.new-draft-dialog > footer button {
+  min-height: 40px;
+  padding: 8px 14px;
+  border: 1px solid #cad4cf;
+  border-radius: 8px;
+  background: white;
+  color: #25302c;
+  font: inherit;
+  font-weight: 700;
+}
+
+.new-draft-dialog button:focus-visible,
+.new-draft-dialog input:focus-visible,
+.new-draft-dialog select:focus-visible,
+.new-draft-dialog textarea:focus-visible,
+.new-draft-dialog:focus-visible {
+  outline: 3px solid rgba(63, 113, 94, .2);
+  outline-offset: 2px;
+}
+
+@media (max-width: 620px) {
+  .new-draft-backdrop {
+    padding: 0;
+  }
+
+  .new-draft-dialog {
+    min-height: 100vh;
+    max-height: 100vh;
+    border: 0;
+    border-radius: 0;
+  }
+
+  .new-draft-options,
+  .new-draft-field-row,
+  .new-draft-field-row.compact {
+    grid-template-columns: 1fr;
+  }
+}

@@ -546,6 +546,7 @@ function PublicationBylineView({ byline }: { byline: PublicationByline }) {
 
 export interface AppProps {
   collaborationLaunch?: CollaborationProjectLaunch
+  desktopProjectLaunch?: ProjectSnapshot
   onNavigateHome?: () => void
   initialExperience?: 'complete-example'
 }
@@ -554,7 +555,7 @@ function emptyCollaborativeSource(name: string) {
   return `---\ntitle: "${name.replaceAll('"', '\\"')}"\n---\n\n`
 }
 
-function App({ collaborationLaunch, onNavigateHome, initialExperience }: AppProps = {}) {
+function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initialExperience }: AppProps = {}) {
   const collaborativeProject = collaborationLaunch?.projects.find((project) => project.id === collaborationLaunch.projectId)
   const collaborativeInitialSource = collaborationLaunch
     ? collaborationLaunch.bootstrapSource ?? emptyCollaborativeSource(collaborativeProject?.name ?? 'Untitled draft')
@@ -638,6 +639,7 @@ function App({ collaborationLaunch, onNavigateHome, initialExperience }: AppProp
   const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [collaborationOpen, setCollaborationOpen] = useState(Boolean(collaborationLaunch))
   const initialExperienceOpenedRef = useRef(false)
+  const desktopProjectOpenedRef = useRef('')
   const [collaborationStatus, setCollaborationStatus] = useState<CollaborationClientStatus>('disconnected')
   const [collaborationSessionActive, setCollaborationSessionActive] = useState(false)
   const [collaborationRole, setCollaborationRole] = useState<WorkspaceRole | null>(null)
@@ -3785,6 +3787,16 @@ function App({ collaborationLaunch, onNavigateHome, initialExperience }: AppProp
       setToast(`Opened ${project.config.name} · ${mainPath}${sourceCount ? ` · ${sourceCount} project source${sourceCount === 1 ? '' : 's'}` : ''}`)
     }
   }
+
+  useEffect(() => {
+    if (!desktopProjectLaunch || desktopProjectOpenedRef.current === desktopProjectLaunch.root) return
+    desktopProjectOpenedRef.current = desktopProjectLaunch.root
+    void applyDesktopProject(desktopProjectLaunch, false).catch((error) => {
+      setToast(`Could not open the local project · ${readableError(error)}`)
+    })
+  // This route-owned project is opened once; applyDesktopProject owns subsequent editor state.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [desktopProjectLaunch])
 
   const openDesktopProject = async (knownRoot?: string, announce = true) => {
     if (!desktopHost.available || projectBusy) return
