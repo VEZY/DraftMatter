@@ -16,10 +16,14 @@ describe('application routes', () => {
     expect(parseApplicationRoute(new URL(applicationRoutePath(startCollaboration), 'https://draftmatter.example'))).toEqual(startCollaboration)
   })
 
-  it('recognizes workspace-filtered Home, invitations, and the complete example', () => {
+  it('recognizes workspace-filtered Home, invitations, learning, and the complete example', () => {
     expect(parseApplicationRoute(new URL('/workspace/forest', 'https://draftmatter.example'))).toEqual({ destination: 'home', workspaceId: 'forest' })
     expect(parseApplicationRoute(new URL('/invite', 'https://draftmatter.example'))).toEqual({ destination: 'invitation' })
     expect(parseApplicationRoute(new URL('/?example=complete', 'https://draftmatter.example'))).toEqual({ destination: 'example' })
+    expect(parseApplicationRoute(new URL('/learn', 'https://draftmatter.example'))).toEqual({ destination: 'learn' })
+    expect(parseApplicationRoute(new URL('/tutorial', 'https://draftmatter.example'))).toEqual({ destination: 'tutorial' })
+    expect(applicationRoutePath({ destination: 'learn' })).toBe('/learn')
+    expect(applicationRoutePath({ destination: 'tutorial' })).toBe('/tutorial')
     expect(parseApplicationRoute(new URL('/unknown', 'https://draftmatter.example'))).toEqual({ destination: 'home' })
   })
 })

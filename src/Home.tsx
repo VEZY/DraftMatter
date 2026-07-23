@@ -8,6 +8,7 @@ import {
 } from './collaboration/sessionContext'
 import type { WorkspaceRole } from './collaboration/workspaceService'
 import type { LocalProjectRecent } from './localProjectCatalogue'
+import { GettingStarted } from './GettingStarted'
 
 interface HomeProps {
   preferredWorkspaceId?: string
@@ -22,6 +23,7 @@ interface HomeProps {
   localProblem?: string
   onOpenExample: () => void
   onOpenLearn: () => void
+  onOpenTutorial: () => void
 }
 
 function roleLabel(role: WorkspaceRole) {
@@ -64,7 +66,8 @@ function SignedOutHome({
   localProblem,
   onOpenExample,
   onOpenLearn,
-}: Pick<HomeProps, 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenLearn'>) {
+  onOpenTutorial,
+}: Pick<HomeProps, 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenLearn' | 'onOpenTutorial'>) {
   const session = useCollaborationSession()
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [serviceUrl, setServiceUrl] = useState(session.serviceUrl || 'https://')
@@ -105,6 +108,7 @@ function SignedOutHome({
       </section>
 
       {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} />}
+      {desktopHost.available && <GettingStarted userId="desktop" role="owner" hasDraft={localProjects.length > 0} onTutorial={onOpenTutorial} onLearn={onOpenLearn} />}
 
       <section className="home-advanced">
         <button className="home-disclosure" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((open) => !open)}>
@@ -140,7 +144,8 @@ function Catalogue({
   localProjects,
   localProblem,
   onOpenLearn,
-}: Pick<HomeProps, 'preferredWorkspaceId' | 'onOpenDraft' | 'onNewDraft' | 'onNewLocalDraft' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'localProjects' | 'localProblem' | 'onOpenLearn'>) {
+  onOpenTutorial,
+}: Pick<HomeProps, 'preferredWorkspaceId' | 'onOpenDraft' | 'onNewDraft' | 'onNewLocalDraft' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'localProjects' | 'localProblem' | 'onOpenLearn' | 'onOpenTutorial'>) {
   const session = useCollaborationSession()
   const [query, setQuery] = useState('')
   const [workspaceId, setWorkspaceId] = useState(() => (
@@ -156,6 +161,13 @@ function Catalogue({
   const owned = visibleDrafts.filter((draft) => draft.role === 'owner')
   const shared = visibleDrafts.filter((draft) => draft.role !== 'owner')
   const accountName = session.profile?.displayName ?? session.profile?.email ?? session.profile?.userId ?? 'Account'
+  const role = session.workspaces.some((workspace) => workspace.role === 'owner')
+    ? 'owner'
+    : session.workspaces.some((workspace) => workspace.role === 'editor')
+      ? 'editor'
+      : session.workspaces.some((workspace) => workspace.role === 'commenter')
+        ? 'commenter'
+        : 'viewer'
 
   const openDraft = (draft: CatalogueDraft) => {
     const launch = session.launchFor(draft.workspaceId, draft.id, { canBootstrap: false })
@@ -218,6 +230,7 @@ function Catalogue({
         )}
 
         {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} />}
+        {session.profile && <GettingStarted userId={session.profile.userId} role={role} client={session.client} hasDraft={session.drafts.length + localProjects.length > 0} onTutorial={onOpenTutorial} onLearn={onOpenLearn} />}
       </div>
     </main>
   )

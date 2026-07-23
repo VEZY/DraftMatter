@@ -552,27 +552,35 @@ export interface AppProps {
   onNavigateHome?: () => void
   initialExperience?: 'complete-example'
   startCollaborationOnMount?: boolean
+  browserDocumentLaunch?: { source: string; filename: string; projectName: string }
+  onOpenLearn?: () => void
 }
 
 function emptyCollaborativeSource(name: string) {
   return `---\ntitle: "${name.replaceAll('"', '\\"')}"\n---\n\n`
 }
 
-function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initialExperience, startCollaborationOnMount = false }: AppProps = {}) {
+function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initialExperience, startCollaborationOnMount = false, browserDocumentLaunch, onOpenLearn }: AppProps = {}) {
   const collaborationSession = useOptionalCollaborationSession()
   const collaborativeProject = collaborationLaunch?.projects.find((project) => project.id === collaborationLaunch.projectId)
   const collaborativeInitialSource = collaborationLaunch
     ? collaborationLaunch.bootstrapSource ?? emptyCollaborativeSource(collaborativeProject?.name ?? 'Untitled draft')
     : null
+  const routeInitialSource = collaborativeInitialSource ?? browserDocumentLaunch?.source ?? null
   const initialProjectMeta = useMemo(() => collaborationLaunch ? {
     filename: `${collaborationLaunch.projectId}.qmd`,
     projectName: collaborativeProject?.name ?? collaborationLaunch.projectId,
     citationStyle: 'draftmatter-author-date' as CitationStyleId,
     citationLocale: 'en-US' as CitationLocale,
-  } : getInitialProjectMeta(), [collaborationLaunch, collaborativeProject?.name])
-  const initialDraftState = useMemo(() => collaborativeInitialSource
-    ? parsePortableDocument(collaborativeInitialSource, initialDraft).draft
-    : getInitialDraftState(), [collaborativeInitialSource])
+  } : browserDocumentLaunch ? {
+    filename: browserDocumentLaunch.filename,
+    projectName: browserDocumentLaunch.projectName,
+    citationStyle: 'draftmatter-author-date' as CitationStyleId,
+    citationLocale: 'en-US' as CitationLocale,
+  } : getInitialProjectMeta(), [browserDocumentLaunch, collaborationLaunch, collaborativeProject?.name])
+  const initialDraftState = useMemo(() => routeInitialSource
+    ? parsePortableDocument(routeInitialSource, initialDraft).draft
+    : getInitialDraftState(), [routeInitialSource])
   const [userSettings, setUserSettings] = useState(() => readUserSettings(localStorage))
   const {
     draft,
@@ -677,7 +685,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   const [doiLookupState, setDoiLookupState] = useState<'idle' | 'resolving'>('idle')
   const [scholarHelpOpen, setScholarHelpOpen] = useState(false)
   const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>(() => readRecoverySnapshots(localStorage))
-  const [citations, setCitations] = useState<CitationRecord[]>(() => collaborationLaunch ? [] : getInitialCitations())
+  const [citations, setCitations] = useState<CitationRecord[]>(() => collaborationLaunch || browserDocumentLaunch ? [] : getInitialCitations())
   const [stagedCitationRecords, setStagedCitationRecords] = useState<CitationRecord[]>([])
   const [citationQuery, setCitationQuery] = useState('')
   const [citationAcquisitionState, setCitationAcquisitionState] = useState<'idle' | 'saving'>('idle')
@@ -698,7 +706,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   const [selectedKernelNames, setSelectedKernelNames] = useState<Partial<Record<ExecutionLanguage, string>>>({})
   const [selectedEnvironmentPaths, setSelectedEnvironmentPaths] = useState<Partial<Record<ExecutionLanguage, string>>>({})
   const [manuscriptSource, setManuscriptSource] = useState(() => {
-    if (collaborativeInitialSource) return collaborativeInitialSource
+    if (routeInitialSource) return routeInitialSource
     const saved = localStorage.getItem(STRUCTURED_SOURCE_KEY)
     if (saved) return upgradeSampleIntroduction(saved)
     return reviewedProjection(initialDraftState)
@@ -4719,6 +4727,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
             <span className="shortcut">{commandUsesMetaKey ? <><Icon name="command" size={12} />P</> : 'Ctrl+P'}</span>
           </button>
           <button className="icon-button focus-mode-toggle" onClick={() => setFocusMode(true)} aria-label="Enter focus mode" title="Focus mode"><Icon name="focus" size={17} /></button>
+          {onOpenLearn && <button className="icon-button" onClick={onOpenLearn} aria-label="Learn DraftMatter" title="Learn DraftMatter"><Icon name="info" size={17} /></button>}
           <span className="topbar-divider" />
           <button className={`review-toggle ${activeNav === 'review' ? 'active' : ''}`} onClick={showReviewPanel} aria-label={`Review, ${totalOpenReviewCount} open item${totalOpenReviewCount === 1 ? '' : 's'}`}>
             <Icon name="message" size={16} />

@@ -12,6 +12,7 @@ import type {
   WorkspaceReviewRequest,
   WorkspaceRole,
 } from './workspaceService'
+import type { OnboardingProgress } from '../onboarding'
 
 export interface CollaborationServiceUrls {
   apiUrl: string
@@ -147,6 +148,14 @@ export class CollaborationServiceClient {
 
   getSession() {
     return this.call<CollaborationSessionProfile>('/api/session')
+  }
+
+  getOnboardingProgress() {
+    return this.call<OnboardingProgress>('/api/onboarding')
+  }
+
+  updateOnboardingProgress(progress: Pick<OnboardingProgress, 'completedTaskIds' | 'dismissed'>) {
+    return this.call<OnboardingProgress>('/api/onboarding', { method: 'POST', body: JSON.stringify(progress) })
   }
 
   async listWorkspaces() {

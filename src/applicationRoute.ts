@@ -4,6 +4,8 @@ export type ApplicationRoute =
   | { destination: 'local-editor'; localProjectId: string; startCollaboration?: boolean }
   | { destination: 'invitation' }
   | { destination: 'example' }
+  | { destination: 'learn' }
+  | { destination: 'tutorial' }
 
 function decoded(value: string | undefined) {
   if (!value) return ''
@@ -26,6 +28,8 @@ export function parseApplicationRoute(location: Pick<Location, 'pathname' | 'sea
     ...(new URLSearchParams(location.search).get('start') === 'collaboration' ? { startCollaboration: true } : {}),
   }
   if (parts[0] === 'invite') return { destination: 'invitation' }
+  if (parts[0] === 'learn') return { destination: 'learn' }
+  if (parts[0] === 'tutorial') return { destination: 'tutorial' }
   if (new URLSearchParams(location.search).get('example') === 'complete') return { destination: 'example' }
   return { destination: 'home' }
 }
@@ -35,5 +39,7 @@ export function applicationRoutePath(route: ApplicationRoute) {
   if (route.destination === 'local-editor') return `/local/${encodeURIComponent(route.localProjectId)}${route.startCollaboration ? '?start=collaboration' : ''}`
   if (route.destination === 'invitation') return '/invite'
   if (route.destination === 'example') return '/?example=complete'
+  if (route.destination === 'learn') return '/learn'
+  if (route.destination === 'tutorial') return '/tutorial'
   return route.workspaceId ? `/workspace/${encodeURIComponent(route.workspaceId)}` : '/'
 }

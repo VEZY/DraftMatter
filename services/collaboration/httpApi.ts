@@ -14,6 +14,7 @@ type WorkspaceApi = Pick<PostgresWorkspaceService,
   | 'listProjectAccess' | 'setProjectRole' | 'clearProjectRole'
   | 'listReviewParticipants' | 'listReviewRequests' | 'createReviewRequest' | 'decideReviewRequest' | 'cancelReviewRequest'
   | 'listProjectNotifications' | 'markProjectNotificationRead'>
+  & Pick<PostgresWorkspaceService, 'getOnboardingProgress' | 'updateOnboardingProgress'>
   & Pick<PostgresWorkspaceService, 'scheduleWorkspaceDeletion' | 'getWorkspaceDeletion' | 'cancelWorkspaceDeletion'>
   & Pick<PostgresWorkspaceService, 'authorizeProject'>
 
@@ -207,6 +208,10 @@ export function createCollaborationHttpApi(options: CollaborationHttpApiOptions)
 
       if (request.method === 'GET' && parts.length === 2 && parts[1] === 'session') {
         return json(200, await options.workspaces.getCurrentIdentity(token), headers)
+      }
+      if (parts.length === 2 && parts[1] === 'onboarding') {
+        if (request.method === 'GET') return json(200, await options.workspaces.getOnboardingProgress(token), headers)
+        if (request.method === 'POST') return json(200, await options.workspaces.updateOnboardingProgress(token, await body(request, maximum)), headers)
       }
 
       if (request.method === 'GET' && parts.length === 2 && parts[1] === 'workspaces') {

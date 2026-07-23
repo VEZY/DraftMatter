@@ -50,6 +50,24 @@ async function database(onMembershipRevoked?: (workspaceId: string, userId: stri
 }
 
 describe('PostgreSQL workspace authorization', () => {
+  it('persists onboarding progress per authenticated user', async () => {
+    const { pool, service } = await database()
+    await expect(service.getOnboardingProgress('owner')).resolves.toEqual({ completedTaskIds: [], dismissed: false })
+    await expect(service.updateOnboardingProgress('owner', {
+      completedTaskIds: ['create-or-open', 'author-profile'],
+      dismissed: true,
+    })).resolves.toMatchObject({
+      completedTaskIds: ['create-or-open', 'author-profile'],
+      dismissed: true,
+    })
+    await expect(service.getOnboardingProgress('owner')).resolves.toMatchObject({
+      completedTaskIds: ['create-or-open', 'author-profile'],
+      dismissed: true,
+    })
+    await expect(service.getOnboardingProgress('other')).resolves.toEqual({ completedTaskIds: [], dismissed: false })
+    await pool.end()
+  })
+
   it('persists tenant-scoped roles, invitations, revocation, and owner audit events', async () => {
     const revocations: string[] = []
     const { pool, service } = await database((workspaceId, userId) => revocations.push(`${workspaceId}:${userId}`))

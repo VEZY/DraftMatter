@@ -40,6 +40,20 @@ describe('browser collaboration service client', () => {
     expect(request).toHaveBeenNthCalledWith(3, 'https://collab.example.org/api/workspaces/forest/projects', expect.anything())
   })
 
+  it('reads and updates account onboarding outside manuscript content', async () => {
+    const request = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ completedTaskIds: ['create-or-open'], dismissed: false }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ completedTaskIds: ['create-or-open'], dismissed: true, updatedAt: '2026-07-23T00:00:00.000Z' }), { status: 200 }))
+    const client = new CollaborationServiceClient('https://collab.example.org', 'access-token', request)
+    await expect(client.getOnboardingProgress()).resolves.toMatchObject({ completedTaskIds: ['create-or-open'] })
+    await expect(client.updateOnboardingProgress({ completedTaskIds: ['create-or-open'], dismissed: true })).resolves.toMatchObject({ dismissed: true })
+    expect(request).toHaveBeenNthCalledWith(1, 'https://collab.example.org/api/onboarding', expect.anything())
+    expect(request).toHaveBeenNthCalledWith(2, 'https://collab.example.org/api/onboarding', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({ completedTaskIds: ['create-or-open'], dismissed: true }),
+    }))
+  })
+
   it('supports invitation management and returns actionable privacy-safe service failures', async () => {
     const request = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ invitation: { id: 'invite-1' }, token: 'one-time-invite' }), { status: 201 }))

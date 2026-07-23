@@ -24,6 +24,7 @@ import {
   type WorkspaceRole,
 } from '../../src/collaboration/workspaceService'
 import { PostgresEntitlementService } from './entitlements'
+import { ONBOARDING_TASK_IDS, type OnboardingProgress, type OnboardingTaskId } from '../../src/onboarding'
 
 const SAFE_ID = /^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/
 
@@ -295,6 +296,46 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
       ...(identity.displayName ? { displayName: identity.displayName } : {}),
       ...(identity.email ? { email: identity.email } : {}),
     }
+  }
+
+  async getOnboardingProgress(token: string): Promise<OnboardingProgress> {
+    const identity = await this.authenticate(token, 'read')
+    const result = await this.pool.query<{ completed_task_ids: unknown; dismissed: boolean; updated_at: Date | string }>(
+      'SELECT completed_task_ids, dismissed, updated_at FROM draftmatter_user_onboarding WHERE user_id = $1',
+      [identity.userId],
+    )
+    const row = result.rows[0]
+    if (!row) return { completedTaskIds: [], dismissed: false }
+    const completedTaskIds = Array.isArray(row.completed_task_ids)
+      ? row.completed_task_ids.filter((id): id is OnboardingTaskId => typeof id === 'string' && ONBOARDING_TASK_IDS.includes(id as OnboardingTaskId))
+      : []
+    return { completedTaskIds, dismissed: row.dismissed, updatedAt: iso(row.updated_at) }
+  }
+
+  async updateOnboardingProgress(
+    token: string,
+    request: Pick<OnboardingProgress, 'completedTaskIds' | 'dismissed'>,
+  ): Promise<OnboardingProgress> {
+    const identity = await this.authenticate(token, 'write')
+    if (!Array.isArray(request.completedTaskIds) || request.completedTaskIds.length > ONBOARDING_TASK_IDS.length) {
+      throw new WorkspaceAccessError('invalid-request', 'Onboarding progress is invalid.')
+    }
+    const completedTaskIds = [...new Set(request.completedTaskIds)]
+    if (completedTaskIds.some((id) => !ONBOARDING_TASK_IDS.includes(id))) {
+      throw new WorkspaceAccessError('invalid-request', 'Onboarding progress contains an unknown task.')
+    }
+    const result = await this.pool.query<{ completed_task_ids: OnboardingTaskId[]; dismissed: boolean; updated_at: Date | string }>(
+      `INSERT INTO draftmatter_user_onboarding(user_id, completed_task_ids, dismissed, updated_at)
+       VALUES ($1, $2::jsonb, $3, CURRENT_TIMESTAMP)
+       ON CONFLICT (user_id) DO UPDATE SET
+         completed_task_ids = EXCLUDED.completed_task_ids,
+         dismissed = EXCLUDED.dismissed,
+         updated_at = CURRENT_TIMESTAMP
+       RETURNING completed_task_ids, dismissed, updated_at`,
+      [identity.userId, JSON.stringify(completedTaskIds), request.dismissed === true],
+    )
+    const row = result.rows[0]
+    return { completedTaskIds: row.completed_task_ids, dismissed: row.dismissed, updatedAt: iso(row.updated_at) }
   }
 
   private async requireWorkspaceAccess(database: Pick<PoolClient, 'query'> | Database, workspaceId: string, userId: string, capability: ProjectCapability) {
