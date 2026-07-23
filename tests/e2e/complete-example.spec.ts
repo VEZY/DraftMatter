@@ -1,6 +1,33 @@
 import { expect, test } from '@playwright/test'
 
 test.describe('built-in complete example', () => {
+  test('keeps long-outline click and keyboard navigation inside their panels', async ({ page }) => {
+    await page.goto('/')
+    await page.evaluate(() => localStorage.clear())
+    await page.reload()
+
+    await page.locator('.project-switcher').click()
+    await page.getByRole('button', { name: /Open complete example/ }).click()
+
+    const outline = page.getByRole('complementary', { name: 'Manuscript outline' })
+    const tree = outline.locator('.outline-tree')
+    await expect.poll(() => tree.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
+    await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight)).toBe(await page.evaluate(() => window.innerHeight))
+    await expect(page.locator('.editor-area')).toHaveCSS('scroll-behavior', 'auto')
+
+    const finalSection = tree.getByRole('button').filter({ hasText: 'Data and code availability' })
+    await finalSection.click()
+    await expect.poll(() => page.locator('.editor-area').evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
+
+    await finalSection.press('ArrowUp')
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
+
+    await page.getByRole('heading', { name: 'Data and code availability', exact: true }).click()
+    await page.getByRole('textbox', { name: 'Rendered manuscript editor' }).press('ArrowUp')
+    await expect.poll(() => page.evaluate(() => window.scrollY)).toBe(0)
+  })
+
   test('opens from the project menu and remains complete after reload', async ({ page }) => {
     await page.goto('/')
     await page.evaluate(() => localStorage.clear())

@@ -1324,7 +1324,11 @@ button:disabled {
 
 .outline-tree {
   display: flex;
+  flex: 1 1 auto;
   flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
   padding: 0 10px;
 }
 
@@ -1485,7 +1489,6 @@ button:disabled {
   min-width: 500px;
   overflow: auto;
   position: relative;
-  scroll-behavior: smooth;
 }
 
 .format-toolbar {

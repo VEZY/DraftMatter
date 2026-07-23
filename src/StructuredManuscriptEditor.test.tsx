@@ -300,6 +300,25 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector('.structured-heading-card[data-section-kind="numbered"]')?.textContent).toContain('Introduction')
   })
 
+  it('navigates to outline targets without starting a scroll animation that can fight caret restoration', async () => {
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    const scrollIntoView = vi.spyOn(HTMLElement.prototype, 'scrollIntoView')
+    await act(async () => root.render(
+      <StructuredManuscriptEditor
+        ref={editorRef}
+        source={'# Jump test\n\n## Lower section\n\nBody.\n'}
+        onChange={vi.fn()}
+      />,
+    ))
+
+    const lowerSection = [...container.querySelectorAll<HTMLElement>('.structured-heading-card')]
+      .find((heading) => heading.querySelector('h2')?.textContent === 'Lower section')!
+    scrollIntoView.mockClear()
+
+    expect(editorRef.current?.scrollToNode(lowerSection.dataset.dmId!)).toBe(true)
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'center' })
+  })
+
   it('filters manuscript review marks by author and highlights the active navigable anchor', async () => {
     const base = '# Review marks\n\nAlpha phrase stays here.\n\nBeta phrase stays here.\n'
     const alice = createReviewChange(base, {

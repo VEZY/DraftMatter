@@ -3983,7 +3983,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       const escaped = globalThis.CSS?.escape ? globalThis.CSS.escape(id) : id.replace(/["\\]/g, '\\$&')
       const element = hostRef.current?.querySelector<HTMLElement>(`[data-dm-id="${escaped}"]`)
       if (!element) return false
-      element.scrollIntoView({ behavior: motionAwareScrollBehavior(), block: 'center' })
+      element.scrollIntoView({ behavior: 'auto', block: 'center' })
       return true
     },
     scrollToReviewAnchor: (anchorId) => {
