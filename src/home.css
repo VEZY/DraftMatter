@@ -538,6 +538,122 @@
   margin-top: 10px;
 }
 
+.home-local-projects {
+  width: min(1080px, calc(100% - 48px));
+  margin: 58px auto 0;
+  padding: 30px 0 0;
+  border-top: 1px solid var(--home-line);
+}
+
+.home-catalogue-content > .home-local-projects {
+  width: 100%;
+}
+
+.home-local-heading {
+  margin-bottom: 13px;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.home-local-heading .home-kicker {
+  margin-bottom: 7px;
+}
+
+.home-local-heading h2 {
+  margin: 0;
+  font: 500 24px Georgia, "Times New Roman", serif;
+}
+
+.home-local-heading > div:last-child {
+  display: flex;
+  gap: 8px;
+}
+
+.home-local-heading button {
+  padding: 8px 11px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.home-local-list {
+  border: 1px solid var(--home-line);
+  border-radius: 10px;
+  background: white;
+  overflow: hidden;
+}
+
+.home-local-row {
+  position: relative;
+  display: flex;
+}
+
+.home-local-row + .home-local-row {
+  border-top: 1px solid var(--home-line);
+}
+
+.home-local-open {
+  width: 100%;
+  min-height: 66px;
+  padding: 12px 54px 12px 14px;
+  border: 0 !important;
+  border-radius: 0 !important;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+
+.home-local-open:hover {
+  background: var(--home-soft);
+}
+
+.home-local-state {
+  color: var(--home-muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.home-local-forget {
+  width: 31px;
+  height: 31px;
+  padding: 0;
+  position: absolute;
+  top: 50%;
+  right: 11px;
+  transform: translateY(-50%);
+  display: grid;
+  place-items: center;
+  opacity: 0;
+}
+
+.home-local-row:hover .home-local-forget,
+.home-local-forget:focus-visible {
+  opacity: 1;
+}
+
+.home-local-empty {
+  padding: 20px;
+  border: 1px dashed #cad5cf;
+  border-radius: 9px;
+  background: rgba(255, 255, 255, .65);
+  color: var(--home-sage);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.home-local-empty span {
+  display: grid;
+  gap: 4px;
+}
+
+.home-local-empty small {
+  color: var(--home-muted);
+}
+
 .home-invitation,
 .home-route-status {
   display: grid;
@@ -608,6 +724,15 @@
   }
 
   .home-role {
+    display: none;
+  }
+
+  .home-local-heading {
+    align-items: start;
+    flex-direction: column;
+  }
+
+  .home-local-state {
     display: none;
   }
 }

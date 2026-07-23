@@ -16,6 +16,7 @@ type DraftLocation = 'collaborative' | 'local'
 
 interface NewDraftWizardProps {
   open: boolean
+  initialLocation?: DraftLocation
   onClose: () => void
   onCollaborativeCreated: (launch: CollaborationProjectLaunch) => void
   onLocalCreated: (project: ProjectSnapshot) => void
@@ -31,6 +32,7 @@ function splitAuthors(value: string) {
 
 export function NewDraftWizard({
   open,
+  initialLocation = 'collaborative',
   onClose,
   onCollaborativeCreated,
   onLocalCreated,
@@ -64,10 +66,11 @@ export function NewDraftWizard({
     if (!open) return
     returnFocusRef.current = document.activeElement as HTMLElement | null
     setStep(1)
+    setLocation(initialLocation)
     setProblem('')
     createdRemoteRef.current = null
     requestAnimationFrame(() => dialogRef.current?.focus())
-  }, [open])
+  }, [initialLocation, open])
 
   useEffect(() => {
     if (!open) return

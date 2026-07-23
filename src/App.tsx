@@ -74,6 +74,7 @@ import { ReviewTimestamp } from './ReviewTimestamp'
 import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
 import { workspaceRoleCapabilities, type WorkspaceRole } from './collaboration/workspaceService'
 import type { CollaborationProjectLaunch } from './collaboration/sessionContext'
+import { rememberLocalProject } from './localProjectCatalogue'
 import { KernelConsole, type KernelCellFailure, type KernelConsoleRestartEpochs, type KernelConsoleStatus, type KernelConsoleStatuses } from './KernelConsole'
 import { ManagedCodeCellEditor } from './ManagedCodeCellEditor'
 import completeExampleSource from './fixtures/projects/alpha-article/paper.qmd?raw'
@@ -3781,6 +3782,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
     setPendingProject(null)
     setSaveState('saved')
     localStorage.setItem(LAST_PROJECT_ROOT_KEY, project.root)
+    rememberLocalProject(localStorage, project)
     writeRecoverySnapshot(openedDraft, displayName, document.content)
     if (announce) {
       const sourceCount = projectBibliography.records.length
@@ -4334,7 +4336,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   const changeCitationLocale = (locale: CitationLocale) => updateCitationPreferences(citationStyle, locale)
 
   useEffect(() => {
-    if (!desktopHost.available || builtInProject || reopenAttemptedRef.current) return
+    if (!desktopHost.available || builtInProject || collaborationLaunch || desktopProjectLaunch || initialExperience || reopenAttemptedRef.current) return
     reopenAttemptedRef.current = true
     const root = localStorage.getItem(LAST_PROJECT_ROOT_KEY)
     if (root) void openDesktopProject(root, false)
