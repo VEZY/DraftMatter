@@ -148,8 +148,8 @@ describe('PostgreSQL workspace authorization', () => {
     await expect(service.authorizeProject('editor', 'forest', 'paper', 'edit')).rejects.toMatchObject({ code: 'forbidden' })
     await expect(service.authorizeProject('editor', 'forest', 'appendix', 'edit')).resolves.toMatchObject({ role: 'editor' })
     expect(await service.listProjects('editor', 'forest')).toEqual([
-      expect.objectContaining({ id: 'appendix', role: 'editor' }),
-      expect.objectContaining({ id: 'paper', role: 'viewer' }),
+      expect.objectContaining({ id: 'appendix', role: 'editor', participantCount: 2, reviewRequested: false }),
+      expect.objectContaining({ id: 'paper', role: 'viewer', participantCount: 2, reviewRequested: false, lastActivityAt: expect.any(String) }),
     ])
     expect(await service.listReviewRequests('owner', 'forest', 'paper')).toEqual(expect.arrayContaining([
       expect.objectContaining({ id: review.id, status: 'cancelled' }),

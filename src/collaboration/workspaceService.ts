@@ -47,6 +47,9 @@ export interface WorkspaceProject {
   name: string
   createdAt: string
   role?: WorkspaceRole
+  lastActivityAt?: string
+  participantCount?: number
+  reviewRequested?: boolean
 }
 
 export interface WorkspaceProjectAccess {

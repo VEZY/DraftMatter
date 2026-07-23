@@ -25,6 +25,9 @@ describe('shared collaboration session', () => {
       name: `Owned draft ${index + 1}`,
       role: 'owner',
       createdAt: `2026-07-${String(index + 1).padStart(2, '0')}T00:00:00.000Z`,
+      lastActivityAt: `2026-07-${String(index + 10).padStart(2, '0')}T12:00:00.000Z`,
+      participantCount: 3,
+      reviewRequested: index === 0,
     }))
     const request = vi.fn<typeof fetch>((input) => {
       const url = String(input)
@@ -64,6 +67,11 @@ describe('shared collaboration session', () => {
     expect(latest!.drafts.find((draft) => draft.id === 'review')).toMatchObject({
       role: 'commenter',
       workspaceName: 'Shared lab',
+    })
+    expect(latest!.drafts.find((draft) => draft.id === 'owned-1')).toMatchObject({
+      lastActivityAt: '2026-07-10T12:00:00.000Z',
+      participantCount: 3,
+      reviewRequested: true,
     })
     expect(latest!.workspaceFailures).toEqual([expect.objectContaining({ workspaceName: 'Field station' })])
     expect(localStorage.getItem('short-lived-token')).toBeNull()

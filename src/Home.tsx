@@ -36,6 +36,13 @@ function createdLabel(createdAt: string) {
   return `Created ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(created)}`
 }
 
+function activityLabel(draft: CatalogueDraft) {
+  const value = draft.lastActivityAt ?? draft.createdAt
+  const activity = new Date(value)
+  if (Number.isNaN(activity.getTime())) return createdLabel(draft.createdAt)
+  return `Active ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(activity)}`
+}
+
 function DraftRow({
   draft,
   onOpen,
@@ -48,7 +55,8 @@ function DraftRow({
       <span className="home-draft-icon"><Icon name="document" size={18} /></span>
       <span className="home-draft-copy">
         <strong>{draft.name}</strong>
-        <small>{draft.workspaceName} · {createdLabel(draft.createdAt)}</small>
+        <small>{draft.workspaceName} · {activityLabel(draft)}</small>
+        {(draft.reviewRequested || draft.participantCount !== undefined) && <em>{draft.reviewRequested ? 'Review requested' : ''}{draft.reviewRequested && draft.participantCount !== undefined ? ' · ' : ''}{draft.participantCount !== undefined ? `${draft.participantCount} ${draft.participantCount === 1 ? 'person' : 'people'}` : ''}</em>}
       </span>
       <span className={`home-role home-role-${draft.role}`}>{roleLabel(draft.role)}</span>
       <Icon name="arrowRight" size={16} />
@@ -153,11 +161,20 @@ function Catalogue({
       ? preferredWorkspaceId
       : 'all'
   ))
+  const [roleFilter, setRoleFilter] = useState<WorkspaceRole | 'all'>('all')
+  const [sort, setSort] = useState<'activity' | 'title' | 'created'>('activity')
   const normalizedQuery = query.trim().toLocaleLowerCase()
   const visibleDrafts = useMemo(() => session.drafts.filter((draft) => (
     (workspaceId === 'all' || draft.workspaceId === workspaceId)
+    && (roleFilter === 'all' || draft.role === roleFilter)
     && (!normalizedQuery || `${draft.name} ${draft.workspaceName}`.toLocaleLowerCase().includes(normalizedQuery))
-  )), [normalizedQuery, session.drafts, workspaceId])
+  )).sort((left, right) => {
+    if (sort === 'title') return left.name.localeCompare(right.name)
+    const leftDate = new Date(sort === 'created' ? left.createdAt : left.lastActivityAt ?? left.createdAt).getTime()
+    const rightDate = new Date(sort === 'created' ? right.createdAt : right.lastActivityAt ?? right.createdAt).getTime()
+    return rightDate - leftDate || left.name.localeCompare(right.name)
+  }), [normalizedQuery, roleFilter, session.drafts, sort, workspaceId])
+  const continueWriting = visibleDrafts.slice(0, 3)
   const owned = visibleDrafts.filter((draft) => draft.role === 'owner')
   const shared = visibleDrafts.filter((draft) => draft.role !== 'owner')
   const accountName = session.profile?.displayName ?? session.profile?.email ?? session.profile?.userId ?? 'Account'
@@ -202,6 +219,8 @@ function Catalogue({
 
         <div className="home-catalogue-tools">
           <label><span>Workspace</span><select value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)}><option value="all">All workspaces</option>{session.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name}</option>)}</select></label>
+          <label><span>Role</span><select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value as WorkspaceRole | 'all')}><option value="all">All roles</option><option value="owner">Owner</option><option value="editor">Editor</option><option value="commenter">Commenter</option><option value="viewer">Viewer</option></select></label>
+          <label><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="activity">Recent activity</option><option value="created">Created</option><option value="title">Title</option></select></label>
           <span>{visibleDrafts.length} draft{visibleDrafts.length === 1 ? '' : 's'}</span>
         </div>
 
@@ -224,6 +243,7 @@ function Catalogue({
           </section>
         ) : (
           <div className="home-draft-sections">
+            {continueWriting.length > 0 && <section aria-labelledby="continue-drafts-title"><div className="home-section-title"><h2 id="continue-drafts-title">Continue writing</h2><span>{continueWriting.length}</span></div><div className="home-draft-list">{continueWriting.map((draft) => <DraftRow key={`continue:${draft.workspaceId}:${draft.id}`} draft={draft} onOpen={() => openDraft(draft)} />)}</div></section>}
             {shared.length > 0 && <section aria-labelledby="shared-drafts-title"><div className="home-section-title"><h2 id="shared-drafts-title">Shared with me</h2><span>{shared.length}</span></div><div className="home-draft-list">{shared.map((draft) => <DraftRow key={`${draft.workspaceId}:${draft.id}`} draft={draft} onOpen={() => openDraft(draft)} />)}</div></section>}
             {owned.length > 0 && <section aria-labelledby="owned-drafts-title"><div className="home-section-title"><h2 id="owned-drafts-title">My drafts</h2><span>{owned.length}</span></div><div className="home-draft-list">{owned.map((draft) => <DraftRow key={`${draft.workspaceId}:${draft.id}`} draft={draft} onOpen={() => openDraft(draft)} />)}</div></section>}
           </div>

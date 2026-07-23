@@ -46,6 +46,9 @@ interface ProjectRow {
 
 interface ProjectWithRoleRow extends ProjectRow {
   effective_role: WorkspaceRole
+  last_activity_at: Date | string
+  participant_count: string | number
+  review_requested: boolean
 }
 
 interface ProjectAccessRow {
@@ -131,7 +134,12 @@ function project(row: ProjectRow | ProjectWithRoleRow): WorkspaceProject {
     workspaceId: row.workspace_id,
     name: row.name,
     createdAt: iso(row.created_at),
-    ...('effective_role' in row ? { role: row.effective_role } : {}),
+    ...('effective_role' in row ? {
+      role: row.effective_role,
+      lastActivityAt: iso(row.last_activity_at),
+      participantCount: Number(row.participant_count),
+      reviewRequested: row.review_requested,
+    } : {}),
   }
 }
 
@@ -512,9 +520,21 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
     const result = await this.pool.query<ProjectWithRoleRow>(
       `SELECT p.workspace_id, p.id, p.name, p.created_at,
               CASE WHEN $3 = 'owner' THEN 'owner' ELSE COALESCE(r.role, $3) END AS effective_role
+              , COALESCE(reviews.last_activity_at, p.created_at) AS last_activity_at
+              , COALESCE(participants.participant_count, 0) AS participant_count
+              , COALESCE(reviews.open_count, 0) > 0 AS review_requested
        FROM draftmatter_projects p
        LEFT JOIN draftmatter_project_roles r
          ON r.workspace_id = p.workspace_id AND r.project_id = p.id AND r.user_id = $2
+       LEFT JOIN (
+         SELECT workspace_id, project_id, MAX(created_at) AS last_activity_at,
+                SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END) AS open_count
+         FROM draftmatter_review_requests GROUP BY workspace_id, project_id
+       ) reviews ON reviews.workspace_id = p.workspace_id AND reviews.project_id = p.id
+       LEFT JOIN (
+         SELECT workspace_id, COUNT(*) AS participant_count FROM draftmatter_memberships
+         WHERE revoked_at IS NULL GROUP BY workspace_id
+       ) participants ON participants.workspace_id = p.workspace_id
        WHERE p.workspace_id = $1 AND p.deleted_at IS NULL ORDER BY p.id`,
       [workspaceId, identity.userId, membership.role],
     )
