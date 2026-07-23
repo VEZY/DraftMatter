@@ -4,6 +4,7 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { CollaborationDialog } from './CollaborationDialog'
 import { HocuspocusCollaborationClient, type CollaborativeEditorBinding } from './sharedEditor'
+import { CollaborationServiceClient } from './collaboration/serviceClient'
 
 function input(container: HTMLElement, label: string) {
   const field = [...container.querySelectorAll('label')].find((candidate) => candidate.querySelector('span')?.textContent === label)?.querySelector('input')
@@ -25,6 +26,60 @@ afterEach(() => {
 })
 
 describe('collaboration dialog', () => {
+  it('stops strict local bootstrap collisions and lets the user open the remote draft explicitly', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
+      projects: [{ id: 'paper', workspaceId: 'forest', name: 'Remote paper', role: 'owner', createdAt: '2026-07-23T00:00:00.000Z' }],
+    }), { status: 200 })))
+    const connect = vi.spyOn(HocuspocusCollaborationClient, 'connect')
+      .mockRejectedValueOnce(new Error('The collaborative draft already contains content. DraftMatter did not overwrite it.'))
+      .mockResolvedValueOnce({
+        publishPortableSource: vi.fn(() => '# Remote'),
+        createCheckpoint: vi.fn(),
+        destroy: vi.fn(),
+        editorBinding: { document: {}, awareness: {} },
+      } as unknown as HocuspocusCollaborationClient)
+    const service = new CollaborationServiceClient('https://collab.example.test', 'short-lived-token')
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => {
+      root.render(<CollaborationDialog
+        open
+        source="# Local"
+        launch={{
+          serviceUrl: 'https://collab.example.test',
+          token: 'short-lived-token',
+          client: service,
+          profile: { userId: 'owner', displayName: 'Owner' },
+          workspaces: [{ id: 'forest', name: 'Forest', role: 'owner', createdAt: '2026-07-01T00:00:00.000Z' }],
+          projects: [{ id: 'paper', workspaceId: 'forest', name: 'Remote paper', role: 'owner', createdAt: '2026-07-23T00:00:00.000Z' }],
+          workspaceId: 'forest',
+          projectId: 'paper',
+          bootstrapSource: '# Local',
+          canBootstrap: true,
+          requireEmptyForBootstrap: true,
+        }}
+        onClose={vi.fn()}
+        onRemoteSource={vi.fn()}
+        onStatus={vi.fn()}
+        onCheckpoint={vi.fn().mockResolvedValue(undefined)}
+        checkpointMode="working-tree"
+        checkpointTarget="paper.qmd"
+      />)
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+
+    expect(container.textContent).toContain('The local manuscript was not uploaded or replaced.')
+    expect(connect).toHaveBeenNthCalledWith(1, expect.objectContaining({ canBootstrap: true, requireEmptyForBootstrap: true }))
+    const openRemote = [...container.querySelectorAll<HTMLButtonElement>('button')].find((candidate) => candidate.textContent === 'Open remote draft')!
+    await act(async () => {
+      openRemote.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    expect(connect).toHaveBeenNthCalledWith(2, expect.objectContaining({ canBootstrap: false, requireEmptyForBootstrap: false }))
+    expect(container.textContent).toContain('Working together')
+    await act(async () => root.unmount())
+  })
+
   it('opens browser invitation links without sending their secret in the request URL', async () => {
     window.history.replaceState({}, '', '/writer#dm-invite=one-use-secret&dm-service=https%3A%2F%2Fcollab.example.test')
     const onRequestOpen = vi.fn()

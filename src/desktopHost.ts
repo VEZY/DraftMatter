@@ -16,6 +16,15 @@ export interface ProjectConfig {
   citationLocale: 'en-US' | 'fr-FR'
   citationBibliography?: string
   execution?: ProjectExecutionPreferences
+  collaboration?: ProjectCollaborationLink
+}
+
+export interface ProjectCollaborationLink {
+  schemaVersion: 1
+  serviceUrl: string
+  workspaceId: string
+  projectId: string
+  lastCheckpointHash?: string
 }
 
 export interface ProjectExecutionLanguagePreferences {
@@ -518,6 +527,9 @@ export function createDesktopHost(
     },
     setExecutionPreferences(root: string, preferences: ProjectExecutionPreferences) {
       return invokeBridge<ProjectSnapshot>('set_execution_preferences', { root, preferences })
+    },
+    setCollaborationLink(root: string, link: ProjectCollaborationLink | null) {
+      return invokeBridge<ProjectSnapshot>('set_collaboration_link', { root, link })
     },
     zoteroStatus() {
       return invokeBridge<ZoteroStatus>('zotero_status')

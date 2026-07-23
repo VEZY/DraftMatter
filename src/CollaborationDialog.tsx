@@ -43,6 +43,7 @@ export interface CollaborationDialogProps {
   localAuthor?: LocalAuthorIdentity
   launch?: CollaborationProjectLaunch
   onConnected?: () => void
+  onKeepLocalSeparate?: () => void
 }
 
 function portableId(value: string, fallback: string) {
@@ -69,6 +70,7 @@ export function CollaborationDialog({
   localAuthor = DEFAULT_USER_SETTINGS.author,
   launch,
   onConnected,
+  onKeepLocalSeparate,
 }: CollaborationDialogProps) {
   const [url, setUrl] = useState('https://')
   const [workspaceId, setWorkspaceId] = useState('')
@@ -93,6 +95,8 @@ export function CollaborationDialog({
   const [newProjectName, setNewProjectName] = useState(checkpointTarget.replace(/\.(qmd|md)$/i, ''))
   const [newProjectId, setNewProjectId] = useState(() => portableId(checkpointTarget.replace(/\.(qmd|md)$/i, ''), 'manuscript'))
   const [invitationToken, setInvitationToken] = useState('')
+  const [bootstrapCollision, setBootstrapCollision] = useState(false)
+  const [openRemoteWithoutBootstrap, setOpenRemoteWithoutBootstrap] = useState(false)
   const clientRef = useRef<HocuspocusCollaborationClient | null>(null)
   const accessTokenRef = useRef<CollaborationAccessToken | null>(null)
   const oidcCallbackStartedRef = useRef(false)
@@ -327,8 +331,8 @@ export function CollaborationDialog({
         projectId,
         token: accessToken,
         bootstrapSource: launch?.bootstrapSource ?? source,
-        canBootstrap: launch ? launch.canBootstrap === true : role === 'owner',
-        requireEmptyForBootstrap: launch?.requireEmptyForBootstrap,
+        canBootstrap: openRemoteWithoutBootstrap ? false : launch ? launch.canBootstrap === true : role === 'owner',
+        requireEmptyForBootstrap: openRemoteWithoutBootstrap ? false : launch?.requireEmptyForBootstrap,
         presence: { userId, name, color: '#617f73' },
         onStatus: (next, message) => {
           updateStatus(next, message)
@@ -356,6 +360,7 @@ export function CollaborationDialog({
       onEditorBindingChange?.(client.editorBinding)
       if (!serviceClient) setServiceClient(apiClient)
       setToken('')
+      setBootstrapCollision(false)
       updateStatus('connected')
       onConnected?.()
     } catch (error) {
@@ -363,7 +368,9 @@ export function CollaborationDialog({
       setActiveRole(null)
       onRoleChange?.(null)
       onSessionStateChange?.(false)
-      updateStatus('error', error instanceof Error ? error.message : String(error))
+      const message = error instanceof Error ? error.message : String(error)
+      setBootstrapCollision(Boolean(launch?.requireEmptyForBootstrap && message.includes('did not overwrite')))
+      updateStatus('error', message)
     }
   }
 
@@ -376,6 +383,14 @@ export function CollaborationDialog({
   // connect intentionally reads the state hydrated from this launch.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [launch, open, serviceClient, serviceState, status])
+
+  useEffect(() => {
+    if (!openRemoteWithoutBootstrap || status !== 'error') return
+    launchStartedRef.current = ''
+    updateStatus('disconnected')
+  // Changing the collision policy deliberately retries the same linked room.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openRemoteWithoutBootstrap, status])
 
   const disconnect = () => {
     if (uncheckpointed && !window.confirm('Leave this live session without checkpointing its latest changes?')) return
@@ -461,6 +476,7 @@ export function CollaborationDialog({
 
             <div className="collaboration-fields"><label><span>Your name</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label><label><span>Author ID</span><input value={userId} onChange={(event) => setUserId(event.target.value)} autoCapitalize="none" spellCheck={false} required readOnly={Boolean(profile)} /><small>{profile ? 'Bound to the authenticated account.' : 'Used for portable review attribution.'}</small></label></div>
             {detail && <div className="collaboration-error" role="alert">{detail}</div>}
+            {bootstrapCollision && <div className="collaboration-bootstrap-recovery"><strong>Choose which draft to keep open</strong><p>The remote draft already contains content. The local manuscript was not uploaded or replaced.</p><div><button type="button" onClick={() => setOpenRemoteWithoutBootstrap(true)}>Open remote draft</button><button type="button" onClick={() => { onKeepLocalSeparate?.(); onClose() }}>Keep local project separate</button></div></div>}
             <footer><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="submit" disabled={status === 'connecting' || !workspaceId || !projectId || (!token && !serviceClient)}>{status === 'connecting' ? 'Connecting…' : projects.length === 0 && serviceClient ? 'Create a project first' : 'Join workspace'}</button></footer>
           </form>
         )}

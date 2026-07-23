@@ -48,6 +48,12 @@ describe('desktop host adapter', () => {
       r: {},
       julia: {},
     })
+    await host.setCollaborationLink('/research/canopy', {
+      schemaVersion: 1,
+      serviceUrl: 'https://collab.example.org',
+      workspaceId: 'forest',
+      projectId: 'canopy-paper',
+    })
     await host.zoteroStatus()
     await host.searchZotero('canopy water', 12)
     await host.zoteroItemAttachments('PXW99EKT')
@@ -120,6 +126,12 @@ describe('desktop host adapter', () => {
       ['set_citation_preferences', { root: '/research/canopy', style: 'draftmatter-numeric', locale: 'fr-FR' }],
       ['set_execution_preferences', { root: '/research/canopy', preferences: {
         python: { kernel: 'python-fixture', environment: '/envs/python' }, r: {}, julia: {},
+      } }],
+      ['set_collaboration_link', { root: '/research/canopy', link: {
+        schemaVersion: 1,
+        serviceUrl: 'https://collab.example.org',
+        workspaceId: 'forest',
+        projectId: 'canopy-paper',
       } }],
       ['zotero_status', undefined],
       ['zotero_search', { query: 'canopy water', limit: 12 }],

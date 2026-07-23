@@ -597,7 +597,7 @@
 .home-local-open {
   width: 100%;
   min-height: 66px;
-  padding: 12px 54px 12px 14px;
+  padding: 12px 210px 12px 14px;
   border: 0 !important;
   border-radius: 0 !important;
   display: flex;
@@ -627,6 +627,21 @@
   display: grid;
   place-items: center;
   opacity: 0;
+}
+
+.home-local-collaborate {
+  min-height: 31px;
+  padding: 6px 9px;
+  position: absolute;
+  top: 50%;
+  right: 49px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--home-sage) !important;
+  font-size: 11px !important;
+  font-weight: 700 !important;
 }
 
 .home-local-row:hover .home-local-forget,
@@ -734,5 +749,15 @@
 
   .home-local-state {
     display: none;
+  }
+
+  .home-local-open {
+    padding-right: 54px;
+  }
+
+  .home-local-collaborate {
+    position: static;
+    margin: 12px 45px 12px 0;
+    transform: none;
   }
 }

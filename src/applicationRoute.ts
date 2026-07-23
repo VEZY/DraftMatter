@@ -1,7 +1,7 @@
 export type ApplicationRoute =
   | { destination: 'home'; workspaceId?: string }
   | { destination: 'collaborative-editor'; workspaceId: string; projectId: string }
-  | { destination: 'local-editor'; localProjectId: string }
+  | { destination: 'local-editor'; localProjectId: string; startCollaboration?: boolean }
   | { destination: 'invitation' }
   | { destination: 'example' }
 
@@ -20,7 +20,11 @@ export function parseApplicationRoute(location: Pick<Location, 'pathname' | 'sea
     return { destination: 'collaborative-editor', workspaceId: decoded(parts[1]), projectId: decoded(parts[3]) }
   }
   if (parts[0] === 'workspace' && parts[1]) return { destination: 'home', workspaceId: decoded(parts[1]) }
-  if (parts[0] === 'local' && parts[1]) return { destination: 'local-editor', localProjectId: decoded(parts.slice(1).join('/')) }
+  if (parts[0] === 'local' && parts[1]) return {
+    destination: 'local-editor',
+    localProjectId: decoded(parts.slice(1).join('/')),
+    ...(new URLSearchParams(location.search).get('start') === 'collaboration' ? { startCollaboration: true } : {}),
+  }
   if (parts[0] === 'invite') return { destination: 'invitation' }
   if (new URLSearchParams(location.search).get('example') === 'complete') return { destination: 'example' }
   return { destination: 'home' }
@@ -28,7 +32,7 @@ export function parseApplicationRoute(location: Pick<Location, 'pathname' | 'sea
 
 export function applicationRoutePath(route: ApplicationRoute) {
   if (route.destination === 'collaborative-editor') return `/workspace/${encodeURIComponent(route.workspaceId)}/project/${encodeURIComponent(route.projectId)}`
-  if (route.destination === 'local-editor') return `/local/${encodeURIComponent(route.localProjectId)}`
+  if (route.destination === 'local-editor') return `/local/${encodeURIComponent(route.localProjectId)}${route.startCollaboration ? '?start=collaboration' : ''}`
   if (route.destination === 'invitation') return '/invite'
   if (route.destination === 'example') return '/?example=complete'
   return route.workspaceId ? `/workspace/${encodeURIComponent(route.workspaceId)}` : '/'

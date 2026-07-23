@@ -73,8 +73,9 @@ import { countWords, measurePortableManuscript } from './manuscriptMetrics'
 import { ReviewTimestamp } from './ReviewTimestamp'
 import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
 import { workspaceRoleCapabilities, type WorkspaceRole } from './collaboration/workspaceService'
-import type { CollaborationProjectLaunch } from './collaboration/sessionContext'
+import { useOptionalCollaborationSession, type CollaborationProjectLaunch } from './collaboration/sessionContext'
 import { rememberLocalProject } from './localProjectCatalogue'
+import { StartCollaborationDialog, type StartCollaborationResult } from './StartCollaborationDialog'
 import { KernelConsole, type KernelCellFailure, type KernelConsoleRestartEpochs, type KernelConsoleStatus, type KernelConsoleStatuses } from './KernelConsole'
 import { ManagedCodeCellEditor } from './ManagedCodeCellEditor'
 import completeExampleSource from './fixtures/projects/alpha-article/paper.qmd?raw'
@@ -550,13 +551,15 @@ export interface AppProps {
   desktopProjectLaunch?: ProjectSnapshot
   onNavigateHome?: () => void
   initialExperience?: 'complete-example'
+  startCollaborationOnMount?: boolean
 }
 
 function emptyCollaborativeSource(name: string) {
   return `---\ntitle: "${name.replaceAll('"', '\\"')}"\n---\n\n`
 }
 
-function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initialExperience }: AppProps = {}) {
+function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initialExperience, startCollaborationOnMount = false }: AppProps = {}) {
+  const collaborationSession = useOptionalCollaborationSession()
   const collaborativeProject = collaborationLaunch?.projects.find((project) => project.id === collaborationLaunch.projectId)
   const collaborativeInitialSource = collaborationLaunch
     ? collaborationLaunch.bootstrapSource ?? emptyCollaborativeSource(collaborativeProject?.name ?? 'Untitled draft')
@@ -639,6 +642,9 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   const [authorBank, setAuthorBank] = useState(() => readAuthorBank(localStorage))
   const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [collaborationOpen, setCollaborationOpen] = useState(Boolean(collaborationLaunch))
+  const [startCollaborationOpen, setStartCollaborationOpen] = useState(false)
+  const [desktopProject, setDesktopProject] = useState<ProjectSnapshot | null>(desktopProjectLaunch ?? null)
+  const [linkedCollaborationLaunch, setLinkedCollaborationLaunch] = useState<CollaborationProjectLaunch | null>(null)
   const initialExperienceOpenedRef = useRef(false)
   const desktopProjectOpenedRef = useRef('')
   const [collaborationStatus, setCollaborationStatus] = useState<CollaborationClientStatus>('disconnected')
@@ -646,6 +652,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   const [collaborationRole, setCollaborationRole] = useState<WorkspaceRole | null>(null)
   const [collaborativeEditorBinding, setCollaborativeEditorBinding] = useState<CollaborativeEditorBinding | null>(null)
   const [collaborationUncheckpointed, setCollaborationUncheckpointed] = useState(false)
+  const activeCollaborationLaunch = collaborationLaunch ?? linkedCollaborationLaunch ?? undefined
   const [filename, setFilename] = useState(initialProjectMeta.filename)
   const [projectName, setProjectName] = useState(initialProjectMeta.projectName)
   const [citationStyle, setCitationStyle] = useState<CitationStyleId>(initialProjectMeta.citationStyle)
@@ -1896,6 +1903,15 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
         setSaveProblem('')
         setSaveState('saved')
         setToast(`Live collaboration checkpoint written · ${current.path}`)
+        const link = desktopProject?.config.collaboration
+        if (link) {
+          void desktopHost.setCollaborationLink(current.root, { ...link, lastCheckpointHash: checkpoint.contentHash }).then((updated) => {
+            setDesktopProject(updated)
+            rememberLocalProject(localStorage, updated)
+          }).catch((error) => {
+            setToast(`Checkpoint saved, but its collaboration identity could not be updated · ${readableError(error)}`)
+          })
+        }
       } catch (error) {
         const failure = normaliseHostFailure(error)
         setSaveProblem(failure.message)
@@ -3761,6 +3777,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
     }
     replaceBuiltInProject(null)
     replaceDesktopSession({ root: project.root, path: mainPath, hash: document.hash, savedRevision: 0 })
+    setDesktopProject(project)
     replaceManuscriptSource(document.content)
     setStructuredMode(true)
     resetDraftHistory(openedDraft)
@@ -3799,6 +3816,42 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   // This route-owned project is opened once; applyDesktopProject owns subsequent editor state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [desktopProjectLaunch])
+
+  useEffect(() => {
+    if (!startCollaborationOnMount || !desktopProject || desktopProject.config.collaboration) return
+    setStartCollaborationOpen(true)
+  }, [desktopProject, startCollaborationOnMount])
+
+  useEffect(() => {
+    const link = desktopProject?.config.collaboration
+    if (!link || collaborationLaunch || linkedCollaborationLaunch || collaborationSession?.state !== 'ready') return
+    if (collaborationSession.serviceUrl !== link.serviceUrl) return
+    const launch = collaborationSession.launchFor(link.workspaceId, link.projectId, { canBootstrap: false })
+    if (!launch) return
+    setLinkedCollaborationLaunch(launch)
+    setCollaborationOpen(true)
+  }, [collaborationLaunch, collaborationSession, desktopProject?.config.collaboration, linkedCollaborationLaunch])
+
+  const acceptStartedCollaboration = ({ project, launch }: StartCollaborationResult) => {
+    setDesktopProject(project)
+    rememberLocalProject(localStorage, project)
+    setLinkedCollaborationLaunch(launch)
+    setCollaborationOpen(true)
+  }
+
+  const keepLocalProjectSeparate = async () => {
+    if (!desktopProject) return
+    try {
+      const updated = await desktopHost.setCollaborationLink(desktopProject.root, null)
+      setDesktopProject(updated)
+      rememberLocalProject(localStorage, updated)
+      setLinkedCollaborationLaunch(null)
+      setStartCollaborationOpen(false)
+      setToast('The local project remains separate. No manuscript content was overwritten.')
+    } catch (error) {
+      setToast(`Could not remove the collaboration link · ${readableError(error)}`)
+    }
+  }
 
   const openDesktopProject = async (knownRoot?: string, announce = true) => {
     if (!desktopHost.available || projectBusy) return
@@ -4623,6 +4676,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
                     <button onClick={() => fileInputRef.current?.click()}><Icon name="document" size={16} /><span><strong>Open manuscript…</strong><small>DraftMatter manuscript, up to 5 MB</small></span></button>
                   )}
                   <button className="project-menu-example" onClick={() => void openCompleteExample()} disabled={projectBusy}><Icon name="spark" size={16} /><span><strong>Open complete example</strong><small>Citations, review, figures, tables, Python, R, and Julia</small></span></button>
+                  {desktopProject && collaborationSession && <button onClick={() => { setProjectMenuOpen(false); desktopProject.config.collaboration ? setCollaborationOpen(true) : setStartCollaborationOpen(true) }}><Icon name="users" size={16} /><span><strong>{desktopProject.config.collaboration ? collaborationRole === 'owner' ? 'Invite people' : 'Collaboration details' : 'Start collaboration'}</strong><small>{desktopProject.config.collaboration ? `${desktopProject.config.collaboration.workspaceId} · ${desktopProject.config.collaboration.projectId}` : 'Link this local manuscript to an online workspace'}</small></span></button>}
                   <button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={16} /><span><strong>Attach bibliography…</strong><small>BibTeX, CSL JSON, RIS, or EndNote · {citations.length} indexed</small></span></button>
                   <button onClick={createSnapshot}><Icon name="clock" size={16} /><span><strong>Save recovery snapshot</strong><small>Keep a private safety copy on this device</small></span></button>
                   <button onClick={() => { setRecoveryOpen(true); setProjectMenuOpen(false) }}><Icon name="history" size={16} /><span><strong>Recovery history</strong><small>{recoveries.length ? `${recoveries.length} local version${recoveries.length === 1 ? '' : 's'}` : 'No local versions yet'}</small></span><span className="menu-count">{recoveries.length}</span></button>
@@ -4648,9 +4702,9 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
         </div>
 
         <div className="topbar-actions">
-          <button className={`collaboration-toggle ${collaborationStatus}`} onClick={() => setCollaborationOpen(true)} aria-label="Open online collaboration">
+          <button className={`collaboration-toggle ${collaborationStatus}`} onClick={() => desktopProject && collaborationSession && !desktopProject.config.collaboration ? setStartCollaborationOpen(true) : setCollaborationOpen(true)} aria-label={desktopProject && collaborationSession && !desktopProject.config.collaboration ? 'Start collaboration' : 'Open online collaboration'}>
             <Icon name="users" size={16} />
-            <span>{collaborationStatus === 'connected' ? `Live${collaborationRole ? ` · ${collaborationRole[0].toUpperCase()}${collaborationRole.slice(1)}` : ''}` : 'Collaborate'}</span>
+            <span>{collaborationStatus === 'connected' ? `Live${collaborationRole ? ` · ${collaborationRole[0].toUpperCase()}${collaborationRole.slice(1)}` : ''}` : desktopProject?.config.collaboration ? 'Reconnect' : desktopProject && collaborationSession ? 'Start collaboration' : 'Collaborate'}</span>
             <i />
           </button>
           {structuredMode && <button
@@ -5674,9 +5728,10 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
       <CollaborationDialog
         open={collaborationOpen}
         source={manuscriptSource}
-        launch={collaborationLaunch}
+        launch={activeCollaborationLaunch}
         onClose={() => setCollaborationOpen(false)}
-        onConnected={() => setCollaborationOpen(false)}
+        onConnected={() => { setCollaborationOpen(false); setStartCollaborationOpen(false) }}
+        onKeepLocalSeparate={() => void keepLocalProjectSeparate()}
         onRemoteSource={applyCollaborativeSource}
         onStatus={updateCollaborationStatus}
         onSessionStateChange={updateCollaborationSessionState}
@@ -5690,6 +5745,21 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
         canUseBrowserSignIn={!desktopHost.available}
         localAuthor={userSettings.author}
       />
+
+      {collaborationSession && desktopProject && (
+        <StartCollaborationDialog
+          open={startCollaborationOpen}
+          project={desktopProject}
+          source={manuscriptSource}
+          onClose={() => setStartCollaborationOpen(false)}
+          onLinked={acceptStartedCollaboration}
+          onUnlinked={(project) => {
+            setDesktopProject(project)
+            rememberLocalProject(localStorage, project)
+            setLinkedCollaborationLaunch(null)
+          }}
+        />
+      )}
 
       {pendingProject && (
         <div className="modal-backdrop manuscript-picker-backdrop" onMouseDown={() => setPendingProject(null)}>

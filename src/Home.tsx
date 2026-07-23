@@ -17,6 +17,7 @@ interface HomeProps {
   onOpenLocalProject: () => void
   onOpenLocalRecent: (project: LocalProjectRecent) => void
   onForgetLocalRecent: (project: LocalProjectRecent) => void
+  onStartLocalCollaboration: (project: LocalProjectRecent) => void
   localProjects: LocalProjectRecent[]
   localProblem?: string
   onOpenExample: () => void
@@ -57,12 +58,13 @@ function SignedOutHome({
   onOpenLocalProject,
   onOpenLocalRecent,
   onForgetLocalRecent,
+  onStartLocalCollaboration,
   onNewLocalDraft,
   localProjects,
   localProblem,
   onOpenExample,
   onOpenLearn,
-}: Pick<HomeProps, 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onNewLocalDraft' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenLearn'>) {
+}: Pick<HomeProps, 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenLearn'>) {
   const session = useCollaborationSession()
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [serviceUrl, setServiceUrl] = useState(session.serviceUrl || 'https://')
@@ -102,7 +104,7 @@ function SignedOutHome({
         <article><span>03</span><strong>Publish clean results</strong><p>Keep code private while figures, tables, and values stay reproducible.</p></article>
       </section>
 
-      {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} />}
+      {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} />}
 
       <section className="home-advanced">
         <button className="home-disclosure" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((open) => !open)}>
@@ -134,10 +136,11 @@ function Catalogue({
   onOpenLocalProject,
   onOpenLocalRecent,
   onForgetLocalRecent,
+  onStartLocalCollaboration,
   localProjects,
   localProblem,
   onOpenLearn,
-}: Pick<HomeProps, 'preferredWorkspaceId' | 'onOpenDraft' | 'onNewDraft' | 'onNewLocalDraft' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'localProjects' | 'localProblem' | 'onOpenLearn'>) {
+}: Pick<HomeProps, 'preferredWorkspaceId' | 'onOpenDraft' | 'onNewDraft' | 'onNewLocalDraft' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'localProjects' | 'localProblem' | 'onOpenLearn'>) {
   const session = useCollaborationSession()
   const [query, setQuery] = useState('')
   const [workspaceId, setWorkspaceId] = useState(() => (
@@ -214,7 +217,7 @@ function Catalogue({
           </div>
         )}
 
-        {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} />}
+        {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} />}
       </div>
     </main>
   )
@@ -231,6 +234,7 @@ function LocalProjectsSection({
   problem,
   onOpen,
   onForget,
+  onStartCollaboration,
   onOpenFolder,
   onCreate,
 }: {
@@ -238,6 +242,7 @@ function LocalProjectsSection({
   problem?: string
   onOpen: (project: LocalProjectRecent) => void
   onForget: (project: LocalProjectRecent) => void
+  onStartCollaboration: (project: LocalProjectRecent) => void
   onOpenFolder: () => void
   onCreate: () => void
 }) {
@@ -255,9 +260,10 @@ function LocalProjectsSection({
               <button className="home-local-open" onClick={() => onOpen(project)} title={project.root}>
                 <span className="home-draft-icon"><Icon name="folder" size={18} /></span>
                 <span className="home-draft-copy"><strong>{project.name}</strong><small>On this computer · {openedLabel(project.lastOpenedAt)}</small></span>
-                <span className="home-local-state">Local only</span>
+                <span className="home-local-state">{project.collaboration ? 'Collaborative · linked' : 'Local only'}</span>
                 <Icon name="arrowRight" size={16} />
               </button>
+              {!project.collaboration && <button className="home-local-collaborate" onClick={() => onStartCollaboration(project)}><Icon name="users" size={14} />Start collaboration</button>}
               <button className="home-local-forget" onClick={() => onForget(project)} aria-label={`Forget ${project.name} from recent projects`} title="Forget recent project"><Icon name="close" size={14} /></button>
             </div>
           ))}

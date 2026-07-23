@@ -11,6 +11,9 @@ describe('application routes', () => {
     const local = { destination: 'local-editor', localProjectId: '/Users/research/paper' } as const
     const localPath = applicationRoutePath(local)
     expect(parseApplicationRoute(new URL(localPath, 'https://draftmatter.example'))).toEqual(local)
+
+    const startCollaboration = { ...local, startCollaboration: true } as const
+    expect(parseApplicationRoute(new URL(applicationRoutePath(startCollaboration), 'https://draftmatter.example'))).toEqual(startCollaboration)
   })
 
   it('recognizes workspace-filtered Home, invitations, and the complete example', () => {

@@ -132,6 +132,19 @@ pub struct ProjectConfig {
     pub citation_bibliography: Option<String>,
     #[serde(default)]
     pub execution: ProjectExecutionPreferences,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collaboration: Option<ProjectCollaborationLink>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectCollaborationLink {
+    pub schema_version: u32,
+    pub service_url: String,
+    pub workspace_id: String,
+    pub project_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_checkpoint_hash: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
@@ -183,6 +196,57 @@ fn validate_citation_preferences(style: &str, locale: &str) -> Result<(), HostEr
         return Err(HostError::InvalidProject(format!(
             "Unsupported citation locale: {locale}."
         )));
+    }
+    Ok(())
+}
+
+fn valid_collaboration_id(value: &str) -> bool {
+    let mut characters = value.chars();
+    characters
+        .next()
+        .is_some_and(|first| first.is_ascii_alphabetic())
+        && value.len() <= 128
+        && characters.all(|character| {
+            character.is_ascii_alphanumeric() || matches!(character, '_' | '-' | '.' | ':')
+        })
+}
+
+fn validate_collaboration_link(link: &ProjectCollaborationLink) -> Result<(), HostError> {
+    if link.schema_version != 1 {
+        return Err(HostError::InvalidProject(
+            "Unsupported collaboration link schema.".to_string(),
+        ));
+    }
+    if !valid_collaboration_id(&link.workspace_id) || !valid_collaboration_id(&link.project_id) {
+        return Err(HostError::InvalidProject(
+            "Collaboration workspace and project IDs must be portable identifiers.".to_string(),
+        ));
+    }
+    let url = link.service_url.trim();
+    let secure = url.starts_with("https://");
+    let loopback = url.starts_with("http://localhost")
+        || url.starts_with("http://127.0.0.1")
+        || url.starts_with("http://[::1]");
+    if url.len() > 2_048
+        || (!secure && !loopback)
+        || url.contains('@')
+        || url.contains('?')
+        || url.contains('#')
+        || url
+            .chars()
+            .any(|character| character.is_control() || character.is_whitespace())
+    {
+        return Err(HostError::InvalidProject(
+            "Collaboration service links require a safe HTTPS URL, except for localhost development."
+                .to_string(),
+        ));
+    }
+    if link.last_checkpoint_hash.as_ref().is_some_and(|hash| {
+        hash.len() != 64 || !hash.chars().all(|character| character.is_ascii_hexdigit())
+    }) {
+        return Err(HostError::InvalidProject(
+            "The collaboration checkpoint hash is invalid.".to_string(),
+        ));
     }
     Ok(())
 }
@@ -648,6 +712,7 @@ fn default_config(root: &Path, documents: &[ProjectEntry]) -> ProjectConfig {
         citation_locale: default_citation_locale(),
         citation_bibliography: None,
         execution: ProjectExecutionPreferences::default(),
+        collaboration: None,
     }
 }
 
@@ -673,6 +738,9 @@ fn load_config(root: &Path, documents: &[ProjectEntry]) -> Result<ProjectConfig,
     }
     validate_citation_preferences(&config.citation_style, &config.citation_locale)?;
     validate_execution_preferences(&config.execution)?;
+    if let Some(link) = &config.collaboration {
+        validate_collaboration_link(link)?;
+    }
     Ok(config)
 }
 
@@ -1634,6 +1702,20 @@ fn set_execution_preferences_impl(
     open_project_impl(raw_root)
 }
 
+fn set_collaboration_link_impl(
+    raw_root: &str,
+    link: Option<ProjectCollaborationLink>,
+) -> Result<ProjectSnapshot, HostError> {
+    if let Some(value) = &link {
+        validate_collaboration_link(value)?;
+    }
+    let mut snapshot = open_project_impl(raw_root)?;
+    snapshot.config.collaboration = link;
+    let root = canonical_root(raw_root)?;
+    persist_config(&root, &snapshot.config)?;
+    open_project_impl(raw_root)
+}
+
 #[derive(Debug)]
 struct ZoteroHttpResponse {
     status: u16,
@@ -2561,6 +2643,7 @@ fn initialize_project_root(
         citation_locale: default_citation_locale(),
         citation_bibliography: None,
         execution: ProjectExecutionPreferences::default(),
+        collaboration: None,
     };
     persist_config(&canonical, &config)?;
     let document = canonical.join(&main_document);
@@ -2743,6 +2826,14 @@ fn set_execution_preferences(
     preferences: ProjectExecutionPreferences,
 ) -> Result<ProjectSnapshot, HostError> {
     set_execution_preferences_impl(&root, preferences)
+}
+
+#[tauri::command]
+fn set_collaboration_link(
+    root: String,
+    link: Option<ProjectCollaborationLink>,
+) -> Result<ProjectSnapshot, HostError> {
+    set_collaboration_link_impl(&root, link)
 }
 
 #[tauri::command]
@@ -3183,6 +3274,7 @@ pub fn run() {
             set_main_document,
             set_citation_preferences,
             set_execution_preferences,
+            set_collaboration_link,
             zotero_status,
             zotero_search,
             zotero_item_attachments,
@@ -3664,6 +3756,47 @@ mod tests {
         let error = set_citation_preferences_impl(root.to_str().unwrap(), "remote-style", "fr-FR")
             .unwrap_err();
         assert!(matches!(error, HostError::InvalidProject(_)));
+    }
+
+    #[test]
+    fn persists_a_versioned_collaboration_link_without_credentials() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("linked-project");
+        create_project_at_root(&root, "Linked project").unwrap();
+        let link = ProjectCollaborationLink {
+            schema_version: 1,
+            service_url: "https://collab.example.org".to_string(),
+            workspace_id: "forest".to_string(),
+            project_id: "canopy-paper".to_string(),
+            last_checkpoint_hash: Some("a".repeat(64)),
+        };
+
+        let linked =
+            set_collaboration_link_impl(root.to_str().unwrap(), Some(link.clone())).unwrap();
+        assert_eq!(linked.config.collaboration, Some(link));
+        let persisted = fs::read_to_string(root.join(".draftmatter/project.json")).unwrap();
+        assert!(persisted.contains("\"workspaceId\": \"forest\""));
+        assert!(persisted.contains("\"lastCheckpointHash\""));
+        assert!(!persisted.to_ascii_lowercase().contains("token"));
+        assert!(!persisted.to_ascii_lowercase().contains("secret"));
+
+        let unlinked = set_collaboration_link_impl(root.to_str().unwrap(), None).unwrap();
+        assert_eq!(unlinked.config.collaboration, None);
+        assert!(!fs::read_to_string(root.join(".draftmatter/project.json"))
+            .unwrap()
+            .contains("\"collaboration\""));
+
+        let unsafe_link = ProjectCollaborationLink {
+            schema_version: 1,
+            service_url: "https://user:password@collab.example.org".to_string(),
+            workspace_id: "forest".to_string(),
+            project_id: "canopy-paper".to_string(),
+            last_checkpoint_hash: None,
+        };
+        assert!(matches!(
+            set_collaboration_link_impl(root.to_str().unwrap(), Some(unsafe_link)),
+            Err(HostError::InvalidProject(_))
+        ));
     }
 
     #[test]

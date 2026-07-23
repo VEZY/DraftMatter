@@ -24,6 +24,7 @@ function ApplicationRouter() {
   const [route, setRoute] = useState<ApplicationRoute>(() => parseApplicationRoute(window.location))
   const [launch, setLaunch] = useState<CollaborationProjectLaunch | null>(null)
   const [localLaunch, setLocalLaunch] = useState<ProjectSnapshot | null>(null)
+  const [startCollaborationRoot, setStartCollaborationRoot] = useState('')
   const [newDraftOpen, setNewDraftOpen] = useState(false)
   const [newDraftLocation, setNewDraftLocation] = useState<'collaborative' | 'local'>('collaborative')
   const [localProjects, setLocalProjects] = useState(() => readLocalProjectRecents(localStorage))
@@ -33,6 +34,7 @@ function ApplicationRouter() {
     const onPopState = () => {
       setLaunch(null)
       setLocalLaunch(null)
+      setStartCollaborationRoot('')
       setRoute(parseApplicationRoute(window.location))
     }
     window.addEventListener('popstate', onPopState)
@@ -50,12 +52,13 @@ function ApplicationRouter() {
     navigate({ destination: 'collaborative-editor', workspaceId: nextLaunch.workspaceId, projectId: nextLaunch.projectId })
   }
 
-  const openLocalDraft = (project: ProjectSnapshot) => {
+  const openLocalDraft = (project: ProjectSnapshot, startCollaboration = false) => {
     setLocalProjects(rememberLocalProject(localStorage, project))
     setLocalProblem('')
+    setStartCollaborationRoot(startCollaboration ? project.root : '')
     setLocalLaunch(project)
     setNewDraftOpen(false)
-    navigate({ destination: 'local-editor', localProjectId: project.root })
+    navigate({ destination: 'local-editor', localProjectId: project.root, ...(startCollaboration ? { startCollaboration: true } : {}) })
   }
 
   const openLocalProject = async (recent?: LocalProjectRecent) => {
@@ -81,6 +84,14 @@ function ApplicationRouter() {
         onOpenLocalProject={() => void openLocalProject()}
         onOpenLocalRecent={(project) => void openLocalProject(project)}
         onForgetLocalRecent={(project) => setLocalProjects(forgetLocalProject(localStorage, project.root))}
+        onStartLocalCollaboration={(project) => {
+          if (!desktopHost.available) return
+          setLocalProblem('')
+          void desktopHost.openProject(project.root).then((snapshot) => openLocalDraft(snapshot, true)).catch((error) => {
+            setLocalProjects(forgetLocalProject(localStorage, project.root))
+            setLocalProblem(`${error instanceof Error ? error.message : String(error)} The unavailable folder was removed from recent projects.`)
+          })
+        }}
         localProjects={localProjects}
         localProblem={localProblem}
         onOpenExample={() => navigate({ destination: 'example' })}
@@ -107,7 +118,7 @@ function ApplicationRouter() {
 
   useEffect(() => {
     if (route.destination !== 'local-editor' || localLaunch || !desktopHost.available || route.localProjectId === 'open') return
-    void desktopHost.openProject(route.localProjectId).then(openLocalDraft).catch((error) => {
+    void desktopHost.openProject(route.localProjectId).then((project) => openLocalDraft(project, route.startCollaboration === true)).catch((error) => {
       setLocalProjects(forgetLocalProject(localStorage, route.localProjectId))
       setLocalProblem(error instanceof Error ? error.message : String(error))
       navigate({ destination: 'home' }, true)
@@ -133,7 +144,7 @@ function ApplicationRouter() {
 
   if (route.destination === 'local-editor') {
     if (!localLaunch) return <main className="home-route-status"><section><h1>Open the local project from Home</h1><p>DraftMatter needs permission to read a project folder on this computer.</p><button onClick={() => navigate({ destination: 'home' })}>Return to Home</button></section></main>
-    return <App desktopProjectLaunch={localLaunch} onNavigateHome={() => { setLocalProjects(readLocalProjectRecents(localStorage)); setLocalLaunch(null); navigate({ destination: 'home' }) }} />
+    return <App desktopProjectLaunch={localLaunch} startCollaborationOnMount={startCollaborationRoot === localLaunch.root} onNavigateHome={() => { setLocalProjects(readLocalProjectRecents(localStorage)); setStartCollaborationRoot(''); setLocalLaunch(null); navigate({ destination: 'home' }) }} />
   }
 
   if (route.destination === 'example') return <App initialExperience="complete-example" onNavigateHome={() => navigate({ destination: 'home' })} />

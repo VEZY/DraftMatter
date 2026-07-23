@@ -1,4 +1,4 @@
-import type { ProjectSnapshot } from './desktopHost'
+import type { ProjectCollaborationLink, ProjectSnapshot } from './desktopHost'
 
 const LOCAL_PROJECTS_KEY = 'draftmatter.local-project-catalogue.v1'
 const MAX_LOCAL_PROJECTS = 24
@@ -8,6 +8,7 @@ export interface LocalProjectRecent {
   name: string
   mainDocument: string
   lastOpenedAt: string
+  collaboration?: ProjectCollaborationLink
 }
 
 type LocalProjectStorage = Pick<Storage, 'getItem' | 'setItem'>
@@ -23,6 +24,12 @@ function validRecent(value: unknown): value is LocalProjectRecent {
     && Boolean(recent.mainDocument.trim())
     && typeof recent.lastOpenedAt === 'string'
     && Number.isFinite(new Date(recent.lastOpenedAt).getTime())
+    && (recent.collaboration === undefined || (
+      recent.collaboration.schemaVersion === 1
+      && typeof recent.collaboration.serviceUrl === 'string'
+      && typeof recent.collaboration.workspaceId === 'string'
+      && typeof recent.collaboration.projectId === 'string'
+    ))
 }
 
 export function readLocalProjectRecents(storage: Pick<LocalProjectStorage, 'getItem'>): LocalProjectRecent[] {
@@ -49,6 +56,7 @@ export function rememberLocalProject(
     name: project.config.name,
     mainDocument: project.config.mainDocument,
     lastOpenedAt: openedAt,
+    collaboration: project.config.collaboration,
   }
   const next = [recent, ...readLocalProjectRecents(storage).filter((candidate) => candidate.root !== project.root)].slice(0, MAX_LOCAL_PROJECTS)
   storage.setItem(LOCAL_PROJECTS_KEY, JSON.stringify(next))
