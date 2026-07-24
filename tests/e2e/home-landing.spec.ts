@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test'
 
 const features = [
-  ['Writing', 'writing', 'Write in a calm, structured editor where the manuscript stays central.', 'Introduction'],
+  ['Writing', 'writing', 'Write in a calm, structured editor where the manuscript stays central.', 'Title → Introduction'],
   ['Results from code', 'results', 'Create figures, tables, and in-text values from R, Python, or Julia. DraftMatter keeps the source linked to the result and keeps code out of the final paper.', 'Results'],
   ['Citations', 'citations', 'Search, insert, and format citations without leaving the manuscript.', 'Citation → References'],
   ['Review and collaboration', 'review', 'Comment, suggest changes, and work with co-authors in the context of the paper.', 'Discussion'],
@@ -25,6 +25,10 @@ test.describe('signed-out Home landing experience', () => {
     const demo = page.locator('.home-workspace-demo')
     await expect(demo).toHaveAttribute('data-active-feature', 'writing')
     await expect(demo.getByText('Canopy recovery after seasonal drought')).toBeVisible()
+    await expect(demo.getByText('Rémi Vezy', { exact: false })).toBeVisible()
+    await expect(demo.getByLabel('ORCID 0000-0002-0808-1461')).toBeVisible()
+    await expect(demo.getByRole('list', { name: 'Author affiliations' })).toContainText('CIRAD, UMR AMAP')
+    await expect(demo.getByRole('heading', { name: 'Abstract' })).toBeVisible()
     await expect(demo.getByRole('heading', { name: 'Introduction' })).toBeVisible()
     await expect(demo.getByText('Figure 1.')).toHaveCount(0)
     await expect(demo.getByRole('heading', { name: 'References' })).toHaveCount(0)

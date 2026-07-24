@@ -30,6 +30,12 @@ describe('signed-out Home product showcase', () => {
     const paper = container.querySelector<HTMLElement>('.home-demo-paper')!
     expect(paper.textContent).toContain('Canopy recovery after seasonal drought')
     expect(container.querySelector('.home-demo-document-location')?.textContent).toContain('Introduction')
+    expect(paper.textContent).toContain('Rémi Vezy')
+    expect(paper.textContent).toContain('0000-0002-0808-1461')
+    expect(paper.textContent).toContain('CIRAD, UMR AMAP, Montpellier F-34398, France')
+    expect(paper.textContent).toContain('AMAP, Univ Montpellier, CIRAD, CNRS, INRAE, IRD, Montpellier, France')
+    expect(paper.querySelector('.home-demo-abstract')?.textContent).toContain('Abstract')
+    expect(paper.querySelector('.home-demo-introduction')?.textContent).toContain('Introduction')
     expect(paper.textContent).toContain('Our objective was to quantify the timing and magnitude of canopy recovery.')
     expect(paper.textContent).not.toContain('(Meyer and Okafor, 2025)')
     expect(paper.textContent).not.toContain('Figure 1.')

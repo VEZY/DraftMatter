@@ -63,7 +63,7 @@ const homeDemoDocumentViews: Record<HomeShowcaseFeatureId, {
   location: string
   outlineSection: 'Introduction' | 'Results' | 'Discussion' | 'References' | null
 }> = {
-  writing: { context: 'Page 2 of 8', location: 'Introduction', outlineSection: 'Introduction' },
+  writing: { context: 'Article opening', location: 'Title → Introduction', outlineSection: 'Introduction' },
   results: { context: 'Page 5 of 8', location: 'Results', outlineSection: 'Results' },
   citations: { context: 'Linked view', location: 'Citation → References', outlineSection: 'References' },
   review: { context: 'Page 6 of 8', location: 'Discussion', outlineSection: 'Discussion' },
@@ -230,9 +230,28 @@ export function HomeShowcase() {
                     <header className="is-preview-active" data-preview-feature="writing">
                       <span>RESEARCH ARTICLE</span>
                       <h3>Canopy recovery after seasonal drought</h3>
-                      <p>Amira Mensah · Jon Lee · Sofia Rossi</p>
+                      <div className="home-demo-author-line">
+                        <strong>Rémi Vezy<sup>1,2</sup></strong>
+                        <span className="home-demo-orcid" aria-label="ORCID 0000-0002-0808-1461">
+                          <span aria-hidden="true">iD</span>
+                          0000-0002-0808-1461
+                        </span>
+                      </div>
+                      <ol className="home-demo-affiliations" aria-label="Author affiliations">
+                        <li><sup>1</sup>CIRAD, UMR AMAP, Montpellier F-34398, France</li>
+                        <li><sup>2</sup>AMAP, Univ Montpellier, CIRAD, CNRS, INRAE, IRD, Montpellier, France</li>
+                      </ol>
                     </header>
-                    <section className="is-preview-active" data-preview-feature="writing">
+                    <section className="home-demo-abstract is-preview-active" data-preview-feature="writing">
+                      <div className="home-demo-section-heading">
+                        <small>01</small><h4>Abstract</h4>
+                      </div>
+                      <p>
+                        Seasonal drought can rapidly alter canopy structure, yet the pace of recovery after rainfall remains difficult to compare across treatments. We followed irrigated and control plots for six weeks and linked every reported estimate to a reproducible analysis.
+                      </p>
+                      <p className="home-demo-keywords"><strong>Keywords</strong> canopy recovery · drought · reproducibility · tropical ecology</p>
+                    </section>
+                    <section className="home-demo-introduction is-preview-active" data-preview-feature="writing">
                       <div className="home-demo-section-heading">
                         <small>02</small><h4>Introduction</h4>
                       </div>
