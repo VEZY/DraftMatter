@@ -12,7 +12,11 @@
 .home-catalogue,
 .home-invitation,
 .home-route-status {
+  height: 100%;
   min-height: 100vh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   color: var(--home-ink);
   background:
     radial-gradient(circle at 76% 10%, rgba(220, 232, 226, .42), transparent 30rem),
