@@ -75,6 +75,23 @@ test.describe('signed-out Home landing experience', () => {
     await demo.getByRole('button', { name: 'View source for Table 1' }).click()
     await expect(demo.getByRole('list', { name: 'Python source for Figure 1' })).toHaveCount(0)
     await expect(demo.getByRole('list', { name: 'Python source for Table 1' })).toContainText('recovery_table')
+
+    const readability = await page.evaluate(() => {
+      const size = (selector: string) => Number.parseFloat(getComputedStyle(document.querySelector<HTMLElement>(selector)!).fontSize)
+      const showcase = document.querySelector<HTMLElement>('.home-showcase')!
+      return {
+        outerGutter: window.innerWidth - showcase.getBoundingClientRect().width,
+        manuscript: size('.home-demo-paper section > p'),
+        source: size('.home-demo-source-panel li'),
+        table: size('.home-demo-table-wrap table'),
+        outline: size('.home-demo-outline li'),
+      }
+    })
+    expect(readability.outerGutter).toBeLessThanOrEqual(26)
+    expect(readability.manuscript).toBeGreaterThanOrEqual(14)
+    expect(readability.source).toBeGreaterThanOrEqual(11)
+    expect(readability.table).toBeGreaterThanOrEqual(11)
+    expect(readability.outline).toBeGreaterThanOrEqual(11)
   })
 
   test('stacks at a mobile viewport without horizontal page overflow', async ({ page }) => {
