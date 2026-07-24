@@ -151,4 +151,17 @@ describe('signed-out Home product showcase', () => {
     expect(container.querySelector('[aria-label="Reference details for Meyer and Okafor, 2025"]')).toBeNull()
     expect(container.querySelector('[role="tooltip"]')).toBeNull()
   })
+
+  it('keeps review guidance outside the manuscript while showing rich tracked changes', async () => {
+    await act(async () => container.querySelector<HTMLButtonElement>('#home-showcase-tab-review')!.click())
+    const paper = container.querySelector<HTMLElement>('.home-demo-paper')!
+
+    expect(paper.querySelector('.home-demo-review-context')).toBeNull()
+    expect(paper.querySelectorAll('del')).toHaveLength(4)
+    expect(paper.querySelectorAll('ins')).toHaveLength(5)
+    expect(paper.textContent).toContain('largest during weeks two and three')
+    expect(paper.textContent).toContain('is consistent with')
+    expect(paper.textContent).toContain('longer monitoring is needed')
+    expect(paper.querySelector('mark')?.textContent).toBe('the difference narrowing after week four')
+  })
 })

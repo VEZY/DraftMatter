@@ -415,17 +415,20 @@ export function HomeShowcase() {
                     <div className="home-demo-section-heading">
                       <small>05</small><h4>Discussion</h4>
                     </div>
-                    <p>
-                      Irrigated plots recovered more quickly after rainfall resumed, while control plots showed a delayed but sustained response.
+                    <p className="home-demo-revision">
+                      Irrigated plots recovered more quickly after rainfall resumed, while control plots showed a delayed but sustained response. The early separation between treatments was{' '}
+                      <del>maintained throughout the study</del> <ins>largest during weeks two and three</ins>, before the trajectories began to converge.
                     </p>
                     <p className="home-demo-revision">
                       Recovery in control plots was <del>slower</del> <ins>more gradual</ins>, with{' '}
-                      <mark>the difference narrowing after week four</mark><sup>1</sup>.
+                      <mark>the difference narrowing after week four</mark><sup>1</sup>. This pattern{' '}
+                      <del>demonstrates</del> <ins>is consistent with</ins> a transient limitation on canopy development rather than a permanent loss of foliage.
                     </p>
-                    <div className="home-demo-review-context">
-                      <Icon name="message" size={14} />
-                      <span><strong>Comment attached to this sentence</strong><small>Review stays beside the relevant text.</small></span>
-                    </div>
+                    <p className="home-demo-revision">
+                      These results <del>prove that irrigation restored canopy function</del>{' '}
+                      <ins>suggest that supplemental water accelerated early canopy closure</ins>. Because measurements ended at week six,{' '}
+                      <ins>longer monitoring is needed to determine whether treatment differences persisted into the next dry period</ins>.
+                    </p>
                   </section>
                 )}
 

@@ -70,6 +70,12 @@ test.describe('signed-out Home landing experience', () => {
     await expect(paper.getByText('Figure 1.')).toHaveCount(0)
     await expect(paper.locator('.home-demo-document-jump')).toHaveText('•••')
     await expect(paper.getByRole('heading', { name: 'References' })).toBeVisible()
+
+    await page.getByRole('tab', { name: /Review and collaboration/ }).click()
+    await expect(paper.locator('.home-demo-review-context')).toHaveCount(0)
+    await expect(paper.locator('del')).toHaveCount(4)
+    await expect(paper.locator('ins')).toHaveCount(5)
+    await expect(paper.getByText(/longer monitoring is needed/)).toBeVisible()
   })
 
   test('supports arrow-key feature navigation and visible focus', async ({ page }) => {

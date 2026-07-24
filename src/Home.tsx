@@ -125,9 +125,6 @@ function SignedOutHome({
           </button>
         </div>
         {session.error && <p className="home-account-error" role="alert">{session.error}</p>}
-        {!session.serviceUrl && (
-          <p className="home-deployment-note">Online collaboration is not configured for this installation. Start writing opens an editable example in this browser.</p>
-        )}
       </section>
 
       <HomeShowcase />
