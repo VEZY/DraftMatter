@@ -48,8 +48,11 @@ describe('browser execution boundary', () => {
 
   it('immediately presents browser code as view-only and replaces process controls with desktop instructions', async () => {
     const banner = container.querySelector<HTMLElement>('.browser-execution-banner')
-    expect(banner?.textContent).toContain('Execution is unavailable in this browser')
-    expect(banner?.textContent).toContain('Code is view-only here')
+    expect(banner?.textContent).toContain('Execution is unavailable in a browser')
+    expect(banner?.textContent).toContain('open this document in DraftMatter desktop')
+    expect(banner?.textContent).toContain('writing, editing, commenting, and reviewing online')
+    expect(banner?.textContent).toContain('run code or refresh computed values')
+    expect(banner?.querySelector('button')?.textContent).toBe('Desktop instructions')
     expect(container.querySelector('.rail-terminal-button')).toBeNull()
     expect(container.querySelector('[aria-label="Shared kernel terminal"]')).toBeNull()
 
@@ -66,8 +69,12 @@ describe('browser execution boundary', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open browser view-only code and desktop instructions"]')!.click())
     expect(container.querySelector('.code-workspace-toolbar')).toBeNull()
     const boundary = container.querySelector<HTMLElement>('.execution-browser-boundary')
-    expect(boundary?.textContent).toContain('Execution is unavailable in this browser')
-    expect(boundary?.textContent).toContain('No terminal, package manager, or local language runtime is created here')
+    expect(boundary?.textContent).toContain('Execution is unavailable in a browser')
+    expect(boundary?.textContent).toContain('For safety, the online editor does not start a terminal, package manager, or local language runtime')
+    expect(boundary?.textContent).toContain('write, edit, comment, and review here')
+    expect(boundary?.textContent).toContain('Only running code and refreshing computed values require the desktop app')
+    expect(boundary?.textContent).toContain('a collaborator with this project open in DraftMatter desktop can update retained outputs for everyone online')
+    expect(boundary?.textContent).toContain('To run code or refresh computed values')
     expect(boundary?.textContent).toContain('Open project folder…')
     expect(boundary?.textContent).toContain('one-time trust and language setup')
     expect(container.querySelector('.execution-cell-view-only')?.textContent).toContain('Browser view only')

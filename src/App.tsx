@@ -4994,8 +4994,11 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
             {!desktopSession && executableCells.length > 0 && (
               <section className="browser-execution-banner" role="note" aria-label="Browser execution unavailable">
                 <span className="browser-execution-banner-icon"><Icon name="eye" size={17} /></span>
-                <span><strong>Execution is unavailable in this browser</strong><small>Code is view-only here; no local runtime or terminal is started.</small></span>
-                <button type="button" onClick={() => setExecutionWorkspaceOpen(true)}>Make executable</button>
+                <span>
+                  <strong>Execution is unavailable in a browser — open this document in DraftMatter desktop</strong>
+                  <small>You can keep writing, editing, commenting, and reviewing online. Use a trusted desktop session to run code or refresh computed values.</small>
+                </span>
+                <button type="button" onClick={() => setExecutionWorkspaceOpen(true)}>Desktop instructions</button>
               </section>
             )}
             {!structuredOutline.some((item) => item.level === 1) && (
@@ -5280,10 +5283,13 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
               </div> : <section className="execution-browser-boundary" role="note" aria-label="How to enable code execution">
                 <div className="execution-browser-boundary-heading">
                   <span><Icon name="eye" size={18} /></span>
-                  <div><strong>Execution is unavailable in this browser</strong><small>Code and retained outputs are view-only. No terminal, package manager, or local language runtime is created here.</small></div>
+                  <div>
+                    <strong>Execution is unavailable in a browser — open this document in DraftMatter desktop</strong>
+                    <small>For safety, the online editor does not start a terminal, package manager, or local language runtime. You can still write, edit, comment, and review here. Only running code and refreshing computed values require the desktop app; a collaborator with this project open in DraftMatter desktop can update retained outputs for everyone online.</small>
+                  </div>
                 </div>
                 <div className="execution-browser-steps">
-                  <strong>To make this manuscript executable</strong>
+                  <strong>To run code or refresh computed values</strong>
                   <ol>
                     <li><span>1</span><p>Install or open <strong>DraftMatter desktop</strong>.</p></li>
                     <li><span>2</span><p>Use the project menu and choose <strong>Open project folder…</strong></p></li>
