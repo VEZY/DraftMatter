@@ -58,16 +58,15 @@ const tableSource = [
   ').reset_index()',
 ]
 
-const homeDemoDocumentViews: Record<HomeShowcaseFeatureId, {
-  context: string
-  location: string
-  outlineSection: 'Introduction' | 'Results' | 'Discussion' | 'References' | null
-}> = {
-  writing: { context: 'Article opening', location: 'Title → Introduction', outlineSection: 'Introduction' },
-  results: { context: 'Page 5 of 8', location: 'Results', outlineSection: 'Results' },
-  citations: { context: 'Linked view', location: 'Citation → References', outlineSection: 'References' },
-  review: { context: 'Page 6 of 8', location: 'Discussion', outlineSection: 'Discussion' },
-  checks: { context: 'Whole manuscript', location: 'Preflight review', outlineSection: null },
+const homeDemoOutlineSections: Record<
+  HomeShowcaseFeatureId,
+  'Introduction' | 'Results' | 'Discussion' | 'References' | null
+> = {
+  writing: 'Introduction',
+  results: 'Results',
+  citations: 'References',
+  review: 'Discussion',
+  checks: null,
 }
 
 function DemoSourcePanel({
@@ -101,7 +100,7 @@ export function HomeShowcase() {
   const [citationDetailsOpen, setCitationDetailsOpen] = useState(false)
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
   const selected = homeShowcaseFeatures.find((feature) => feature.id === activeFeature) ?? homeShowcaseFeatures[0]
-  const documentView = homeDemoDocumentViews[activeFeature]
+  const outlineSection = homeDemoOutlineSections[activeFeature]
 
   const selectTab = (index: number, focus = false) => {
     const next = homeShowcaseFeatures[index]
@@ -210,20 +209,15 @@ export function HomeShowcase() {
               <span>Manuscript</span>
               <ol>
                 <li><small>01</small>Abstract</li>
-                <li className={documentView.outlineSection === 'Introduction' ? 'is-current' : undefined}><small>02</small>Introduction</li>
+                <li className={outlineSection === 'Introduction' ? 'is-current' : undefined}><small>02</small>Introduction</li>
                 <li><small>03</small>Methods</li>
-                <li className={documentView.outlineSection === 'Results' ? 'is-current' : undefined}><small>04</small>Results</li>
-                <li className={documentView.outlineSection === 'Discussion' ? 'is-current' : undefined}><small>05</small>Discussion</li>
-                <li className={documentView.outlineSection === 'References' ? 'is-current' : undefined}><small>06</small>References</li>
+                <li className={outlineSection === 'Results' ? 'is-current' : undefined}><small>04</small>Results</li>
+                <li className={outlineSection === 'Discussion' ? 'is-current' : undefined}><small>05</small>Discussion</li>
+                <li className={outlineSection === 'References' ? 'is-current' : undefined}><small>06</small>References</li>
               </ol>
             </aside>
 
             <article className="home-demo-paper" aria-label="Fictional manuscript preview" aria-live="polite">
-              <div className="home-demo-document-location">
-                <span>{documentView.context}</span>
-                <strong>{documentView.location}</strong>
-              </div>
-
               <div key={activeFeature} className="home-demo-paper-view" data-document-view={activeFeature}>
                 {activeFeature === 'writing' && (
                   <>
@@ -397,7 +391,7 @@ export function HomeShowcase() {
 
                     <div className="home-demo-document-jump" aria-label="The manuscript continues to the References section">
                       <span aria-hidden="true" />
-                      <small>Later in this manuscript</small>
+                      <span className="home-demo-document-ellipsis" aria-hidden="true">•••</span>
                       <span aria-hidden="true" />
                     </div>
 

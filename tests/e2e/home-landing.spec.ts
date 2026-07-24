@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test'
 
 const features = [
-  ['Writing', 'writing', 'Write in a calm, structured editor where the manuscript stays central.', 'Title → Introduction'],
-  ['Results from code', 'results', 'Create figures, tables, and in-text values from R, Python, or Julia. DraftMatter keeps the source linked to the result and keeps code out of the final paper.', 'Results'],
-  ['Citations', 'citations', 'Search, insert, and format citations without leaving the manuscript.', 'Citation → References'],
-  ['Review and collaboration', 'review', 'Comment, suggest changes, and work with co-authors in the context of the paper.', 'Discussion'],
-  ['Checks and export', 'checks', 'Review citation, computation, output, and export issues before sharing the paper.', 'Preflight review'],
+  ['Writing', 'writing', 'Write in a calm, structured editor where the manuscript stays central.'],
+  ['Results from code', 'results', 'Create figures, tables, and in-text values from R, Python, or Julia. DraftMatter keeps the source linked to the result and keeps code out of the final paper.'],
+  ['Citations', 'citations', 'Search, insert, and format citations without leaving the manuscript.'],
+  ['Review and collaboration', 'review', 'Comment, suggest changes, and work with co-authors in the context of the paper.'],
+  ['Checks and export', 'checks', 'Review citation, computation, output, and export issues before sharing the paper.'],
 ] as const
 
 test.describe('signed-out Home landing experience', () => {
@@ -40,7 +40,7 @@ test.describe('signed-out Home landing experience', () => {
     const demo = page.locator('.home-workspace-demo')
     const panel = page.getByRole('tabpanel')
 
-    for (const [label, id, description, location] of features) {
+    for (const [label, id, description] of features) {
       const tab = page.getByRole('tab', { name: new RegExp(label) })
       await tab.click()
       await expect(tab).toHaveAttribute('aria-selected', 'true')
@@ -48,7 +48,7 @@ test.describe('signed-out Home landing experience', () => {
       await expect(demo).toHaveAttribute('data-active-feature', id)
       await expect(demo.locator(`[data-preview-feature="${id}"].is-preview-active`).first()).toBeVisible()
       await expect(demo.locator('.home-demo-paper-view')).toHaveAttribute('data-document-view', id)
-      await expect(demo.locator('.home-demo-document-location')).toContainText(location)
+      await expect(demo.locator('.home-demo-document-location')).toHaveCount(0)
     }
   })
 
@@ -68,7 +68,7 @@ test.describe('signed-out Home landing experience', () => {
     await page.getByRole('tab', { name: /Citations/ }).click()
     await expect(paper.getByText('Canopy recovery after seasonal drought')).toHaveCount(0)
     await expect(paper.getByText('Figure 1.')).toHaveCount(0)
-    await expect(paper.getByText('Later in this manuscript')).toBeVisible()
+    await expect(paper.locator('.home-demo-document-jump')).toHaveText('•••')
     await expect(paper.getByRole('heading', { name: 'References' })).toBeVisible()
   })
 

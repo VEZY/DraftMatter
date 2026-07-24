@@ -595,32 +595,7 @@
   font-family: Georgia, "Times New Roman", serif;
 }
 
-.home-demo-document-location {
-  padding-bottom: 11px;
-  border-bottom: 1px solid #e3e7e5;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
-}
-
-.home-demo-document-location span {
-  color: #8a958f;
-  font-size: 10px;
-  font-weight: 750;
-  letter-spacing: .07em;
-  text-transform: uppercase;
-}
-
-.home-demo-document-location strong {
-  color: var(--home-sage-dark);
-  font-size: 11px;
-  font-weight: 750;
-}
-
 .home-demo-paper-view {
-  padding-top: 24px;
   animation: home-demo-view-enter 180ms ease-out both;
 }
 
@@ -1285,16 +1260,15 @@
   font-family: Inter, ui-sans-serif, system-ui, sans-serif;
 }
 
-.home-demo-document-jump > span {
+.home-demo-document-jump > span:not(.home-demo-document-ellipsis) {
   height: 1px;
   background: repeating-linear-gradient(90deg, #d2d9d5 0 5px, transparent 5px 10px);
 }
 
-.home-demo-document-jump small {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: .04em;
-  text-transform: uppercase;
+.home-demo-document-ellipsis {
+  color: #9aa49f;
+  font-size: 11px;
+  letter-spacing: .24em;
 }
 
 .home-demo-references-heading {

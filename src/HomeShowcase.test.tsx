@@ -29,7 +29,7 @@ describe('signed-out Home product showcase', () => {
     expect(container.querySelector('[role="tabpanel"]')?.textContent).toContain(homeShowcaseFeatures[0].description)
     const paper = container.querySelector<HTMLElement>('.home-demo-paper')!
     expect(paper.textContent).toContain('Canopy recovery after seasonal drought')
-    expect(container.querySelector('.home-demo-document-location')?.textContent).toContain('Introduction')
+    expect(container.querySelector('.home-demo-document-location')).toBeNull()
     expect(paper.textContent).toContain('Rémi Vezy')
     expect(paper.textContent).toContain('0000-0002-0808-1461')
     expect(paper.textContent).toContain('CIRAD, UMR AMAP, Montpellier F-34398, France')
@@ -128,6 +128,7 @@ describe('signed-out Home product showcase', () => {
     expect(references.classList.contains('is-preview-active')).toBe(true)
     expect(references.textContent).toContain('Meyer, L., & Okafor, C. (2025).')
     expect(references.textContent).toContain('Journal of Canopy Ecology, 18')
+    expect(container.querySelector('.home-demo-document-jump')?.textContent).toBe('•••')
     expect(container.querySelector('.home-demo-outline li.is-current')?.textContent).toContain('References')
 
     await act(async () => citation.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
