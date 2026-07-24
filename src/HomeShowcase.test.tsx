@@ -86,8 +86,20 @@ describe('signed-out Home product showcase', () => {
     expect(container.querySelector('.home-demo-source-panel')).toBeNull()
 
     await act(async () => container.querySelector<HTMLButtonElement>('#home-showcase-tab-results')!.click())
-    expect(container.textContent).toContain('Try “View source” on the figure or table.')
-    expect(container.textContent).toContain('Try this')
+    expect(container.textContent).toContain('Try it in the preview')
+    expect(container.textContent).toContain('Click “View source” on the figure or table.')
+    expect(container.querySelector('.home-demo-result-tools')?.textContent).not.toContain('Try this')
+    expect(container.querySelector('.home-demo-code-panel')?.textContent).toContain('Python')
+    expect(container.querySelector('.home-demo-code-panel')?.textContent).toContain('R')
+    expect(container.querySelector('.home-demo-code-panel')?.textContent).toContain('Julia')
+    expect(container.querySelector('.home-demo-code-panel')?.textContent).toContain('Shared with document cells')
+    expect(container.querySelector('.home-demo-code-panel')?.textContent).toContain('Project.toml & Manifest.toml')
+    expect(container.querySelector('.home-demo-code-panel')?.textContent).toContain('Add package')
+    expect(container.querySelector('.home-demo-code-panel')?.textContent).toContain('parsed automatically into manuscript figures, tables, and in-text values')
+    const codePanel = container.querySelector<HTMLElement>('.home-demo-code-panel')!
+    const workspaceBody = container.querySelector<HTMLElement>('.home-demo-body')!
+    expect(codePanel.closest('.home-demo-paper')).toBeNull()
+    expect(workspaceBody.compareDocumentPosition(codePanel) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(container.textContent).toContain('Canopy cover increased steadily after rainfall returned.')
     expect(container.textContent).toContain('Treatment estimates and confidence intervals are summarized')
     const figureReference = container.querySelector<HTMLElement>('[aria-label="Automatic reference to Figure 1"]')!

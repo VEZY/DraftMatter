@@ -42,7 +42,7 @@ describe('rendered local execution workflow', () => {
       : { language, health: 'missing', message: `${language} is not installed.` })
     vi.spyOn(desktopHost, 'discoverJupyterKernels').mockResolvedValue({
       health: 'available', searchedLocations: ['/kernels'],
-      kernels: [{ name: 'python-fixture', displayName: 'Python fixture', language: 'python', health: 'available', resourceDir: '/kernels/python-fixture' }],
+      kernels: [{ name: 'python-fixture', displayName: 'Python · DraftMatter', language: 'python', health: 'available', resourceDir: '/kernels/python-fixture' }],
     })
     vi.spyOn(desktopHost, 'executionTrustStatus')
       .mockResolvedValueOnce({ trusted: false, scope: 'session', warning: 'Project code has the user permissions. Local execution is not a sandbox.' })

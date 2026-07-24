@@ -254,9 +254,10 @@ export function NewDraftWizard({
         {step === 1 && (
           <div className="new-draft-options">
             <button className={location === 'collaborative' ? 'selected' : ''} onClick={() => setLocation('collaborative')}>
-              <span><Icon name="users" size={20} /></span><strong>Collaborative draft</strong><small>Work with invited collaborators in a DraftMatter workspace.</small>
+              <span><Icon name="users" size={20} /></span><strong>Collaborative draft</strong><small>Write and review together online. Code cannot run online.</small>
             </button>
-            {desktopHost.available && <button className={location === 'local' ? 'selected' : ''} onClick={() => setLocation('local')}><span><Icon name="folder" size={20} /></span><strong>On this computer</strong><small>Create a portable project folder that remains under your control.</small></button>}
+            {desktopHost.available && <button className={location === 'local' ? 'selected' : ''} onClick={() => setLocation('local')}><span><Icon name="folder" size={20} /></span><strong>On this computer</strong><small>Work in a portable project folder and run code on your computer.</small></button>}
+            <p className="new-draft-location-note">Drafts can move either way: open an online draft on your computer to run code, or put a local draft online to collaborate.</p>
           </div>
         )}
 

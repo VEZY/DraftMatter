@@ -56,9 +56,30 @@
   line-height: 1.7;
 }
 
-.learn-intro button {
+.learn-actions {
   margin-top: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.learn-actions button {
   padding: 10px 15px;
+  border: 1px solid #ccd7d1;
+  border-radius: 8px;
+  background: white;
+  color: #2d3934;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font: inherit;
+  font-weight: 700;
+}
+
+.learn-actions .home-primary {
+  border-color: #3f715e;
+  background: #3f715e;
+  color: white;
 }
 
 .learn-lessons {

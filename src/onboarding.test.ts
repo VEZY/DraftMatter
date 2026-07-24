@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import {
-  buildTutorialSource,
   onboardingTasksFor,
   readLocalOnboarding,
   writeLocalOnboarding,
@@ -40,15 +39,4 @@ describe('DraftMatter onboarding', () => {
     expect([...values.keys()]).toEqual(['draftmatter.onboarding.v1:researcher-1'])
   })
 
-  it('builds an isolated personal tutorial covering the five core workflows', () => {
-    const source = buildTutorialSource()
-    expect(source).toContain('your personal, editable tutorial copy')
-    expect(source).toContain('## Write and organize')
-    expect(source).toContain('## Cite a source')
-    expect(source).toContain('## Reproducible results')
-    expect(source).toContain('## Review')
-    expect(source).toContain('## Collaborate and checkpoint')
-    expect(source).not.toContain('room')
-    expect(source).not.toContain('workspaceId')
-  })
 })

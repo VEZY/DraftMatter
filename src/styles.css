@@ -3778,6 +3778,21 @@ button:disabled {
 .formatter-package-callout button { background: #fff; border: 1px solid #bdccc3; border-radius: 5px; color: #486253; font-size: 8px; font-weight: 700; min-height: 29px; padding: 0 10px; }
 .formatter-package-callout button:hover:not(:disabled) { background: #edf4ef; border-color: #9db1a5; }
 .formatter-package-callout button:disabled { cursor: default; opacity: .5; }
+.project-environment-callout {
+  background: #f6f9f7;
+  border: 1px solid #dce7e0;
+  border-radius: 7px;
+  display: flex;
+  margin: 0 16px 10px;
+  padding: 9px 10px;
+}
+.project-environment-callout > span { display: grid; gap: 3px; }
+.project-environment-callout strong { color: #405a4c; font-size: 9px; }
+.project-environment-callout small { color: #718078; font-size: 8px; line-height: 1.5; }
+.project-environment-callout[data-language="r"] { background: #f7f7fb; border-color: #e1e2ef; }
+.project-environment-callout[data-language="r"] strong { color: #555e92; }
+.project-environment-callout[data-language="julia"] { background: #faf7fc; border-color: #e9deef; }
+.project-environment-callout[data-language="julia"] strong { color: #674f74; }
 .julia-package-list { display: grid; max-height: min(330px, 42vh); min-height: 72px; overflow: auto; padding: 5px 10px 10px; }
 .julia-package-list > p { align-self: center; color: #849089; font-size: 9px; margin: 0; padding: 18px; text-align: center; }
 .julia-package-list > div { align-items: center; border-radius: 6px; display: flex; gap: 12px; min-height: 48px; padding: 7px 8px; }

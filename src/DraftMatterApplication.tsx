@@ -6,7 +6,7 @@ import { Home } from './Home'
 import { InvitationEntry } from './InvitationEntry'
 import { NewDraftWizard } from './NewDraftWizard'
 import { Learn } from './Learn'
-import { buildTutorialSource } from './onboarding'
+import { ProgrammingLanguages } from './ProgrammingLanguages'
 import { applicationRoutePath, parseApplicationRoute, type ApplicationRoute } from './applicationRoute'
 import {
   CollaborationSessionProvider,
@@ -100,6 +100,7 @@ function ApplicationRouter() {
         localProblem={localProblem}
         onOpenExample={() => navigate({ destination: 'example' })}
         onOpenLearn={() => navigate({ destination: 'learn' })}
+        onOpenLanguages={() => navigate({ destination: 'languages' })}
         onOpenTutorial={() => navigate({ destination: 'tutorial' })}
       />
       <NewDraftWizard
@@ -138,7 +139,7 @@ function ApplicationRouter() {
 
   if (route.destination === 'collaborative-editor') {
     if (launch) {
-      return <App collaborationLaunch={launch} onOpenLearn={() => navigate({ destination: 'learn' })} onNavigateHome={() => { setLaunch(null); navigate({ destination: 'home', workspaceId: launch.workspaceId }) }} />
+      return <App collaborationLaunch={launch} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLaunch(null); navigate({ destination: 'home', workspaceId: launch.workspaceId }) }} />
     }
     if (!session.profile) {
       return home()
@@ -149,13 +150,14 @@ function ApplicationRouter() {
 
   if (route.destination === 'local-editor') {
     if (!localLaunch) return <main className="home-route-status"><section><h1>Open the local project from Home</h1><p>DraftMatter needs permission to read a project folder on this computer.</p><button onClick={() => navigate({ destination: 'home' })}>Return to Home</button></section></main>
-    return <App desktopProjectLaunch={localLaunch} startCollaborationOnMount={startCollaborationRoot === localLaunch.root} onOpenLearn={() => navigate({ destination: 'learn' })} onNavigateHome={() => { setLocalProjects(readLocalProjectRecents(localStorage)); setStartCollaborationRoot(''); setLocalLaunch(null); navigate({ destination: 'home' }) }} />
+    return <App desktopProjectLaunch={localLaunch} startCollaborationOnMount={startCollaborationRoot === localLaunch.root} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLocalProjects(readLocalProjectRecents(localStorage)); setStartCollaborationRoot(''); setLocalLaunch(null); navigate({ destination: 'home' }) }} />
   }
 
-  if (route.destination === 'example') return <App initialExperience="complete-example" onOpenLearn={() => navigate({ destination: 'learn' })} onNavigateHome={() => navigate({ destination: 'home' })} />
-  if (route.destination === 'learn') return <Learn onBack={() => navigate({ destination: 'home' })} onStartTutorial={() => navigate({ destination: 'tutorial' })} />
-  if (route.destination === 'tutorial') return <App browserDocumentLaunch={{ source: buildTutorialSource(), filename: 'my-draftmatter-tutorial.qmd', projectName: 'My DraftMatter tutorial' }} onOpenLearn={() => navigate({ destination: 'learn' })} onNavigateHome={() => navigate({ destination: 'home' })} />
-  if (route.destination === 'browser-editor') return <App onOpenLearn={() => navigate({ destination: 'learn' })} onNavigateHome={() => navigate({ destination: 'home' })} />
+  if (route.destination === 'example') return <App initialExperience="complete-example" onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />
+  if (route.destination === 'learn') return <Learn onBack={() => navigate({ destination: 'home' })} onStartTour={() => navigate({ destination: 'tutorial' })} />
+  if (route.destination === 'languages') return <ProgrammingLanguages onBack={() => navigate({ destination: 'home' })} />
+  if (route.destination === 'tutorial') return <App initialExperience="complete-example" startExampleTour onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />
+  if (route.destination === 'browser-editor') return <App onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />
 
   return home(route.workspaceId)
 }

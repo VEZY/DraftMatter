@@ -82,7 +82,7 @@ export function GettingStarted({
         })}
       </div>
       {syncNote && <p className="getting-started-sync" role="status">{syncNote}</p>}
-      <footer><button onClick={onTutorial}><Icon name="spark" size={15} />Open my tutorial</button><button onClick={onLearn}>Learn DraftMatter <Icon name="arrowRight" size={14} /></button></footer>
+      <footer><button onClick={onTutorial}><Icon name="spark" size={15} />Start guided tour</button><button onClick={onLearn}>Learn DraftMatter <Icon name="arrowRight" size={14} /></button></footer>
     </section>
   )
 }

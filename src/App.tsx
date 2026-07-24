@@ -6,6 +6,7 @@ import { desktopHost, normaliseHostFailure, resolveMainDocument, type CodeFormat
 import { parsePortableDocument, parseReviewMarkup } from './sharedEditor'
 import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
+import { ExampleTour } from './ExampleTour'
 import { ManuscriptTextEditor } from './ManuscriptTextEditor'
 import { StructuredManuscriptEditor, type StructuredManuscriptEditorHandle, type StructuredOutlineItem, type StructuredReviewSelection } from './StructuredManuscriptEditor'
 import { parseStructuredManuscript, structuredCitationClusters } from './structuredManuscript'
@@ -267,6 +268,7 @@ function runtimeName(language: RuntimeLanguage) {
 
 function runtimeInstallationGuidance(language: RuntimeLanguage) {
   const name = runtimeName(language)
+  if (language === 'python') return 'Python was not found. Choose Set up Python and DraftMatter will acquire uv only for Python work, create this project’s .venv, and download a managed Python only if no compatible installation is available.'
   const platform = globalThis.navigator?.platform?.toLowerCase() ?? ''
   if (platform.includes('win')) return `Install ${name} from its official Windows installer, reopen DraftMatter, then choose Detect again.`
   if (platform.includes('mac')) return `Install ${name} from its official macOS installer or your package manager, reopen DraftMatter, then choose Detect again.`
@@ -563,16 +565,18 @@ export interface AppProps {
   desktopProjectLaunch?: ProjectSnapshot
   onNavigateHome?: () => void
   initialExperience?: 'complete-example'
+  startExampleTour?: boolean
   startCollaborationOnMount?: boolean
   browserDocumentLaunch?: { source: string; filename: string; projectName: string }
   onOpenLearn?: () => void
+  onOpenLanguages?: () => void
 }
 
 function emptyCollaborativeSource(name: string) {
   return `---\ntitle: "${name.replaceAll('"', '\\"')}"\n---\n\n`
 }
 
-function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initialExperience, startCollaborationOnMount = false, browserDocumentLaunch, onOpenLearn }: AppProps = {}) {
+function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initialExperience, startExampleTour = false, startCollaborationOnMount = false, browserDocumentLaunch, onOpenLearn, onOpenLanguages }: AppProps = {}) {
   const collaborationSession = useOptionalCollaborationSession()
   const collaborativeProject = collaborationLaunch?.projects.find((project) => project.id === collaborationLaunch.projectId)
   const collaborativeInitialSource = collaborationLaunch
@@ -649,6 +653,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   const [saveProblem, setSaveProblem] = useState('')
   const [toast, setToast] = useState('')
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
+  const [exampleTourOpen, setExampleTourOpen] = useState(startExampleTour)
   const [builtInProject, setBuiltInProject] = useState<'complete-example' | null>(() =>
     localStorage.getItem(BUILT_IN_PROJECT_KEY) === 'complete-example' ? 'complete-example' : null,
   )
@@ -2353,8 +2358,8 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
       selectedEnvironmentPaths[language],
       runtime,
     )
-    if (!environment) {
-      setExecutionProblem(`${runtimeName(language)} itself is missing. Install the runtime for your operating system, then choose Detect again; DraftMatter installs only the kernel integration package.`)
+    if (!environment && language !== 'python') {
+      setExecutionProblem(runtimeInstallationGuidance(language))
       return
     }
     setKernelSetupLanguage(language)
@@ -2362,7 +2367,11 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
       const trust = await desktopHost.executionTrustStatus(session.root)
       if (!trust.trusted) {
         setExecutionTrustPurpose('kernel-setup')
-        setExecutionTrustWarning(`${trust.warning} Setting up ${runtimeName(language)} will install ${language === 'python' ? 'ipykernel' : language === 'r' ? 'IRkernel' : 'IJulia'} into the detected environment and register a DraftMatter kernelspec.`)
+        setExecutionTrustWarning(`${trust.warning} ${language === 'python'
+          ? 'DraftMatter will use an existing compatible uv or acquire a pinned copy, create .venv, and add ipykernel and Ruff to this project.'
+          : language === 'r'
+            ? 'DraftMatter will bootstrap renv in this project, restore renv.lock when present, and add IRkernel and styler to the isolated library.'
+            : 'DraftMatter will instantiate the Julia project, add IJulia when needed, and register its project kernel.'}`)
         setExecutionTrustOpen(true)
         return
       }
@@ -2383,7 +2392,10 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
       if (!inventory || desktopSessionRef.current?.root !== session.root) return
 
       for (const language of languages) {
-        let ready = healthyKernelsFor(inventory, language).length > 0
+        const healthyKernels = healthyKernelsFor(inventory, language)
+        let ready = language === 'julia'
+          ? healthyKernels.length > 0
+          : healthyKernels.some((kernel) => kernel.displayName.includes('DraftMatter'))
         if (language === 'julia' && inventory.executables.julia.health === 'available') {
           const taskId = startSetupActivity(
             'Checking the Julia project',
@@ -2411,7 +2423,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
         if (ready) continue
 
         const runtime = inventory.executables[language]
-        if (runtime.health !== 'available' || !runtime.executable) {
+        if ((runtime.health !== 'available' || !runtime.executable) && language !== 'python') {
           setSelectedEnvironmentLanguage(language)
           setExecutionProblem(runtimeInstallationGuidance(language))
           setEnvironmentOpen(true)
@@ -5840,10 +5852,11 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
               {(['python', 'r', 'julia'] as const).map((language) => {
                 const runtime = runtimeInventory?.executables[language]
                 const selected = language === selectedEnvironmentLanguage
+                const projectKernel = runtimeInventory && healthyKernelsFor(runtimeInventory, language)[0]
                 return <button className={selected ? 'selected' : ''} key={language} onClick={() => setSelectedEnvironmentLanguage(language)} aria-pressed={selected}>
                   <span className={`runtime-language runtime-${language}`}>{language === 'python' ? 'Py' : language === 'julia' ? 'Jl' : 'R'}</span>
-                  <span><strong>{runtimeName(language)}</strong><small>{runtimeDiscoveryState === 'discovering' ? 'Checking…' : runtime?.health === 'available' ? `${runtime.version ?? 'Version available'} · ${runtime.executable}` : runtime?.message ?? 'Not checked'}</small></span>
-                  <span className={`runtime-health ${runtime?.health ?? 'not-checked'}`}>{runtime?.health === 'available' ? 'Available' : runtime?.health === 'unhealthy' ? 'Needs attention' : runtime?.health === 'missing' ? 'Missing' : 'Not checked'}</span>
+                  <span><strong>{runtimeName(language)}</strong><small>{runtimeDiscoveryState === 'discovering' ? 'Checking…' : projectKernel ? `Project environment · ${projectKernel.executable ?? projectKernel.resourceDir}` : runtime?.health === 'available' ? `${runtime.version ?? 'Version available'} · ${runtime.executable}` : runtime?.message ?? 'Not checked'}</small></span>
+                  <span className={`runtime-health ${projectKernel ? 'available' : runtime?.health ?? 'not-checked'}`}>{projectKernel ? 'Project ready' : runtime?.health === 'available' ? 'Available' : runtime?.health === 'unhealthy' ? 'Needs attention' : runtime?.health === 'missing' ? 'Missing' : 'Not checked'}</span>
                 </button>
               })}
             </div>
@@ -5868,6 +5881,21 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
                     : runtimeInventory ? `${selectedEnvironmentKernels.length} ready ${runtimeName(selectedEnvironmentLanguage)} environment${selectedEnvironmentKernels.length === 1 ? '' : 's'}` : 'Check local environments to choose one'}</span>
               </label>
             </div>
+            {selectedEnvironmentLanguage === 'python' && (
+              <div className="project-environment-callout" data-language="python">
+                <span><strong>Python projects use uv</strong><small>DraftMatter prefers an existing Python and uv. When needed, it acquires uv in application data, creates .venv here, and keeps dependencies in pyproject.toml and uv.lock.</small></span>
+              </div>
+            )}
+            {selectedEnvironmentLanguage === 'r' && (
+              <div className="project-environment-callout" data-language="r">
+                <span><strong>R projects use renv</strong><small>DraftMatter uses the detected R installation, bootstraps renv only for R projects, and restores or creates renv.lock without changing the system R installation.</small></span>
+              </div>
+            )}
+            {selectedEnvironmentLanguage === 'julia' && (
+              <div className="project-environment-callout" data-language="julia">
+                <span><strong>Julia uses its native project environment</strong><small>The detected Julia runs with --project=. and dependencies remain in Project.toml and Manifest.toml.</small></span>
+              </div>
+            )}
             {selectedEnvironmentLanguage !== 'julia' && selectedEnvironmentSetupExecutable && (() => {
               const status = formatterStatuses[selectedEnvironmentLanguage]
               const packageName = selectedEnvironmentLanguage === 'python' ? 'Ruff' : 'styler'
@@ -5893,7 +5921,8 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
             {executionProblem && <div className="execution-environment-help" role="alert">{executionProblem}</div>}
             <div className="execution-dialog-actions environment-actions">
               {desktopSession && <button onClick={() => void forgetCurrentProjectTrust()} disabled={kernelSetupBusy || formatterSetupBusy}>Forget project trust</button>}
-              {selectedEnvironmentSetupExecutable && <button onClick={() => void requestKernelIntegrationSetup(selectedEnvironmentLanguage)} disabled={kernelSetupBusy || formatterSetupBusy || runtimeDiscoveryState === 'discovering'}>{kernelSetupBusy && kernelSetupLanguage === selectedEnvironmentLanguage ? 'Setting up…' : selectedEnvironmentKernel ? 'Repair integration' : `Set up ${runtimeName(selectedEnvironmentLanguage)}`}</button>}
+              {onOpenLanguages && <button onClick={() => { setEnvironmentOpen(false); onOpenLanguages() }}>How languages work</button>}
+              {(selectedEnvironmentSetupExecutable || selectedEnvironmentLanguage === 'python') && <button onClick={() => void requestKernelIntegrationSetup(selectedEnvironmentLanguage)} disabled={kernelSetupBusy || formatterSetupBusy || runtimeDiscoveryState === 'discovering'}>{kernelSetupBusy && kernelSetupLanguage === selectedEnvironmentLanguage ? 'Setting up…' : selectedEnvironmentKernel ? 'Repair integration' : `Set up ${runtimeName(selectedEnvironmentLanguage)}`}</button>}
               <button onClick={() => void restartExecution(selectedEnvironmentLanguage)} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}>Restart {runtimeName(selectedEnvironmentLanguage)}</button>
               <button onClick={() => void terminateExecution(selectedEnvironmentLanguage)} disabled={!desktopSession}>Terminate {runtimeName(selectedEnvironmentLanguage)}</button>
               <span />
@@ -6350,6 +6379,8 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
           />
         </div>
       )}
+
+      {exampleTourOpen && <ExampleTour onClose={() => setExampleTourOpen(false)} />}
 
       {toast && <div className="toast" role="status"><Icon name="check" size={16} /> {toast}</div>}
 

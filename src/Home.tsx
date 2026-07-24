@@ -24,6 +24,7 @@ interface HomeProps {
   localProblem?: string
   onOpenExample: () => void
   onOpenLearn: () => void
+  onOpenLanguages: () => void
   onOpenTutorial: () => void
 }
 
@@ -75,8 +76,9 @@ function SignedOutHome({
   localProblem,
   onOpenExample,
   onOpenLearn,
+  onOpenLanguages,
   onOpenTutorial,
-}: Pick<HomeProps, 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenLearn' | 'onOpenTutorial'>) {
+}: Pick<HomeProps, 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenLearn' | 'onOpenLanguages' | 'onOpenTutorial'>) {
   const session = useCollaborationSession()
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [serviceUrl, setServiceUrl] = useState(session.serviceUrl || 'https://')
@@ -106,7 +108,10 @@ function SignedOutHome({
           <img src="/draftmatter-pencil-mark.svg" alt="" />
           <span>DraftMatter</span>
         </a>
-        <button className="home-link-button" onClick={onOpenLearn}>Learn DraftMatter</button>
+        <nav className="home-welcome-links" aria-label="Learn about DraftMatter">
+          <button className="home-link-button" onClick={onOpenLanguages}><Icon name="code" size={15} />Programming languages</button>
+          <button className="home-link-button home-learn-link" onClick={onOpenLearn}><Icon name="spark" size={15} />Learn DraftMatter</button>
+        </nav>
       </header>
 
       <section className="home-hero" aria-labelledby="home-title">
@@ -128,6 +133,18 @@ function SignedOutHome({
       </section>
 
       <HomeShowcase />
+
+      <section className="home-learn-cta" aria-labelledby="home-learn-title">
+        <div>
+          <span className="home-kicker">Learn with a complete paper</span>
+          <h2 id="home-learn-title">See how the pieces come together.</h2>
+          <p>Follow a short tour showcasing citations, reproducible results, code, and review.</p>
+        </div>
+        <button onClick={onOpenLearn}>
+          Learn DraftMatter
+          <Icon name="arrowRight" size={16} />
+        </button>
+      </section>
 
       <section className="home-principles" aria-labelledby="home-principles-title">
         <div className="home-section-intro">
@@ -190,8 +207,9 @@ function Catalogue({
   localProjects,
   localProblem,
   onOpenLearn,
+  onOpenLanguages,
   onOpenTutorial,
-}: Pick<HomeProps, 'preferredWorkspaceId' | 'onOpenDraft' | 'onNewDraft' | 'onNewLocalDraft' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'localProjects' | 'localProblem' | 'onOpenLearn' | 'onOpenTutorial'>) {
+}: Pick<HomeProps, 'preferredWorkspaceId' | 'onOpenDraft' | 'onNewDraft' | 'onNewLocalDraft' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'localProjects' | 'localProblem' | 'onOpenLearn' | 'onOpenLanguages' | 'onOpenTutorial'>) {
   const session = useCollaborationSession()
   const [query, setQuery] = useState('')
   const [workspaceId, setWorkspaceId] = useState(() => (
@@ -241,6 +259,7 @@ function Catalogue({
           <span className="sr-only">Search drafts</span>
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search drafts" />
         </label>
+        <button className="home-link-button" onClick={onOpenLanguages}>Languages</button>
         <button className="home-link-button" onClick={onOpenLearn}>Help</button>
         <div className="home-account">
           <span aria-hidden="true">{accountName.slice(0, 1).toUpperCase()}</span>

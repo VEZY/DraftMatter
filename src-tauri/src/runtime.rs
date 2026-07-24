@@ -5,7 +5,7 @@ use std::collections::HashSet;
 use std::env;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -16,6 +16,8 @@ const MAX_PROBE_OUTPUT_BYTES: u64 = 64 * 1024;
 const MAX_KERNEL_SPEC_BYTES: u64 = 128 * 1024;
 const MAX_KERNEL_SPECS: usize = 128;
 const MAX_SETUP_DIAGNOSTIC_CHARS: usize = 8 * 1024;
+const MAX_TOOL_INSTALLER_BYTES: u64 = 2 * 1024 * 1024;
+const UV_VERSION: &str = "0.11.31";
 pub(crate) const JULIA_PROJECT_ARGUMENT: &str = "--project=.";
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Hash)]
@@ -582,6 +584,17 @@ fn run_setup_command(
     language: RuntimeLanguage,
     progress: Option<TaskProgressReporter>,
 ) -> Result<(), HostError> {
+    run_setup_command_with_environment(executable, arguments, root, language, &[], progress)
+}
+
+fn run_setup_command_with_environment(
+    executable: &Path,
+    arguments: &[OsString],
+    root: &Path,
+    language: RuntimeLanguage,
+    environment: &[(&str, OsString)],
+    progress: Option<TaskProgressReporter>,
+) -> Result<(), HostError> {
     let mut command = Command::new(executable);
     command
         .args(arguments)
@@ -589,6 +602,9 @@ fn run_setup_command(
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    for (name, value) in environment {
+        command.env(name, value);
+    }
     configure_project_environment(&mut command, language, root);
     if let Some(report) = &progress {
         report(
@@ -635,6 +651,309 @@ fn run_setup_command(
     } else {
         Err(setup_failure(language, &stderr, &stdout))
     }
+}
+
+fn download_installer(url: &str, destination: &Path) -> Result<(), HostError> {
+    let response = ureq::get(url).call().map_err(|error| {
+        HostError::Integration(format!(
+            "Could not download the pinned environment-tool installer from {url}: {error}"
+        ))
+    })?;
+    let mut bytes = Vec::new();
+    response
+        .into_reader()
+        .take(MAX_TOOL_INSTALLER_BYTES + 1)
+        .read_to_end(&mut bytes)
+        .map_err(|error| {
+            HostError::Integration(format!(
+                "Could not read the environment-tool installer: {error}"
+            ))
+        })?;
+    if bytes.len() as u64 > MAX_TOOL_INSTALLER_BYTES {
+        return Err(HostError::Integration(
+            "The environment-tool installer exceeded the 2 MB safety limit.".to_string(),
+        ));
+    }
+    if let Some(parent) = destination.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            HostError::Integration(format!(
+                "Could not create the managed tools directory {}: {error}",
+                parent.display()
+            ))
+        })?;
+    }
+    let mut file = fs::File::create(destination).map_err(|error| {
+        HostError::Integration(format!(
+            "Could not create the temporary environment-tool installer: {error}"
+        ))
+    })?;
+    file.write_all(&bytes).map_err(|error| {
+        HostError::Integration(format!(
+            "Could not save the environment-tool installer: {error}"
+        ))
+    })
+}
+
+fn managed_uv_path(tool_root: &Path) -> PathBuf {
+    tool_root
+        .join("uv")
+        .join(if cfg!(windows) { "uv.exe" } else { "uv" })
+}
+
+fn healthy_executable(path: &Path) -> bool {
+    executable_file(path)
+        && run_version_probe(path)
+            .map(|output| output.success)
+            .unwrap_or(false)
+}
+
+fn resolve_uv(tool_root: &Path) -> Option<PathBuf> {
+    resolve_executable_in_paths(OsStr::new("uv"), &search_paths())
+        .filter(|path| healthy_executable(path))
+        .or_else(|| {
+            let managed = managed_uv_path(tool_root);
+            healthy_executable(&managed).then_some(managed)
+        })
+}
+
+fn install_uv(
+    tool_root: &Path,
+    project_root: &Path,
+    progress: Option<TaskProgressReporter>,
+) -> Result<PathBuf, HostError> {
+    let install_dir = tool_root.join("uv");
+    fs::create_dir_all(&install_dir).map_err(|error| {
+        HostError::Integration(format!(
+            "Could not create the managed uv directory {}: {error}",
+            install_dir.display()
+        ))
+    })?;
+    if let Some(report) = &progress {
+        report(
+            "status",
+            &format!(
+                "uv was not found. Downloading the pinned uv {UV_VERSION} installer from Astral…\n"
+            ),
+        );
+    }
+    let environment = [
+        ("UV_INSTALL_DIR", install_dir.as_os_str().to_os_string()),
+        ("UV_NO_MODIFY_PATH", OsString::from("1")),
+    ];
+    let installer = if cfg!(windows) {
+        let installer = install_dir.join(format!("uv-{UV_VERSION}-installer.ps1"));
+        download_installer(
+            &format!("https://astral.sh/uv/{UV_VERSION}/install.ps1"),
+            &installer,
+        )?;
+        run_setup_command_with_environment(
+            Path::new("powershell.exe"),
+            &[
+                OsString::from("-NoProfile"),
+                OsString::from("-NonInteractive"),
+                OsString::from("-ExecutionPolicy"),
+                OsString::from("Bypass"),
+                OsString::from("-File"),
+                installer.as_os_str().to_os_string(),
+            ],
+            project_root,
+            RuntimeLanguage::Python,
+            &environment,
+            progress.clone(),
+        )?;
+        installer
+    } else {
+        let installer = install_dir.join(format!("uv-{UV_VERSION}-installer.sh"));
+        download_installer(
+            &format!("https://astral.sh/uv/{UV_VERSION}/install.sh"),
+            &installer,
+        )?;
+        run_setup_command_with_environment(
+            Path::new("/bin/sh"),
+            &[installer.as_os_str().to_os_string()],
+            project_root,
+            RuntimeLanguage::Python,
+            &environment,
+            progress.clone(),
+        )?;
+        installer
+    };
+    let _ = fs::remove_file(installer);
+    let uv = managed_uv_path(tool_root);
+    if !healthy_executable(&uv) {
+        return Err(HostError::Integration(format!(
+            "The uv installer finished, but DraftMatter could not verify {}.",
+            uv.display()
+        )));
+    }
+    if let Some(report) = &progress {
+        report(
+            "status",
+            "uv is ready in DraftMatter application data; the system PATH was not changed.\n",
+        );
+    }
+    Ok(uv)
+}
+
+fn ensure_uv(
+    tool_root: &Path,
+    project_root: &Path,
+    progress: Option<TaskProgressReporter>,
+) -> Result<PathBuf, HostError> {
+    if let Some(uv) = resolve_uv(tool_root) {
+        if let Some(report) = &progress {
+            report(
+                "status",
+                &format!(
+                    "Using the compatible uv installation at {}.\n",
+                    uv.display()
+                ),
+            );
+        }
+        return Ok(uv);
+    }
+    install_uv(tool_root, project_root, progress)
+}
+
+fn python_project_name(root: &Path) -> String {
+    let candidate = root
+        .file_name()
+        .and_then(OsStr::to_str)
+        .unwrap_or("draftmatter-project")
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
+        .collect::<String>();
+    let normalized = candidate
+        .split('-')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join("-");
+    if normalized.is_empty() {
+        "draftmatter-project".to_string()
+    } else {
+        normalized
+    }
+}
+
+fn ensure_python_project_metadata(root: &Path) -> Result<(), HostError> {
+    let pyproject = root.join("pyproject.toml");
+    if pyproject.exists() {
+        return Ok(());
+    }
+    fs::write(
+        &pyproject,
+        format!(
+            "[project]\nname = \"{}\"\nversion = \"0.1.0\"\nrequires-python = \">=3.10\"\ndependencies = []\n",
+            python_project_name(root)
+        ),
+    )
+    .map_err(|error| {
+        HostError::Integration(format!(
+            "Could not create the Python project metadata at {}: {error}",
+            pyproject.display()
+        ))
+    })
+}
+
+fn python_project_executable(root: &Path) -> PathBuf {
+    if cfg!(windows) {
+        root.join(".venv").join("Scripts").join("python.exe")
+    } else {
+        root.join(".venv").join("bin").join("python")
+    }
+}
+
+fn setup_python_project(
+    root: &Path,
+    selected_environment: Option<&str>,
+    tool_root: &Path,
+    progress: Option<TaskProgressReporter>,
+) -> Result<PathBuf, HostError> {
+    let uv = ensure_uv(tool_root, root, progress.clone())?;
+    ensure_python_project_metadata(root)?;
+    let project_python = python_project_executable(root);
+    let tool_environment = [
+        (
+            "UV_PYTHON_INSTALL_DIR",
+            tool_root.join("python").as_os_str().to_os_string(),
+        ),
+        ("UV_NO_MODIFY_PATH", OsString::from("1")),
+        (
+            "UV_PROJECT_ENVIRONMENT",
+            root.join(".venv").as_os_str().to_os_string(),
+        ),
+    ];
+    if !healthy_executable(&project_python) {
+        let selected = selected_environment
+            .map(PathBuf::from)
+            .filter(|path| healthy_executable(path))
+            .or_else(|| resolve_runtime_executable(RuntimeLanguage::Python));
+        let mut arguments = vec![OsString::from("venv"), OsString::from("--seed")];
+        if let Some(selected) = selected {
+            arguments.push(OsString::from("--python"));
+            arguments.push(selected.as_os_str().to_os_string());
+        }
+        arguments.push(OsString::from(".venv"));
+        if let Some(report) = &progress {
+            report(
+                "status",
+                "Creating an isolated Python environment in .venv…\n",
+            );
+        }
+        run_setup_command_with_environment(
+            &uv,
+            &arguments,
+            root,
+            RuntimeLanguage::Python,
+            &tool_environment,
+            progress.clone(),
+        )?;
+    }
+    if let Some(report) = &progress {
+        report(
+            "status",
+            "Synchronizing ipykernel and Ruff with the Python project through uv…\n",
+        );
+    }
+    run_setup_command_with_environment(
+        &uv,
+        &[
+            OsString::from("add"),
+            OsString::from("--dev"),
+            OsString::from("ipykernel"),
+            OsString::from("ruff"),
+        ],
+        root,
+        RuntimeLanguage::Python,
+        &tool_environment,
+        progress,
+    )?;
+    if !healthy_executable(&project_python) {
+        return Err(HostError::Integration(format!(
+            "uv finished, but the project Python environment was not found at {}.",
+            project_python.display()
+        )));
+    }
+    Ok(project_python)
+}
+
+fn escaped_r_string(path: &Path) -> String {
+    path.to_string_lossy()
+        .replace('\\', "\\\\")
+        .replace('\'', "\\'")
+}
+
+fn r_project_setup_expression(root: &Path) -> String {
+    let project = escaped_r_string(root);
+    format!(
+        "options(repos=c(CRAN='https://cloud.r-project.org')); project <- normalizePath('{project}', winslash='/', mustWork=TRUE); bootstrap <- file.path(project, '.draftmatter', 'r-bootstrap-library'); dir.create(bootstrap, recursive=TRUE, showWarnings=FALSE); .libPaths(c(bootstrap, .libPaths())); if (!requireNamespace('renv', quietly=TRUE)) install.packages('renv', lib=bootstrap, repos='https://cloud.r-project.org'); if (!requireNamespace('renv', quietly=TRUE)) stop('renv could not be loaded after installation'); renv::consent(provided=TRUE); lockfile <- file.path(project, 'renv.lock'); activate <- file.path(project, 'renv', 'activate.R'); if (file.exists(lockfile) || file.exists(activate)) {{ renv::activate(project=project); if (file.exists(lockfile)) renv::restore(project=project, prompt=FALSE) }} else {{ renv::init(project=project, bare=TRUE, restart=FALSE) }}; renv::install(c('IRkernel', 'styler'), project=project); renv::snapshot(project=project, prompt=FALSE); if (!requireNamespace('IRkernel', quietly=TRUE)) stop('IRkernel could not be loaded from the renv project library')"
+    )
 }
 
 fn setup_kernel_name(language: RuntimeLanguage, executable: &Path, root: &Path) -> String {
@@ -822,26 +1141,30 @@ pub fn setup_kernel_integration_with_progress_impl(
     raw_root: &str,
     language: RuntimeLanguage,
     selected_environment: Option<&str>,
+    managed_tool_root: Option<&Path>,
     progress: Option<TaskProgressReporter>,
 ) -> Result<KernelIntegrationSetupResult, HostError> {
     let root = canonical_root(raw_root)?;
-    let executable = setup_runtime_executable(language, selected_environment)?;
+    let executable = match language {
+        RuntimeLanguage::Python => setup_python_project(
+            &root,
+            selected_environment,
+            managed_tool_root.ok_or_else(|| {
+                HostError::Integration(
+                    "DraftMatter could not locate its application-data directory for uv."
+                        .to_string(),
+                )
+            })?,
+            progress.clone(),
+        )?,
+        RuntimeLanguage::R | RuntimeLanguage::Julia => {
+            setup_runtime_executable(language, selected_environment)?
+        }
+    };
     let kernel_name = setup_kernel_name(language, &executable, &root);
     let display_name = format!("{} · DraftMatter", runtime_name(language));
     match language {
         RuntimeLanguage::Python => {
-            run_setup_command(
-                &executable,
-                &[
-                    OsString::from("-m"),
-                    OsString::from("pip"),
-                    OsString::from("install"),
-                    OsString::from("ipykernel"),
-                ],
-                &root,
-                language,
-                progress.clone(),
-            )?;
             run_setup_command(
                 &executable,
                 &[
@@ -860,13 +1183,13 @@ pub fn setup_kernel_integration_with_progress_impl(
             )?;
         }
         RuntimeLanguage::R => {
-            let expression = "user_lib <- path.expand(Sys.getenv('R_LIBS_USER')); if (nzchar(user_lib)) { dir.create(user_lib, recursive=TRUE, showWarnings=FALSE); .libPaths(c(user_lib, .libPaths())) }; if (!requireNamespace('IRkernel', quietly=TRUE)) install.packages('IRkernel', repos='https://cloud.r-project.org', lib=if (nzchar(user_lib)) user_lib else NULL); if (!requireNamespace('IRkernel', quietly=TRUE)) stop('IRkernel could not be loaded after installation')";
+            let expression = r_project_setup_expression(&root);
             run_setup_command(
                 &executable,
                 &[
                     OsString::from("--vanilla"),
                     OsString::from("-e"),
-                    OsString::from(expression),
+                    OsString::from(&expression),
                 ],
                 &root,
                 language,
@@ -957,6 +1280,44 @@ mod tests {
         let error = setup_runtime_executable(RuntimeLanguage::Python, Some("env/bin/python"))
             .unwrap_err();
         assert!(matches!(error, HostError::InvalidPath(_)));
+    }
+
+    #[test]
+    fn creates_minimal_uv_project_metadata_without_overwriting_an_existing_project() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("Canopy responses 2026");
+        fs::create_dir(&root).unwrap();
+
+        ensure_python_project_metadata(&root).unwrap();
+        let created = fs::read_to_string(root.join("pyproject.toml")).unwrap();
+        assert!(created.contains("name = \"canopy-responses-2026\""));
+        assert!(created.contains("requires-python = \">=3.10\""));
+
+        fs::write(root.join("pyproject.toml"), "[project]\nname = \"kept\"\n").unwrap();
+        ensure_python_project_metadata(&root).unwrap();
+        assert_eq!(
+            fs::read_to_string(root.join("pyproject.toml")).unwrap(),
+            "[project]\nname = \"kept\"\n"
+        );
+    }
+
+    #[test]
+    fn prepares_r_through_a_project_local_renv_bootstrap() {
+        let expression = r_project_setup_expression(Path::new("/research/canopy"));
+        assert!(expression.contains(".draftmatter', 'r-bootstrap-library"));
+        assert!(expression.contains("renv::restore(project=project, prompt=FALSE)"));
+        assert!(expression.contains("renv::install(c('IRkernel', 'styler'), project=project)"));
+        assert!(expression.contains("renv::snapshot(project=project, prompt=FALSE)"));
+    }
+
+    #[test]
+    fn keeps_managed_uv_out_of_the_system_path() {
+        let expected = if cfg!(windows) {
+            PathBuf::from("tools/uv/uv.exe")
+        } else {
+            PathBuf::from("tools/uv/uv")
+        };
+        assert_eq!(managed_uv_path(Path::new("tools")), expected);
     }
 
     #[test]

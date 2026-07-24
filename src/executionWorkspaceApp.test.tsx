@@ -73,8 +73,8 @@ describe('shared Jupyter execution workspace', () => {
     vi.spyOn(desktopHost, 'probeRuntime').mockImplementation(async (language) => ({ language, health: 'available', executable: `/usr/bin/${language}`, version: `${language} test runtime` }))
     vi.spyOn(desktopHost, 'discoverJupyterKernels').mockResolvedValue({
       health: 'available', searchedLocations: ['/kernels'], kernels: [
-        { name: 'python-fixture', displayName: 'Python fixture', language: 'python', health: 'available', resourceDir: '/kernels/python' },
-        { name: 'r-fixture', displayName: 'R fixture', language: 'r', health: 'available', resourceDir: '/kernels/r' },
+        { name: 'python-fixture', displayName: 'Python · DraftMatter', language: 'python', health: 'available', resourceDir: '/kernels/python' },
+        { name: 'r-fixture', displayName: 'R · DraftMatter', language: 'r', health: 'available', resourceDir: '/kernels/r' },
         { name: 'julia-fixture', displayName: 'Julia fixture', language: 'julia', health: 'available', resourceDir: '/kernels/julia' },
       ],
     })

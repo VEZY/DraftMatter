@@ -112,6 +112,14 @@
   line-height: 1.45;
 }
 
+.new-draft-location-note {
+  grid-column: 1 / -1;
+  margin: 2px 4px 0;
+  color: #69756f;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
 .new-draft-templates {
   display: grid;
   gap: 8px;

@@ -17,7 +17,7 @@ export const homeShowcaseFeatures: ReadonlyArray<{
   {
     id: 'results',
     label: 'Results from code',
-    description: 'Create figures, tables, and in-text values from R, Python, or Julia. DraftMatter keeps the source linked to the result and keeps code out of the final paper.',
+    description: 'Use Julia, R, or Python with a local terminal and project packages. DraftMatter parses outputs into manuscript figures, tables, and in-text values while keeping every result linked to its source.',
   },
   {
     id: 'citations',
@@ -94,6 +94,46 @@ function DemoSourcePanel({
   )
 }
 
+function DemoCodePanel() {
+  return (
+    <div className="home-demo-code-panel" role="note" aria-label="Programming languages and manuscript output workflow">
+      <div className="home-demo-code-panel-head">
+        <span><Icon name="code" size={14} /></span>
+        <span><small>Project tools</small><strong>Code &amp; computation</strong></span>
+        <span>Local desktop workspace</span>
+      </div>
+      <div className="home-demo-code-panel-toolbar">
+        <span><Icon name="plus" size={10} />Add values</span>
+        <span><Icon name="table" size={10} />Add reproducible table</span>
+        <span><Icon name="plus" size={10} />Julia packages</span>
+        <span><Icon name="more" size={11} />Environments</span>
+      </div>
+      <div className="home-demo-code-panel-body">
+        <div className="home-demo-terminal">
+          <div className="home-demo-terminal-tabs" aria-label="Available terminal languages">
+            <span>Python <i /></span><span>R <i /></span><span className="active">Julia <i /></span>
+            <small>Reproducible session</small>
+          </div>
+          <div className="home-demo-terminal-output">
+            <code><span>julia&gt;</span> using DataFrames, CairoMakie</code>
+            <code><span>julia&gt;</span> @publish canopy_gain unit=&quot;%&quot; digits=1</code>
+            <strong><span>{'{{canopy_gain}}'}</span>18.4%</strong>
+          </div>
+          <div className="home-demo-terminal-prompt"><span>julia&gt;</span><span>Shared with document cells</span><button>Run</button></div>
+        </div>
+        <aside className="home-demo-environment">
+          <span>Project environment</span>
+          <strong>Julia environment</strong>
+          <small><Icon name="check" size={10} />Project.toml &amp; Manifest.toml</small>
+          <ul><li><span>DataFrames</span><small>1.7.0</small></li><li><span>CairoMakie</span><small>0.15.6</small></li></ul>
+          <button><Icon name="plus" size={10} />Add package</button>
+        </aside>
+      </div>
+      <div className="home-demo-code-panel-flow"><Icon name="arrowRight" size={12} /><span>Terminal output is parsed automatically into manuscript figures, tables, and in-text values.</span></div>
+    </div>
+  )
+}
+
 export function HomeShowcase() {
   const [activeFeature, setActiveFeature] = useState<HomeShowcaseFeatureId>('writing')
   const [openSource, setOpenSource] = useState<HomeDemoSource | null>(null)
@@ -162,10 +202,14 @@ export function HomeShowcase() {
             <strong>{selected.label}</strong>
             <p>{selected.description}</p>
             {activeFeature === 'results' && (
-              <span className="home-showcase-tip">
-                <Icon name="code" size={13} />
-                Try “View source” on the figure or table.
-              </span>
+              <div className="home-showcase-action">
+                <span className="home-showcase-action-icon"><Icon name="code" size={15} /></span>
+                <span>
+                  <small>Try it in the preview</small>
+                  <strong>Click “View source” on the figure or table.</strong>
+                </span>
+                <Icon name="arrowRight" size={16} />
+              </div>
             )}
             {activeFeature === 'citations' && (
               <span className="home-showcase-tip">
@@ -276,7 +320,6 @@ export function HomeShowcase() {
                         <span>Reproducible figure</span>
                         <div className="home-demo-result-tools" aria-label="Reproducible figure controls">
                           <span><Icon name="play" size={12} />Run result</span>
-                          {openSource === null && <small className="home-demo-source-cue">Try this</small>}
                           <button
                             type="button"
                             className="home-demo-source-toggle"
@@ -469,6 +512,7 @@ export function HomeShowcase() {
               </div>
             </aside>
           </div>
+          {activeFeature === 'results' && <DemoCodePanel />}
         </div>
       </div>
     </section>

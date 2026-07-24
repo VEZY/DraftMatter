@@ -45,7 +45,7 @@ describe('Getting started checklist', () => {
     await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent === 'Show checklist')!.click())
     expect(container.textContent).toContain('Add a citation')
 
-    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Open my tutorial'))!.click())
+    await act(async () => [...container.querySelectorAll('button')].find((button) => button.textContent?.includes('Start guided tour'))!.click())
     expect(tutorial).toHaveBeenCalledOnce()
   })
 })

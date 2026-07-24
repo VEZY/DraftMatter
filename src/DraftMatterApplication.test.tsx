@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DraftMatterApplication } from './DraftMatterApplication'
 
 vi.mock('./App', () => ({
-  default: ({ initialExperience }: { initialExperience?: string }) => <div data-testid="editor">{initialExperience ?? 'editor'}</div>,
+  default: ({ initialExperience, startExampleTour }: { initialExperience?: string; startExampleTour?: boolean }) => <div data-testid="editor" data-example-tour={startExampleTour ? 'open' : 'closed'}>{initialExperience ?? 'editor'}</div>,
 }))
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -73,6 +73,38 @@ describe('DraftMatter application entry', () => {
     container.remove()
   })
 
+  it('offers a prominent learning action after the guided preview', async () => {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<DraftMatterApplication />))
+
+    const learnAction = container.querySelector<HTMLButtonElement>('.home-learn-cta button')!
+    expect(learnAction.textContent).toContain('Learn DraftMatter')
+    expect(container.querySelector('.home-learn-cta')?.textContent).toContain('short tour')
+    await act(async () => learnAction.click())
+
+    expect(window.location.pathname).toBe('/learn')
+    expect(container.textContent).toContain('Start guided tour')
+
+    await act(async () => root.unmount())
+  })
+
+  it('opens the programming-languages guide from Home', async () => {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<DraftMatterApplication />))
+
+    const languages = [...container.querySelectorAll<HTMLButtonElement>('button')]
+      .find((button) => button.textContent?.includes('Programming languages'))!
+    await act(async () => languages.click())
+
+    expect(window.location.pathname).toBe('/languages')
+    expect(container.querySelector('h1')?.textContent).toBe('Code that belongs to the project.')
+    expect(container.textContent).toContain('Existing installations come first.')
+
+    await act(async () => root.unmount())
+  })
+
   it('opens an editable browser copy from Start writing when no collaboration service is configured', async () => {
     const container = document.createElement('div')
     const root = createRoot(container)
@@ -82,6 +114,23 @@ describe('DraftMatter application entry', () => {
 
     expect(window.location.search).toBe('?example=complete')
     expect(container.querySelector('[data-testid="editor"]')?.textContent).toBe('complete-example')
+    await act(async () => root.unmount())
+  })
+
+  it('offers one guided-tour action that opens the complete example', async () => {
+    window.history.replaceState({}, '', '/learn')
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<DraftMatterApplication />))
+
+    expect(container.textContent).toContain('Start guided tour')
+    expect(container.textContent).not.toContain('Open complete example')
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Start guided tour'))!.click())
+
+    expect(window.location.pathname).toBe('/tutorial')
+    expect(container.querySelector('[data-testid="editor"]')?.textContent).toBe('complete-example')
+    expect(container.querySelector('[data-testid="editor"]')?.getAttribute('data-example-tour')).toBe('open')
+
     await act(async () => root.unmount())
   })
 

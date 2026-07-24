@@ -70,39 +70,3 @@ export function writeLocalOnboarding(storage: Pick<Storage, 'setItem'>, userId: 
   storage.setItem(`${ONBOARDING_KEY_PREFIX}${userId}`, JSON.stringify(next))
   return next
 }
-
-export function buildTutorialSource() {
-  return `---
-title: "My DraftMatter tutorial"
-author:
-  - name: "Your name"
-format:
-  html:
-    number-sections: true
----
-
-# My DraftMatter tutorial
-
-> This is your personal, editable tutorial copy. Nothing here is shared until you explicitly invite someone.
-
-## Write and organize {#sec-tutorial-writing}
-
-Replace this paragraph, add a section, and move one block to practice shaping a manuscript.
-
-## Cite a source {#sec-tutorial-citations}
-
-Add a citation to a real source, then inspect its metadata.
-
-## Reproducible results {#sec-tutorial-results}
-
-On desktop, insert a reproducible figure or table and publish one inline value. Clean exports show outputs, not source code.
-
-## Review {#sec-tutorial-review}
-
-Select a phrase, add a comment, and try suggestion mode.
-
-## Collaborate and checkpoint {#sec-tutorial-collaboration}
-
-Invite a collaborator with the narrowest useful role. As owner, create a portable checkpoint when the live draft is ready.
-`
-}

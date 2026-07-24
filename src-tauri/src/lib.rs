@@ -8,7 +8,7 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
@@ -3014,7 +3014,7 @@ async fn setup_kernel_integration(
 ) -> Result<KernelIntegrationSetupResult, HostError> {
     let canonical = canonical_root(&root)?;
     execution_trust::require_execution_trust(&canonical, trust.inner())?;
-    let progress = task_progress_reporter(app, task_id);
+    let progress = task_progress_reporter(app.clone(), task_id);
     if let Some(report) = &progress {
         report(
             "status",
@@ -3024,11 +3024,21 @@ async fn setup_kernel_integration(
             ),
         );
     }
+    let managed_tool_root = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| {
+            HostError::Integration(format!(
+                "DraftMatter could not locate its application-data directory: {error}"
+            ))
+        })?
+        .join("managed-tools");
     tauri::async_runtime::spawn_blocking(move || {
         setup_kernel_integration_with_progress_impl(
             &root,
             language,
             environment.as_deref(),
+            Some(&managed_tool_root),
             progress,
         )
     })

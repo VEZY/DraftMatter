@@ -15,6 +15,7 @@ const MAX_FORMAT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_INSTALL_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 
 const R_FORMAT_SCRIPT: &str = r#"
+if (file.exists(file.path("renv", "activate.R"))) source(file.path("renv", "activate.R"))
 if (!requireNamespace("styler", quietly = TRUE)) stop("styler is not installed")
 invisible(capture.output(styler::cache_deactivate()))
 input <- paste(readLines(file("stdin"), warn = FALSE), collapse = "\n")
@@ -22,17 +23,24 @@ cat(styler::style_text(input), sep = "\n")
 "#;
 
 const R_INSTALL_SCRIPT: &str = r#"
-user_lib <- path.expand(Sys.getenv("R_LIBS_USER"))
-if (nzchar(user_lib)) {
-  dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
-  .libPaths(c(user_lib, .libPaths()))
+if (file.exists(file.path("renv", "activate.R"))) {
+  source(file.path("renv", "activate.R"))
+  renv::install("styler", project = getwd())
+  renv::snapshot(project = getwd(), prompt = FALSE)
+} else {
+  user_lib <- path.expand(Sys.getenv("R_LIBS_USER"))
+  if (nzchar(user_lib)) {
+    dir.create(user_lib, recursive = TRUE, showWarnings = FALSE)
+    .libPaths(c(user_lib, .libPaths()))
+  }
+  install.packages("styler", repos = "https://cloud.r-project.org", lib = if (nzchar(user_lib)) user_lib else NULL)
 }
-install.packages("styler", repos = "https://cloud.r-project.org", lib = if (nzchar(user_lib)) user_lib else NULL)
 if (!requireNamespace("styler", quietly = TRUE)) stop("styler could not be loaded after installation")
 cat(as.character(packageVersion("styler")))
 "#;
 
 const R_PROBE_SCRIPT: &str = r#"
+if (file.exists(file.path("renv", "activate.R"))) source(file.path("renv", "activate.R"))
 if (!requireNamespace("styler", quietly = TRUE)) quit(status = 1)
 cat(as.character(packageVersion("styler")))
 "#;
