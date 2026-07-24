@@ -93,8 +93,8 @@ function SignedOutHome({
 
       <section className="home-hero" aria-labelledby="home-title">
         <span className="home-kicker">A calm place for research manuscripts</span>
-        <h1 id="home-title">Write together without giving up a portable source.</h1>
-        <p>DraftMatter keeps the manuscript, review history, citations, and reproducible outputs close—while collaborators work in one shared draft.</p>
+        <h1 id="home-title">Write reproducible papers together.</h1>
+        <p>Write your papers with no distraction, batteries included: track changes, comments, history, citations, reproducible figures, tables and in-text values.</p>
         <div className="home-hero-actions">
           <button className="home-primary" onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}>
             <Icon name="users" size={17} />
@@ -110,9 +110,9 @@ function SignedOutHome({
       </section>
 
       <section className="home-steps" aria-label="How DraftMatter works">
-        <article><span>01</span><strong>Start from a portable manuscript</strong><p>Create a draft or open the source you already own.</p></article>
+        <article><span>01</span><strong>Start with a local manuscript</strong><p>Create a draft or open an existing manuscript.</p></article>
         <article><span>02</span><strong>Invite the right people</strong><p>Give collaborators only the role they need.</p></article>
-        <article><span>03</span><strong>Publish clean results</strong><p>Keep code private while figures, tables, and values stay reproducible.</p></article>
+        <article><span>03</span><strong>Publish a clean paper</strong><p>Reproducible figures, tables, and in-text values, keep code invisible to readers.</p></article>
       </section>
 
       {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} />}
