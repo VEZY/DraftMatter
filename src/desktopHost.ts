@@ -78,6 +78,11 @@ export interface ProjectAsset {
   mediaType: string
 }
 
+export interface ProjectSeedFile {
+  path: string
+  bytes: number[]
+}
+
 export interface SaveDocumentRequest {
   root: string
   path: string
@@ -487,6 +492,9 @@ export function createDesktopHost(
     createProject(parent: string, name: string, firstAuthor?: NewProjectAuthor) {
       return invokeBridge<ProjectSnapshot>('create_project', firstAuthor ? { parent, name, firstAuthor } : { parent, name })
     },
+    createTemporaryProject(name: string) {
+      return invokeBridge<ProjectSnapshot>('create_temporary_project', { name })
+    },
     readDocument(root: string, path: string) {
       return invokeBridge<DocumentSnapshot>('read_document', { root, path })
     },
@@ -495,6 +503,9 @@ export function createDesktopHost(
     },
     readProjectAssets(root: string, paths: string[]) {
       return invokeBridge<ProjectAsset[]>('read_project_assets', { root, paths })
+    },
+    seedProjectFiles(root: string, files: ProjectSeedFile[]) {
+      return invokeBridge<string[]>('seed_project_files', { root, files })
     },
     readCitationLock(root: string) {
       return invokeBridge<DocumentSnapshot | null>('read_citation_lock', { root })

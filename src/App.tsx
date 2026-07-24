@@ -75,6 +75,7 @@ import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
 import { workspaceRoleCapabilities, type WorkspaceRole } from './collaboration/workspaceService'
 import { useOptionalCollaborationSession, type CollaborationProjectLaunch } from './collaboration/sessionContext'
 import { rememberLocalProject } from './localProjectCatalogue'
+import { desktopLaunchUrl } from './desktopLaunch'
 import { StartCollaborationDialog, type StartCollaborationResult } from './StartCollaborationDialog'
 import { KernelConsole, type KernelCellFailure, type KernelConsoleRestartEpochs, type KernelConsoleStatus, type KernelConsoleStatuses } from './KernelConsole'
 import { ManagedCodeCellEditor } from './ManagedCodeCellEditor'
@@ -83,6 +84,9 @@ import completeExampleReferences from './fixtures/projects/alpha-article/referen
 import completeExamplePythonFigure from './fixtures/projects/alpha-article/figures/python-canopy.svg?raw'
 import completeExampleRFigure from './fixtures/projects/alpha-article/figures/r-allocation.svg?raw'
 import completeExampleJuliaFigure from './fixtures/projects/alpha-article/figures/julia-model.svg?raw'
+import completeExampleCanopyData from './fixtures/projects/alpha-article/data/canopy.csv?raw'
+import completeExampleAllocationData from './fixtures/projects/alpha-article/data/allocation.csv?raw'
+import completeExamplePredictionData from './fixtures/projects/alpha-article/data/model-predictions.csv?raw'
 
 const STRUCTURED_SOURCE_KEY = 'draftmatter.structured-source.v1'
 const STRUCTURED_MODE_KEY = 'draftmatter.structured-mode.v1'
@@ -106,6 +110,14 @@ const completeExampleAssetUrls: Record<string, string> = {
   'figures/r-allocation.svg': `data:image/svg+xml;charset=utf-8,${encodeURIComponent(completeExampleRFigure)}`,
   'figures/julia-model.svg': `data:image/svg+xml;charset=utf-8,${encodeURIComponent(completeExampleJuliaFigure)}`,
 }
+const completeExampleProjectFiles = [
+  { path: 'data/canopy.csv', content: completeExampleCanopyData },
+  { path: 'data/allocation.csv', content: completeExampleAllocationData },
+  { path: 'data/model-predictions.csv', content: completeExamplePredictionData },
+  { path: 'figures/python-canopy.svg', content: completeExamplePythonFigure },
+  { path: 'figures/r-allocation.svg', content: completeExampleRFigure },
+  { path: 'figures/julia-model.svg', content: completeExampleJuliaFigure },
+]
 
 interface PortableFileOpenOptions {
   projectName?: string
@@ -698,6 +710,9 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   const [newProjectAuthorSelection, setNewProjectAuthorSelection] = useState('new')
   const [newProjectAuthor, setNewProjectAuthor] = useState<PublicationAuthorDraft>(() => publicationAuthorDraft({ name: userSettings.author.name }))
   const [newProjectProblem, setNewProjectProblem] = useState('')
+  const [localExecutionCopyOpen, setLocalExecutionCopyOpen] = useState(false)
+  const [localExecutionCopyName, setLocalExecutionCopyName] = useState('')
+  const [localExecutionCopyProblem, setLocalExecutionCopyProblem] = useState('')
   const [pendingProject, setPendingProject] = useState<{ project: ProjectSnapshot; announce: boolean } | null>(null)
   const [runtimeInventory, setRuntimeInventory] = useState<RuntimeInventory>()
   const [runtimeDiscoveryState, setRuntimeDiscoveryState] = useState<'idle' | 'discovering' | 'ready'>('idle')
@@ -1552,6 +1567,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
         setExportOpen(false)
         setProjectMenuOpen(false)
         setCreateProjectOpen(false)
+        setLocalExecutionCopyOpen(false)
         setPendingProject(null)
         setEnvironmentOpen(false)
         setLinkDialogOpen(false)
@@ -1632,6 +1648,17 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   const reviewLocationLabel = reviewQueue.length ? `REVIEW ${activeReviewPosition + 1} OF ${reviewQueue.length}` : 'NO FEEDBACK IN THIS VIEW'
   const reviewProposalStatus = reviewProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
   const executableCells = extractExecutableCells(executionSource).cells
+  const sharedManuscript = Boolean(activeCollaborationLaunch || collaborationSessionActive)
+  const executionBoundaryKind = desktopSession
+    ? 'desktop'
+    : builtInProject === 'complete-example'
+      ? 'template'
+      : sharedManuscript
+        ? desktopHost.available ? 'shared-desktop' : 'shared-browser'
+        : 'portable-browser'
+  const openInDesktopHref = executionBoundaryKind === 'shared-browser'
+    ? desktopLaunchUrl(window.location.href)
+    : null
   const setupCells = executableCells.filter(isSetupCell)
   const setupCell = setupCells[0]
   const panelManagedCells = executableCells.filter(isPanelManagedCell).sort((left, right) => (
@@ -3682,7 +3709,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialExperience])
 
-  const applyDesktopProject = async (project: ProjectSnapshot, announce = true, selectedPath?: string) => {
+  const applyDesktopProject = async (project: ProjectSnapshot, announce = true, selectedPath?: string, remember = true) => {
     automaticSetupSignatureRef.current = ''
     pendingSetupLanguagesRef.current = []
     const mainPath = resolveMainDocument(project, selectedPath)
@@ -3807,8 +3834,10 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
     setProjectMenuOpen(false)
     setPendingProject(null)
     setSaveState('saved')
-    localStorage.setItem(LAST_PROJECT_ROOT_KEY, project.root)
-    rememberLocalProject(localStorage, project)
+    if (remember) {
+      localStorage.setItem(LAST_PROJECT_ROOT_KEY, project.root)
+      rememberLocalProject(localStorage, project)
+    }
     writeRecoverySnapshot(openedDraft, displayName, document.content)
     if (announce) {
       const sourceCount = projectBibliography.records.length
@@ -3923,6 +3952,94 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
       const message = error instanceof Error ? error.message : normaliseHostFailure(error).message
       setNewProjectProblem(message)
       setToast(message)
+    } finally {
+      setProjectBusy(false)
+    }
+  }
+
+  const beginLocalExecutionCopy = () => {
+    if (!desktopHost.available) return
+    setLocalExecutionCopyName(projectName.trim() || 'DraftMatter project')
+    setLocalExecutionCopyProblem('')
+    setExecutionWorkspaceOpen(false)
+    setLocalExecutionCopyOpen(true)
+  }
+
+  const populateLocalExecutionCopy = async (project: ProjectSnapshot) => {
+    const mainPath = resolveMainDocument(project)
+    const document = mainPath && project.documents.find((entry) => entry.path === mainPath)
+    if (!mainPath || !document) throw new Error('The new local project did not contain a manuscript.')
+    let source = manuscriptSourceRef.current
+    if (citations.length) {
+      const bibliographyPath = DEFAULT_ACQUISITION_BIBLIOGRAPHY
+      source = ensureBibliographyReference(source, bibliographyPath)
+      const citedKeys = [...new Set(structuredCitationClusters(source).flatMap((cluster) => cluster.items.map((item) => item.citekey)))]
+      const lock = buildCitationLock(citations.filter((record) => record.source !== 'sample'))
+      const cache = createCitationCache(citations, citedKeys).cache
+      await desktopHost.acquireCitations({
+        root: project.root,
+        documentPath: mainPath,
+        documentContent: source,
+        expectedDocumentHash: document.hash,
+        bibliographyPath,
+        expectedBibliographyHash: null,
+        bibliographyRecords: citations
+          .filter((record) => record.source !== 'sample')
+          .map((record) => citationRecordToAcquisitionCsl(record, bibliographyPath)),
+        lockContent: serializeCitationLock(lock),
+        expectedLockHash: null,
+        cacheContent: serializeCitationCache(cache),
+        expectedCacheHash: null,
+      })
+    } else {
+      await desktopHost.saveDocument({
+        root: project.root,
+        path: mainPath,
+        content: source,
+        expectedHash: document.hash,
+      })
+    }
+    if (builtInProject === 'complete-example') {
+      const encoder = new TextEncoder()
+      await desktopHost.seedProjectFiles(project.root, completeExampleProjectFiles.map((file) => ({
+        path: file.path,
+        bytes: [...encoder.encode(file.content)],
+      })))
+    }
+    if (activeCollaborationLaunch) {
+      await desktopHost.setCollaborationLink(project.root, {
+        schemaVersion: 1,
+        serviceUrl: activeCollaborationLaunch.serviceUrl,
+        workspaceId: activeCollaborationLaunch.workspaceId,
+        projectId: activeCollaborationLaunch.projectId,
+      })
+    }
+    return desktopHost.openProject(project.root)
+  }
+
+  const createLocalExecutionCopy = async (temporary: boolean) => {
+    const name = localExecutionCopyName.trim()
+    if (!desktopHost.available || !name || projectBusy) return
+    setProjectBusy(true)
+    setLocalExecutionCopyProblem('')
+    try {
+      const project = temporary
+        ? await desktopHost.createTemporaryProject(name)
+        : await (async () => {
+          const parent = await desktopHost.pickProjectFolder('Choose where to save the local project copy')
+          if (!parent) return null
+          return desktopHost.createProject(parent, name)
+        })()
+      if (!project) return
+      const populated = await populateLocalExecutionCopy(project)
+      await applyDesktopProject(populated, false, undefined, !temporary)
+      setLocalExecutionCopyOpen(false)
+      setToast(temporary
+        ? 'Opened a temporary local copy · trust the project when you are ready to run code'
+        : 'Local project copy created · trust the project when you are ready to run code')
+    } catch (error) {
+      const message = error instanceof Error ? error.message : normaliseHostFailure(error).message
+      setLocalExecutionCopyProblem(message)
     } finally {
       setProjectBusy(false)
     }
@@ -4611,7 +4728,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
           <span className="execution-cell-kind">{cell.role === 'setup' ? 'Setup' : cell.role === 'values' ? 'Published values' : 'Manuscript'}</span>
           <strong>{cell.id}</strong>
           <em className={`cell-status ${status}`}><i />{cellStatusLabel(status)}</em>
-          <small>{desktopSession ? state?.reason ?? view?.message ?? 'Ready for an explicit run.' : 'Execution status is available in DraftMatter desktop.'}</small>
+          <small>{desktopSession ? state?.reason ?? view?.message ?? 'Ready for an explicit run.' : executionBoundaryKind === 'template' ? 'Make a project copy to establish a new execution state.' : executionBoundaryKind === 'shared-desktop' ? 'Create a local project copy to establish desktop execution state.' : 'Execution status is available in a local DraftMatter desktop project.'}</small>
         </div>
         <div className="execution-cell-actions">
           {desktopSession ? <>
@@ -4619,13 +4736,13 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
             {executionActiveCell === cell.id
               ? <button onClick={() => void interruptExecution(cell.language)}><Icon name="close" size={13} /> Interrupt</button>
               : <button className="run-button" onClick={() => void requestExecution({ kind: 'cell', cellId: cell.id })} disabled={executionPlanBusy || Boolean(runtimeInventory && view && !view.executionEnabled)}><Icon name="play" size={13} /> Run</button>}
-          </> : <span className="execution-cell-view-only"><Icon name="eye" size={13} /> Browser view only</span>}
+          </> : <span className="execution-cell-view-only"><Icon name="eye" size={13} /> {executionBoundaryKind === 'template' ? 'Template · copy to run' : executionBoundaryKind === 'shared-desktop' ? 'Local copy required' : executionBoundaryKind === 'shared-browser' ? 'Online · view only' : 'Browser view only'}</span>}
         </div>
         {managed && (
           <ManagedCodeCellEditor
             cell={cell}
             readOnly={!canEditManuscript || !desktopSession}
-            readOnlyMessage={!desktopSession ? 'Portable source · view only in browser' : undefined}
+            readOnlyMessage={!desktopSession ? executionBoundaryKind === 'template' ? 'Template source · make a project copy to edit' : executionBoundaryKind === 'shared-desktop' ? 'Shared source · create a local project copy to edit' : 'Portable source · view only in browser' : undefined}
             initiallyOpen={cell.role === 'setup'}
             onSave={savePanelManagedCell}
             onFormat={(cellId, source) => formatCodeCell(cellId, cell.language, source)}
@@ -4672,8 +4789,10 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
                   <span><strong>{desktopSession?.path ?? filename}</strong><small title={desktopSession?.root}>{desktopSession
                     ? 'Project folder · saved on disk'
                     : builtInProject === 'complete-example'
-                      ? 'Built-in example · editable browser copy'
-                      : 'Portable manuscript · saved in this browser'}</small></span>
+                      ? 'Built-in example · copy before execution'
+                      : sharedManuscript
+                        ? desktopHost.available ? 'Shared online manuscript · local project not created' : 'Shared online manuscript'
+                        : 'Portable manuscript · saved in this browser'}</small></span>
                 </div>
                 <div className="project-menu-actions">
                   {desktopHost.available ? (
@@ -4718,11 +4837,11 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
           </button>
           {structuredMode && <button
             className={`topbar-code-workspace ${executionWorkspaceOpen ? 'active' : ''} ${desktopSession ? '' : 'browser-view-only'}`.trim()}
-            aria-label={desktopSession ? 'Open Code and computation' : 'Open browser view-only code and desktop instructions'}
+            aria-label={desktopSession ? 'Open Code and computation' : executionBoundaryKind === 'template' ? 'Open example code and project copy options' : executionBoundaryKind === 'shared-desktop' ? 'Open shared code and local project copy options' : 'Open browser view-only code and desktop instructions'}
             aria-expanded={executionWorkspaceOpen}
             onClick={() => setExecutionWorkspaceOpen(true)}
-            title={desktopSession ? 'Open Code & computation' : 'Code is view-only in the browser · open for desktop instructions'}
-          ><Icon name={desktopSession ? 'code' : 'eye'} size={15} /><span>Code</span>{!desktopSession && <span className="code-view-only-badge">View only</span>}{executableCells.length > 0 && <span className="count-badge" aria-hidden="true">{executableCells.length}</span>}</button>}
+            title={desktopSession ? 'Open Code & computation' : executionBoundaryKind === 'template' ? 'Example code · make a project copy to execute' : executionBoundaryKind === 'shared-desktop' ? 'Shared code · create a local project copy to execute' : 'Code is view-only in the browser · open for desktop instructions'}
+          ><Icon name={desktopSession ? 'code' : executionBoundaryKind === 'template' ? 'spark' : 'eye'} size={15} /><span>Code</span>{!desktopSession && <span className="code-view-only-badge">{executionBoundaryKind === 'template' ? 'Template' : executionBoundaryKind === 'shared-desktop' ? 'Copy first' : 'View only'}</span>}{executableCells.length > 0 && <span className="count-badge" aria-hidden="true">{executableCells.length}</span>}</button>}
           <button className="icon-button command-button" onClick={() => setCommandOpen(true)} aria-label="Open command menu" title={`Open command menu (${commandUsesMetaKey ? 'Command' : 'Control'} P)`}>
             <Icon name="search" />
             <span className="shortcut">{commandUsesMetaKey ? <><Icon name="command" size={12} />P</> : 'Ctrl+P'}</span>
@@ -4992,13 +5111,30 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
               </button>
             </div>
             {!desktopSession && executableCells.length > 0 && (
-              <section className="browser-execution-banner" role="note" aria-label="Browser execution unavailable">
-                <span className="browser-execution-banner-icon"><Icon name="eye" size={17} /></span>
-                <span>
-                  <strong>Execution is unavailable in a browser — open this document in DraftMatter desktop</strong>
-                  <small>You can keep writing, editing, commenting, and reviewing online. Use a trusted desktop session to run code or refresh computed values.</small>
-                </span>
-                <button type="button" onClick={() => setExecutionWorkspaceOpen(true)}>Desktop instructions</button>
+              <section className={`browser-execution-banner ${executionBoundaryKind}`} role="note" aria-label={executionBoundaryKind === 'template' ? 'Example execution requires a project copy' : 'Code execution unavailable in the current document'}>
+                <span className="browser-execution-banner-icon"><Icon name={executionBoundaryKind === 'template' ? 'spark' : 'eye'} size={17} /></span>
+                {executionBoundaryKind === 'template' ? <span>
+                  <strong>This example must be copied before its code can run</strong>
+                  <small>The example is a reusable template. Its retained results are safe to inspect here; make your own project copy to edit the code, trust it, and refresh the values.</small>
+                </span> : executionBoundaryKind === 'shared-desktop' ? <span>
+                  <strong>Create a local project before running code</strong>
+                  <small>This shared manuscript is open in DraftMatter desktop, but it does not have a local project folder yet. Choose a saved or temporary copy, then trust it when you run code.</small>
+                </span> : executionBoundaryKind === 'shared-browser' ? <span>
+                  <strong>Run code from DraftMatter desktop</strong>
+                  <small>Writing, editing, comments, and review remain available online. For safety, the browser does not run project code; open a local desktop copy to trust it and refresh computed values.</small>
+                </span> : <span>
+                  <strong>Code runs from a DraftMatter desktop project</strong>
+                  <small>You can keep writing, editing, commenting, and reviewing here. Open this portable manuscript as a local desktop project to trust and run its code.</small>
+                </span>}
+                {executionBoundaryKind === 'template'
+                  ? desktopHost.available
+                    ? <button type="button" onClick={beginLocalExecutionCopy}>Make project copy</button>
+                    : <button type="button" onClick={() => download('reviewed')}>Download a copy</button>
+                  : executionBoundaryKind === 'shared-desktop'
+                    ? <button type="button" onClick={beginLocalExecutionCopy}>Create local copy</button>
+                    : executionBoundaryKind === 'shared-browser' && openInDesktopHref
+                      ? <a href={openInDesktopHref}>Open in desktop</a>
+                      : <button type="button" onClick={() => setExecutionWorkspaceOpen(true)}>Desktop instructions</button>}
               </section>
             )}
             {!structuredOutline.some((item) => item.level === 1) && (
@@ -5028,6 +5164,9 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
               codeCellStatuses={Object.fromEntries(executionCellStates.map((state) => [state.cellId, state.status] as const))}
               codeCellActionsEnabled={Boolean(desktopSession) && !executionPlanBusy}
               codeCellBrowserViewOnly={!desktopSession}
+              codeCellViewOnlyLabel={executionBoundaryKind === 'template' ? 'Example · copy to run' : executionBoundaryKind === 'shared-desktop' ? 'Local copy required' : executionBoundaryKind === 'shared-browser' ? 'Online · view only' : 'Browser view only'}
+              codeCellViewOnlySummary={executionBoundaryKind === 'template' ? 'Template code is inspectable here · Make a project copy to edit or run it' : executionBoundaryKind === 'shared-desktop' ? 'Create a local project copy to edit or run this code' : executionBoundaryKind === 'shared-browser' ? 'Code is inspectable online · Open a local desktop copy to run it' : 'Code is view-only in this browser · Open the project in DraftMatter desktop to run it'}
+              codeCellUnavailableActionLabel={executionBoundaryKind === 'template' ? 'Copy required' : executionBoundaryKind === 'shared-desktop' ? 'Local copy required' : executionBoundaryKind === 'shared-browser' ? 'Desktop required' : 'Desktop required'}
               codeCellRunAboveEnabled={codeCellRunAboveEnabled}
               onRunCodeCell={(cellId) => void requestExecution({ kind: 'cell', cellId })}
               onRunCodeCellAbove={(cellId) => void requestExecution({ kind: 'above', cellId })}
@@ -5262,9 +5401,21 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
             <aside className="code-workspace-drawer" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="code-workspace-title">
               <header className="code-workspace-drawer-head">
                 <span className="execution-shield"><Icon name="code" size={19} /></span>
-                <div><span className="eyebrow">{desktopSession ? 'Project tools' : 'Browser boundary'}</span><h2 id="code-workspace-title">Code &amp; computation</h2><p>{desktopSession
+                <div><span className="eyebrow">{desktopSession
+                  ? 'Project tools'
+                  : executionBoundaryKind === 'template'
+                    ? 'Example template'
+                    : executionBoundaryKind === 'shared-desktop'
+                      ? 'Local project required'
+                      : executionBoundaryKind === 'shared-browser'
+                        ? 'Online collaboration'
+                        : 'Browser boundary'}</span><h2 id="code-workspace-title">Code &amp; computation</h2><p>{desktopSession
                   ? <>{executableCells.length ? `${executableCells.length} cell${executableCells.length === 1 ? '' : 's'} · ${cellStatusLabel(executionSummaryStatus)} ·` : 'Set up a language or add a computation.'} Setup and published-value source stay outside the manuscript page.</>
-                  : <>{executableCells.length ? `${executableCells.length} portable code cell${executableCells.length === 1 ? '' : 's'} · view only.` : 'No portable code cells.'} Execution requires DraftMatter desktop.</>}
+                  : executionBoundaryKind === 'template'
+                    ? <>{executableCells.length} example code cell{executableCells.length === 1 ? '' : 's'} · retained outputs are view-only until you make a project copy.</>
+                    : executionBoundaryKind === 'shared-desktop'
+                      ? <>{executableCells.length} shared code cell{executableCells.length === 1 ? '' : 's'} · create a local project copy to enable desktop execution.</>
+                      : <>{executableCells.length ? `${executableCells.length} portable code cell${executableCells.length === 1 ? '' : 's'} · view only.` : 'No portable code cells.'} Execution requires a local DraftMatter desktop project.</>}
                 </p></div>
                 <button className="icon-button" onClick={() => setExecutionWorkspaceOpen(false)} aria-label="Close Code and computation"><Icon name="close" /></button>
               </header>
@@ -5280,22 +5431,44 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
                 <button className="subtle" onClick={() => void requestExecution({ kind: 'clean-all' })} disabled={executionPlanBusy || Boolean(runtimeInventory && executableCells.some((cell) => !executionEnvironmentAvailable(cell)))}><Icon name="history" size={13} /> Clean run</button>
                 {executableCells.some((cell) => cell.language === 'julia') && <button className="subtle" onClick={() => void openJuliaPackages()} disabled={juliaPackageBusy}><Icon name="plus" size={12} /> Julia packages</button>}
                 <button className="subtle" onClick={() => void discoverExecutionEnvironments(true)} aria-label="Execution environments and options"><Icon name="more" size={14} /> Environments</button>
-              </div> : <section className="execution-browser-boundary" role="note" aria-label="How to enable code execution">
+              </div> : <section className={`execution-browser-boundary ${executionBoundaryKind}`} role="note" aria-label="How to enable code execution">
                 <div className="execution-browser-boundary-heading">
-                  <span><Icon name="eye" size={18} /></span>
-                  <div>
-                    <strong>Execution is unavailable in a browser — open this document in DraftMatter desktop</strong>
-                    <small>For safety, the online editor does not start a terminal, package manager, or local language runtime. You can still write, edit, comment, and review here. Only running code and refreshing computed values require the desktop app; a collaborator with this project open in DraftMatter desktop can update retained outputs for everyone online.</small>
-                  </div>
+                  <span><Icon name={executionBoundaryKind === 'template' ? 'spark' : 'eye'} size={18} /></span>
+                  {executionBoundaryKind === 'template' ? <div>
+                    <strong>Make your own project copy to run this example</strong>
+                    <small>This built-in article is a reusable template, not an online project. Its code and retained outputs are available for inspection, but execution stays disabled so the template remains a known reference state.</small>
+                  </div> : executionBoundaryKind === 'shared-desktop' ? <div>
+                    <strong>This shared manuscript needs a local project copy</strong>
+                    <small>DraftMatter desktop is already open. Choose a permanent folder or a temporary working copy, then trust that local project when you first run code. The online manuscript remains available for writing, comments, and review.</small>
+                  </div> : executionBoundaryKind === 'shared-browser' ? <div>
+                    <strong>Run code from a local DraftMatter desktop project</strong>
+                    <small>For safety, the online editor does not start a terminal, package manager, or language runtime. Writing, editing, comments, and review remain available here. A collaborator using a trusted desktop copy can run code and update retained outputs for everyone online.</small>
+                  </div> : <div>
+                    <strong>Open this portable manuscript as a DraftMatter desktop project</strong>
+                    <small>The browser can edit and review the document, but it cannot start a terminal, package manager, or language runtime. Create or open a local desktop project before trusting and running its code.</small>
+                  </div>}
                 </div>
                 <div className="execution-browser-steps">
-                  <strong>To run code or refresh computed values</strong>
-                  <ol>
-                    <li><span>1</span><p>Install or open <strong>DraftMatter desktop</strong>.</p></li>
-                    <li><span>2</span><p>Use the project menu and choose <strong>Open project folder…</strong></p></li>
-                    <li><span>3</span><p>Select the folder containing this manuscript, then complete the one-time trust and language setup when prompted.</p></li>
-                  </ol>
-                  <p className="execution-browser-transfer"><Icon name="download" size={13} /> If this is a browser-only copy, first use <strong>Export → Download portable source</strong> and place it in that folder.</p>
+                  {executionBoundaryKind === 'template' ? <>
+                    <strong>Your copy keeps the full example manuscript, data, figures, and references</strong>
+                    {desktopHost.available
+                      ? <button className="execution-browser-primary-action" onClick={beginLocalExecutionCopy}>Make project copy…</button>
+                      : <><button className="execution-browser-primary-action" onClick={() => download('reviewed')}>Download project source</button><p className="execution-browser-transfer"><Icon name="download" size={13} /> Open the downloaded source in DraftMatter desktop and save it as a project before running code.</p></>}
+                  </> : executionBoundaryKind === 'shared-desktop' ? <>
+                    <strong>Choose how to keep the local execution copy</strong>
+                    <button className="execution-browser-primary-action" onClick={beginLocalExecutionCopy}>Create local project…</button>
+                  </> : executionBoundaryKind === 'shared-browser' ? <>
+                    <strong>Continue in the desktop app to choose a saved or temporary local copy</strong>
+                    {openInDesktopHref && <a className="execution-browser-primary-action" href={openInDesktopHref}>Open in DraftMatter desktop</a>}
+                  </> : <>
+                    <strong>To run code or refresh computed values</strong>
+                    <ol>
+                      <li><span>1</span><p>Install or open <strong>DraftMatter desktop</strong>.</p></li>
+                      <li><span>2</span><p>Use the project menu and choose <strong>Open project folder…</strong></p></li>
+                      <li><span>3</span><p>Select the folder containing this manuscript, then complete the one-time trust and language setup when prompted.</p></li>
+                    </ol>
+                    <p className="execution-browser-transfer"><Icon name="download" size={13} /> First use <strong>Export → Download portable source</strong> if the manuscript exists only in this browser.</p>
+                  </>}
                 </div>
               </section>}
               {setupCells.length > 1 && (
@@ -5306,15 +5479,15 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
               )}
               <div className="code-workspace-scroll">
                 <div className="execution-cell-list">
-                  {panelManagedCells.length > 0 && <div className="execution-cell-group"><strong>Project code</strong><small>{desktopSession ? 'Setup and published-value computations run with the document but are never displayed on the manuscript page.' : 'View-only setup and published-value source retained in the portable manuscript.'}</small></div>}
+                  {panelManagedCells.length > 0 && <div className="execution-cell-group"><strong>Project code</strong><small>{desktopSession ? 'Setup and published-value computations run with the document but are never displayed on the manuscript page.' : executionBoundaryKind === 'template' ? 'Example setup and published-value source · available after making a project copy.' : 'View-only setup and published-value source retained in the portable manuscript.'}</small></div>}
                   {panelManagedCells.map(renderExecutionCellRow)}
-                  {manuscriptCodeCells.length > 0 && <div className="execution-cell-group"><strong>Manuscript code blocks</strong><small>{desktopSession ? 'These figure, table, and ordinary code blocks remain visible and editable in the manuscript.' : 'View-only code and retained outputs. Open this project in DraftMatter desktop to edit or run them.'}</small></div>}
+                  {manuscriptCodeCells.length > 0 && <div className="execution-cell-group"><strong>Manuscript code blocks</strong><small>{desktopSession ? 'These figure, table, and ordinary code blocks remain visible and editable in the manuscript.' : executionBoundaryKind === 'template' ? 'View-only template code and retained outputs. Make a project copy to edit or run them.' : executionBoundaryKind === 'shared-desktop' ? 'View-only until this shared manuscript has a local project copy.' : 'View-only code and retained outputs. Open a local project in DraftMatter desktop to edit or run them.'}</small></div>}
                   {manuscriptCodeCells.map(renderExecutionCellRow)}
                   {executableCells.length === 0 && <div className="execution-cell-empty"><strong>No computations yet</strong><small>{desktopSession ? 'Add the project setup or a published-values computation here. Figure and table code blocks can be inserted directly in the manuscript.' : 'Code authoring and execution become available when this manuscript is opened as a DraftMatter desktop project.'}</small></div>}
                 </div>
                 {cleanRunCertification && <p className="clean-run-certification"><Icon name="check" size={13} /> Clean run certified · {cleanRunCertification.resultHashes.length} outputs from one ordered run</p>}
               </div>
-              <footer className="code-workspace-footer"><span><Icon name={desktopSession ? 'document' : 'eye'} size={13} /> {desktopSession ? 'Source is saved in the portable project document' : 'Portable code and retained outputs · view only in browser'}</span><button onClick={() => setExecutionWorkspaceOpen(false)}>Done</button></footer>
+              <footer className="code-workspace-footer"><span><Icon name={desktopSession ? 'document' : 'eye'} size={13} /> {desktopSession ? 'Source is saved in the portable project document' : executionBoundaryKind === 'template' ? 'Built-in example · execution requires your own project copy' : executionBoundaryKind === 'shared-desktop' ? 'Shared online source · local project not created yet' : 'Portable code and retained outputs · view only in browser'}</span><button onClick={() => setExecutionWorkspaceOpen(false)}>Done</button></footer>
             </aside>
           </div>
         )}
@@ -5795,6 +5968,40 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
               ))}
             </div>
             <div className="manuscript-picker-footer"><Icon name="folder" size={14} /><span title={pendingProject.project.root}>{pendingProject.project.root}</span></div>
+          </div>
+        </div>
+      )}
+
+      {localExecutionCopyOpen && (
+        <div className="modal-backdrop execution-dialog-backdrop" onMouseDown={() => { if (!projectBusy) setLocalExecutionCopyOpen(false) }}>
+          <div className="local-execution-copy-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="local-execution-copy-title">
+            <div className="execution-dialog-head">
+              <span className="execution-shield"><Icon name="folder" size={19} /></span>
+              <div>
+                <span className="eyebrow">{builtInProject === 'complete-example' ? 'Copy the example' : 'Local execution'}</span>
+                <h2 id="local-execution-copy-title">Create a local project copy</h2>
+                <p>{builtInProject === 'complete-example'
+                  ? 'DraftMatter will copy the complete manuscript, references, data, and retained figures. The built-in template stays unchanged.'
+                  : 'The shared manuscript remains online for collaboration. Its code runs only from a local project that you explicitly trust.'}</p>
+              </div>
+              <button className="icon-button" type="button" onClick={() => setLocalExecutionCopyOpen(false)} disabled={projectBusy} aria-label="Close local project copy dialog"><Icon name="close" /></button>
+            </div>
+            <label className="local-execution-copy-name"><span>Local project name</span><input autoFocus maxLength={240} value={localExecutionCopyName} onChange={(event) => setLocalExecutionCopyName(event.target.value)} /></label>
+            <div className="local-execution-copy-options">
+              <button type="button" onClick={() => void createLocalExecutionCopy(false)} disabled={!localExecutionCopyName.trim() || projectBusy}>
+                <span className="local-copy-option-icon"><Icon name="folder" size={17} /></span>
+                <span><strong>Choose where to save it…</strong><small>Create a normal project folder that stays on this computer.</small></span>
+                <Icon name="arrowRight" size={14} />
+              </button>
+              <button type="button" onClick={() => void createLocalExecutionCopy(true)} disabled={!localExecutionCopyName.trim() || projectBusy}>
+                <span className="local-copy-option-icon temporary"><Icon name="clock" size={17} /></span>
+                <span><strong>Use a temporary working copy</strong><small>Open it now without choosing a folder. The operating system may remove it later.</small></span>
+                <Icon name="arrowRight" size={14} />
+              </button>
+            </div>
+            <p className="local-execution-copy-trust"><Icon name="code" size={14} /> Creating a copy never runs code. DraftMatter asks you to trust the local project when you first execute or configure a language.</p>
+            {localExecutionCopyProblem && <div className="create-project-problem" role="alert">{localExecutionCopyProblem}</div>}
+            <div className="execution-dialog-actions"><button type="button" onClick={() => setLocalExecutionCopyOpen(false)} disabled={projectBusy}>Cancel</button></div>
           </div>
         </div>
       )}

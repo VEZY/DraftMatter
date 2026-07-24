@@ -19,9 +19,11 @@ describe('desktop host adapter', () => {
 
     await expect(host.openProject('/research/canopy')).resolves.toEqual(project)
     await host.createProject('/research', 'Canopy study', { name: 'Alice Martin', orcid: '0000-0002-1825-0097', affiliations: ['Plant Research Institute'] })
+    await host.createTemporaryProject('Canopy scratch')
     await host.readDocument('/research/canopy', 'paper.qmd')
     await host.readBibliography('/research/canopy', 'references.bib')
     await host.readProjectAssets('/research/canopy', ['figures/canopy.png'])
+    await host.seedProjectFiles('/research/canopy', [{ path: 'data/canopy.csv', bytes: [120, 44, 121] }])
     await host.readCitationLock('/research/canopy')
     await host.readCitationCache('/research/canopy')
     await host.saveCitationLock({ root: '/research/canopy', content: '{"schemaVersion":1,"entries":[]}', expectedHash: null })
@@ -110,9 +112,11 @@ describe('desktop host adapter', () => {
         name: 'Canopy study',
         firstAuthor: { name: 'Alice Martin', orcid: '0000-0002-1825-0097', affiliations: ['Plant Research Institute'] },
       }],
+      ['create_temporary_project', { name: 'Canopy scratch' }],
       ['read_document', { root: '/research/canopy', path: 'paper.qmd' }],
       ['read_bibliography', { root: '/research/canopy', path: 'references.bib' }],
       ['read_project_assets', { root: '/research/canopy', paths: ['figures/canopy.png'] }],
+      ['seed_project_files', { root: '/research/canopy', files: [{ path: 'data/canopy.csv', bytes: [120, 44, 121] }] }],
       ['read_citation_lock', { root: '/research/canopy' }],
       ['read_citation_cache', { root: '/research/canopy' }],
       ['save_citation_lock', { request: { root: '/research/canopy', content: '{"schemaVersion":1,"entries":[]}', expectedHash: null } }],

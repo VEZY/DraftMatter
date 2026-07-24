@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react'
+import { isTauri } from '@tauri-apps/api/core'
+import { useEffect, useRef, useState } from 'react'
 import App from './App'
+import { desktopLaunchTarget } from './desktopLaunch'
 import { Home } from './Home'
 import { InvitationEntry } from './InvitationEntry'
 import { NewDraftWizard } from './NewDraftWizard'
@@ -163,5 +165,35 @@ export interface DraftMatterApplicationProps {
 }
 
 export function DraftMatterApplication({ collaboration }: DraftMatterApplicationProps) {
-  return <CollaborationSessionProvider {...collaboration}><ApplicationRouter /></CollaborationSessionProvider>
+  const desktop = isTauri()
+  const [desktopLaunchReady, setDesktopLaunchReady] = useState(!desktop)
+  const [sessionGeneration, setSessionGeneration] = useState(0)
+  const lastDesktopTargetRef = useRef('')
+
+  useEffect(() => {
+    if (!desktop) return
+    let active = true
+    let unlisten: (() => void) | undefined
+    const open = (urls: string[] | null) => {
+      const target = urls?.map(desktopLaunchTarget).find((candidate): candidate is string => Boolean(candidate))
+      if (!target || target === lastDesktopTargetRef.current) return
+      lastDesktopTargetRef.current = target
+      window.history.replaceState({}, '', target)
+      setSessionGeneration((current) => current + 1)
+    }
+    void import('@tauri-apps/plugin-deep-link').then(async ({ getCurrent, onOpenUrl }) => {
+      open(await getCurrent())
+      if (!active) return
+      unlisten = await onOpenUrl(open)
+    }).finally(() => {
+      if (active) setDesktopLaunchReady(true)
+    })
+    return () => {
+      active = false
+      unlisten?.()
+    }
+  }, [desktop])
+
+  if (!desktopLaunchReady) return <div className="home-route-status" role="status">Opening DraftMatter…</div>
+  return <CollaborationSessionProvider key={sessionGeneration} {...collaboration}><ApplicationRouter /></CollaborationSessionProvider>
 }

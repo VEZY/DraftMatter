@@ -69,7 +69,10 @@ describe('built-in complete example project', () => {
     expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('.draftmatter-reviews')
 
     await act(async () => container.querySelector<HTMLButtonElement>('.project-switcher')!.click())
-    expect(container.querySelector('.project-menu-current')?.textContent).toContain('Built-in example · editable browser copy')
+    expect(container.querySelector('.project-menu-current')?.textContent).toContain('Built-in example · copy before execution')
+    expect(container.querySelector('.browser-execution-banner')?.textContent).toContain('This example must be copied before its code can run')
+    expect(container.querySelector('.browser-execution-banner')?.textContent).not.toContain('unavailable in a browser')
+    expect(manuscript.querySelector('.structured-cell-status')?.textContent).toBe('Example · copy to run')
 
     await act(async () => root.unmount())
     container.remove()
@@ -99,5 +102,56 @@ describe('built-in complete example project', () => {
 
     expect(reopenProject).not.toHaveBeenCalled()
     expect(container.querySelector('.project-switcher-name')?.textContent).toBe('Complete example paper')
+    expect(container.querySelector('.browser-execution-banner')?.textContent).toContain('Make project copy')
   }, 15_000)
+
+  it('copies the bundled references, data, and retained figures into a local project', async () => {
+    desktopHost.available = true
+    const project = {
+      root: '/tmp/DraftMatter/Complete-example-test',
+      config: {
+        schemaVersion: 1,
+        name: 'Complete example paper',
+        mainDocument: 'paper.qmd',
+        citationStyle: 'draftmatter-author-date' as const,
+        citationLocale: 'en-US' as const,
+      },
+      documents: [{ path: 'paper.qmd', kind: 'manuscript' as const, bytes: 10, modifiedMs: 1, hash: 'starter-hash' }],
+      bibliographies: [],
+    }
+    vi.spyOn(desktopHost, 'createTemporaryProject').mockResolvedValue(project)
+    vi.spyOn(desktopHost, 'acquireCitations').mockResolvedValue({
+      documentHash: 'document-hash',
+      bibliographyHash: 'bibliography-hash',
+      lockHash: 'lock-hash',
+      cacheHash: 'cache-hash',
+      bibliographyPath: 'references.json',
+      acquired: 2,
+      unchanged: 0,
+    })
+    const seedFiles = vi.spyOn(desktopHost, 'seedProjectFiles').mockResolvedValue([])
+    vi.spyOn(desktopHost, 'openProject').mockRejectedValue(new Error('Stop after verifying the project copy'))
+
+    await act(async () => root.render(<App initialExperience="complete-example" />))
+    await flush()
+    await act(async () => buttonWithText(container, 'Make project copy').click())
+    const dialog = container.querySelector<HTMLElement>('[aria-labelledby="local-execution-copy-title"]')!
+    await act(async () => buttonWithText(dialog, 'Use a temporary working copy').click())
+    await flush()
+
+    expect(desktopHost.acquireCitations).toHaveBeenCalledWith(expect.objectContaining({
+      root: project.root,
+      documentPath: 'paper.qmd',
+      bibliographyPath: 'references.json',
+      bibliographyRecords: expect.arrayContaining([expect.objectContaining({ id: 'vezy2024' })]),
+    }))
+    expect(seedFiles).toHaveBeenCalledWith(project.root, expect.arrayContaining([
+      expect.objectContaining({ path: 'data/canopy.csv' }),
+      expect.objectContaining({ path: 'data/allocation.csv' }),
+      expect.objectContaining({ path: 'data/model-predictions.csv' }),
+      expect.objectContaining({ path: 'figures/python-canopy.svg' }),
+      expect.objectContaining({ path: 'figures/r-allocation.svg' }),
+      expect.objectContaining({ path: 'figures/julia-model.svg' }),
+    ]))
+  })
 })

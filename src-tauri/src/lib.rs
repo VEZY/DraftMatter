@@ -11,6 +11,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use tauri::Emitter;
 use tauri_plugin_dialog::DialogExt;
 use tauri_plugin_opener::OpenerExt;
+use uuid::Uuid;
 
 mod code_formatting;
 mod execution_artifacts;
@@ -336,6 +337,13 @@ pub struct ProjectAsset {
     pub path: String,
     pub bytes: Vec<u8>,
     pub media_type: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProjectSeedFile {
+    pub path: String,
+    pub bytes: Vec<u8>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -908,6 +916,83 @@ fn read_project_assets_impl(
         });
     }
     Ok(assets)
+}
+
+fn seed_project_files_impl(
+    raw_root: &str,
+    files: &[ProjectSeedFile],
+) -> Result<Vec<String>, HostError> {
+    if files.len() > 128 {
+        return Err(HostError::UnsupportedFile(
+            "A project copy cannot seed more than 128 files.".to_string(),
+        ));
+    }
+    let root = canonical_root(raw_root)?;
+    let mut total_bytes = 0_u64;
+    let mut written = Vec::with_capacity(files.len());
+    for file in files {
+        let safe = safe_relative(&file.path)?;
+        if safe
+            .components()
+            .next()
+            .is_some_and(|part| part.as_os_str() == ".draftmatter")
+        {
+            return Err(HostError::InvalidPath(
+                "Project copy files cannot replace DraftMatter private metadata.".to_string(),
+            ));
+        }
+        let extension = safe
+            .extension()
+            .and_then(OsStr::to_str)
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if !matches!(
+            extension.as_str(),
+            "csv"
+                | "tsv"
+                | "json"
+                | "png"
+                | "jpg"
+                | "jpeg"
+                | "tif"
+                | "tiff"
+                | "svg"
+                | "pdf"
+                | "eps"
+                | "webp"
+        ) {
+            return Err(HostError::UnsupportedFile(format!(
+                "Project copy files must use a supported data, bibliography, or figure format: {}",
+                file.path
+            )));
+        }
+        let bytes = file.bytes.len() as u64;
+        if bytes > MAX_PROJECT_ASSET_BYTES {
+            return Err(HostError::UnsupportedFile(format!(
+                "A project copy file exceeds the 32 MB limit: {}",
+                file.path
+            )));
+        }
+        total_bytes = total_bytes.saturating_add(bytes);
+        if total_bytes > MAX_PROJECT_ASSETS_BYTES {
+            return Err(HostError::UnsupportedFile(
+                "Project copy files exceed the 96 MB limit.".to_string(),
+            ));
+        }
+        let destination = root.join(&safe);
+        if destination.exists() {
+            return Err(HostError::InvalidProject(format!(
+                "A project copy file already exists: {}",
+                file.path
+            )));
+        }
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        write_atomic(&destination, &file.bytes, false)?;
+        written.push(slash_path(&safe));
+    }
+    Ok(written)
 }
 
 fn citation_lock_path(root: &Path) -> PathBuf {
@@ -2702,6 +2787,26 @@ fn create_project(
     }
 }
 
+fn create_temporary_project_in(parent: &Path, name: &str) -> Result<ProjectSnapshot, HostError> {
+    let normalized_name = normalized_project_name(name)?;
+    let folder_name = portable_project_folder_name(&normalized_name)?;
+    fs::create_dir_all(parent)?;
+    let root_path = parent.join(format!("{folder_name}-{}", Uuid::new_v4()));
+    fs::create_dir(&root_path)?;
+    match initialize_project_root(&root_path, &normalized_name, None) {
+        Ok(snapshot) => Ok(snapshot),
+        Err(error) => {
+            let _ = fs::remove_dir_all(&root_path);
+            Err(error)
+        }
+    }
+}
+
+#[tauri::command]
+fn create_temporary_project(name: String) -> Result<ProjectSnapshot, HostError> {
+    create_temporary_project_in(&std::env::temp_dir().join("DraftMatter"), &name)
+}
+
 #[tauri::command]
 fn read_document(root: String, path: String) -> Result<DocumentSnapshot, HostError> {
     read_document_impl(&root, &path)
@@ -2715,6 +2820,11 @@ fn read_bibliography(root: String, path: String) -> Result<DocumentSnapshot, Hos
 #[tauri::command]
 fn read_project_assets(root: String, paths: Vec<String>) -> Result<Vec<ProjectAsset>, HostError> {
     read_project_assets_impl(&root, &paths)
+}
+
+#[tauri::command]
+fn seed_project_files(root: String, files: Vec<ProjectSeedFile>) -> Result<Vec<String>, HostError> {
+    seed_project_files_impl(&root, &files)
 }
 
 #[tauri::command]
@@ -3253,6 +3363,15 @@ async fn render_external_export_to_file(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_deep_link::init())
+        .setup(|_app| {
+            #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
+            {
+                use tauri_plugin_deep_link::DeepLinkExt;
+                _app.deep_link().register_all()?;
+            }
+            Ok(())
+        })
         .manage(ExecutionTrustStore::default())
         .manage(KernelProcessRegistry::default())
         .plugin(tauri_plugin_dialog::init())
@@ -3260,9 +3379,11 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_project,
             create_project,
+            create_temporary_project,
             read_document,
             read_bibliography,
             read_project_assets,
+            seed_project_files,
             read_citation_lock,
             read_citation_cache,
             save_citation_lock,
@@ -3738,6 +3859,26 @@ mod tests {
     }
 
     #[test]
+    fn creates_an_isolated_temporary_project_without_running_content() {
+        let temporary = tempdir().unwrap();
+        let snapshot =
+            create_temporary_project_in(temporary.path(), "Shared canopy study").unwrap();
+        let root = PathBuf::from(&snapshot.root);
+        assert_eq!(
+            root.parent().unwrap().canonicalize().unwrap(),
+            temporary.path().canonicalize().unwrap()
+        );
+        assert!(root
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .starts_with("Shared canopy study-"));
+        assert_eq!(snapshot.config.name, "Shared canopy study");
+        assert!(root.join("paper.qmd").is_file());
+        assert!(root.join(".draftmatter/project.json").is_file());
+    }
+
+    #[test]
     fn persists_valid_citation_preferences_and_rejects_unknown_values() {
         let temporary = tempdir().unwrap();
         let root = temporary.path().join("citation-preferences");
@@ -3967,6 +4108,52 @@ mod tests {
         assert!(matches!(
             read_project_assets_impl(root.to_str().unwrap(), &["figures/data.csv".to_string()]),
             Err(HostError::UnsupportedFile(_))
+        ));
+    }
+
+    #[test]
+    fn seeds_only_bounded_portable_files_inside_a_new_project() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("project");
+        create_project_at_root(&root, "Test").unwrap();
+        let written = seed_project_files_impl(
+            root.to_str().unwrap(),
+            &[
+                ProjectSeedFile {
+                    path: "data/canopy.csv".into(),
+                    bytes: b"week,value\n1,2\n".to_vec(),
+                },
+                ProjectSeedFile {
+                    path: "figures/canopy.svg".into(),
+                    bytes: b"<svg/>".to_vec(),
+                },
+            ],
+        )
+        .unwrap();
+        assert_eq!(written, vec!["data/canopy.csv", "figures/canopy.svg"]);
+        assert_eq!(
+            fs::read(root.join("data/canopy.csv")).unwrap(),
+            b"week,value\n1,2\n"
+        );
+        assert!(matches!(
+            seed_project_files_impl(
+                root.to_str().unwrap(),
+                &[ProjectSeedFile {
+                    path: "../outside.csv".into(),
+                    bytes: Vec::new()
+                }],
+            ),
+            Err(HostError::InvalidPath(_))
+        ));
+        assert!(matches!(
+            seed_project_files_impl(
+                root.to_str().unwrap(),
+                &[ProjectSeedFile {
+                    path: ".draftmatter/project.json".into(),
+                    bytes: Vec::new()
+                }],
+            ),
+            Err(HostError::InvalidPath(_))
         ));
     }
 

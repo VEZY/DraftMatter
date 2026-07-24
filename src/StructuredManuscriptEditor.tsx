@@ -264,6 +264,9 @@ export interface StructuredManuscriptEditorProps {
   codeCellStatuses?: Record<string, ExecutionFreshnessStatus>
   codeCellActionsEnabled?: boolean
   codeCellBrowserViewOnly?: boolean
+  codeCellViewOnlyLabel?: string
+  codeCellViewOnlySummary?: string
+  codeCellUnavailableActionLabel?: string
   codeCellRunAboveEnabled?: Record<string, boolean>
   onRunCodeCell?: (cellId: string) => void
   onRunCodeCellAbove?: (cellId: string) => void
@@ -726,6 +729,9 @@ function codeCellNodeView(
   presentationStatus: (cellId: string) => ExecutionFreshnessStatus | undefined,
   actionsEnabled: () => boolean,
   browserViewOnly: () => boolean,
+  viewOnlyLabel: () => string,
+  viewOnlySummary: () => string,
+  unavailableActionLabel: () => string,
   runAboveEnabled: (cellId: string) => boolean | undefined,
   onRun: (cellId: string) => void,
   onRunAbove: (cellId: string) => void,
@@ -924,9 +930,9 @@ function codeCellNodeView(
     const canRunAbove = runAboveEnabled(cellId)
     dom.dataset.status = presentedStatus
     dom.dataset.executionMode = viewOnly ? 'browser-view-only' : 'desktop'
-    status.textContent = viewOnly ? 'Browser view only' : codeCellStatusLabel(presentedStatus)
+    status.textContent = viewOnly ? viewOnlyLabel() : codeCellStatusLabel(presentedStatus)
     summary.textContent = viewOnly
-      ? `Code is view-only in this browser · ${lines} ${lines === 1 ? 'line' : 'lines'} · Open the project in DraftMatter desktop to run it`
+      ? `${viewOnlySummary()} · ${lines} ${lines === 1 ? 'line' : 'lines'}`
       : `Source stays outside the manuscript · ${lines} ${lines === 1 ? 'line' : 'lines'}`
     summary.hidden = expanded
     editorHost.hidden = !expanded
@@ -941,9 +947,9 @@ function codeCellNodeView(
     runAbove.setAttribute('aria-label', `Run all computations above reproducible ${objectName}`)
     updateCodeCellStatus(dom, presentedStatus)
     if (viewOnly) {
-      status.textContent = 'Browser view only'
+      status.textContent = viewOnlyLabel()
       run.dataset.action = 'unavailable'
-      run.textContent = 'Desktop required'
+      run.textContent = unavailableActionLabel()
       run.setAttribute('aria-label', `Execution unavailable in browser for reproducible ${objectName} (${cellLanguage})`)
       run.disabled = true
     } else {
@@ -3442,6 +3448,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   codeCellStatuses,
   codeCellActionsEnabled = false,
   codeCellBrowserViewOnly = false,
+  codeCellViewOnlyLabel = 'Browser view only',
+  codeCellViewOnlySummary = 'Code is view-only in this browser · Open the project in DraftMatter desktop to run it',
+  codeCellUnavailableActionLabel = 'Desktop required',
   codeCellRunAboveEnabled,
   onRunCodeCell,
   onRunCodeCellAbove,
@@ -3482,6 +3491,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const codeCellStatusesRef = useRef(codeCellStatuses)
   const codeCellActionsEnabledRef = useRef(codeCellActionsEnabled)
   const codeCellBrowserViewOnlyRef = useRef(codeCellBrowserViewOnly)
+  const codeCellViewOnlyLabelRef = useRef(codeCellViewOnlyLabel)
+  const codeCellViewOnlySummaryRef = useRef(codeCellViewOnlySummary)
+  const codeCellUnavailableActionLabelRef = useRef(codeCellUnavailableActionLabel)
   const codeCellRunAboveEnabledRef = useRef(codeCellRunAboveEnabled)
   const onRunCodeCellRef = useRef(onRunCodeCell)
   const onRunCodeCellAboveRef = useRef(onRunCodeCellAbove)
@@ -3512,6 +3524,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   codeCellStatusesRef.current = codeCellStatuses
   codeCellActionsEnabledRef.current = codeCellActionsEnabled
   codeCellBrowserViewOnlyRef.current = codeCellBrowserViewOnly
+  codeCellViewOnlyLabelRef.current = codeCellViewOnlyLabel
+  codeCellViewOnlySummaryRef.current = codeCellViewOnlySummary
+  codeCellUnavailableActionLabelRef.current = codeCellUnavailableActionLabel
   codeCellRunAboveEnabledRef.current = codeCellRunAboveEnabled
   onRunCodeCellRef.current = onRunCodeCell
   onRunCodeCellAboveRef.current = onRunCodeCellAbove
@@ -4162,6 +4177,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
             (cellId) => codeCellStatusesRef.current?.[cellId],
             () => codeCellActionsEnabledRef.current,
             () => codeCellBrowserViewOnlyRef.current,
+            () => codeCellViewOnlyLabelRef.current,
+            () => codeCellViewOnlySummaryRef.current,
+            () => codeCellUnavailableActionLabelRef.current,
             (cellId) => codeCellRunAboveEnabledRef.current?.[cellId],
             (cellId) => onRunCodeCellRef.current?.(cellId),
             (cellId) => onRunCodeCellAboveRef.current?.(cellId),
@@ -4361,7 +4379,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       cell.dispatchEvent(new Event('dm-code-read-only-change'))
       cell.dispatchEvent(new Event('dm-code-presentation-change'))
     })
-  }, [codeCellActionsEnabled, codeCellBrowserViewOnly, codeCellRunAboveEnabled])
+  }, [codeCellActionsEnabled, codeCellBrowserViewOnly, codeCellRunAboveEnabled, codeCellUnavailableActionLabel, codeCellViewOnlyLabel, codeCellViewOnlySummary])
 
   useEffect(() => {
     const view = viewRef.current
