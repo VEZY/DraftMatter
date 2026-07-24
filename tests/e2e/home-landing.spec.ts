@@ -92,6 +92,10 @@ test.describe('signed-out Home landing experience', () => {
 
     await page.getByRole('tab', { name: /Results from code/ }).click()
     await expect(page.getByText('Try “View source” on the figure or table.')).toBeVisible()
+    await expect(demo.getByLabel('Automatic reference to Figure 1')).toBeVisible()
+    await expect(demo.getByLabel('Automatic reference to Table 1')).toBeVisible()
+    await expect(demo.getByText(/Canopy cover increased steadily after rainfall returned/)).toBeVisible()
+    await expect(demo.getByText(/Treatment estimates and confidence intervals are summarized/)).toBeVisible()
     await expect(figureSource).toHaveCount(1)
     await figureSource.click()
 

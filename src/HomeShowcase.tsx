@@ -274,14 +274,10 @@ export function HomeShowcase() {
                       <small>04</small><h4>Results</h4>
                     </div>
                     <p>
-                      Recovery reached{' '}
-                      <span className="home-demo-computed">
-                        18.4%<small>computed</small>
-                      </span>
-                      {' '}above the dry-season baseline. The largest gains occurred during the first three weeks.
+                      Canopy cover increased steadily after rainfall returned. Irrigated plots separated from controls during the first three weeks and maintained the larger gain through week six (<span className="home-demo-cross-reference" aria-label="Automatic reference to Figure 1">Figure 1</span>).
                     </p>
 
-                    <figure className="home-demo-figure is-preview-active">
+                    <figure id="home-demo-figure-1" className="home-demo-figure is-preview-active">
                       <div className="home-demo-result-bar">
                         <span>Reproducible figure</span>
                         <div className="home-demo-result-tools" aria-label="Reproducible figure controls">
@@ -316,7 +312,15 @@ export function HomeShowcase() {
                       <figcaption><strong>Figure 1.</strong> Canopy recovery after rainfall resumed. Irrigated plots are shown in sage.</figcaption>
                     </figure>
 
-                    <div className="home-demo-table-wrap is-preview-active">
+                    <p>
+                      At the end of the observation period, irrigated plots reached{' '}
+                      <span className="home-demo-computed">
+                        18.4%<small>computed</small>
+                      </span>
+                      {' '}above the dry-season baseline, compared with 8.7% in control plots. Treatment estimates and confidence intervals are summarized in <span className="home-demo-cross-reference" aria-label="Automatic reference to Table 1">Table 1</span>.
+                    </p>
+
+                    <div id="home-demo-table-1" className="home-demo-table-wrap is-preview-active">
                       <div className="home-demo-table-title"><strong>Table 1.</strong> Recovery estimates by treatment</div>
                       <div className="home-demo-result-bar">
                         <span>Reproducible table</span>

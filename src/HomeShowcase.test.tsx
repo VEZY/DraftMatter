@@ -88,6 +88,15 @@ describe('signed-out Home product showcase', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('#home-showcase-tab-results')!.click())
     expect(container.textContent).toContain('Try “View source” on the figure or table.')
     expect(container.textContent).toContain('Try this')
+    expect(container.textContent).toContain('Canopy cover increased steadily after rainfall returned.')
+    expect(container.textContent).toContain('Treatment estimates and confidence intervals are summarized')
+    const figureReference = container.querySelector<HTMLElement>('[aria-label="Automatic reference to Figure 1"]')!
+    const tableReference = container.querySelector<HTMLElement>('[aria-label="Automatic reference to Table 1"]')!
+    const figure = container.querySelector<HTMLElement>('#home-demo-figure-1')!
+    const table = container.querySelector<HTMLElement>('#home-demo-table-1')!
+    expect(figureReference.compareDocumentPosition(figure) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(figure.compareDocumentPosition(tableReference) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(tableReference.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     const figureToggle = container.querySelector<HTMLButtonElement>('[aria-label="View source for Figure 1"]')!
     expect(figureToggle.getAttribute('aria-expanded')).toBe('false')
 
