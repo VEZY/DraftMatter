@@ -118,7 +118,7 @@ function SignedOutHome({
         <div className="home-hero-layout">
           <div className="home-hero-copy">
             <span className="home-kicker">A calm workspace for rigorous research</span>
-            <h1 id="home-title">Your paper should be as reproducible as your research.</h1>
+            <h1 id="home-title">Your paper should be as <span>reproducible</span> as your research.</h1>
             <p className="home-hero-support">Research writing, with the missing pieces built in.</p>
             <p className="home-hero-summary">DraftMatter brings writing, citations, reproducible results, review, and collaboration into one focused workspace. Everything is available when needed and quiet when it is not.</p>
             <div className="home-hero-actions">
@@ -131,6 +131,11 @@ function SignedOutHome({
                 <Icon name="arrowRight" size={17} />
               </button>
             </div>
+            <ul className="home-hero-proof" aria-label="DraftMatter principles">
+              <li><Icon name="check" size={13} />Portable manuscript</li>
+              <li><Icon name="check" size={13} />Local computation</li>
+              <li><Icon name="check" size={13} />Review in context</li>
+            </ul>
             {session.error && <p className="home-account-error" role="alert">{session.error}</p>}
           </div>
           <HomeHeroPreview />
@@ -351,8 +356,29 @@ function LocalProjectsSection({
   )
 }
 
+function HomeSketchDefinitions() {
+  return (
+    <svg className="home-sketch-defs" aria-hidden="true">
+      <defs>
+        <filter id="home-pencil-wobble" x="-8%" y="-8%" width="116%" height="116%" colorInterpolationFilters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency=".012 .18" numOctaves="1" seed="17" result="noise" />
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale=".55" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+        <filter id="home-pencil-wobble-deep" x="-10%" y="-10%" width="120%" height="120%" colorInterpolationFilters="sRGB">
+          <feTurbulence type="fractalNoise" baseFrequency=".009 .11" numOctaves="2" seed="29" result="noise" />
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="1.15" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </defs>
+    </svg>
+  )
+}
+
 export function Home(props: HomeProps) {
   const session = useCollaborationSession()
-  if (session.profile) return <Catalogue {...props} />
-  return <SignedOutHome {...props} />
+  return (
+    <>
+      <HomeSketchDefinitions />
+      {session.profile ? <Catalogue {...props} /> : <SignedOutHome {...props} />}
+    </>
+  )
 }
