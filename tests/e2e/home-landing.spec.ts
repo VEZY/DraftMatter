@@ -57,9 +57,32 @@ test.describe('signed-out Home landing experience', () => {
     await expect(results).toHaveCSS('outline-style', 'solid')
   })
 
+  test('keeps result source hidden until the guided View source control is used', async ({ page }) => {
+    await page.goto('/')
+    const demo = page.locator('.home-workspace-demo')
+    const figureSource = demo.getByRole('button', { name: 'View source for Figure 1' })
+    await expect(figureSource).toBeDisabled()
+    await expect(demo.locator('.home-demo-source-panel')).toHaveCount(0)
+
+    await page.getByRole('tab', { name: /Results from code/ }).click()
+    await expect(page.getByText('Try “View source” on the figure or table.')).toBeVisible()
+    await expect(figureSource).toBeEnabled()
+    await figureSource.click()
+
+    await expect(demo.getByRole('list', { name: 'Python source for Figure 1' })).toContainText('ax.plot')
+    await expect(demo.getByRole('button', { name: 'Close source for Figure 1' })).toHaveAttribute('aria-expanded', 'true')
+
+    await demo.getByRole('button', { name: 'View source for Table 1' }).click()
+    await expect(demo.getByRole('list', { name: 'Python source for Figure 1' })).toHaveCount(0)
+    await expect(demo.getByRole('list', { name: 'Python source for Table 1' })).toContainText('recovery_table')
+  })
+
   test('stacks at a mobile viewport without horizontal page overflow', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/')
+    await page.getByRole('tab', { name: /Results from code/ }).click()
+    await page.getByRole('button', { name: 'View source for Figure 1' }).click()
+    await expect(page.getByRole('list', { name: 'Python source for Figure 1' })).toBeVisible()
 
     const measurements = await page.evaluate(() => {
       const surface = document.querySelector<HTMLElement>('.home-welcome')!
@@ -75,7 +98,7 @@ test.describe('signed-out Home landing experience', () => {
     expect(measurements.documentOverflow).toBeLessThanOrEqual(1)
     expect(measurements.surfaceOverflow).toBeLessThanOrEqual(1)
     expect(measurements.columns).toBe(1)
-    await expect(page.getByRole('tab', { name: /Writing/ })).toBeVisible()
+    await expect(page.getByRole('tab', { name: /Results from code/ })).toBeVisible()
     await expect(page.locator('.home-workspace-demo')).toBeVisible()
   })
 })

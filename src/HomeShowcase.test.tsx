@@ -71,4 +71,31 @@ describe('signed-out Home product showcase', () => {
     expect(document.activeElement).toBe(checks)
     expect(checks.getAttribute('aria-selected')).toBe('true')
   })
+
+  it('guides readers to inspect hidden figure and table source inline', async () => {
+    const figureToggle = container.querySelector<HTMLButtonElement>('[aria-label="View source for Figure 1"]')!
+    expect(figureToggle.disabled).toBe(true)
+    expect(figureToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelector('.home-demo-source-panel')).toBeNull()
+
+    await act(async () => container.querySelector<HTMLButtonElement>('#home-showcase-tab-results')!.click())
+    expect(container.textContent).toContain('Try “View source” on the figure or table.')
+    expect(container.textContent).toContain('Try this')
+    expect(figureToggle.disabled).toBe(false)
+
+    await act(async () => figureToggle.click())
+    expect(container.querySelector('[aria-label="Python source for Figure 1"]')?.textContent).toContain('ax.plot')
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Close source for Figure 1"]')?.getAttribute('aria-expanded')).toBe('true')
+    expect(container.querySelector('#home-demo-table-source')).toBeNull()
+
+    const tableToggle = container.querySelector<HTMLButtonElement>('[aria-label="View source for Table 1"]')!
+    await act(async () => tableToggle.click())
+    expect(container.querySelector('#home-demo-figure-source')).toBeNull()
+    expect(container.querySelector('[aria-label="Python source for Table 1"]')?.textContent).toContain('recovery_table')
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Close source for Table 1"]')?.getAttribute('aria-expanded')).toBe('true')
+
+    await act(async () => container.querySelector<HTMLButtonElement>('#home-showcase-tab-citations')!.click())
+    expect(container.querySelector('.home-demo-source-panel')).toBeNull()
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="View source for Table 1"]')?.disabled).toBe(true)
+  })
 })

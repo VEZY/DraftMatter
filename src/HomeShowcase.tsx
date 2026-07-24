@@ -2,6 +2,7 @@ import { useRef, useState, type KeyboardEvent } from 'react'
 import { Icon } from './Icon'
 
 export type HomeShowcaseFeatureId = 'writing' | 'results' | 'citations' | 'review' | 'checks'
+type HomeDemoSource = 'figure' | 'table'
 
 export const homeShowcaseFeatures: ReadonlyArray<{
   id: HomeShowcaseFeatureId
@@ -39,8 +40,52 @@ function featureState(active: HomeShowcaseFeatureId, features: HomeShowcaseFeatu
   return active === features ? 'is-preview-active' : 'is-preview-muted'
 }
 
+const figureSource = [
+  'summary = observations.groupby(["week", "treatment"], as_index=False).agg(',
+  '    canopy_cover=("canopy_cover", "mean"),',
+  ')',
+  'figure, ax = plt.subplots()',
+  'for treatment, values in summary.groupby("treatment"):',
+  '    ax.plot(values["week"], values["canopy_cover"], marker="o", label=treatment)',
+  'ax.set(xlabel="Weeks after rainfall", ylabel="Canopy cover (%)")',
+]
+
+const tableSource = [
+  'recovery_table = observations.groupby("treatment").agg(',
+  '    change=("change", "mean"),',
+  '    lower_ci=("lower_ci", "mean"),',
+  '    upper_ci=("upper_ci", "mean"),',
+  ').reset_index()',
+]
+
+function DemoSourcePanel({
+  id,
+  label,
+  lines,
+}: {
+  id: string
+  label: string
+  lines: string[]
+}) {
+  return (
+    <div id={id} className="home-demo-source-panel">
+      <div className="home-demo-source-heading">
+        <span>PY</span>
+        <div>
+          <strong>Python source</strong>
+          <small>Source stays outside the manuscript · {lines.length} lines</small>
+        </div>
+      </div>
+      <ol aria-label={label}>
+        {lines.map((line, index) => <li key={`${index}:${line}`}><code>{line || ' '}</code></li>)}
+      </ol>
+    </div>
+  )
+}
+
 export function HomeShowcase() {
   const [activeFeature, setActiveFeature] = useState<HomeShowcaseFeatureId>('writing')
+  const [openSource, setOpenSource] = useState<HomeDemoSource | null>(null)
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
   const selected = homeShowcaseFeatures.find((feature) => feature.id === activeFeature) ?? homeShowcaseFeatures[0]
 
@@ -48,6 +93,7 @@ export function HomeShowcase() {
     const next = homeShowcaseFeatures[index]
     if (!next) return
     setActiveFeature(next.id)
+    if (next.id !== 'results') setOpenSource(null)
     if (focus) tabs.current[index]?.focus()
   }
 
@@ -101,6 +147,12 @@ export function HomeShowcase() {
           >
             <strong>{selected.label}</strong>
             <p>{selected.description}</p>
+            {activeFeature === 'results' && (
+              <span className="home-showcase-tip">
+                <Icon name="code" size={13} />
+                Try “View source” on the figure or table.
+              </span>
+            )}
           </div>
         </div>
 
@@ -170,10 +222,26 @@ export function HomeShowcase() {
                 </p>
 
                 <figure className={`home-demo-figure ${featureState(activeFeature, 'results')}`} data-preview-feature="results">
-                  <div className="home-demo-result-tools" aria-label="Reproducible result controls">
-                    <span><Icon name="play" size={12} />Run result</span>
-                    <span><Icon name="code" size={12} />View source</span>
+                  <div className="home-demo-result-bar">
+                    <span>Reproducible figure</span>
+                    <div className="home-demo-result-tools" aria-label="Reproducible figure controls">
+                      <span><Icon name="play" size={12} />Run result</span>
+                      {activeFeature === 'results' && openSource === null && <small className="home-demo-source-cue">Try this</small>}
+                      <button
+                        type="button"
+                        className="home-demo-source-toggle"
+                        aria-expanded={openSource === 'figure'}
+                        aria-controls="home-demo-figure-source"
+                        aria-label={`${openSource === 'figure' ? 'Close' : 'View'} source for Figure 1`}
+                        disabled={activeFeature !== 'results'}
+                        onClick={() => setOpenSource((current) => current === 'figure' ? null : 'figure')}
+                      >
+                        <Icon name="code" size={12} />
+                        {openSource === 'figure' ? 'Close source' : 'View source'}
+                      </button>
+                    </div>
                   </div>
+                  {openSource === 'figure' && <DemoSourcePanel id="home-demo-figure-source" label="Python source for Figure 1" lines={figureSource} />}
                   <svg viewBox="0 0 440 160" role="img" aria-labelledby="home-demo-chart-title">
                     <title id="home-demo-chart-title">Canopy recovery over six weeks for control and irrigated plots</title>
                     <g className="home-demo-chart-grid">
@@ -191,6 +259,25 @@ export function HomeShowcase() {
 
                 <div className={`home-demo-table-wrap ${featureState(activeFeature, 'results')}`} data-preview-feature="results">
                   <div className="home-demo-table-title"><strong>Table 1.</strong> Recovery estimates by treatment</div>
+                  <div className="home-demo-result-bar">
+                    <span>Reproducible table</span>
+                    <div className="home-demo-result-tools" aria-label="Reproducible table controls">
+                      <span><Icon name="play" size={12} />Run result</span>
+                      <button
+                        type="button"
+                        className="home-demo-source-toggle"
+                        aria-expanded={openSource === 'table'}
+                        aria-controls="home-demo-table-source"
+                        aria-label={`${openSource === 'table' ? 'Close' : 'View'} source for Table 1`}
+                        disabled={activeFeature !== 'results'}
+                        onClick={() => setOpenSource((current) => current === 'table' ? null : 'table')}
+                      >
+                        <Icon name="code" size={12} />
+                        {openSource === 'table' ? 'Close source' : 'View source'}
+                      </button>
+                    </div>
+                  </div>
+                  {openSource === 'table' && <DemoSourcePanel id="home-demo-table-source" label="Python source for Table 1" lines={tableSource} />}
                   <table>
                     <thead><tr><th>Treatment</th><th>Change</th><th>95% CI</th></tr></thead>
                     <tbody>
