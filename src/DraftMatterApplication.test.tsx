@@ -73,18 +73,21 @@ describe('DraftMatter application entry', () => {
     container.remove()
   })
 
-  it('offers a prominent learning action after the guided preview', async () => {
+  it('offers a concise learning overview with a direct guided-tour action', async () => {
     const container = document.createElement('div')
     const root = createRoot(container)
     await act(async () => root.render(<DraftMatterApplication />))
 
-    const learnAction = container.querySelector<HTMLButtonElement>('.home-learn-cta button')!
-    expect(learnAction.textContent).toContain('Learn DraftMatter')
-    expect(container.querySelector('.home-learn-cta')?.textContent).toContain('short tour')
-    await act(async () => learnAction.click())
+    const guide = container.querySelector<HTMLElement>('.home-learning-guide')!
+    expect(guide.textContent).toContain('Explore a complete research paper.')
+    expect(guide.textContent).toContain('Produce reproducible results')
+    expect(guide.textContent).not.toContain('steps complete')
+    const tourAction = guide.querySelector<HTMLButtonElement>('button')!
+    expect(tourAction.textContent).toContain('Start guided tour')
+    await act(async () => tourAction.click())
 
-    expect(window.location.pathname).toBe('/learn')
-    expect(container.textContent).toContain('Start guided tour')
+    expect(window.location.pathname).toBe('/tutorial')
+    expect(container.querySelector('[data-testid="editor"]')?.getAttribute('data-example-tour')).toBe('open')
 
     await act(async () => root.unmount())
   })

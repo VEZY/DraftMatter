@@ -2,7 +2,7 @@ import { expect, test } from '@playwright/test'
 
 const features = [
   ['Writing', 'writing', 'Write in a calm, structured editor where the manuscript stays central.'],
-  ['Results from code', 'results', 'Create figures, tables, and in-text values from R, Python, or Julia. DraftMatter keeps the source linked to the result and keeps code out of the final paper.'],
+  ['Results from code', 'results', 'Use Julia, R, or Python with a local terminal and project packages. DraftMatter parses outputs into manuscript figures, tables, and in-text values while keeping every result linked to its source.'],
   ['Citations', 'citations', 'Search, insert, and format citations without leaving the manuscript.'],
   ['Review and collaboration', 'review', 'Comment, suggest changes, and work with co-authors in the context of the paper.'],
   ['Checks and export', 'checks', 'Review citation, computation, output, and export issues before sharing the paper.'],
@@ -33,6 +33,12 @@ test.describe('signed-out Home landing experience', () => {
     await expect(demo.getByText('Figure 1.')).toHaveCount(0)
     await expect(demo.getByRole('heading', { name: 'References' })).toHaveCount(0)
     await expect(demo.getByText('Project checks')).toBeVisible()
+
+    const learning = page.locator('.home-learning-guide')
+    await expect(learning.getByRole('heading', { name: 'Explore a complete research paper.' })).toBeVisible()
+    await expect(learning.getByText('Produce reproducible results', { exact: true })).toBeVisible()
+    await expect(learning.getByRole('button', { name: 'Start guided tour' })).toBeVisible()
+    await expect(learning).not.toContainText('steps complete')
   })
 
   test('keeps one workspace while every feature reveals its concrete description and emphasis', async ({ page }) => {

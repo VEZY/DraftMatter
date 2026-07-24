@@ -8,7 +8,7 @@ import {
 } from './collaboration/sessionContext'
 import type { WorkspaceRole } from './collaboration/workspaceService'
 import type { LocalProjectRecent } from './localProjectCatalogue'
-import { GettingStarted } from './GettingStarted'
+import { HomeLearningGuide } from './HomeLearningGuide'
 import { HomeShowcase } from './HomeShowcase'
 
 interface HomeProps {
@@ -134,17 +134,7 @@ function SignedOutHome({
 
       <HomeShowcase />
 
-      <section className="home-learn-cta" aria-labelledby="home-learn-title">
-        <div>
-          <span className="home-kicker">Learn with a complete paper</span>
-          <h2 id="home-learn-title">See how the pieces come together.</h2>
-          <p>Follow a short tour showcasing citations, reproducible results, code, and review.</p>
-        </div>
-        <button onClick={onOpenLearn}>
-          Learn DraftMatter
-          <Icon name="arrowRight" size={16} />
-        </button>
-      </section>
+      <HomeLearningGuide onStartTour={onOpenTutorial} />
 
       <section className="home-principles" aria-labelledby="home-principles-title">
         <div className="home-section-intro">
@@ -171,7 +161,6 @@ function SignedOutHome({
       </section>
 
       {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} />}
-      {desktopHost.available && <GettingStarted userId="desktop" role="owner" hasDraft={localProjects.length > 0} onTutorial={onOpenTutorial} onLearn={onOpenLearn} />}
 
       <section className="home-advanced">
         <button className="home-disclosure" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((open) => !open)}>
@@ -234,14 +223,6 @@ function Catalogue({
   const owned = visibleDrafts.filter((draft) => draft.role === 'owner')
   const shared = visibleDrafts.filter((draft) => draft.role !== 'owner')
   const accountName = session.profile?.displayName ?? session.profile?.email ?? session.profile?.userId ?? 'Account'
-  const role = session.workspaces.some((workspace) => workspace.role === 'owner')
-    ? 'owner'
-    : session.workspaces.some((workspace) => workspace.role === 'editor')
-      ? 'editor'
-      : session.workspaces.some((workspace) => workspace.role === 'commenter')
-        ? 'commenter'
-        : 'viewer'
-
   const openDraft = (draft: CatalogueDraft) => {
     const launch = session.launchFor(draft.workspaceId, draft.id, { canBootstrap: false })
     if (launch) onOpenDraft(launch)
@@ -307,7 +288,7 @@ function Catalogue({
         )}
 
         {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} />}
-        {session.profile && <GettingStarted userId={session.profile.userId} role={role} client={session.client} hasDraft={session.drafts.length + localProjects.length > 0} onTutorial={onOpenTutorial} onLearn={onOpenLearn} />}
+        <HomeLearningGuide onStartTour={onOpenTutorial} />
       </div>
     </main>
   )
