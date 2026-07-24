@@ -1,0 +1,230 @@
+import { useRef, useState, type KeyboardEvent } from 'react'
+import { Icon } from './Icon'
+
+export type HomeShowcaseFeatureId = 'writing' | 'results' | 'citations' | 'review' | 'checks'
+
+export const homeShowcaseFeatures: ReadonlyArray<{
+  id: HomeShowcaseFeatureId
+  label: string
+  description: string
+}> = [
+  {
+    id: 'writing',
+    label: 'Writing',
+    description: 'Write in a calm, structured editor where the manuscript stays central.',
+  },
+  {
+    id: 'results',
+    label: 'Results from code',
+    description: 'Create figures, tables, and in-text values from R, Python, or Julia. DraftMatter keeps the source linked to the result and keeps code out of the final paper.',
+  },
+  {
+    id: 'citations',
+    label: 'Citations',
+    description: 'Search, insert, and format citations without leaving the manuscript.',
+  },
+  {
+    id: 'review',
+    label: 'Review and collaboration',
+    description: 'Comment, suggest changes, and work with co-authors in the context of the paper.',
+  },
+  {
+    id: 'checks',
+    label: 'Checks and export',
+    description: 'Review citation, computation, output, and export issues before sharing the paper.',
+  },
+]
+
+function featureState(active: HomeShowcaseFeatureId, features: HomeShowcaseFeatureId) {
+  return active === features ? 'is-preview-active' : 'is-preview-muted'
+}
+
+export function HomeShowcase() {
+  const [activeFeature, setActiveFeature] = useState<HomeShowcaseFeatureId>('writing')
+  const tabs = useRef<Array<HTMLButtonElement | null>>([])
+  const selected = homeShowcaseFeatures.find((feature) => feature.id === activeFeature) ?? homeShowcaseFeatures[0]
+
+  const selectTab = (index: number, focus = false) => {
+    const next = homeShowcaseFeatures[index]
+    if (!next) return
+    setActiveFeature(next.id)
+    if (focus) tabs.current[index]?.focus()
+  }
+
+  const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
+    let nextIndex: number | undefined
+    if (event.key === 'ArrowRight' || event.key === 'ArrowDown') nextIndex = (index + 1) % homeShowcaseFeatures.length
+    if (event.key === 'ArrowLeft' || event.key === 'ArrowUp') nextIndex = (index - 1 + homeShowcaseFeatures.length) % homeShowcaseFeatures.length
+    if (event.key === 'Home') nextIndex = 0
+    if (event.key === 'End') nextIndex = homeShowcaseFeatures.length - 1
+    if (nextIndex === undefined) return
+    event.preventDefault()
+    selectTab(nextIndex, true)
+  }
+
+  return (
+    <section id="home-showcase" className="home-showcase" aria-labelledby="home-showcase-title">
+      <div className="home-section-intro home-showcase-intro">
+        <span className="home-kicker">A guided product preview</span>
+        <h2 id="home-showcase-title">Stay in the flow</h2>
+        <p>Write, compute, cite, and review in one focused workspace.</p>
+      </div>
+
+      <div className="home-showcase-layout">
+        <div className="home-showcase-guide">
+          <div className="home-showcase-tabs" role="tablist" aria-label="DraftMatter workspace features">
+            {homeShowcaseFeatures.map((feature, index) => (
+              <button
+                ref={(element) => { tabs.current[index] = element }}
+                key={feature.id}
+                id={`home-showcase-tab-${feature.id}`}
+                type="button"
+                role="tab"
+                aria-selected={activeFeature === feature.id}
+                aria-controls="home-showcase-panel"
+                tabIndex={activeFeature === feature.id ? 0 : -1}
+                onClick={() => selectTab(index)}
+                onKeyDown={(event) => onTabKeyDown(event, index)}
+              >
+                <span>{index + 1}</span>
+                <strong>{feature.label}</strong>
+                <Icon name="arrowRight" size={15} />
+              </button>
+            ))}
+          </div>
+          <div
+            id="home-showcase-panel"
+            className="home-showcase-description"
+            role="tabpanel"
+            aria-labelledby={`home-showcase-tab-${activeFeature}`}
+            tabIndex={0}
+          >
+            <strong>{selected.label}</strong>
+            <p>{selected.description}</p>
+          </div>
+        </div>
+
+        <div
+          className="home-workspace-demo"
+          data-active-feature={activeFeature}
+          aria-label="DraftMatter workspace product demonstration"
+        >
+          <div className="home-demo-label">
+            <Icon name="eye" size={13} />
+            Guided preview
+          </div>
+          <div className="home-demo-topbar">
+            <div className="home-demo-project">
+              <img src="/draftmatter-pencil-mark.svg" alt="" />
+              <span><strong>Canopy recovery study</strong><small>All changes saved</small></span>
+            </div>
+            <div className={`home-demo-presence ${featureState(activeFeature, 'review')}`} data-preview-feature="review">
+              <span aria-label="Amira is viewing">AM</span>
+              <span aria-label="Jon is viewing">JL</span>
+              <small>2 here</small>
+            </div>
+            <div className={`home-demo-check-summary ${featureState(activeFeature, 'checks')}`} data-preview-feature="checks">
+              <Icon name="check" size={13} />
+              <span><strong>Checks</strong><small>1 issue</small></span>
+            </div>
+            <span className={`home-demo-export ${featureState(activeFeature, 'checks')}`} data-preview-feature="checks">
+              <Icon name="download" size={13} />Export
+            </span>
+          </div>
+
+          <div className="home-demo-body">
+            <aside className={`home-demo-outline ${featureState(activeFeature, 'writing')}`} data-preview-feature="writing" aria-label="Manuscript outline">
+              <span>Manuscript</span>
+              <ol>
+                <li><small>01</small>Abstract</li>
+                <li><small>02</small>Introduction</li>
+                <li><small>03</small>Methods</li>
+                <li className="is-current"><small>04</small>Results</li>
+                <li><small>05</small>Discussion</li>
+              </ol>
+            </aside>
+
+            <article className="home-demo-paper" aria-label="Fictional manuscript preview">
+              <header className={featureState(activeFeature, 'writing')} data-preview-feature="writing">
+                <span>RESEARCH ARTICLE</span>
+                <h3>Canopy recovery after seasonal drought</h3>
+                <p>Amira Mensah · Jon Lee · Sofia Rossi</p>
+              </header>
+
+              <section>
+                <div className={`home-demo-section-heading ${featureState(activeFeature, 'writing')}`} data-preview-feature="writing">
+                  <small>04</small><h4>Results</h4>
+                </div>
+                <p className={featureState(activeFeature, 'writing')} data-preview-feature="writing">
+                  Canopy cover recovered steadily during the six weeks after rainfall returned. The largest gains occurred in the first three weeks.
+                </p>
+                <p>
+                  Recovery reached{' '}
+                  <span className={`home-demo-computed ${featureState(activeFeature, 'results')}`} data-preview-feature="results">
+                    18.4%<small>computed</small>
+                  </span>
+                  {' '}above the dry-season baseline, consistent with earlier observations{' '}
+                  <span className={`home-demo-citation ${featureState(activeFeature, 'citations')}`} data-preview-feature="citations">
+                    (Meyer and Okafor, 2025)
+                  </span>.
+                </p>
+
+                <figure className={`home-demo-figure ${featureState(activeFeature, 'results')}`} data-preview-feature="results">
+                  <div className="home-demo-result-tools" aria-label="Reproducible result controls">
+                    <span><Icon name="play" size={12} />Run result</span>
+                    <span><Icon name="code" size={12} />View source</span>
+                  </div>
+                  <svg viewBox="0 0 440 160" role="img" aria-labelledby="home-demo-chart-title">
+                    <title id="home-demo-chart-title">Canopy recovery over six weeks for control and irrigated plots</title>
+                    <g className="home-demo-chart-grid">
+                      <path d="M38 20V132H420M38 104H420M38 76H420M38 48H420" />
+                    </g>
+                    <path className="home-demo-chart-control" d="M40 120 C100 116 120 103 170 96 S260 81 300 72 S370 61 416 57" />
+                    <path className="home-demo-chart-treatment" d="M40 118 C80 106 120 83 170 68 S240 42 300 35 S370 26 416 24" />
+                    <g className="home-demo-chart-points">
+                      <circle cx="40" cy="118" r="3" /><circle cx="170" cy="68" r="3" /><circle cx="300" cy="35" r="3" /><circle cx="416" cy="24" r="3" />
+                    </g>
+                    <text x="38" y="150">0</text><text x="166" y="150">2</text><text x="296" y="150">4</text><text x="410" y="150">6 weeks</text>
+                  </svg>
+                  <figcaption><strong>Figure 1.</strong> Canopy recovery after rainfall resumed. Irrigated plots are shown in sage.</figcaption>
+                </figure>
+
+                <div className={`home-demo-table-wrap ${featureState(activeFeature, 'results')}`} data-preview-feature="results">
+                  <div className="home-demo-table-title"><strong>Table 1.</strong> Recovery estimates by treatment</div>
+                  <table>
+                    <thead><tr><th>Treatment</th><th>Change</th><th>95% CI</th></tr></thead>
+                    <tbody>
+                      <tr><td>Control</td><td>8.7%</td><td>6.1 to 11.2</td></tr>
+                      <tr><td>Irrigated</td><td>18.4%</td><td>15.8 to 21.0</td></tr>
+                    </tbody>
+                  </table>
+                </div>
+
+                <p className={`home-demo-revision ${featureState(activeFeature, 'review')}`} data-preview-feature="review">
+                  Recovery in control plots was <del>slower</del> <ins>more gradual</ins>, with{' '}
+                  <mark>the difference narrowing after week four</mark><sup>1</sup>.
+                </p>
+              </section>
+            </article>
+
+            <aside className="home-demo-side" aria-label="Review and project status">
+              <div className={`home-demo-comment ${featureState(activeFeature, 'review')}`} data-preview-feature="review">
+                <span>1</span>
+                <div><strong>Sofia Rossi</strong><small>Could we connect this result to Figure 1?</small></div>
+              </div>
+              <div className={`home-demo-checks ${featureState(activeFeature, 'checks')}`} data-preview-feature="checks">
+                <div><Icon name="check" size={14} /><strong>Project checks</strong></div>
+                <ul>
+                  <li><span />Citations <small>Ready</small></li>
+                  <li><span />Computation <small>Current</small></li>
+                  <li className="has-warning"><span />Export <small>1 issue</small></li>
+                </ul>
+                <span className="home-demo-check-action">Review before export</span>
+              </div>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}

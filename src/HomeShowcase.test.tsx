@@ -1,0 +1,74 @@
+// @vitest-environment jsdom
+
+import { act } from 'react'
+import { createRoot } from 'react-dom/client'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { HomeShowcase, homeShowcaseFeatures } from './HomeShowcase'
+
+describe('signed-out Home product showcase', () => {
+  let container: HTMLDivElement
+  let root: ReturnType<typeof createRoot>
+
+  beforeEach(async () => {
+    ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+    container = document.createElement('div')
+    document.body.append(container)
+    root = createRoot(container)
+    await act(async () => root.render(<HomeShowcase />))
+  })
+
+  afterEach(async () => {
+    await act(async () => root.unmount())
+    container.remove()
+  })
+
+  it('starts with a complete, understandable manuscript and Writing selected', () => {
+    const writing = container.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
+    expect(writing?.textContent).toContain('Writing')
+    expect(container.querySelector('.home-workspace-demo')?.getAttribute('data-active-feature')).toBe('writing')
+    expect(container.querySelector('[role="tabpanel"]')?.textContent).toContain(homeShowcaseFeatures[0].description)
+    expect(container.textContent).toContain('Canopy recovery after seasonal drought')
+    expect(container.textContent).toContain('(Meyer and Okafor, 2025)')
+    expect(container.textContent).toContain('18.4%')
+    expect(container.textContent).toContain('Figure 1.')
+    expect(container.textContent).toContain('Table 1.')
+    expect(container.textContent).toContain('Could we connect this result to Figure 1?')
+    expect(container.textContent).toContain('Project checks')
+  })
+
+  it.each(homeShowcaseFeatures)('selects $label with its description and corresponding workspace emphasis', async (feature) => {
+    const tab = container.querySelector<HTMLButtonElement>(`#home-showcase-tab-${feature.id}`)!
+    await act(async () => tab.click())
+
+    expect(tab.getAttribute('aria-selected')).toBe('true')
+    expect(tab.tabIndex).toBe(0)
+    expect(container.querySelector('.home-workspace-demo')?.getAttribute('data-active-feature')).toBe(feature.id)
+    expect(container.querySelector('[role="tabpanel"]')?.textContent).toContain(feature.description)
+    const emphasized = [...container.querySelectorAll<HTMLElement>(`[data-preview-feature="${feature.id}"]`)]
+    expect(emphasized.length).toBeGreaterThan(0)
+    expect(emphasized.every((element) => element.classList.contains('is-preview-active'))).toBe(true)
+  })
+
+  it('moves selection and focus with the full tab keyboard pattern', async () => {
+    const writing = container.querySelector<HTMLButtonElement>('#home-showcase-tab-writing')!
+    writing.focus()
+
+    await act(async () => writing.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true })))
+    const results = container.querySelector<HTMLButtonElement>('#home-showcase-tab-results')!
+    expect(document.activeElement).toBe(results)
+    expect(results.getAttribute('aria-selected')).toBe('true')
+
+    await act(async () => results.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true })))
+    const checks = container.querySelector<HTMLButtonElement>('#home-showcase-tab-checks')!
+    expect(document.activeElement).toBe(checks)
+    expect(checks.getAttribute('aria-selected')).toBe('true')
+
+    await act(async () => checks.dispatchEvent(new KeyboardEvent('keydown', { key: 'Home', bubbles: true })))
+    expect(document.activeElement).toBe(writing)
+    expect(writing.getAttribute('aria-selected')).toBe('true')
+
+    await act(async () => writing.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true })))
+    expect(document.activeElement).toBe(checks)
+    expect(checks.getAttribute('aria-selected')).toBe('true')
+  })
+})

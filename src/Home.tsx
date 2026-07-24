@@ -9,6 +9,7 @@ import {
 import type { WorkspaceRole } from './collaboration/workspaceService'
 import type { LocalProjectRecent } from './localProjectCatalogue'
 import { GettingStarted } from './GettingStarted'
+import { HomeShowcase } from './HomeShowcase'
 
 interface HomeProps {
   preferredWorkspaceId?: string
@@ -42,45 +43,6 @@ function activityLabel(draft: CatalogueDraft) {
   if (Number.isNaN(activity.getTime())) return createdLabel(draft.createdAt)
   return `Active ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(activity)}`
 }
-
-const homeFeatures = [
-  {
-    icon: 'document',
-    title: 'A manuscript, not a notebook',
-    detail: 'Write in a calm rendered page with sections, equations, footnotes, figures and tables. DraftMatter keeps the underlying Markdown or Quarto source portable.',
-    note: 'Automatic numbering and cross-references',
-  },
-  {
-    icon: 'book',
-    title: 'Citations in the flow',
-    detail: 'Search the web through Crossref, connect a local Zotero library, or import BibTeX, CSL JSON, RIS and EndNote records without leaving the draft.',
-    note: 'Formatted citations and references, automatically',
-  },
-  {
-    icon: 'code',
-    title: 'Results that stay reproducible',
-    detail: 'Run Python, R and Julia—even in the same document—and publish their figures, tables and named values directly into the paper.',
-    note: 'Freshness checks and runtime provenance',
-  },
-  {
-    icon: 'message',
-    title: 'Review without parallel copies',
-    detail: 'Track changes, anchor comments to the text, reply with attribution, and accept or reject suggestions without creating another “final” file.',
-    note: 'Original, review and clean final views',
-  },
-  {
-    icon: 'users',
-    title: 'Collaboration with boundaries',
-    detail: 'Co-author online with owner, editor, commenter and viewer roles. Work can converge after reconnecting, then return to the project as an explicit checkpoint.',
-    note: 'Optional service, including self-hosting',
-  },
-  {
-    icon: 'branch',
-    title: 'Plain text, real version control',
-    detail: 'Keep the manuscript, bibliography, code and data in one repository. Use DraftMatter’s rendered Git history or manage everything from your preferred IDE.',
-    note: 'Semantic diffs, checkpoints, branches and remotes',
-  },
-] as const
 
 function DraftRow({
   draft,
@@ -119,6 +81,23 @@ function SignedOutHome({
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [serviceUrl, setServiceUrl] = useState(session.serviceUrl || 'https://')
   const [accessToken, setAccessToken] = useState('')
+  const startWriting = () => {
+    if (desktopHost.available) {
+      onNewLocalDraft()
+      return
+    }
+    if (session.serviceUrl) {
+      void session.signIn()
+      return
+    }
+    onOpenExample()
+  }
+  const showProductPreview = () => {
+    const showcase = document.getElementById('home-showcase')
+    if (!showcase) return
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
+    showcase.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' })
+  }
 
   return (
     <main className="home-welcome">
@@ -131,77 +110,49 @@ function SignedOutHome({
       </header>
 
       <section className="home-hero" aria-labelledby="home-title">
-        <span className="home-kicker">The research writing workspace</span>
-        <h1 id="home-title">Write the paper. <span>Keep it reproducible.</span></h1>
-        <p>DraftMatter brings scholarly writing, citations, tracked review, live collaboration and executable results into one calm environment, without locking your work inside the app.</p>
+        <span className="home-kicker">A calm workspace for rigorous research</span>
+        <h1 id="home-title">Your paper should not be the least reproducible part of your research.</h1>
+        <p className="home-hero-support">Research writing, with the missing pieces built in.</p>
+        <p className="home-hero-summary">DraftMatter brings writing, citations, reproducible results, review, and collaboration into one focused workspace. Everything is available when needed and quiet when it is not.</p>
         <div className="home-hero-actions">
-          <button className="home-primary" onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}>
-            <Icon name="users" size={17} />
-            {session.state === 'signing-in' ? 'Opening sign-in…' : 'Sign in'}
+          <button className="home-primary" onClick={startWriting} disabled={!desktopHost.available && session.state === 'signing-in'}>
+            <Icon name="document" size={17} />
+            Start writing
           </button>
-          {desktopHost.available && <button onClick={onOpenLocalProject}><Icon name="folder" size={17} />Open local project</button>}
-          <button onClick={onOpenExample}><Icon name="spark" size={17} />Explore complete example</button>
+          <button onClick={showProductPreview}>
+            See how it works
+            <Icon name="arrowRight" size={17} />
+          </button>
         </div>
-        <ul className="home-hero-proof" aria-label="DraftMatter principles">
-          <li><Icon name="check" size={14} />Plain-text source</li>
-          <li><Icon name="check" size={14} />Local-first desktop</li>
-          <li><Icon name="check" size={14} />Python · R · Julia</li>
-          <li><Icon name="check" size={14} />Clean publication exports</li>
-        </ul>
         {session.error && <p className="home-account-error" role="alert">{session.error}</p>}
         {!session.serviceUrl && (
-          <p className="home-deployment-note">Online collaboration is not configured for this installation. Local projects and the complete example remain available.</p>
+          <p className="home-deployment-note">Online collaboration is not configured for this installation. Start writing opens an editable example in this browser.</p>
         )}
       </section>
 
-      <section className="home-positioning" aria-labelledby="home-positioning-title">
-        <div className="home-positioning-copy">
-          <span className="home-kicker">One research project</span>
-          <h2 id="home-positioning-title">Your paper should not be the least reproducible part of your research.</h2>
-          <p>Stop copying results out of notebooks, passing review files around, and fixing references by hand. DraftMatter keeps the readable manuscript at the center while the evidence behind it stays close.</p>
-        </div>
-        <div className="home-project-picture" aria-label="Code, data and references feed one portable rendered manuscript">
-          <div className="home-project-assets">
-            <span><Icon name="code" size={16} /><strong>analysis.py · model.R · figures.jl</strong><small>Executable research</small></span>
-            <span><Icon name="table" size={16} /><strong>data/</strong><small>Project inputs</small></span>
-            <span><Icon name="book" size={16} /><strong>references.bib</strong><small>Scholarly sources</small></span>
-          </div>
-          <Icon className="home-project-arrow" name="arrowRight" size={22} />
-          <div className="home-project-paper">
-            <span><Icon name="document" size={18} />paper.qmd</span>
-            <strong>One rendered manuscript</strong>
-            <small>Write · cite · compute · review</small>
-          </div>
-        </div>
-      </section>
+      <HomeShowcase />
 
-      <section className="home-feature-section" aria-labelledby="home-features-title">
+      <section className="home-principles" aria-labelledby="home-principles-title">
         <div className="home-section-intro">
-          <span className="home-kicker">Everything the paper needs</span>
-          <h2 id="home-features-title">Research writing, with the missing pieces built in.</h2>
-          <p>DraftMatter is designed for researchers who want a polished writing experience and a project that can still explain where every result came from.</p>
+          <span className="home-kicker">Designed around the paper</span>
+          <h2 id="home-principles-title">One workspace for the work around writing.</h2>
         </div>
-        <div className="home-feature-grid">
-          {homeFeatures.map((feature) => (
-            <article key={feature.title}>
-              <span className="home-feature-icon"><Icon name={feature.icon} size={20} /></span>
-              <h3>{feature.title}</h3>
-              <p>{feature.detail}</p>
-              <small><Icon name="check" size={13} />{feature.note}</small>
-            </article>
-          ))}
-        </div>
-      </section>
-
-      <section className="home-publication" aria-labelledby="home-publication-title">
-        <div>
-          <span className="home-kicker">From source to submission</span>
-          <h2 id="home-publication-title">The working project stays rich. The paper leaves clean.</h2>
-          <p>Publish the results and references—not the machinery behind them. Export clean Markdown, HTML, PDF or DOCX, or pass inert source to Pandoc and Quarto.</p>
-        </div>
-        <div className="home-publication-formats" aria-label="Publication features">
-          <span>Markdown</span><span>HTML</span><span>PDF</span><span>DOCX</span>
-          <small><Icon name="check" size={14} />Citations, cross-references and reproducible outputs included</small>
+        <div className="home-principle-grid">
+          <article>
+            <span><Icon name="document" size={19} /></span>
+            <h3>Focus on the manuscript.</h3>
+            <p>Write in a calm environment where the paper remains central.</p>
+          </article>
+          <article>
+            <span><Icon name="code" size={19} /></span>
+            <h3>Build reproducibility into the paper.</h3>
+            <p>Produce figures, tables, and computed values from code without switching tools.</p>
+          </article>
+          <article>
+            <span><Icon name="message" size={19} /></span>
+            <h3>Review without losing context.</h3>
+            <p>Comment, suggest changes, and collaborate alongside the manuscript.</p>
+          </article>
         </div>
       </section>
 
