@@ -94,6 +94,28 @@ test.describe('signed-out Home landing experience', () => {
     expect(readability.outline).toBeGreaterThanOrEqual(11)
   })
 
+  test('shows full reference details from the citation step on hover and focus', async ({ page }) => {
+    await page.goto('/')
+    await page.getByRole('tab', { name: /Citations/ }).click()
+    await expect(page.getByText('Hover over or focus the citation to inspect its reference.')).toBeVisible()
+
+    const citation = page.getByRole('button', { name: 'Reference details for Meyer and Okafor, 2025' })
+    await citation.hover()
+    const details = page.getByRole('tooltip')
+    await expect(details).toBeVisible()
+    await expect(details).toContainText('Canopy resilience following seasonal drought')
+    await expect(details).toContainText('Lena Meyer · Chidi Okafor')
+    await expect(details).toContainText('2025 · Journal of Canopy Ecology')
+    await expect(details).toContainText('@meyer2025')
+
+    await page.mouse.move(0, 0)
+    await expect(details).toHaveCount(0)
+    await citation.focus()
+    await expect(page.getByRole('tooltip')).toBeVisible()
+    await citation.press('Escape')
+    await expect(page.getByRole('tooltip')).toHaveCount(0)
+  })
+
   test('stacks at a mobile viewport without horizontal page overflow', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/')
@@ -117,5 +139,18 @@ test.describe('signed-out Home landing experience', () => {
     expect(measurements.columns).toBe(1)
     await expect(page.getByRole('tab', { name: /Results from code/ })).toBeVisible()
     await expect(page.locator('.home-workspace-demo')).toBeVisible()
+
+    await page.getByRole('tab', { name: /Citations/ }).click()
+    await page.getByRole('button', { name: 'Reference details for Meyer and Okafor, 2025' }).click()
+    await expect(page.getByRole('tooltip')).toBeVisible()
+    const citationOverflow = await page.evaluate(() => {
+      const surface = document.querySelector<HTMLElement>('.home-welcome')!
+      return {
+        document: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+        surface: surface.scrollWidth - surface.clientWidth,
+      }
+    })
+    expect(citationOverflow.document).toBeLessThanOrEqual(1)
+    expect(citationOverflow.surface).toBeLessThanOrEqual(1)
   })
 })

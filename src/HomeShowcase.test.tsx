@@ -98,4 +98,36 @@ describe('signed-out Home product showcase', () => {
     expect(container.querySelector('.home-demo-source-panel')).toBeNull()
     expect(container.querySelector<HTMLButtonElement>('[aria-label="View source for Table 1"]')?.disabled).toBe(true)
   })
+
+  it('reveals complete reference details on citation hover and keyboard focus', async () => {
+    const citation = container.querySelector<HTMLButtonElement>('[aria-label="Reference details for Meyer and Okafor, 2025"]')!
+    expect(citation.tabIndex).toBe(-1)
+    expect(citation.getAttribute('aria-disabled')).toBe('true')
+    expect(container.querySelector('[role="tooltip"]')).toBeNull()
+
+    await act(async () => container.querySelector<HTMLButtonElement>('#home-showcase-tab-citations')!.click())
+    expect(container.textContent).toContain('Hover over or focus the citation to inspect its reference.')
+    expect(citation.tabIndex).toBe(0)
+    expect(citation.getAttribute('aria-disabled')).toBe('false')
+
+    await act(async () => citation.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
+    const hoverDetails = container.querySelector<HTMLElement>('[role="tooltip"]')!
+    expect(citation.getAttribute('aria-expanded')).toBe('true')
+    expect(hoverDetails.textContent).toContain('Canopy resilience following seasonal drought')
+    expect(hoverDetails.textContent).toContain('Lena Meyer · Chidi Okafor')
+    expect(hoverDetails.textContent).toContain('2025 · Journal of Canopy Ecology')
+    expect(hoverDetails.textContent).toContain('@meyer2025')
+
+    await act(async () => citation.dispatchEvent(new MouseEvent('mouseout', { bubbles: true })))
+    expect(container.querySelector('[role="tooltip"]')).toBeNull()
+
+    await act(async () => citation.focus())
+    expect(container.querySelector('[role="tooltip"]')).not.toBeNull()
+    await act(async () => citation.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+    expect(container.querySelector('[role="tooltip"]')).toBeNull()
+
+    await act(async () => container.querySelector<HTMLButtonElement>('#home-showcase-tab-review')!.click())
+    expect(citation.tabIndex).toBe(-1)
+    expect(container.querySelector('[role="tooltip"]')).toBeNull()
+  })
 })

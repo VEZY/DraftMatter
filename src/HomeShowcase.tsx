@@ -86,6 +86,7 @@ function DemoSourcePanel({
 export function HomeShowcase() {
   const [activeFeature, setActiveFeature] = useState<HomeShowcaseFeatureId>('writing')
   const [openSource, setOpenSource] = useState<HomeDemoSource | null>(null)
+  const [citationDetailsOpen, setCitationDetailsOpen] = useState(false)
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
   const selected = homeShowcaseFeatures.find((feature) => feature.id === activeFeature) ?? homeShowcaseFeatures[0]
 
@@ -94,6 +95,7 @@ export function HomeShowcase() {
     if (!next) return
     setActiveFeature(next.id)
     if (next.id !== 'results') setOpenSource(null)
+    if (next.id !== 'citations') setCitationDetailsOpen(false)
     if (focus) tabs.current[index]?.focus()
   }
 
@@ -151,6 +153,12 @@ export function HomeShowcase() {
               <span className="home-showcase-tip">
                 <Icon name="code" size={13} />
                 Try “View source” on the figure or table.
+              </span>
+            )}
+            {activeFeature === 'citations' && (
+              <span className="home-showcase-tip">
+                <Icon name="book" size={13} />
+                Hover over or focus the citation to inspect its reference.
               </span>
             )}
           </div>
@@ -216,8 +224,47 @@ export function HomeShowcase() {
                     18.4%<small>computed</small>
                   </span>
                   {' '}above the dry-season baseline, consistent with earlier observations{' '}
-                  <span className={`home-demo-citation ${featureState(activeFeature, 'citations')}`} data-preview-feature="citations">
-                    (Meyer and Okafor, 2025)
+                  <span className="home-demo-citation-wrap">
+                    <button
+                      type="button"
+                      className={`home-demo-citation ${featureState(activeFeature, 'citations')}`}
+                      data-preview-feature="citations"
+                      aria-label="Reference details for Meyer and Okafor, 2025"
+                      aria-expanded={citationDetailsOpen}
+                      aria-controls="home-demo-citation-details"
+                      aria-disabled={activeFeature !== 'citations'}
+                      tabIndex={activeFeature === 'citations' ? 0 : -1}
+                      onMouseEnter={() => {
+                        if (activeFeature === 'citations') setCitationDetailsOpen(true)
+                      }}
+                      onMouseLeave={() => setCitationDetailsOpen(false)}
+                      onFocus={() => {
+                        if (activeFeature === 'citations') setCitationDetailsOpen(true)
+                      }}
+                      onBlur={() => setCitationDetailsOpen(false)}
+                      onClick={() => {
+                        if (activeFeature === 'citations') setCitationDetailsOpen(true)
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Escape') setCitationDetailsOpen(false)
+                      }}
+                    >
+                      (Meyer and Okafor, 2025)
+                    </button>
+                    {activeFeature === 'citations' && citationDetailsOpen && (
+                      <span id="home-demo-citation-details" className="home-demo-citation-card" role="tooltip">
+                        <span className="home-demo-citation-card-head">
+                          <span>B</span>
+                          <span><small>Project bibliography</small><strong>Meyer and Okafor, 2025</strong></span>
+                        </span>
+                        <strong>Canopy resilience following seasonal drought</strong>
+                        <span className="home-demo-citation-authors">Lena Meyer · Chidi Okafor</span>
+                        <span className="home-demo-citation-metadata">
+                          <span><span>Published</span><span>2025 · Journal of Canopy Ecology</span></span>
+                          <span><span>Citekey</span><span><code>@meyer2025</code></span></span>
+                        </span>
+                      </span>
+                    )}
                   </span>.
                 </p>
 
