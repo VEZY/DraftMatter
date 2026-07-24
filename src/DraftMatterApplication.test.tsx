@@ -42,7 +42,7 @@ describe('DraftMatter application entry', () => {
 
     expect(container.querySelector('[data-testid="editor"]')).toBeNull()
     expect(container.textContent).toContain('A calm workspace for rigorous research')
-    expect(container.querySelector('h1')?.textContent).toBe('Your paper should not be the least reproducible part of your research.')
+    expect(container.querySelector('h1')?.textContent).toBe('Your paper should be as reproducible as your research.')
     expect(container.textContent).toContain('Research writing, with the missing pieces built in.')
     expect(container.textContent).toContain('DraftMatter brings writing, citations, reproducible results, review, and collaboration into one focused workspace. Everything is available when needed and quiet when it is not.')
     expect(container.textContent).toContain('Start writing')
@@ -177,7 +177,7 @@ describe('DraftMatter application entry', () => {
     expect(container.textContent).toContain('Canopy recovery paper')
     expect(container.textContent).toContain('New draft')
     expect(container.querySelector('.home-showcase')).toBeNull()
-    expect(container.textContent).not.toContain('Your paper should not be the least reproducible part of your research.')
+    expect(container.textContent).not.toContain('Your paper should be as reproducible as your research.')
 
     await act(async () => root.unmount())
     container.remove()

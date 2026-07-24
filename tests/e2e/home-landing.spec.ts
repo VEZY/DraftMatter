@@ -13,7 +13,7 @@ test.describe('signed-out Home landing experience', () => {
     await page.goto('/')
 
     await expect(page.getByText('A calm workspace for rigorous research', { exact: true })).toBeVisible()
-    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your paper should not be the least reproducible part of your research.')
+    await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your paper should be as reproducible as your research.')
     await expect(page.getByText('Research writing, with the missing pieces built in.', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Start writing' })).toBeVisible()
 

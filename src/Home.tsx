@@ -116,7 +116,7 @@ function SignedOutHome({
 
       <section className="home-hero" aria-labelledby="home-title">
         <span className="home-kicker">A calm workspace for rigorous research</span>
-        <h1 id="home-title">Your paper should not be the least reproducible part of your research.</h1>
+        <h1 id="home-title">Your paper should be as reproducible as your research.</h1>
         <p className="home-hero-support">Research writing, with the missing pieces built in.</p>
         <p className="home-hero-summary">DraftMatter brings writing, citations, reproducible results, review, and collaboration into one focused workspace. Everything is available when needed and quiet when it is not.</p>
         <div className="home-hero-actions">
