@@ -9,7 +9,7 @@ import {
 import type { WorkspaceRole } from './collaboration/workspaceService'
 import type { LocalProjectRecent } from './localProjectCatalogue'
 import { HomeLearningGuide } from './HomeLearningGuide'
-import { HomeShowcase } from './HomeShowcase'
+import { HomeHeroPreview, HomeShowcase } from './HomeShowcase'
 
 interface HomeProps {
   preferredWorkspaceId?: string
@@ -115,21 +115,26 @@ function SignedOutHome({
       </header>
 
       <section className="home-hero" aria-labelledby="home-title">
-        <span className="home-kicker">A calm workspace for rigorous research</span>
-        <h1 id="home-title">Your paper should be as reproducible as your research.</h1>
-        <p className="home-hero-support">Research writing, with the missing pieces built in.</p>
-        <p className="home-hero-summary">DraftMatter brings writing, citations, reproducible results, review, and collaboration into one focused workspace. Everything is available when needed and quiet when it is not.</p>
-        <div className="home-hero-actions">
-          <button className="home-primary" onClick={startWriting} disabled={!desktopHost.available && session.state === 'signing-in'}>
-            <Icon name="document" size={17} />
-            Start writing
-          </button>
-          <button onClick={showProductPreview}>
-            See how it works
-            <Icon name="arrowRight" size={17} />
-          </button>
+        <div className="home-hero-layout">
+          <div className="home-hero-copy">
+            <span className="home-kicker">A calm workspace for rigorous research</span>
+            <h1 id="home-title">Your paper should be as reproducible as your research.</h1>
+            <p className="home-hero-support">Research writing, with the missing pieces built in.</p>
+            <p className="home-hero-summary">DraftMatter brings writing, citations, reproducible results, review, and collaboration into one focused workspace. Everything is available when needed and quiet when it is not.</p>
+            <div className="home-hero-actions">
+              <button className="home-primary" onClick={startWriting} disabled={!desktopHost.available && session.state === 'signing-in'}>
+                <Icon name="document" size={17} />
+                Start writing
+              </button>
+              <button onClick={showProductPreview}>
+                See how it works
+                <Icon name="arrowRight" size={17} />
+              </button>
+            </div>
+            {session.error && <p className="home-account-error" role="alert">{session.error}</p>}
+          </div>
+          <HomeHeroPreview />
         </div>
-        {session.error && <p className="home-account-error" role="alert">{session.error}</p>}
       </section>
 
       <HomeShowcase />

@@ -49,17 +49,29 @@ describe('DraftMatter application entry', () => {
     expect(container.textContent).toContain('See how it works')
     expect(container.textContent).toContain('Stay in the flow')
     expect(container.textContent).not.toContain('Keep reproducible results close to the writing.')
+    const hero = container.querySelector<HTMLElement>('.home-hero-layout')!
+    const heroCopy = hero.querySelector<HTMLElement>('.home-hero-copy')!
+    const heroPreview = hero.querySelector<HTMLElement>('.home-hero-preview')!
+    expect(heroCopy.compareDocumentPosition(heroPreview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(heroPreview.textContent).toContain('Reproducible figure')
+    expect(heroPreview.textContent).toContain('Focus mode')
+    expect(heroPreview.querySelector('.home-demo-outline')).toBeNull()
+    expect(heroPreview.querySelector('.home-demo-comment')).toBeNull()
+    expect(heroPreview.querySelector('button')).toBeNull()
     await act(async () => root.unmount())
     container.remove()
   })
 
-  it('scrolls the See how it works action to the guided showcase', async () => {
+  it.each([
+    { reducedMotion: false, behavior: 'smooth' },
+    { reducedMotion: true, behavior: 'auto' },
+  ] as const)('scrolls the See how it works action to the guided showcase with $behavior behavior', async ({ reducedMotion, behavior }) => {
     const scrollIntoView = vi.fn()
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
       value: scrollIntoView,
     })
-    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true })))
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: reducedMotion })))
     const container = document.createElement('div')
     document.body.append(container)
     const root = createRoot(container)
@@ -68,7 +80,7 @@ describe('DraftMatter application entry', () => {
     await act(async () => action.click())
 
     expect(container.querySelector('#home-showcase')).not.toBeNull()
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'start' })
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior, block: 'start' })
     await act(async () => root.unmount())
     container.remove()
   })

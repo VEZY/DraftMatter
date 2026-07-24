@@ -134,6 +134,188 @@ function DemoCodePanel() {
   )
 }
 
+function DemoTopbar({
+  activeFeature,
+  staticPreview = false,
+}: {
+  activeFeature: HomeShowcaseFeatureId
+  staticPreview?: boolean
+}) {
+  return (
+    <div className="home-demo-topbar">
+      <div className="home-demo-project">
+        <img src="/draftmatter-pencil-mark.svg" alt="" />
+        <span><strong>Canopy recovery study</strong><small>All changes saved</small></span>
+      </div>
+      {staticPreview ? (
+        <span className="home-hero-focus-status"><Icon name="focus" size={12} />Focus mode</span>
+      ) : (
+        <>
+          <div className={`home-demo-presence ${featureState(activeFeature, 'review')}`} data-preview-feature="review">
+            <span aria-label="Amira is viewing">AM</span>
+            <span aria-label="Jon is viewing">JL</span>
+            <small>2 here</small>
+          </div>
+          <div className={`home-demo-check-summary ${featureState(activeFeature, 'checks')}`} data-preview-feature="checks">
+            <Icon name="check" size={13} />
+            <span><strong>Checks</strong><small>1 issue</small></span>
+          </div>
+          <span className={`home-demo-export ${featureState(activeFeature, 'checks')}`} data-preview-feature="checks">
+            <Icon name="download" size={13} />Export
+          </span>
+        </>
+      )}
+    </div>
+  )
+}
+
+function DemoOutline({
+  current,
+  label = 'Manuscript outline',
+}: {
+  current: 'Introduction' | 'Results' | 'Discussion' | 'References' | null
+  label?: string
+}) {
+  return (
+    <aside className="home-demo-outline" aria-label={label}>
+      <span>Manuscript</span>
+      <ol>
+        <li><small>01</small>Abstract</li>
+        <li className={current === 'Introduction' ? 'is-current' : undefined}><small>02</small>Introduction</li>
+        <li><small>03</small>Methods</li>
+        <li className={current === 'Results' ? 'is-current' : undefined}><small>04</small>Results</li>
+        <li className={current === 'Discussion' ? 'is-current' : undefined}><small>05</small>Discussion</li>
+        <li className={current === 'References' ? 'is-current' : undefined}><small>06</small>References</li>
+      </ol>
+    </aside>
+  )
+}
+
+function DemoComment({ highlighted = false }: { highlighted?: boolean }) {
+  return (
+    <div className={`home-demo-comment ${highlighted ? 'is-preview-active' : ''}`} data-preview-feature="review">
+      <span>1</span>
+      <div><strong>Sofia Rossi</strong><small>Could we connect this result to Figure 1?</small></div>
+    </div>
+  )
+}
+
+function DemoResultsPaper({
+  interactive,
+  figureOnly = false,
+  openSource = null,
+  onToggleSource,
+}: {
+  interactive: boolean
+  figureOnly?: boolean
+  openSource?: HomeDemoSource | null
+  onToggleSource?: (source: HomeDemoSource) => void
+}) {
+  const resultTools = (source: HomeDemoSource, label: string, sourceId: string) => (
+    <div className="home-demo-result-tools" aria-label={interactive ? `Reproducible ${source} controls` : undefined}>
+      <span><Icon name="play" size={12} />Run result</span>
+      {interactive ? (
+        <button
+          type="button"
+          className="home-demo-source-toggle"
+          aria-expanded={openSource === source}
+          aria-controls={sourceId}
+          aria-label={`${openSource === source ? 'Close' : 'View'} source for ${label}`}
+          onClick={() => onToggleSource?.(source)}
+        >
+          <Icon name="code" size={12} />
+          {openSource === source ? 'Close source' : 'View source'}
+        </button>
+      ) : (
+        <span className="home-demo-source-linked"><Icon name="code" size={12} />Source linked</span>
+      )}
+    </div>
+  )
+
+  return (
+    <section className="is-preview-active" data-preview-feature="results">
+      <div className="home-demo-section-heading">
+        <small>04</small><h4>Results</h4>
+      </div>
+      <p>
+        Canopy cover increased steadily after rainfall returned. Irrigated plots separated from controls during the first three weeks and maintained the larger gain through week six (
+        <span className="home-demo-cross-reference" aria-label={interactive ? 'Automatic reference to Figure 1' : undefined}>Figure 1</span>).
+      </p>
+
+      <figure id={interactive ? 'home-demo-figure-1' : undefined} className="home-demo-figure is-preview-active">
+        <div className="home-demo-result-bar">
+          <span>Reproducible figure</span>
+          {resultTools('figure', 'Figure 1', 'home-demo-figure-source')}
+        </div>
+        {interactive && openSource === 'figure' && <DemoSourcePanel id="home-demo-figure-source" label="Python source for Figure 1" lines={figureSource} />}
+        <svg
+          viewBox="0 0 440 160"
+          role="img"
+          aria-label="Canopy recovery over six weeks for control and irrigated plots"
+        >
+          <title>Canopy recovery over six weeks for control and irrigated plots</title>
+          <g className="home-demo-chart-grid">
+            <path d="M38 20V132H420M38 104H420M38 76H420M38 48H420" />
+          </g>
+          <path className="home-demo-chart-control" d="M40 120 C100 116 120 103 170 96 S260 81 300 72 S370 61 416 57" />
+          <path className="home-demo-chart-treatment" d="M40 118 C80 106 120 83 170 68 S240 42 300 35 S370 26 416 24" />
+          <g className="home-demo-chart-points">
+            <circle cx="40" cy="118" r="3" /><circle cx="170" cy="68" r="3" /><circle cx="300" cy="35" r="3" /><circle cx="416" cy="24" r="3" />
+          </g>
+          <text x="38" y="150">0</text><text x="166" y="150">2</text><text x="296" y="150">4</text><text x="410" y="150">6 weeks</text>
+        </svg>
+        <figcaption><strong>Figure 1.</strong> Canopy recovery after rainfall resumed. Irrigated plots are shown in sage.</figcaption>
+      </figure>
+
+      {!figureOnly && (
+        <>
+          <p>
+            At the end of the observation period, irrigated plots reached{' '}
+            <span className="home-demo-computed">
+              18.4%<small>computed</small>
+            </span>
+            {' '}above the dry-season baseline, compared with 8.7% in control plots. Treatment estimates and confidence intervals are summarized in{' '}
+            <span className="home-demo-cross-reference" aria-label={interactive ? 'Automatic reference to Table 1' : undefined}>Table 1</span>.
+          </p>
+
+          <div id={interactive ? 'home-demo-table-1' : undefined} className="home-demo-table-wrap is-preview-active">
+            <div className="home-demo-table-title"><strong>Table 1.</strong> Recovery estimates by treatment</div>
+            <div className="home-demo-result-bar">
+              <span>Reproducible table</span>
+              {resultTools('table', 'Table 1', 'home-demo-table-source')}
+            </div>
+            {interactive && openSource === 'table' && <DemoSourcePanel id="home-demo-table-source" label="Python source for Table 1" lines={tableSource} />}
+            <table>
+              <thead><tr><th>Treatment</th><th>Change</th><th>95% CI</th></tr></thead>
+              <tbody>
+                <tr><td>Control</td><td>8.7%</td><td>6.1 to 11.2</td></tr>
+                <tr><td>Irrigated</td><td>18.4%</td><td>15.8 to 21.0</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </>
+      )}
+    </section>
+  )
+}
+
+export function HomeHeroPreview() {
+  return (
+    <div className="home-hero-preview" role="group" aria-label="DraftMatter Results from code manuscript glimpse">
+      <div className="home-hero-product-preview" data-active-feature="results">
+        <DemoTopbar activeFeature="results" staticPreview />
+        <div className="home-demo-body home-hero-focus-canvas">
+          <article className="home-demo-paper" aria-label="Results manuscript glimpse">
+            <div className="home-demo-paper-view" data-document-view="results">
+              <DemoResultsPaper interactive={false} figureOnly />
+            </div>
+          </article>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export function HomeShowcase() {
   const [activeFeature, setActiveFeature] = useState<HomeShowcaseFeatureId>('writing')
   const [openSource, setOpenSource] = useState<HomeDemoSource | null>(null)
@@ -229,37 +411,10 @@ export function HomeShowcase() {
             <Icon name="eye" size={13} />
             Guided preview
           </div>
-          <div className="home-demo-topbar">
-            <div className="home-demo-project">
-              <img src="/draftmatter-pencil-mark.svg" alt="" />
-              <span><strong>Canopy recovery study</strong><small>All changes saved</small></span>
-            </div>
-            <div className={`home-demo-presence ${featureState(activeFeature, 'review')}`} data-preview-feature="review">
-              <span aria-label="Amira is viewing">AM</span>
-              <span aria-label="Jon is viewing">JL</span>
-              <small>2 here</small>
-            </div>
-            <div className={`home-demo-check-summary ${featureState(activeFeature, 'checks')}`} data-preview-feature="checks">
-              <Icon name="check" size={13} />
-              <span><strong>Checks</strong><small>1 issue</small></span>
-            </div>
-            <span className={`home-demo-export ${featureState(activeFeature, 'checks')}`} data-preview-feature="checks">
-              <Icon name="download" size={13} />Export
-            </span>
-          </div>
+          <DemoTopbar activeFeature={activeFeature} />
 
           <div className="home-demo-body">
-            <aside className="home-demo-outline" aria-label="Manuscript outline">
-              <span>Manuscript</span>
-              <ol>
-                <li><small>01</small>Abstract</li>
-                <li className={outlineSection === 'Introduction' ? 'is-current' : undefined}><small>02</small>Introduction</li>
-                <li><small>03</small>Methods</li>
-                <li className={outlineSection === 'Results' ? 'is-current' : undefined}><small>04</small>Results</li>
-                <li className={outlineSection === 'Discussion' ? 'is-current' : undefined}><small>05</small>Discussion</li>
-                <li className={outlineSection === 'References' ? 'is-current' : undefined}><small>06</small>References</li>
-              </ol>
-            </aside>
+            <DemoOutline current={outlineSection} />
 
             <article className="home-demo-paper" aria-label="Fictional manuscript preview" aria-live="polite">
               <div key={activeFeature} className="home-demo-paper-view" data-document-view={activeFeature}>
@@ -307,85 +462,11 @@ export function HomeShowcase() {
                 )}
 
                 {activeFeature === 'results' && (
-                  <section className="is-preview-active" data-preview-feature="results">
-                    <div className="home-demo-section-heading">
-                      <small>04</small><h4>Results</h4>
-                    </div>
-                    <p>
-                      Canopy cover increased steadily after rainfall returned. Irrigated plots separated from controls during the first three weeks and maintained the larger gain through week six (<span className="home-demo-cross-reference" aria-label="Automatic reference to Figure 1">Figure 1</span>).
-                    </p>
-
-                    <figure id="home-demo-figure-1" className="home-demo-figure is-preview-active">
-                      <div className="home-demo-result-bar">
-                        <span>Reproducible figure</span>
-                        <div className="home-demo-result-tools" aria-label="Reproducible figure controls">
-                          <span><Icon name="play" size={12} />Run result</span>
-                          <button
-                            type="button"
-                            className="home-demo-source-toggle"
-                            aria-expanded={openSource === 'figure'}
-                            aria-controls="home-demo-figure-source"
-                            aria-label={`${openSource === 'figure' ? 'Close' : 'View'} source for Figure 1`}
-                            onClick={() => setOpenSource((current) => current === 'figure' ? null : 'figure')}
-                          >
-                            <Icon name="code" size={12} />
-                            {openSource === 'figure' ? 'Close source' : 'View source'}
-                          </button>
-                        </div>
-                      </div>
-                      {openSource === 'figure' && <DemoSourcePanel id="home-demo-figure-source" label="Python source for Figure 1" lines={figureSource} />}
-                      <svg viewBox="0 0 440 160" role="img" aria-labelledby="home-demo-chart-title">
-                        <title id="home-demo-chart-title">Canopy recovery over six weeks for control and irrigated plots</title>
-                        <g className="home-demo-chart-grid">
-                          <path d="M38 20V132H420M38 104H420M38 76H420M38 48H420" />
-                        </g>
-                        <path className="home-demo-chart-control" d="M40 120 C100 116 120 103 170 96 S260 81 300 72 S370 61 416 57" />
-                        <path className="home-demo-chart-treatment" d="M40 118 C80 106 120 83 170 68 S240 42 300 35 S370 26 416 24" />
-                        <g className="home-demo-chart-points">
-                          <circle cx="40" cy="118" r="3" /><circle cx="170" cy="68" r="3" /><circle cx="300" cy="35" r="3" /><circle cx="416" cy="24" r="3" />
-                        </g>
-                        <text x="38" y="150">0</text><text x="166" y="150">2</text><text x="296" y="150">4</text><text x="410" y="150">6 weeks</text>
-                      </svg>
-                      <figcaption><strong>Figure 1.</strong> Canopy recovery after rainfall resumed. Irrigated plots are shown in sage.</figcaption>
-                    </figure>
-
-                    <p>
-                      At the end of the observation period, irrigated plots reached{' '}
-                      <span className="home-demo-computed">
-                        18.4%<small>computed</small>
-                      </span>
-                      {' '}above the dry-season baseline, compared with 8.7% in control plots. Treatment estimates and confidence intervals are summarized in <span className="home-demo-cross-reference" aria-label="Automatic reference to Table 1">Table 1</span>.
-                    </p>
-
-                    <div id="home-demo-table-1" className="home-demo-table-wrap is-preview-active">
-                      <div className="home-demo-table-title"><strong>Table 1.</strong> Recovery estimates by treatment</div>
-                      <div className="home-demo-result-bar">
-                        <span>Reproducible table</span>
-                        <div className="home-demo-result-tools" aria-label="Reproducible table controls">
-                          <span><Icon name="play" size={12} />Run result</span>
-                          <button
-                            type="button"
-                            className="home-demo-source-toggle"
-                            aria-expanded={openSource === 'table'}
-                            aria-controls="home-demo-table-source"
-                            aria-label={`${openSource === 'table' ? 'Close' : 'View'} source for Table 1`}
-                            onClick={() => setOpenSource((current) => current === 'table' ? null : 'table')}
-                          >
-                            <Icon name="code" size={12} />
-                            {openSource === 'table' ? 'Close source' : 'View source'}
-                          </button>
-                        </div>
-                      </div>
-                      {openSource === 'table' && <DemoSourcePanel id="home-demo-table-source" label="Python source for Table 1" lines={tableSource} />}
-                      <table>
-                        <thead><tr><th>Treatment</th><th>Change</th><th>95% CI</th></tr></thead>
-                        <tbody>
-                          <tr><td>Control</td><td>8.7%</td><td>6.1 to 11.2</td></tr>
-                          <tr><td>Irrigated</td><td>18.4%</td><td>15.8 to 21.0</td></tr>
-                        </tbody>
-                      </table>
-                    </div>
-                  </section>
+                  <DemoResultsPaper
+                    interactive
+                    openSource={openSource}
+                    onToggleSource={(source) => setOpenSource((current) => current === source ? null : source)}
+                  />
                 )}
 
                 {activeFeature === 'citations' && (
@@ -497,10 +578,7 @@ export function HomeShowcase() {
             </article>
 
             <aside className="home-demo-side" aria-label="Review and project status">
-              <div className={`home-demo-comment ${featureState(activeFeature, 'review')}`} data-preview-feature="review">
-                <span>1</span>
-                <div><strong>Sofia Rossi</strong><small>Could we connect this result to Figure 1?</small></div>
-              </div>
+              <DemoComment highlighted={activeFeature === 'review'} />
               <div className={`home-demo-checks ${featureState(activeFeature, 'checks')}`} data-preview-feature="checks">
                 <div><Icon name="check" size={14} /><strong>Project checks</strong></div>
                 <ul>

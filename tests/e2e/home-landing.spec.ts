@@ -10,12 +10,37 @@ const features = [
 
 test.describe('signed-out Home landing experience', () => {
   test('presents the approved story and scrolls to a usable guided preview', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/')
 
     await expect(page.getByText('A calm workspace for rigorous research', { exact: true })).toBeVisible()
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your paper should be as reproducible as your research.')
     await expect(page.getByText('Research writing, with the missing pieces built in.', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Start writing' })).toBeVisible()
+
+    const hero = page.locator('.home-hero-layout')
+    const heroPreview = hero.locator('.home-hero-product-preview')
+    await expect(heroPreview).toBeVisible()
+    await expect(heroPreview.getByRole('heading', { name: 'Results' })).toBeVisible()
+    await expect(heroPreview.getByText('Focus mode', { exact: true })).toBeVisible()
+    await expect(heroPreview.getByText('Reproducible figure', { exact: true })).toBeVisible()
+    await expect(heroPreview.locator('.home-demo-outline, .home-demo-comment, .home-demo-presence')).toHaveCount(0)
+    await expect(heroPreview.locator('button, [tabindex], [id], [aria-controls]')).toHaveCount(0)
+    const heroLayout = await hero.evaluate((layout) => {
+      const preview = layout.querySelector<HTMLElement>('.home-hero-preview')!.getBoundingClientRect()
+      const copy = layout.querySelector<HTMLElement>('.home-hero-copy')!.getBoundingClientRect()
+      const bounds = layout.getBoundingClientRect()
+      return {
+        previewShare: preview.width / bounds.width,
+        previewBottom: preview.bottom,
+        previewBeforeCopy: preview.right < copy.left,
+        viewportHeight: window.innerHeight,
+      }
+    })
+    expect(heroLayout.previewShare).toBeGreaterThanOrEqual(.42)
+    expect(heroLayout.previewShare).toBeLessThanOrEqual(.46)
+    expect(heroLayout.previewBottom).toBeLessThanOrEqual(heroLayout.viewportHeight)
+    expect(heroLayout.previewBeforeCopy).toBe(true)
 
     await page.getByRole('button', { name: 'See how it works' }).click()
     const surface = page.locator('.home-welcome')
@@ -41,6 +66,30 @@ test.describe('signed-out Home landing experience', () => {
     await expect(learning).not.toContainText('steps complete')
   })
 
+  test('keeps a balanced two-column hero at an intermediate width', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 })
+    await page.goto('/')
+
+    const layout = page.locator('.home-hero-layout')
+    const measurements = await layout.evaluate((element) => {
+      const preview = element.querySelector<HTMLElement>('.home-hero-preview')!.getBoundingClientRect()
+      const copy = element.querySelector<HTMLElement>('.home-hero-copy')!.getBoundingClientRect()
+      const bounds = element.getBoundingClientRect()
+      return {
+        previewShare: preview.width / bounds.width,
+        previewBeforeCopy: preview.right < copy.left,
+        previewBottom: preview.bottom,
+        viewportHeight: window.innerHeight,
+      }
+    })
+
+    expect(measurements.previewShare).toBeGreaterThanOrEqual(.4)
+    expect(measurements.previewShare).toBeLessThanOrEqual(.47)
+    expect(measurements.previewBeforeCopy).toBe(true)
+    expect(measurements.previewBottom).toBeLessThanOrEqual(measurements.viewportHeight)
+    await expect(layout.locator('.home-hero-product-preview')).toBeVisible()
+  })
+
   test('keeps one workspace while every feature reveals its concrete description and emphasis', async ({ page }) => {
     await page.goto('/')
     const demo = page.locator('.home-workspace-demo')
@@ -60,7 +109,7 @@ test.describe('signed-out Home landing experience', () => {
 
   test('uses focused document excerpts instead of combining distant sections on one page', async ({ page }) => {
     await page.goto('/')
-    const paper = page.locator('.home-demo-paper')
+    const paper = page.locator('.home-workspace-demo .home-demo-paper')
 
     await expect(paper.getByText('Canopy recovery after seasonal drought')).toBeVisible()
     await expect(paper.getByText('Figure 1.')).toHaveCount(0)
@@ -130,10 +179,10 @@ test.describe('signed-out Home landing experience', () => {
       const showcase = document.querySelector<HTMLElement>('.home-showcase')!
       return {
         outerGutter: window.innerWidth - showcase.getBoundingClientRect().width,
-        manuscript: size('.home-demo-paper section > p'),
-        source: size('.home-demo-source-panel li'),
-        table: size('.home-demo-table-wrap table'),
-        outline: size('.home-demo-outline li'),
+        manuscript: size('.home-workspace-demo .home-demo-paper section > p'),
+        source: size('.home-workspace-demo .home-demo-source-panel li'),
+        table: size('.home-workspace-demo .home-demo-table-wrap table'),
+        outline: size('.home-workspace-demo .home-demo-outline li'),
       }
     })
     expect(readability.outerGutter).toBeLessThanOrEqual(26)
@@ -185,6 +234,22 @@ test.describe('signed-out Home landing experience', () => {
   test('stacks at a mobile viewport without horizontal page overflow', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.goto('/')
+    const mobileHeroLayout = await page.locator('.home-hero-layout').evaluate((layout) => {
+      const copy = layout.querySelector<HTMLElement>('.home-hero-copy')!.getBoundingClientRect()
+      const actions = layout.querySelector<HTMLElement>('.home-hero-actions')!.getBoundingClientRect()
+      const preview = layout.querySelector<HTMLElement>('.home-hero-preview')!.getBoundingClientRect()
+      return {
+        copyBeforePreview: copy.bottom < preview.top,
+        previewAfterActions: actions.bottom < preview.top,
+        previewWidth: preview.width,
+        viewportWidth: window.innerWidth,
+      }
+    })
+    expect(mobileHeroLayout.copyBeforePreview).toBe(true)
+    expect(mobileHeroLayout.previewAfterActions).toBe(true)
+    expect(mobileHeroLayout.previewWidth).toBeLessThanOrEqual(mobileHeroLayout.viewportWidth - 30)
+    await expect(page.locator('.home-hero-product-preview').getByText('Reproducible figure', { exact: true })).toBeVisible()
+
     await page.getByRole('tab', { name: /Results from code/ }).click()
     await page.getByRole('button', { name: 'View source for Figure 1' }).click()
     await expect(page.getByRole('list', { name: 'Python source for Figure 1' })).toBeVisible()
