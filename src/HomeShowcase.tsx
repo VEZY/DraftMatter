@@ -58,6 +58,18 @@ const tableSource = [
   ').reset_index()',
 ]
 
+const homeDemoDocumentViews: Record<HomeShowcaseFeatureId, {
+  context: string
+  location: string
+  outlineSection: 'Introduction' | 'Results' | 'Discussion' | 'References' | null
+}> = {
+  writing: { context: 'Page 2 of 8', location: 'Introduction', outlineSection: 'Introduction' },
+  results: { context: 'Page 5 of 8', location: 'Results', outlineSection: 'Results' },
+  citations: { context: 'Linked view', location: 'Citation → References', outlineSection: 'References' },
+  review: { context: 'Page 6 of 8', location: 'Discussion', outlineSection: 'Discussion' },
+  checks: { context: 'Whole manuscript', location: 'Preflight review', outlineSection: null },
+}
+
 function DemoSourcePanel({
   id,
   label,
@@ -89,6 +101,7 @@ export function HomeShowcase() {
   const [citationDetailsOpen, setCitationDetailsOpen] = useState(false)
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
   const selected = homeShowcaseFeatures.find((feature) => feature.id === activeFeature) ?? homeShowcaseFeatures[0]
+  const documentView = homeDemoDocumentViews[activeFeature]
 
   const selectTab = (index: number, focus = false) => {
     const next = homeShowcaseFeatures[index]
@@ -193,170 +206,231 @@ export function HomeShowcase() {
           </div>
 
           <div className="home-demo-body">
-            <aside className={`home-demo-outline ${featureState(activeFeature, 'writing')}`} data-preview-feature="writing" aria-label="Manuscript outline">
+            <aside className="home-demo-outline" aria-label="Manuscript outline">
               <span>Manuscript</span>
               <ol>
                 <li><small>01</small>Abstract</li>
-                <li><small>02</small>Introduction</li>
+                <li className={documentView.outlineSection === 'Introduction' ? 'is-current' : undefined}><small>02</small>Introduction</li>
                 <li><small>03</small>Methods</li>
-                <li className={activeFeature === 'citations' ? undefined : 'is-current'}><small>04</small>Results</li>
-                <li><small>05</small>Discussion</li>
-                <li className={activeFeature === 'citations' ? 'is-current' : undefined}><small>06</small>References</li>
+                <li className={documentView.outlineSection === 'Results' ? 'is-current' : undefined}><small>04</small>Results</li>
+                <li className={documentView.outlineSection === 'Discussion' ? 'is-current' : undefined}><small>05</small>Discussion</li>
+                <li className={documentView.outlineSection === 'References' ? 'is-current' : undefined}><small>06</small>References</li>
               </ol>
             </aside>
 
-            <article className="home-demo-paper" aria-label="Fictional manuscript preview">
-              <header className={featureState(activeFeature, 'writing')} data-preview-feature="writing">
-                <span>RESEARCH ARTICLE</span>
-                <h3>Canopy recovery after seasonal drought</h3>
-                <p>Amira Mensah · Jon Lee · Sofia Rossi</p>
-              </header>
+            <article className="home-demo-paper" aria-label="Fictional manuscript preview" aria-live="polite">
+              <div className="home-demo-document-location">
+                <span>{documentView.context}</span>
+                <strong>{documentView.location}</strong>
+              </div>
 
-              <section>
-                <div className={`home-demo-section-heading ${featureState(activeFeature, 'writing')}`} data-preview-feature="writing">
-                  <small>04</small><h4>Results</h4>
-                </div>
-                <p className={featureState(activeFeature, 'writing')} data-preview-feature="writing">
-                  Canopy cover recovered steadily during the six weeks after rainfall returned. The largest gains occurred in the first three weeks.
-                </p>
-                <p>
-                  Recovery reached{' '}
-                  <span className={`home-demo-computed ${featureState(activeFeature, 'results')}`} data-preview-feature="results">
-                    18.4%<small>computed</small>
-                  </span>
-                  {' '}above the dry-season baseline, consistent with earlier observations{' '}
-                  <span className="home-demo-citation-wrap">
-                    <button
-                      type="button"
-                      className={`home-demo-citation ${featureState(activeFeature, 'citations')}`}
-                      data-preview-feature="citations"
-                      aria-label="Reference details for Meyer and Okafor, 2025"
-                      aria-expanded={citationDetailsOpen}
-                      aria-controls="home-demo-citation-details"
-                      aria-disabled={activeFeature !== 'citations'}
-                      tabIndex={activeFeature === 'citations' ? 0 : -1}
-                      onMouseEnter={() => {
-                        if (activeFeature === 'citations') setCitationDetailsOpen(true)
-                      }}
-                      onMouseLeave={() => setCitationDetailsOpen(false)}
-                      onFocus={() => {
-                        if (activeFeature === 'citations') setCitationDetailsOpen(true)
-                      }}
-                      onBlur={() => setCitationDetailsOpen(false)}
-                      onClick={() => {
-                        if (activeFeature === 'citations') setCitationDetailsOpen(true)
-                      }}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Escape') setCitationDetailsOpen(false)
-                      }}
-                    >
-                      (Meyer and Okafor, 2025)
-                    </button>
-                    {activeFeature === 'citations' && citationDetailsOpen && (
-                      <span id="home-demo-citation-details" className="home-demo-citation-card" role="tooltip">
-                        <span className="home-demo-citation-card-head">
-                          <span>B</span>
-                          <span><small>Project bibliography</small><strong>Meyer and Okafor, 2025</strong></span>
-                        </span>
-                        <strong>Canopy resilience following seasonal drought</strong>
-                        <span className="home-demo-citation-authors">Lena Meyer · Chidi Okafor</span>
-                        <span className="home-demo-citation-metadata">
-                          <span><span>Published</span><span>2025 · Journal of Canopy Ecology</span></span>
-                          <span><span>Citekey</span><span><code>@meyer2025</code></span></span>
-                        </span>
+              <div key={activeFeature} className="home-demo-paper-view" data-document-view={activeFeature}>
+                {activeFeature === 'writing' && (
+                  <>
+                    <header className="is-preview-active" data-preview-feature="writing">
+                      <span>RESEARCH ARTICLE</span>
+                      <h3>Canopy recovery after seasonal drought</h3>
+                      <p>Amira Mensah · Jon Lee · Sofia Rossi</p>
+                    </header>
+                    <section className="is-preview-active" data-preview-feature="writing">
+                      <div className="home-demo-section-heading">
+                        <small>02</small><h4>Introduction</h4>
+                      </div>
+                      <p>
+                        Seasonal drought increasingly shapes the recovery of tropical canopies. Understanding how quickly leaf cover returns can help distinguish short-term stress from lasting structural change.
+                      </p>
+                      <p>
+                        Here, we compare irrigated and control plots during the six weeks after rainfall resumed. We combine field observations with reproducible analyses to keep each reported result connected to its evidence.
+                      </p>
+                      <p className="home-demo-writing-line">
+                        Our objective was to quantify the timing and magnitude of canopy recovery.<span aria-hidden="true" />
+                      </p>
+                    </section>
+                  </>
+                )}
+
+                {activeFeature === 'results' && (
+                  <section className="is-preview-active" data-preview-feature="results">
+                    <div className="home-demo-section-heading">
+                      <small>04</small><h4>Results</h4>
+                    </div>
+                    <p>
+                      Recovery reached{' '}
+                      <span className="home-demo-computed">
+                        18.4%<small>computed</small>
                       </span>
-                    )}
-                  </span>.
-                </p>
+                      {' '}above the dry-season baseline. The largest gains occurred during the first three weeks.
+                    </p>
 
-                <figure className={`home-demo-figure ${featureState(activeFeature, 'results')}`} data-preview-feature="results">
-                  <div className="home-demo-result-bar">
-                    <span>Reproducible figure</span>
-                    <div className="home-demo-result-tools" aria-label="Reproducible figure controls">
-                      <span><Icon name="play" size={12} />Run result</span>
-                      {activeFeature === 'results' && openSource === null && <small className="home-demo-source-cue">Try this</small>}
-                      <button
-                        type="button"
-                        className="home-demo-source-toggle"
-                        aria-expanded={openSource === 'figure'}
-                        aria-controls="home-demo-figure-source"
-                        aria-label={`${openSource === 'figure' ? 'Close' : 'View'} source for Figure 1`}
-                        disabled={activeFeature !== 'results'}
-                        onClick={() => setOpenSource((current) => current === 'figure' ? null : 'figure')}
-                      >
-                        <Icon name="code" size={12} />
-                        {openSource === 'figure' ? 'Close source' : 'View source'}
-                      </button>
+                    <figure className="home-demo-figure is-preview-active">
+                      <div className="home-demo-result-bar">
+                        <span>Reproducible figure</span>
+                        <div className="home-demo-result-tools" aria-label="Reproducible figure controls">
+                          <span><Icon name="play" size={12} />Run result</span>
+                          {openSource === null && <small className="home-demo-source-cue">Try this</small>}
+                          <button
+                            type="button"
+                            className="home-demo-source-toggle"
+                            aria-expanded={openSource === 'figure'}
+                            aria-controls="home-demo-figure-source"
+                            aria-label={`${openSource === 'figure' ? 'Close' : 'View'} source for Figure 1`}
+                            onClick={() => setOpenSource((current) => current === 'figure' ? null : 'figure')}
+                          >
+                            <Icon name="code" size={12} />
+                            {openSource === 'figure' ? 'Close source' : 'View source'}
+                          </button>
+                        </div>
+                      </div>
+                      {openSource === 'figure' && <DemoSourcePanel id="home-demo-figure-source" label="Python source for Figure 1" lines={figureSource} />}
+                      <svg viewBox="0 0 440 160" role="img" aria-labelledby="home-demo-chart-title">
+                        <title id="home-demo-chart-title">Canopy recovery over six weeks for control and irrigated plots</title>
+                        <g className="home-demo-chart-grid">
+                          <path d="M38 20V132H420M38 104H420M38 76H420M38 48H420" />
+                        </g>
+                        <path className="home-demo-chart-control" d="M40 120 C100 116 120 103 170 96 S260 81 300 72 S370 61 416 57" />
+                        <path className="home-demo-chart-treatment" d="M40 118 C80 106 120 83 170 68 S240 42 300 35 S370 26 416 24" />
+                        <g className="home-demo-chart-points">
+                          <circle cx="40" cy="118" r="3" /><circle cx="170" cy="68" r="3" /><circle cx="300" cy="35" r="3" /><circle cx="416" cy="24" r="3" />
+                        </g>
+                        <text x="38" y="150">0</text><text x="166" y="150">2</text><text x="296" y="150">4</text><text x="410" y="150">6 weeks</text>
+                      </svg>
+                      <figcaption><strong>Figure 1.</strong> Canopy recovery after rainfall resumed. Irrigated plots are shown in sage.</figcaption>
+                    </figure>
+
+                    <div className="home-demo-table-wrap is-preview-active">
+                      <div className="home-demo-table-title"><strong>Table 1.</strong> Recovery estimates by treatment</div>
+                      <div className="home-demo-result-bar">
+                        <span>Reproducible table</span>
+                        <div className="home-demo-result-tools" aria-label="Reproducible table controls">
+                          <span><Icon name="play" size={12} />Run result</span>
+                          <button
+                            type="button"
+                            className="home-demo-source-toggle"
+                            aria-expanded={openSource === 'table'}
+                            aria-controls="home-demo-table-source"
+                            aria-label={`${openSource === 'table' ? 'Close' : 'View'} source for Table 1`}
+                            onClick={() => setOpenSource((current) => current === 'table' ? null : 'table')}
+                          >
+                            <Icon name="code" size={12} />
+                            {openSource === 'table' ? 'Close source' : 'View source'}
+                          </button>
+                        </div>
+                      </div>
+                      {openSource === 'table' && <DemoSourcePanel id="home-demo-table-source" label="Python source for Table 1" lines={tableSource} />}
+                      <table>
+                        <thead><tr><th>Treatment</th><th>Change</th><th>95% CI</th></tr></thead>
+                        <tbody>
+                          <tr><td>Control</td><td>8.7%</td><td>6.1 to 11.2</td></tr>
+                          <tr><td>Irrigated</td><td>18.4%</td><td>15.8 to 21.0</td></tr>
+                        </tbody>
+                      </table>
                     </div>
-                  </div>
-                  {openSource === 'figure' && <DemoSourcePanel id="home-demo-figure-source" label="Python source for Figure 1" lines={figureSource} />}
-                  <svg viewBox="0 0 440 160" role="img" aria-labelledby="home-demo-chart-title">
-                    <title id="home-demo-chart-title">Canopy recovery over six weeks for control and irrigated plots</title>
-                    <g className="home-demo-chart-grid">
-                      <path d="M38 20V132H420M38 104H420M38 76H420M38 48H420" />
-                    </g>
-                    <path className="home-demo-chart-control" d="M40 120 C100 116 120 103 170 96 S260 81 300 72 S370 61 416 57" />
-                    <path className="home-demo-chart-treatment" d="M40 118 C80 106 120 83 170 68 S240 42 300 35 S370 26 416 24" />
-                    <g className="home-demo-chart-points">
-                      <circle cx="40" cy="118" r="3" /><circle cx="170" cy="68" r="3" /><circle cx="300" cy="35" r="3" /><circle cx="416" cy="24" r="3" />
-                    </g>
-                    <text x="38" y="150">0</text><text x="166" y="150">2</text><text x="296" y="150">4</text><text x="410" y="150">6 weeks</text>
-                  </svg>
-                  <figcaption><strong>Figure 1.</strong> Canopy recovery after rainfall resumed. Irrigated plots are shown in sage.</figcaption>
-                </figure>
+                  </section>
+                )}
 
-                <div className={`home-demo-table-wrap ${featureState(activeFeature, 'results')}`} data-preview-feature="results">
-                  <div className="home-demo-table-title"><strong>Table 1.</strong> Recovery estimates by treatment</div>
-                  <div className="home-demo-result-bar">
-                    <span>Reproducible table</span>
-                    <div className="home-demo-result-tools" aria-label="Reproducible table controls">
-                      <span><Icon name="play" size={12} />Run result</span>
-                      <button
-                        type="button"
-                        className="home-demo-source-toggle"
-                        aria-expanded={openSource === 'table'}
-                        aria-controls="home-demo-table-source"
-                        aria-label={`${openSource === 'table' ? 'Close' : 'View'} source for Table 1`}
-                        disabled={activeFeature !== 'results'}
-                        onClick={() => setOpenSource((current) => current === 'table' ? null : 'table')}
-                      >
-                        <Icon name="code" size={12} />
-                        {openSource === 'table' ? 'Close source' : 'View source'}
-                      </button>
+                {activeFeature === 'citations' && (
+                  <div className="is-preview-active" data-preview-feature="citations">
+                    <section>
+                      <div className="home-demo-section-heading">
+                        <small>04</small><h4>Results</h4>
+                      </div>
+                      <p>
+                        Recovery remained strongest in irrigated plots, consistent with earlier observations{' '}
+                        <span className="home-demo-citation-wrap">
+                          <button
+                            type="button"
+                            className="home-demo-citation is-preview-active"
+                            aria-label="Reference details for Meyer and Okafor, 2025"
+                            aria-expanded={citationDetailsOpen}
+                            aria-controls="home-demo-citation-details"
+                            onMouseEnter={() => setCitationDetailsOpen(true)}
+                            onMouseLeave={() => setCitationDetailsOpen(false)}
+                            onFocus={() => setCitationDetailsOpen(true)}
+                            onBlur={() => setCitationDetailsOpen(false)}
+                            onClick={() => setCitationDetailsOpen(true)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Escape') setCitationDetailsOpen(false)
+                            }}
+                          >
+                            (Meyer and Okafor, 2025)
+                          </button>
+                          {citationDetailsOpen && (
+                            <span id="home-demo-citation-details" className="home-demo-citation-card" role="tooltip">
+                              <span className="home-demo-citation-card-head">
+                                <span>B</span>
+                                <span><small>Project bibliography</small><strong>Meyer and Okafor, 2025</strong></span>
+                              </span>
+                              <strong>Canopy resilience following seasonal drought</strong>
+                              <span className="home-demo-citation-authors">Lena Meyer · Chidi Okafor</span>
+                              <span className="home-demo-citation-metadata">
+                                <span><span>Published</span><span>2025 · Journal of Canopy Ecology</span></span>
+                                <span><span>Citekey</span><span><code>@meyer2025</code></span></span>
+                              </span>
+                            </span>
+                          )}
+                        </span>.
+                      </p>
+                    </section>
+
+                    <div className="home-demo-document-jump" aria-label="The manuscript continues to the References section">
+                      <span aria-hidden="true" />
+                      <small>Later in this manuscript</small>
+                      <span aria-hidden="true" />
                     </div>
+
+                    <section className="home-demo-references is-preview-active" aria-labelledby="home-demo-references-heading">
+                      <div className="home-demo-references-heading">
+                        <h4 id="home-demo-references-heading">References</h4>
+                        <span><Icon name="check" size={11} />Automatically generated</span>
+                      </div>
+                      <ol>
+                        <li>
+                          Meyer, L., &amp; Okafor, C. (2025). Canopy resilience following seasonal drought.{' '}
+                          <em>Journal of Canopy Ecology, 18</em>(2), 114–129.
+                        </li>
+                      </ol>
+                    </section>
                   </div>
-                  {openSource === 'table' && <DemoSourcePanel id="home-demo-table-source" label="Python source for Table 1" lines={tableSource} />}
-                  <table>
-                    <thead><tr><th>Treatment</th><th>Change</th><th>95% CI</th></tr></thead>
-                    <tbody>
-                      <tr><td>Control</td><td>8.7%</td><td>6.1 to 11.2</td></tr>
-                      <tr><td>Irrigated</td><td>18.4%</td><td>15.8 to 21.0</td></tr>
-                    </tbody>
-                  </table>
-                </div>
+                )}
 
-                <p className={`home-demo-revision ${featureState(activeFeature, 'review')}`} data-preview-feature="review">
-                  Recovery in control plots was <del>slower</del> <ins>more gradual</ins>, with{' '}
-                  <mark>the difference narrowing after week four</mark><sup>1</sup>.
-                </p>
-              </section>
+                {activeFeature === 'review' && (
+                  <section className="is-preview-active" data-preview-feature="review">
+                    <div className="home-demo-section-heading">
+                      <small>05</small><h4>Discussion</h4>
+                    </div>
+                    <p>
+                      Irrigated plots recovered more quickly after rainfall resumed, while control plots showed a delayed but sustained response.
+                    </p>
+                    <p className="home-demo-revision">
+                      Recovery in control plots was <del>slower</del> <ins>more gradual</ins>, with{' '}
+                      <mark>the difference narrowing after week four</mark><sup>1</sup>.
+                    </p>
+                    <div className="home-demo-review-context">
+                      <Icon name="message" size={14} />
+                      <span><strong>Comment attached to this sentence</strong><small>Review stays beside the relevant text.</small></span>
+                    </div>
+                  </section>
+                )}
 
-              <section
-                className={`home-demo-references ${featureState(activeFeature, 'citations')}`}
-                data-preview-feature="citations"
-                aria-labelledby="home-demo-references-heading"
-              >
-                <div className="home-demo-references-heading">
-                  <h4 id="home-demo-references-heading">References</h4>
-                  <span><Icon name="check" size={11} />Automatically generated</span>
-                </div>
-                <ol>
-                  <li>
-                    Meyer, L., &amp; Okafor, C. (2025). Canopy resilience following seasonal drought.{' '}
-                    <em>Journal of Canopy Ecology, 18</em>(2), 114–129.
-                  </li>
-                </ol>
-              </section>
+                {activeFeature === 'checks' && (
+                  <section className="home-demo-preflight is-preview-active" data-preview-feature="checks">
+                    <span className="home-demo-preflight-kicker"><Icon name="check" size={13} />Whole-manuscript review</span>
+                    <h3>Ready to export, with one item to review</h3>
+                    <p>DraftMatter checks the manuscript, bibliography, computed outputs, and export settings together before a file is created.</p>
+                    <div className="home-demo-preflight-summary">
+                      <div><strong>6</strong><small>sections</small></div>
+                      <div><strong>1</strong><small>citation</small></div>
+                      <div><strong>2</strong><small>computed outputs</small></div>
+                    </div>
+                    <ul>
+                      <li><Icon name="check" size={13} /><span><strong>Citations</strong><small>Formatted and included in References</small></span><em>Ready</em></li>
+                      <li><Icon name="check" size={13} /><span><strong>Computation</strong><small>Figure and table outputs are current</small></span><em>Ready</em></li>
+                      <li className="has-warning"><Icon name="info" size={13} /><span><strong>Export</strong><small>Add a running title for the journal template</small></span><em>Review</em></li>
+                    </ul>
+                    <div className="home-demo-preflight-formats"><span>PDF</span><span>Word</span><span>HTML</span></div>
+                  </section>
+                )}
+              </div>
             </article>
 
             <aside className="home-demo-side" aria-label="Review and project status">

@@ -22,18 +22,18 @@ describe('signed-out Home product showcase', () => {
     container.remove()
   })
 
-  it('starts with a complete, understandable manuscript and Writing selected', () => {
+  it('starts with a focused, understandable Writing view', () => {
     const writing = container.querySelector<HTMLButtonElement>('[role="tab"][aria-selected="true"]')
     expect(writing?.textContent).toContain('Writing')
     expect(container.querySelector('.home-workspace-demo')?.getAttribute('data-active-feature')).toBe('writing')
     expect(container.querySelector('[role="tabpanel"]')?.textContent).toContain(homeShowcaseFeatures[0].description)
-    expect(container.textContent).toContain('Canopy recovery after seasonal drought')
-    expect(container.textContent).toContain('(Meyer and Okafor, 2025)')
-    expect(container.textContent).toContain('18.4%')
-    expect(container.textContent).toContain('Figure 1.')
-    expect(container.textContent).toContain('Table 1.')
-    expect(container.textContent).toContain('References')
-    expect(container.textContent).toContain('Automatically generated')
+    const paper = container.querySelector<HTMLElement>('.home-demo-paper')!
+    expect(paper.textContent).toContain('Canopy recovery after seasonal drought')
+    expect(container.querySelector('.home-demo-document-location')?.textContent).toContain('Introduction')
+    expect(paper.textContent).toContain('Our objective was to quantify the timing and magnitude of canopy recovery.')
+    expect(paper.textContent).not.toContain('(Meyer and Okafor, 2025)')
+    expect(paper.textContent).not.toContain('Figure 1.')
+    expect(paper.textContent).not.toContain('References')
     expect(container.textContent).toContain('Could we connect this result to Figure 1?')
     expect(container.textContent).toContain('Project checks')
   })
@@ -46,6 +46,7 @@ describe('signed-out Home product showcase', () => {
     expect(tab.tabIndex).toBe(0)
     expect(container.querySelector('.home-workspace-demo')?.getAttribute('data-active-feature')).toBe(feature.id)
     expect(container.querySelector('[role="tabpanel"]')?.textContent).toContain(feature.description)
+    expect(container.querySelector('.home-demo-paper-view')?.getAttribute('data-document-view')).toBe(feature.id)
     const emphasized = [...container.querySelectorAll<HTMLElement>(`[data-preview-feature="${feature.id}"]`)]
     expect(emphasized.length).toBeGreaterThan(0)
     expect(emphasized.every((element) => element.classList.contains('is-preview-active'))).toBe(true)
@@ -75,15 +76,14 @@ describe('signed-out Home product showcase', () => {
   })
 
   it('guides readers to inspect hidden figure and table source inline', async () => {
-    const figureToggle = container.querySelector<HTMLButtonElement>('[aria-label="View source for Figure 1"]')!
-    expect(figureToggle.disabled).toBe(true)
-    expect(figureToggle.getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelector('[aria-label="View source for Figure 1"]')).toBeNull()
     expect(container.querySelector('.home-demo-source-panel')).toBeNull()
 
     await act(async () => container.querySelector<HTMLButtonElement>('#home-showcase-tab-results')!.click())
     expect(container.textContent).toContain('Try “View source” on the figure or table.')
     expect(container.textContent).toContain('Try this')
-    expect(figureToggle.disabled).toBe(false)
+    const figureToggle = container.querySelector<HTMLButtonElement>('[aria-label="View source for Figure 1"]')!
+    expect(figureToggle.getAttribute('aria-expanded')).toBe('false')
 
     await act(async () => figureToggle.click())
     expect(container.querySelector('[aria-label="Python source for Figure 1"]')?.textContent).toContain('ax.plot')
@@ -98,19 +98,17 @@ describe('signed-out Home product showcase', () => {
 
     await act(async () => container.querySelector<HTMLButtonElement>('#home-showcase-tab-citations')!.click())
     expect(container.querySelector('.home-demo-source-panel')).toBeNull()
-    expect(container.querySelector<HTMLButtonElement>('[aria-label="View source for Table 1"]')?.disabled).toBe(true)
+    expect(container.querySelector('[aria-label="View source for Table 1"]')).toBeNull()
   })
 
   it('reveals complete reference details on citation hover and keyboard focus', async () => {
-    const citation = container.querySelector<HTMLButtonElement>('[aria-label="Reference details for Meyer and Okafor, 2025"]')!
-    expect(citation.tabIndex).toBe(-1)
-    expect(citation.getAttribute('aria-disabled')).toBe('true')
+    expect(container.querySelector('[aria-label="Reference details for Meyer and Okafor, 2025"]')).toBeNull()
     expect(container.querySelector('[role="tooltip"]')).toBeNull()
 
     await act(async () => container.querySelector<HTMLButtonElement>('#home-showcase-tab-citations')!.click())
+    const citation = container.querySelector<HTMLButtonElement>('[aria-label="Reference details for Meyer and Okafor, 2025"]')!
     expect(container.textContent).toContain('The References section updates automatically.')
     expect(citation.tabIndex).toBe(0)
-    expect(citation.getAttribute('aria-disabled')).toBe('false')
     const references = container.querySelector<HTMLElement>('.home-demo-references')!
     expect(references.classList.contains('is-preview-active')).toBe(true)
     expect(references.textContent).toContain('Meyer, L., & Okafor, C. (2025).')
@@ -134,7 +132,7 @@ describe('signed-out Home product showcase', () => {
     expect(container.querySelector('[role="tooltip"]')).toBeNull()
 
     await act(async () => container.querySelector<HTMLButtonElement>('#home-showcase-tab-review')!.click())
-    expect(citation.tabIndex).toBe(-1)
+    expect(container.querySelector('[aria-label="Reference details for Meyer and Okafor, 2025"]')).toBeNull()
     expect(container.querySelector('[role="tooltip"]')).toBeNull()
   })
 })
