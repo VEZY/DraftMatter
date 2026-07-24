@@ -22,22 +22,36 @@ describe('Home hero product glimpse', () => {
     container.remove()
   })
 
-  it('reuses the Results figure as a quiet, non-interactive focus-mode glimpse', () => {
+  it('presents a complete, non-interactive paper inside the focus-mode scroller', () => {
     const preview = container.querySelector<HTMLElement>('.home-hero-product-preview')!
+    const paper = preview.querySelector<HTMLElement>('.home-hero-manuscript-scroll')!
 
-    expect(preview.getAttribute('data-active-feature')).toBe('results')
-    expect(preview.querySelector('.home-demo-paper-view')?.getAttribute('data-document-view')).toBe('results')
+    expect(preview.getAttribute('data-active-feature')).toBe('complete-paper')
+    expect(preview.querySelector('.home-demo-paper-view')?.getAttribute('data-document-view')).toBe('complete-paper')
     expect(preview.textContent).toContain('Focus mode')
+    expect(preview.textContent).toContain('2 comments')
+    expect(paper.textContent).toContain('Canopy recovery after seasonal drought')
+    expect(paper.textContent).toContain('Rémi Vezy')
+    expect(paper.textContent).toContain('CIRAD, UMR AMAP')
+    expect(paper.textContent).toContain('Abstract')
+    expect(paper.textContent).toContain('Materials and methods')
+    expect(paper.querySelector('.home-demo-equation')?.textContent).toContain('R')
     expect(preview.textContent).toContain('Reproducible figure')
     expect(preview.textContent).toContain('Source linked')
     expect(preview.textContent).toContain('Figure 1.')
-    expect(preview.textContent).not.toContain('Table 1.')
+    expect(preview.textContent).toContain('Table 1.')
+    expect(paper.querySelector('.home-demo-discussion')?.textContent).toContain('Discussion')
+    expect(paper.querySelectorAll('del')).toHaveLength(4)
+    expect(paper.querySelectorAll('ins')).toHaveLength(5)
+    expect(paper.textContent).toContain('References')
+    expect(paper.textContent).toContain('Automatically generated')
     expect(preview.querySelector('.home-demo-outline')).toBeNull()
     expect(preview.querySelector('.home-demo-comment')).toBeNull()
     expect(preview.querySelector('.home-demo-presence')).toBeNull()
 
     expect(preview.querySelectorAll('button')).toHaveLength(0)
-    expect(preview.querySelectorAll('[tabindex]')).toHaveLength(0)
+    expect(preview.querySelectorAll('[tabindex]')).toHaveLength(1)
+    expect(paper.tabIndex).toBe(0)
     expect(preview.querySelectorAll('[id]')).toHaveLength(0)
     expect(preview.querySelectorAll('[aria-controls]')).toHaveLength(0)
     expect(preview.classList.contains('home-workspace-demo')).toBe(false)

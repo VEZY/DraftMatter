@@ -21,11 +21,14 @@ test.describe('signed-out Home landing experience', () => {
     const hero = page.locator('.home-hero-layout')
     const heroPreview = hero.locator('.home-hero-product-preview')
     await expect(heroPreview).toBeVisible()
-    await expect(heroPreview.getByRole('heading', { name: 'Results' })).toBeVisible()
+    await expect(heroPreview.getByRole('heading', { name: 'Canopy recovery after seasonal drought' })).toBeVisible()
+    await expect(heroPreview.getByText('Rémi Vezy', { exact: false })).toBeVisible()
+    await expect(heroPreview.getByRole('heading', { name: 'Abstract' })).toBeVisible()
     await expect(heroPreview.getByText('Focus mode', { exact: true })).toBeVisible()
-    await expect(heroPreview.getByText('Reproducible figure', { exact: true })).toBeVisible()
+    await expect(heroPreview.getByText('2 comments', { exact: true })).toBeVisible()
     await expect(heroPreview.locator('.home-demo-outline, .home-demo-comment, .home-demo-presence')).toHaveCount(0)
-    await expect(heroPreview.locator('button, [tabindex], [id], [aria-controls]')).toHaveCount(0)
+    await expect(heroPreview.locator('button, [id], [aria-controls]')).toHaveCount(0)
+    await expect(heroPreview.getByRole('region', { name: 'Scrollable example manuscript' })).toHaveAttribute('tabindex', '0')
     const heroLayout = await hero.evaluate((layout) => {
       const preview = layout.querySelector<HTMLElement>('.home-hero-preview')!.getBoundingClientRect()
       const copy = layout.querySelector<HTMLElement>('.home-hero-copy')!.getBoundingClientRect()
@@ -88,6 +91,41 @@ test.describe('signed-out Home landing experience', () => {
     expect(measurements.previewBeforeCopy).toBe(true)
     expect(measurements.previewBottom).toBeLessThanOrEqual(measurements.viewportHeight)
     await expect(layout.locator('.home-hero-product-preview')).toBeVisible()
+  })
+
+  test('scrolls the complete hero paper from its title through review to generated references', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/')
+
+    const paper = page.getByRole('region', { name: 'Scrollable example manuscript' })
+    const title = paper.getByRole('heading', { name: 'Canopy recovery after seasonal drought' })
+    await expect(title).toBeInViewport()
+    const scrollRange = await paper.evaluate((element) => ({
+      clientHeight: element.clientHeight,
+      scrollHeight: element.scrollHeight,
+      scrollTop: element.scrollTop,
+    }))
+    expect(scrollRange.scrollHeight).toBeGreaterThan(scrollRange.clientHeight)
+    expect(scrollRange.scrollTop).toBe(0)
+
+    await paper.focus()
+    await paper.press('PageDown')
+    await expect.poll(() => paper.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+
+    await paper.evaluate((element) => {
+      const discussion = element.querySelector<HTMLElement>('.home-demo-discussion')!
+      element.scrollTop = discussion.offsetTop - 16
+    })
+    const discussion = paper.locator('.home-demo-discussion')
+    await expect(discussion).toBeInViewport()
+    await expect(discussion.locator('del')).toHaveCount(4)
+    await expect(discussion.locator('ins')).toHaveCount(5)
+
+    await paper.evaluate((element) => { element.scrollTop = element.scrollHeight })
+    const references = paper.locator('.home-demo-references')
+    await expect(references).toBeInViewport()
+    await expect(references).toContainText('Automatically generated')
+    await expect(references).toContainText('Meyer, L., & Okafor, C. (2025).')
   })
 
   test('keeps one workspace while every feature reveals its concrete description and emphasis', async ({ page }) => {
@@ -197,7 +235,7 @@ test.describe('signed-out Home landing experience', () => {
     await page.getByRole('tab', { name: /Citations/ }).click()
     await expect(page.getByText(/The References section updates automatically/)).toBeVisible()
 
-    const references = page.locator('.home-demo-references')
+    const references = page.locator('.home-workspace-demo .home-demo-references')
     await expect(references).toHaveClass(/is-preview-active/)
     await expect(references.getByRole('heading', { name: 'References' })).toBeVisible()
     await expect(references).toContainText('Automatically generated')
@@ -248,7 +286,7 @@ test.describe('signed-out Home landing experience', () => {
     expect(mobileHeroLayout.copyBeforePreview).toBe(true)
     expect(mobileHeroLayout.previewAfterActions).toBe(true)
     expect(mobileHeroLayout.previewWidth).toBeLessThanOrEqual(mobileHeroLayout.viewportWidth - 30)
-    await expect(page.locator('.home-hero-product-preview').getByText('Reproducible figure', { exact: true })).toBeVisible()
+    await expect(page.locator('.home-hero-product-preview').getByRole('heading', { name: 'Canopy recovery after seasonal drought' })).toBeVisible()
 
     await page.getByRole('tab', { name: /Results from code/ }).click()
     await page.getByRole('button', { name: 'View source for Figure 1' }).click()

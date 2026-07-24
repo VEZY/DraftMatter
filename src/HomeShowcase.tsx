@@ -148,7 +148,14 @@ function DemoTopbar({
         <span><strong>Canopy recovery study</strong><small>All changes saved</small></span>
       </div>
       {staticPreview ? (
-        <span className="home-hero-focus-status"><Icon name="focus" size={12} />Focus mode</span>
+        <span className="home-hero-focus-meta">
+          <span><Icon name="message" size={12} />2 comments</span>
+          <span className="home-hero-focus-status">
+            <Icon name="focus" size={12} />
+            <span className="home-hero-focus-label">Focus mode</span>
+            <span className="home-hero-focus-label-short">Focus</span>
+          </span>
+        </span>
       ) : (
         <>
           <div className={`home-demo-presence ${featureState(activeFeature, 'review')}`} data-preview-feature="review">
@@ -197,6 +204,116 @@ function DemoComment({ highlighted = false }: { highlighted?: boolean }) {
       <span>1</span>
       <div><strong>Sofia Rossi</strong><small>Could we connect this result to Figure 1?</small></div>
     </div>
+  )
+}
+
+function DemoArticleOpening({ showCaret = true }: { showCaret?: boolean }) {
+  return (
+    <>
+      <header className="is-preview-active" data-preview-feature="writing">
+        <span>RESEARCH ARTICLE</span>
+        <h3>Canopy recovery after seasonal drought</h3>
+        <div className="home-demo-author-line">
+          <strong>Rémi Vezy<sup>1,2</sup></strong>
+          <span className="home-demo-orcid" aria-label="ORCID 0000-0002-0808-1461">
+            <span aria-hidden="true">iD</span>
+            0000-0002-0808-1461
+          </span>
+        </div>
+        <ol className="home-demo-affiliations" aria-label="Author affiliations">
+          <li><sup>1</sup>CIRAD, UMR AMAP, Montpellier F-34398, France</li>
+          <li><sup>2</sup>AMAP, Univ Montpellier, CIRAD, CNRS, INRAE, IRD, Montpellier, France</li>
+        </ol>
+      </header>
+      <section className="home-demo-abstract is-preview-active" data-preview-feature="writing">
+        <div className="home-demo-section-heading">
+          <small>01</small><h4>Abstract</h4>
+        </div>
+        <p>
+          Seasonal drought can rapidly alter canopy structure, yet the pace of recovery after rainfall remains difficult to compare across treatments. We followed irrigated and control plots for six weeks and linked every reported estimate to a reproducible analysis.
+        </p>
+        <p className="home-demo-keywords"><strong>Keywords</strong> canopy recovery · drought · reproducibility · tropical ecology</p>
+      </section>
+      <section className="home-demo-introduction is-preview-active" data-preview-feature="writing">
+        <div className="home-demo-section-heading">
+          <small>02</small><h4>Introduction</h4>
+        </div>
+        <p>
+          Seasonal drought increasingly shapes the recovery of tropical canopies. Understanding how quickly leaf cover returns can help distinguish short-term stress from lasting structural change.
+        </p>
+        <p>
+          Here, we compare irrigated and control plots during the six weeks after rainfall resumed. We combine field observations with reproducible analyses to keep each reported result connected to its evidence.
+        </p>
+        <p className={showCaret ? 'home-demo-writing-line' : undefined}>
+          Our objective was to quantify the timing and magnitude of canopy recovery.{showCaret && <span aria-hidden="true" />}
+        </p>
+      </section>
+    </>
+  )
+}
+
+function DemoMethodsSection() {
+  return (
+    <section className="home-demo-methods">
+      <div className="home-demo-section-heading">
+        <small>03</small><h4>Materials and methods</h4>
+      </div>
+      <p>
+        We monitored twelve irrigated and twelve control plots after rainfall resumed. Canopy cover was estimated weekly from calibrated hemispherical photographs, following the sampling logic of{' '}
+        <span className="home-demo-inline-citation">(Meyer and Okafor, 2025)</span>.
+      </p>
+      <p>
+        Recovery for plot <em>i</em> was expressed relative to its dry-season baseline:
+      </p>
+      <div className="home-demo-equation" role="img" aria-label="Recovery equals canopy cover at week six minus baseline canopy cover, divided by baseline canopy cover">
+        <span>R<sub>i</sub> = (C<sub>i,6</sub> − C<sub>i,0</sub>) / C<sub>i,0</sub></span>
+        <small>(1)</small>
+      </div>
+      <p>
+        Treatment means and confidence intervals were computed from the retained analysis environment used to generate the figure and table below.
+      </p>
+    </section>
+  )
+}
+
+function DemoDiscussionSection() {
+  return (
+    <section className="home-demo-discussion is-preview-active" data-preview-feature="review">
+      <div className="home-demo-section-heading">
+        <small>05</small><h4>Discussion</h4>
+      </div>
+      <p className="home-demo-revision">
+        Irrigated plots recovered more quickly after rainfall resumed, while control plots showed a delayed but sustained response. The early separation between treatments was{' '}
+        <del>maintained throughout the study</del> <ins>largest during weeks two and three</ins>, before the trajectories began to converge.
+      </p>
+      <p className="home-demo-revision">
+        Recovery in control plots was <del>slower</del> <ins>more gradual</ins>, with{' '}
+        <mark>the difference narrowing after week four</mark><sup>1</sup>. This pattern{' '}
+        <del>demonstrates</del> <ins>is consistent with</ins> a transient limitation on canopy development rather than a permanent loss of foliage.
+      </p>
+      <p className="home-demo-revision">
+        These results <del>prove that irrigation restored canopy function</del>{' '}
+        <ins>suggest that supplemental water accelerated early canopy closure</ins>. Because measurements ended at week six,{' '}
+        <ins>longer monitoring is needed to determine whether treatment differences persisted into the next dry period</ins>.
+      </p>
+    </section>
+  )
+}
+
+function DemoReferencesSection() {
+  return (
+    <section className="home-demo-references is-preview-active">
+      <div className="home-demo-references-heading">
+        <h4>References</h4>
+        <span><Icon name="check" size={11} />Automatically generated</span>
+      </div>
+      <ol>
+        <li>
+          Meyer, L., &amp; Okafor, C. (2025). Canopy resilience following seasonal drought.{' '}
+          <em>Journal of Canopy Ecology, 18</em>(2), 114–129.
+        </li>
+      </ol>
+    </section>
   )
 }
 
@@ -299,15 +416,32 @@ function DemoResultsPaper({
   )
 }
 
+function DemoFullPaper() {
+  return (
+    <div className="home-demo-full-paper">
+      <DemoArticleOpening showCaret={false} />
+      <DemoMethodsSection />
+      <DemoResultsPaper interactive={false} />
+      <DemoDiscussionSection />
+      <DemoReferencesSection />
+    </div>
+  )
+}
+
 export function HomeHeroPreview() {
   return (
-    <div className="home-hero-preview" role="group" aria-label="DraftMatter Results from code manuscript glimpse">
-      <div className="home-hero-product-preview" data-active-feature="results">
+    <div className="home-hero-preview" role="group" aria-label="DraftMatter complete manuscript focus-mode glimpse">
+      <div className="home-hero-product-preview" data-active-feature="complete-paper">
         <DemoTopbar activeFeature="results" staticPreview />
         <div className="home-demo-body home-hero-focus-canvas">
-          <article className="home-demo-paper" aria-label="Results manuscript glimpse">
-            <div className="home-demo-paper-view" data-document-view="results">
-              <DemoResultsPaper interactive={false} figureOnly />
+          <article
+            className="home-demo-paper home-hero-manuscript-scroll"
+            role="region"
+            aria-label="Scrollable example manuscript"
+            tabIndex={0}
+          >
+            <div className="home-demo-paper-view" data-document-view="complete-paper">
+              <DemoFullPaper />
             </div>
           </article>
         </div>
@@ -418,48 +552,7 @@ export function HomeShowcase() {
 
             <article className="home-demo-paper" aria-label="Fictional manuscript preview" aria-live="polite">
               <div key={activeFeature} className="home-demo-paper-view" data-document-view={activeFeature}>
-                {activeFeature === 'writing' && (
-                  <>
-                    <header className="is-preview-active" data-preview-feature="writing">
-                      <span>RESEARCH ARTICLE</span>
-                      <h3>Canopy recovery after seasonal drought</h3>
-                      <div className="home-demo-author-line">
-                        <strong>Rémi Vezy<sup>1,2</sup></strong>
-                        <span className="home-demo-orcid" aria-label="ORCID 0000-0002-0808-1461">
-                          <span aria-hidden="true">iD</span>
-                          0000-0002-0808-1461
-                        </span>
-                      </div>
-                      <ol className="home-demo-affiliations" aria-label="Author affiliations">
-                        <li><sup>1</sup>CIRAD, UMR AMAP, Montpellier F-34398, France</li>
-                        <li><sup>2</sup>AMAP, Univ Montpellier, CIRAD, CNRS, INRAE, IRD, Montpellier, France</li>
-                      </ol>
-                    </header>
-                    <section className="home-demo-abstract is-preview-active" data-preview-feature="writing">
-                      <div className="home-demo-section-heading">
-                        <small>01</small><h4>Abstract</h4>
-                      </div>
-                      <p>
-                        Seasonal drought can rapidly alter canopy structure, yet the pace of recovery after rainfall remains difficult to compare across treatments. We followed irrigated and control plots for six weeks and linked every reported estimate to a reproducible analysis.
-                      </p>
-                      <p className="home-demo-keywords"><strong>Keywords</strong> canopy recovery · drought · reproducibility · tropical ecology</p>
-                    </section>
-                    <section className="home-demo-introduction is-preview-active" data-preview-feature="writing">
-                      <div className="home-demo-section-heading">
-                        <small>02</small><h4>Introduction</h4>
-                      </div>
-                      <p>
-                        Seasonal drought increasingly shapes the recovery of tropical canopies. Understanding how quickly leaf cover returns can help distinguish short-term stress from lasting structural change.
-                      </p>
-                      <p>
-                        Here, we compare irrigated and control plots during the six weeks after rainfall resumed. We combine field observations with reproducible analyses to keep each reported result connected to its evidence.
-                      </p>
-                      <p className="home-demo-writing-line">
-                        Our objective was to quantify the timing and magnitude of canopy recovery.<span aria-hidden="true" />
-                      </p>
-                    </section>
-                  </>
-                )}
+                {activeFeature === 'writing' && <DemoArticleOpening />}
 
                 {activeFeature === 'results' && (
                   <DemoResultsPaper
@@ -519,42 +612,11 @@ export function HomeShowcase() {
                       <span aria-hidden="true" />
                     </div>
 
-                    <section className="home-demo-references is-preview-active" aria-labelledby="home-demo-references-heading">
-                      <div className="home-demo-references-heading">
-                        <h4 id="home-demo-references-heading">References</h4>
-                        <span><Icon name="check" size={11} />Automatically generated</span>
-                      </div>
-                      <ol>
-                        <li>
-                          Meyer, L., &amp; Okafor, C. (2025). Canopy resilience following seasonal drought.{' '}
-                          <em>Journal of Canopy Ecology, 18</em>(2), 114–129.
-                        </li>
-                      </ol>
-                    </section>
+                    <DemoReferencesSection />
                   </div>
                 )}
 
-                {activeFeature === 'review' && (
-                  <section className="is-preview-active" data-preview-feature="review">
-                    <div className="home-demo-section-heading">
-                      <small>05</small><h4>Discussion</h4>
-                    </div>
-                    <p className="home-demo-revision">
-                      Irrigated plots recovered more quickly after rainfall resumed, while control plots showed a delayed but sustained response. The early separation between treatments was{' '}
-                      <del>maintained throughout the study</del> <ins>largest during weeks two and three</ins>, before the trajectories began to converge.
-                    </p>
-                    <p className="home-demo-revision">
-                      Recovery in control plots was <del>slower</del> <ins>more gradual</ins>, with{' '}
-                      <mark>the difference narrowing after week four</mark><sup>1</sup>. This pattern{' '}
-                      <del>demonstrates</del> <ins>is consistent with</ins> a transient limitation on canopy development rather than a permanent loss of foliage.
-                    </p>
-                    <p className="home-demo-revision">
-                      These results <del>prove that irrigation restored canopy function</del>{' '}
-                      <ins>suggest that supplemental water accelerated early canopy closure</ins>. Because measurements ended at week six,{' '}
-                      <ins>longer monitoring is needed to determine whether treatment differences persisted into the next dry period</ins>.
-                    </p>
-                  </section>
-                )}
+                {activeFeature === 'review' && <DemoDiscussionSection />}
 
                 {activeFeature === 'checks' && (
                   <section className="home-demo-preflight is-preview-active" data-preview-feature="checks">
