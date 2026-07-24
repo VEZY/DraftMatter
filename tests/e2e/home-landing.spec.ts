@@ -114,6 +114,16 @@ test.describe('signed-out Home landing experience', () => {
     await expect(details).toContainText('Lena Meyer · Chidi Okafor')
     await expect(details).toContainText('2025 · Journal of Canopy Ecology')
     await expect(details).toContainText('@meyer2025')
+    const headerLayout = await details.locator('.home-demo-citation-card-head').evaluate((header) => {
+      const badge = header.firstElementChild!.getBoundingClientRect()
+      const bibliography = header.lastElementChild!.getBoundingClientRect()
+      return {
+        gap: bibliography.left - badge.right,
+        bibliographyWidth: bibliography.width,
+      }
+    })
+    expect(headerLayout.gap).toBeGreaterThanOrEqual(8)
+    expect(headerLayout.bibliographyWidth).toBeGreaterThan(150)
 
     await page.mouse.move(0, 0)
     await expect(details).toHaveCount(0)

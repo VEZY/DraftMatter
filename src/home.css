@@ -751,7 +751,7 @@
   gap: 9px;
 }
 
-.home-demo-citation-card-head > span {
+.home-demo-citation-card-head > span:first-child {
   width: 28px;
   height: 28px;
   flex: 0 0 auto;
@@ -766,9 +766,17 @@
 }
 
 .home-demo-citation-card-head > span:last-child {
+  width: auto;
+  height: auto;
   min-width: 0;
+  flex: 1 1 auto;
+  background: transparent;
+  color: inherit;
   display: grid;
+  place-items: initial;
   gap: 2px;
+  border-radius: 0;
+  font: inherit;
 }
 
 .home-demo-citation-card-head small {
