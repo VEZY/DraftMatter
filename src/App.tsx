@@ -799,13 +799,14 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
     const command = language === 'julia' ? '$ julia --project=.\n' : ''
     setSetupActivity({ id, title, status: 'running', output: `${command}${message.trim()}\n`, language })
     setExecutionWorkspaceOpen(false)
-    setKernelConsoleOpen(true)
     return id
   }
 
   const openKernelTerminal = (language?: ExecutionLanguage) => {
-    if (language) setKernelConsolePreferredLanguage(language)
-    setKernelConsolePreferredLanguageEpoch((current) => current + 1)
+    if (language) {
+      setKernelConsolePreferredLanguage(language)
+      setKernelConsolePreferredLanguageEpoch((current) => current + 1)
+    }
     setJuliaPackagesOpen(false)
     setEnvironmentOpen(false)
     setKernelConsoleOpen(true)
@@ -4797,7 +4798,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
                 className={`rail-terminal-button ${kernelConsoleDirty ? 'dirty' : ''}`}
                 data-status={terminalLauncherStatus}
                 data-label={`Terminal · ${terminalLauncherStatusLabel}`}
-                onClick={() => openKernelTerminal(terminalLauncherLanguage)}
+                onClick={() => openKernelTerminal(setupActivity && !kernelCellFailure ? undefined : terminalLauncherLanguage)}
                 aria-label={`Open shared kernel terminal, ${terminalLauncherStatusLabel}${kernelConsoleDirty ? ', interactive state present' : ''}`}
                 title={setupActivity?.title}
               >

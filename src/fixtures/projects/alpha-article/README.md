@@ -4,7 +4,7 @@ This folder is a self-contained, synthetic research article that demonstrates Dr
 
 Open the folder as a project and use `paper.qmd` as the main manuscript. It includes:
 
-- a complete scientific article from abstract through declarations and references;
+- a complete scientific article from abstract through declarations, followed by DraftMatter's automatically generated bibliography;
 - three authors, three deduplicated affiliations, and an example ORCID;
 - clustered author–date citations and a project bibliography;
 - a numbered equation, footnote, semantic figure/table identities, and cross-references;

@@ -230,6 +230,8 @@ describe('shared Jupyter execution workspace', () => {
     expect(desktopHost.listJuliaPackages).toHaveBeenCalledWith(rootPath, expect.any(String))
     expect(desktopHost.setupKernelIntegration).not.toHaveBeenCalled()
     expect(container.querySelector('[aria-labelledby="execution-trust-title"]')).toBeNull()
+    expect(container.querySelector<HTMLElement>('[aria-label="Shared kernel terminal"]')?.parentElement?.hidden).toBe(true)
+    expect(container.querySelector('.rail-terminal-button')?.getAttribute('data-label')).toBe('Terminal · Ready')
   })
 
   it('keeps the quick citation launcher available in a desktop project', async () => {
@@ -283,7 +285,7 @@ describe('shared Jupyter execution workspace', () => {
     )
   })
 
-  it('moves Julia package work into a project tab in the shared terminal', async () => {
+  it('keeps Julia package work in the background until the terminal is opened', async () => {
     await settle(420)
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
     let resolveAdd: (environment: JuliaEnvironment) => void = () => undefined
@@ -304,6 +306,10 @@ describe('shared Jupyter execution workspace', () => {
     await settle(30)
 
     expect(container.querySelector('[aria-labelledby="julia-packages-title"]')).toBeNull()
+    expect(container.querySelector<HTMLElement>('[aria-label="Shared kernel terminal"]')?.parentElement?.hidden).toBe(true)
+    const workingLauncher = container.querySelector<HTMLButtonElement>('.rail-terminal-button')!
+    expect(workingLauncher.getAttribute('data-label')).toBe('Terminal · Working…')
+    await act(async () => workingLauncher.click())
     const activity = container.querySelector<HTMLElement>('.kernel-project-activity')!
     expect(activity.textContent).toContain('Adding DataFrames')
     expect(activity.textContent).toContain('editor remains usable')

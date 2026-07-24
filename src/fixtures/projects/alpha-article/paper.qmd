@@ -342,10 +342,6 @@ No human participants, animals, or living plants were used. All observations wer
 
 The complete source, review records, CSV inputs, executable cells, retained SVG figures, and retained tables are bundled with this project. No network access is needed to inspect or export the article.
 
-## References {.unnumbered}
-
-References are rendered from `references.json` using the project’s author–date citation style.
-
 ::::: {.draftmatter-reviews .hidden data-schema="1"}
 :::: {#dm-alpha-suggestion .dm-change data-anchor="dm-alpha-suggestion-range" data-kind="replace" data-author="dm-alpha-reviewer" data-status="open" data-created="2026-07-18T08:00:00.000Z"}
 ~~~{.dm-proposal}

@@ -14,7 +14,7 @@ been tested in isolation:
 - three structured publication authors, three deduplicated affiliations, and one example ORCID;
 - two cached citations and a portable project bibliography;
 - a complete IMRAD manuscript plus acknowledgements, contributions, funding,
-  competing interests, ethics, availability, and references sections;
+  competing interests, ethics, and availability sections, followed by DraftMatter's automatically generated bibliography;
 - one numbered display equation with a valid semantic cross-reference;
 - Python, R, and Julia figure, table, and published-value cells;
 - three retained figures, three retained tables, and the published values
