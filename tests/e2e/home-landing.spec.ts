@@ -44,6 +44,24 @@ test.describe('signed-out Home landing experience', () => {
     expect(heroLayout.previewShare).toBeLessThanOrEqual(.46)
     expect(heroLayout.previewBottom).toBeLessThanOrEqual(heroLayout.viewportHeight)
     expect(heroLayout.previewBeforeCopy).toBe(true)
+    const paperVisual = await heroPreview.locator('.home-demo-paper').evaluate((paper) => {
+      const title = paper.querySelector<HTMLElement>('header h3')!
+      const paragraph = paper.querySelector<HTMLElement>('.home-demo-introduction p')!
+      const abstract = paper.querySelector<HTMLElement>('.home-demo-abstract')!
+      return {
+        horizontalInset: Number.parseFloat(getComputedStyle(paper).paddingLeft),
+        titleSize: Number.parseFloat(getComputedStyle(title).fontSize),
+        paragraphSize: Number.parseFloat(getComputedStyle(paragraph).fontSize),
+        paragraphLineHeight: Number.parseFloat(getComputedStyle(paragraph).lineHeight),
+        paperBorder: getComputedStyle(paper).borderTopStyle,
+        abstractBorder: getComputedStyle(abstract).borderTopStyle,
+      }
+    })
+    expect(paperVisual.horizontalInset).toBeGreaterThanOrEqual(40)
+    expect(paperVisual.titleSize / paperVisual.paragraphSize).toBeGreaterThan(2)
+    expect(paperVisual.paragraphLineHeight / paperVisual.paragraphSize).toBeGreaterThan(1.65)
+    expect(paperVisual.paperBorder).toBe('solid')
+    expect(paperVisual.abstractBorder).toBe('solid')
 
     await page.getByRole('button', { name: 'See how it works' }).click()
     const surface = page.locator('.home-welcome')
