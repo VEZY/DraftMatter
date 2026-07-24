@@ -43,6 +43,45 @@ function activityLabel(draft: CatalogueDraft) {
   return `Active ${new Intl.DateTimeFormat(undefined, { dateStyle: 'medium' }).format(activity)}`
 }
 
+const homeFeatures = [
+  {
+    icon: 'document',
+    title: 'A manuscript, not a notebook',
+    detail: 'Write in a calm rendered page with sections, equations, footnotes, figures and tables. DraftMatter keeps the underlying Markdown or Quarto source portable.',
+    note: 'Automatic numbering and cross-references',
+  },
+  {
+    icon: 'book',
+    title: 'Citations in the flow',
+    detail: 'Search the web through Crossref, connect a local Zotero library, or import BibTeX, CSL JSON, RIS and EndNote records without leaving the draft.',
+    note: 'Formatted citations and references, automatically',
+  },
+  {
+    icon: 'code',
+    title: 'Results that stay reproducible',
+    detail: 'Run Python, R and Julia—even in the same document—and publish their figures, tables and named values directly into the paper.',
+    note: 'Freshness checks and runtime provenance',
+  },
+  {
+    icon: 'message',
+    title: 'Review without parallel copies',
+    detail: 'Track changes, anchor comments to the text, reply with attribution, and accept or reject suggestions without creating another “final” file.',
+    note: 'Original, review and clean final views',
+  },
+  {
+    icon: 'users',
+    title: 'Collaboration with boundaries',
+    detail: 'Co-author online with owner, editor, commenter and viewer roles. Work can converge after reconnecting, then return to the project as an explicit checkpoint.',
+    note: 'Optional service, including self-hosting',
+  },
+  {
+    icon: 'branch',
+    title: 'Plain text, real version control',
+    detail: 'Keep the manuscript, bibliography, code and data in one repository. Use DraftMatter’s rendered Git history or manage everything from your preferred IDE.',
+    note: 'Semantic diffs, checkpoints, branches and remotes',
+  },
+] as const
+
 function DraftRow({
   draft,
   onOpen,
@@ -92,9 +131,9 @@ function SignedOutHome({
       </header>
 
       <section className="home-hero" aria-labelledby="home-title">
-        <span className="home-kicker">A calm place for research manuscripts</span>
-        <h1 id="home-title">Write reproducible papers together.</h1>
-        <p>Write your papers with no distraction, batteries included: track changes, comments, history, citations, reproducible figures, tables and in-text values.</p>
+        <span className="home-kicker">The research writing workspace</span>
+        <h1 id="home-title">Write the paper. <span>Keep it reproducible.</span></h1>
+        <p>DraftMatter brings scholarly writing, citations, tracked review, live collaboration and executable results into one calm environment, without locking your work inside the app.</p>
         <div className="home-hero-actions">
           <button className="home-primary" onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}>
             <Icon name="users" size={17} />
@@ -103,16 +142,67 @@ function SignedOutHome({
           {desktopHost.available && <button onClick={onOpenLocalProject}><Icon name="folder" size={17} />Open local project</button>}
           <button onClick={onOpenExample}><Icon name="spark" size={17} />Explore complete example</button>
         </div>
+        <ul className="home-hero-proof" aria-label="DraftMatter principles">
+          <li><Icon name="check" size={14} />Plain-text source</li>
+          <li><Icon name="check" size={14} />Local-first desktop</li>
+          <li><Icon name="check" size={14} />Python · R · Julia</li>
+          <li><Icon name="check" size={14} />Clean publication exports</li>
+        </ul>
         {session.error && <p className="home-account-error" role="alert">{session.error}</p>}
         {!session.serviceUrl && (
           <p className="home-deployment-note">Online collaboration is not configured for this installation. Local projects and the complete example remain available.</p>
         )}
       </section>
 
-      <section className="home-steps" aria-label="How DraftMatter works">
-        <article><span>01</span><strong>Start with a local manuscript</strong><p>Create a draft or open an existing manuscript.</p></article>
-        <article><span>02</span><strong>Invite the right people</strong><p>Give collaborators only the role they need.</p></article>
-        <article><span>03</span><strong>Publish a clean paper</strong><p>Reproducible figures, tables, and in-text values, keep code invisible to readers.</p></article>
+      <section className="home-positioning" aria-labelledby="home-positioning-title">
+        <div className="home-positioning-copy">
+          <span className="home-kicker">One research project</span>
+          <h2 id="home-positioning-title">Your paper should not be the least reproducible part of your research.</h2>
+          <p>Stop copying results out of notebooks, passing review files around, and fixing references by hand. DraftMatter keeps the readable manuscript at the center while the evidence behind it stays close.</p>
+        </div>
+        <div className="home-project-picture" aria-label="Code, data and references feed one portable rendered manuscript">
+          <div className="home-project-assets">
+            <span><Icon name="code" size={16} /><strong>analysis.py · model.R · figures.jl</strong><small>Executable research</small></span>
+            <span><Icon name="table" size={16} /><strong>data/</strong><small>Project inputs</small></span>
+            <span><Icon name="book" size={16} /><strong>references.bib</strong><small>Scholarly sources</small></span>
+          </div>
+          <Icon className="home-project-arrow" name="arrowRight" size={22} />
+          <div className="home-project-paper">
+            <span><Icon name="document" size={18} />paper.qmd</span>
+            <strong>One rendered manuscript</strong>
+            <small>Write · cite · compute · review</small>
+          </div>
+        </div>
+      </section>
+
+      <section className="home-feature-section" aria-labelledby="home-features-title">
+        <div className="home-section-intro">
+          <span className="home-kicker">Everything the paper needs</span>
+          <h2 id="home-features-title">Research writing, with the missing pieces built in.</h2>
+          <p>DraftMatter is designed for researchers who want a polished writing experience and a project that can still explain where every result came from.</p>
+        </div>
+        <div className="home-feature-grid">
+          {homeFeatures.map((feature) => (
+            <article key={feature.title}>
+              <span className="home-feature-icon"><Icon name={feature.icon} size={20} /></span>
+              <h3>{feature.title}</h3>
+              <p>{feature.detail}</p>
+              <small><Icon name="check" size={13} />{feature.note}</small>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="home-publication" aria-labelledby="home-publication-title">
+        <div>
+          <span className="home-kicker">From source to submission</span>
+          <h2 id="home-publication-title">The working project stays rich. The paper leaves clean.</h2>
+          <p>Publish the results and references—not the machinery behind them. Export clean Markdown, HTML, PDF or DOCX, or pass inert source to Pandoc and Quarto.</p>
+        </div>
+        <div className="home-publication-formats" aria-label="Publication features">
+          <span>Markdown</span><span>HTML</span><span>PDF</span><span>DOCX</span>
+          <small><Icon name="check" size={14} />Citations, cross-references and reproducible outputs included</small>
+        </div>
       </section>
 
       {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} />}

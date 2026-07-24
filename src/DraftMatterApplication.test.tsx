@@ -23,8 +23,10 @@ describe('DraftMatter application entry', () => {
     await act(async () => root.render(<DraftMatterApplication />))
 
     expect(container.querySelector('[data-testid="editor"]')).toBeNull()
-    expect(container.querySelector('h1')?.textContent).toContain('Write together')
+    expect(container.querySelector('h1')?.textContent).toContain('Write the paper. Keep it reproducible.')
     expect(container.textContent).toContain('Explore complete example')
+    expect(container.textContent).toContain('Citations in the flow')
+    expect(container.textContent).toContain('Plain text, real version control')
     expect(container.textContent).not.toContain('Canopy drought study')
     await act(async () => root.unmount())
   })
