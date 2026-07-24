@@ -1102,6 +1102,51 @@
   font-weight: 800;
 }
 
+.home-demo-references {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid #e1e5e3;
+}
+
+.home-demo-references-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.home-demo-references-heading h4 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+
+.home-demo-references-heading > span {
+  padding: 4px 7px;
+  border: 1px solid #ccdad3;
+  border-radius: 999px;
+  background: #f2f7f4;
+  color: var(--home-sage-dark);
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 750;
+  white-space: nowrap;
+}
+
+.home-demo-references ol {
+  margin: 14px 0 0;
+  padding-left: 27px;
+}
+
+.home-demo-references li {
+  padding-left: 5px;
+  font-size: 13px;
+  line-height: 1.65;
+}
+
 .home-demo-side {
   min-height: 1040px;
   padding: 105px 12px 20px 0;
@@ -1233,6 +1278,10 @@
 .home-workspace-demo .home-demo-checks.is-preview-active {
   border-color: #8daf9f;
   box-shadow: 0 0 0 3px rgba(74, 125, 103, .11);
+}
+
+.home-workspace-demo .home-demo-references.is-preview-active {
+  border-top-color: #8daf9f;
 }
 
 .home-principles {
@@ -2167,6 +2216,11 @@
   .home-demo-citation-card {
     width: min(300px, calc(100vw - 50px));
     right: -8px;
+  }
+
+  .home-demo-references-heading {
+    align-items: flex-start;
+    flex-direction: column;
   }
 }
 

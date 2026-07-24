@@ -32,6 +32,8 @@ describe('signed-out Home product showcase', () => {
     expect(container.textContent).toContain('18.4%')
     expect(container.textContent).toContain('Figure 1.')
     expect(container.textContent).toContain('Table 1.')
+    expect(container.textContent).toContain('References')
+    expect(container.textContent).toContain('Automatically generated')
     expect(container.textContent).toContain('Could we connect this result to Figure 1?')
     expect(container.textContent).toContain('Project checks')
   })
@@ -106,9 +108,14 @@ describe('signed-out Home product showcase', () => {
     expect(container.querySelector('[role="tooltip"]')).toBeNull()
 
     await act(async () => container.querySelector<HTMLButtonElement>('#home-showcase-tab-citations')!.click())
-    expect(container.textContent).toContain('Hover over or focus the citation to inspect its reference.')
+    expect(container.textContent).toContain('The References section updates automatically.')
     expect(citation.tabIndex).toBe(0)
     expect(citation.getAttribute('aria-disabled')).toBe('false')
+    const references = container.querySelector<HTMLElement>('.home-demo-references')!
+    expect(references.classList.contains('is-preview-active')).toBe(true)
+    expect(references.textContent).toContain('Meyer, L., & Okafor, C. (2025).')
+    expect(references.textContent).toContain('Journal of Canopy Ecology, 18')
+    expect(container.querySelector('.home-demo-outline li.is-current')?.textContent).toContain('References')
 
     await act(async () => citation.dispatchEvent(new MouseEvent('mouseover', { bubbles: true })))
     const hoverDetails = container.querySelector<HTMLElement>('[role="tooltip"]')!

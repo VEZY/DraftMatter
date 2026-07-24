@@ -97,7 +97,14 @@ test.describe('signed-out Home landing experience', () => {
   test('shows full reference details from the citation step on hover and focus', async ({ page }) => {
     await page.goto('/')
     await page.getByRole('tab', { name: /Citations/ }).click()
-    await expect(page.getByText('Hover over or focus the citation to inspect its reference.')).toBeVisible()
+    await expect(page.getByText(/The References section updates automatically/)).toBeVisible()
+
+    const references = page.locator('.home-demo-references')
+    await expect(references).toHaveClass(/is-preview-active/)
+    await expect(references.getByRole('heading', { name: 'References' })).toBeVisible()
+    await expect(references).toContainText('Automatically generated')
+    await expect(references).toContainText('Meyer, L., & Okafor, C. (2025).')
+    await expect(references).toContainText('Journal of Canopy Ecology, 18')
 
     const citation = page.getByRole('button', { name: 'Reference details for Meyer and Okafor, 2025' })
     await citation.hover()

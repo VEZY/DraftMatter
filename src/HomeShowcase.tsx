@@ -158,7 +158,7 @@ export function HomeShowcase() {
             {activeFeature === 'citations' && (
               <span className="home-showcase-tip">
                 <Icon name="book" size={13} />
-                Hover over or focus the citation to inspect its reference.
+                Hover over or focus the citation to inspect its reference. The References section updates automatically.
               </span>
             )}
           </div>
@@ -199,8 +199,9 @@ export function HomeShowcase() {
                 <li><small>01</small>Abstract</li>
                 <li><small>02</small>Introduction</li>
                 <li><small>03</small>Methods</li>
-                <li className="is-current"><small>04</small>Results</li>
+                <li className={activeFeature === 'citations' ? undefined : 'is-current'}><small>04</small>Results</li>
                 <li><small>05</small>Discussion</li>
+                <li className={activeFeature === 'citations' ? 'is-current' : undefined}><small>06</small>References</li>
               </ol>
             </aside>
 
@@ -338,6 +339,23 @@ export function HomeShowcase() {
                   Recovery in control plots was <del>slower</del> <ins>more gradual</ins>, with{' '}
                   <mark>the difference narrowing after week four</mark><sup>1</sup>.
                 </p>
+              </section>
+
+              <section
+                className={`home-demo-references ${featureState(activeFeature, 'citations')}`}
+                data-preview-feature="citations"
+                aria-labelledby="home-demo-references-heading"
+              >
+                <div className="home-demo-references-heading">
+                  <h4 id="home-demo-references-heading">References</h4>
+                  <span><Icon name="check" size={11} />Automatically generated</span>
+                </div>
+                <ol>
+                  <li>
+                    Meyer, L., &amp; Okafor, C. (2025). Canopy resilience following seasonal drought.{' '}
+                    <em>Journal of Canopy Ecology, 18</em>(2), 114–129.
+                  </li>
+                </ol>
               </section>
             </article>
 
