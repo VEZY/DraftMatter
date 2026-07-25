@@ -4772,6 +4772,18 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
 
   return (
     <div className={`app-shell ${focusMode ? 'focus-mode' : ''}`}>
+      <svg className="app-sketch-defs" aria-hidden="true">
+        <defs>
+          <filter id="app-pencil-wobble" x="-8%" y="-8%" width="116%" height="116%" colorInterpolationFilters="sRGB">
+            <feTurbulence type="fractalNoise" baseFrequency=".013 .2" numOctaves="1" seed="23" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale=".48" xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+          <filter id="app-pencil-wobble-deep" x="-10%" y="-10%" width="120%" height="120%" colorInterpolationFilters="sRGB">
+            <feTurbulence type="fractalNoise" baseFrequency=".011 .12" numOctaves="2" seed="31" result="noise" />
+            <feDisplacementMap in="SourceGraphic" in2="noise" scale=".9" xChannelSelector="R" yChannelSelector="G" />
+          </filter>
+        </defs>
+      </svg>
       {focusMode && <button className="focus-mode-exit" onClick={() => setFocusMode(false)} aria-label="Leave focus mode"><Icon name="focus" size={15} /> Leave focus</button>}
       <header className="topbar">
         <div className="brand-block">

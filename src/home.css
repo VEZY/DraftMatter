@@ -5765,3 +5765,395 @@
     padding: 0;
   }
 }
+
+/* Pencil and highlighter study: colour behaves like a mark on white paper -- */
+
+:root {
+  --home-yellow-marker: rgb(239 205 73 / 32%);
+  --home-green-marker: rgb(74 137 91 / 22%);
+  --home-blue-marker: rgb(63 108 160 / 20%);
+  --home-rust-marker: rgb(164 87 64 / 18%);
+}
+
+.home-welcome ::selection,
+.home-catalogue ::selection {
+  background: var(--home-yellow-marker);
+  color: var(--home-ink);
+}
+
+.home-welcome-header,
+.home-catalogue-bar {
+  background:
+    linear-gradient(90deg, rgb(36 36 36 / 62%), rgb(96 96 96 / 26%) 54%, rgb(36 36 36 / 52%)) bottom / 100% 1px no-repeat,
+    #fff;
+}
+
+.home-brand img,
+.home-welcome svg:not(.home-sketch-defs),
+.home-catalogue svg:not(.home-sketch-defs) {
+  filter: url("#home-pencil-wobble");
+}
+
+.home-link-button:hover,
+.home-link-button:focus-visible {
+  background:
+    linear-gradient(179deg, transparent 0 24%, var(--home-blue-marker) 26% 80%, transparent 82%);
+}
+
+.home-kicker::before {
+  background:
+    linear-gradient(var(--home-sage), var(--home-sage)) 0 0 / 100% 1.5px no-repeat,
+    linear-gradient(rgb(63 107 82 / 34%), rgb(63 107 82 / 34%)) 4px 3px / 88% 1px no-repeat;
+  height: 4px;
+}
+
+.home-hero h1 span {
+  background:
+    linear-gradient(181deg, transparent 0 53%, var(--home-yellow-marker) 55% 84%, transparent 86%);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  padding: 0 .035em;
+}
+
+.home-hero h1 span::after {
+  background:
+    linear-gradient(var(--home-sage), var(--home-sage)) 0 1px / 100% 1.4px no-repeat,
+    linear-gradient(90deg, transparent, rgb(63 107 82 / 48%) 8% 91%, transparent) 4px 4px / calc(100% - 8px) 1px no-repeat;
+}
+
+.home-hero-copy > .home-hero-summary {
+  border-left-color: transparent;
+  background:
+    linear-gradient(var(--home-sage), var(--home-sage)) 0 4px / 1.5px calc(100% - 8px) no-repeat,
+    linear-gradient(rgb(63 107 82 / 27%), rgb(63 107 82 / 27%)) 4px 8px / 1px calc(100% - 14px) no-repeat;
+}
+
+.home-hero-copy > .home-hero-summary::before {
+  display: none;
+}
+
+.home-primary {
+  border-radius: 8px 9px 6px 7px;
+}
+
+.home-hero-actions button:not(.home-primary),
+.home-welcome-header .home-learn-link,
+.home-disclosure {
+  border-color: rgb(36 36 36 / 52%);
+  border-radius: 8px 7px 9px 6px;
+}
+
+.home-hero-actions button:not(.home-primary):hover {
+  background:
+    linear-gradient(179deg, transparent 0 23%, var(--home-blue-marker) 25% 82%, transparent 84%),
+    #fff;
+  border-color: var(--home-blue-pen);
+  color: var(--home-blue-pen);
+}
+
+.home-hero-proof li:nth-child(1) svg {
+  color: var(--home-sage);
+}
+
+.home-hero-proof li:nth-child(2) svg {
+  color: var(--home-blue-pen);
+}
+
+.home-hero-proof li:nth-child(3) svg {
+  color: var(--home-rust);
+}
+
+.home-hero-proof li:nth-child(1)::after {
+  background: linear-gradient(90deg, rgb(63 107 82 / 30%), transparent);
+}
+
+.home-hero-proof li:nth-child(2)::after {
+  background: linear-gradient(90deg, rgb(53 91 134 / 28%), transparent);
+}
+
+.home-hero-proof li:nth-child(3)::after {
+  background: linear-gradient(90deg, rgb(164 87 64 / 25%), transparent);
+}
+
+.home-hero-product-preview,
+.home-workspace-demo {
+  border-color: transparent;
+  border-radius: 5px 4px 6px 3px;
+  box-shadow:
+    .9px 1px 0 rgb(36 36 36 / 16%),
+    3px 6px 14px rgb(36 36 36 / 5%),
+    10px 18px 30px rgb(36 36 36 / 3.5%);
+}
+
+.home-hero-product-preview::after,
+.home-workspace-demo::after {
+  border-color: rgb(36 36 36 / 52%);
+  border-radius: inherit;
+  filter: url("#home-pencil-wobble-deep");
+  inset: 0 -1px -1px 0;
+  transform: rotate(.035deg);
+}
+
+.home-hero-product-preview .home-demo-paper,
+.home-workspace-demo .home-demo-paper {
+  border-color: rgb(36 36 36 / 43%);
+  border-radius: 2px 1px 3px 1px;
+  background:
+    linear-gradient(91deg, rgb(36 36 36 / 1.2%), transparent 8% 94%, rgb(36 36 36 / 1.8%)),
+    #fff;
+}
+
+.home-demo-paper-view > header > span,
+.home-demo-preflight-kicker {
+  background:
+    linear-gradient(180deg, transparent 0 52%, var(--home-yellow-marker) 54% 86%, transparent 88%);
+  padding-inline: 2px;
+  width: fit-content;
+}
+
+.home-demo-section-heading h4 {
+  background:
+    linear-gradient(179deg, transparent 0 55%, var(--home-yellow-marker) 57% 88%, transparent 90%);
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+  padding-inline: 1px;
+}
+
+.home-showcase-tabs button[aria-selected="true"] {
+  background:
+    linear-gradient(178deg, transparent 0 16%, var(--home-yellow-marker) 18% 86%, transparent 88%),
+    #fff;
+  border-color: rgb(36 36 36 / 52%);
+  border-radius: 8px 7px 9px 6px;
+}
+
+.home-showcase-tabs button[aria-selected="true"]::before {
+  border-color: rgb(36 36 36 / 30%);
+  filter: url("#home-pencil-wobble-deep");
+}
+
+.home-showcase-tabs button[aria-selected="true"] > span {
+  border-color: var(--home-blue-pen);
+  background: #fff;
+  color: var(--home-blue-pen);
+  box-shadow:
+    inset 0 -9px 0 var(--home-blue-marker),
+    .7px .8px 0 rgb(36 36 36 / 13%);
+}
+
+.home-showcase-tabs button[aria-selected="true"] strong {
+  color: var(--home-ink);
+  text-decoration-color: var(--home-blue-pen);
+  text-decoration-style: solid;
+}
+
+.home-showcase-description {
+  position: relative;
+  padding-left: 17px;
+}
+
+.home-showcase-description::before {
+  background:
+    linear-gradient(var(--home-blue-pen), var(--home-blue-pen)) 0 0 / 1.5px 100% no-repeat,
+    linear-gradient(rgb(53 91 134 / 28%), rgb(53 91 134 / 28%)) 4px 8% / 1px 86% no-repeat;
+  content: "";
+  filter: url("#home-pencil-wobble-deep");
+  inset: 4px auto 4px 0;
+  pointer-events: none;
+  position: absolute;
+  width: 6px;
+}
+
+.home-showcase-description > strong {
+  background:
+    linear-gradient(179deg, transparent 0 52%, var(--home-blue-marker) 54% 87%, transparent 89%);
+  padding-inline: 1px;
+}
+
+.home-demo-outline li.is-current {
+  background:
+    linear-gradient(178deg, transparent 0 18%, var(--home-blue-marker) 20% 86%, transparent 88%);
+  box-shadow: inset 2px 0 var(--home-blue-pen);
+}
+
+.home-demo-outline li.is-current::before {
+  display: none;
+}
+
+.home-demo-inline-citation,
+.home-demo-cross-reference,
+.home-welcome .home-demo-citation {
+  background:
+    linear-gradient(179deg, transparent 0 38%, var(--home-blue-marker) 40% 90%, transparent 92%),
+    #fff;
+  border-color: rgb(53 91 134 / 50%);
+  color: var(--home-blue-pen);
+}
+
+.home-demo-computed {
+  background:
+    linear-gradient(179deg, transparent 0 48%, var(--home-green-marker) 50% 92%, transparent 94%);
+  box-shadow: inset 0 -1.5px 0 var(--home-sage);
+}
+
+.home-demo-revision ins {
+  background:
+    linear-gradient(179deg, transparent 0 50%, var(--home-green-marker) 52% 92%, transparent 94%);
+}
+
+.home-demo-revision del {
+  background:
+    linear-gradient(179deg, transparent 0 52%, var(--home-rust-marker) 54% 91%, transparent 93%);
+}
+
+.home-demo-revision mark {
+  background:
+    linear-gradient(178deg, transparent 0 20%, var(--home-yellow-marker) 22% 90%, transparent 92%);
+  box-shadow: none;
+}
+
+.home-demo-chart-treatment {
+  stroke: var(--home-blue-pen);
+}
+
+.home-demo-chart-points circle {
+  fill: var(--home-blue-pen);
+}
+
+.home-demo-comment {
+  border-color: rgb(164 87 64 / 48%);
+  box-shadow:
+    inset 3px 0 0 var(--home-rust),
+    .8px .9px 0 rgb(36 36 36 / 13%),
+    0 6px 15px rgb(36 36 36 / 4%);
+}
+
+.home-demo-checks {
+  border-color: rgb(63 107 82 / 48%);
+  box-shadow:
+    inset 3px 0 0 var(--home-sage),
+    .8px .9px 0 rgb(36 36 36 / 13%),
+    0 6px 15px rgb(36 36 36 / 4%);
+}
+
+.home-learning-guide {
+  border-color: transparent;
+  border-radius: 7px 8px 5px 6px;
+}
+
+.home-learning-guide::after {
+  border-color: rgb(36 36 36 / 48%);
+  filter: url("#home-pencil-wobble-deep");
+  inset: 0 -1px -1px 0;
+}
+
+.home-learning-topics li {
+  border-color: rgb(36 36 36 / 36%);
+  border-radius: 7px 6px 8px 5px;
+}
+
+.home-learning-topics li:nth-child(1) h3 {
+  background: linear-gradient(179deg, transparent 0 52%, var(--home-yellow-marker) 54% 88%, transparent 90%);
+}
+
+.home-learning-topics li:nth-child(2) h3 {
+  background: linear-gradient(179deg, transparent 0 52%, var(--home-blue-marker) 54% 88%, transparent 90%);
+}
+
+.home-learning-topics li:nth-child(3) h3 {
+  background: linear-gradient(179deg, transparent 0 52%, var(--home-green-marker) 54% 88%, transparent 90%);
+}
+
+.home-learning-topics li:nth-child(4) h3 {
+  background: linear-gradient(179deg, transparent 0 52%, var(--home-rust-marker) 54% 88%, transparent 90%);
+}
+
+.home-learning-topics li h3 {
+  width: fit-content;
+}
+
+.home-learning-topics li:nth-child(1) i {
+  color: #9a711d;
+}
+
+.home-learning-topics li:nth-child(2) i {
+  color: var(--home-blue-pen);
+}
+
+.home-learning-topics li:nth-child(3) i {
+  color: var(--home-sage);
+}
+
+.home-learning-topics li:nth-child(4) i {
+  color: var(--home-rust);
+}
+
+.home-learning-boundary {
+  background:
+    linear-gradient(var(--home-blue-pen), var(--home-blue-pen)) 0 0 / 2px 100% no-repeat,
+    linear-gradient(rgb(53 91 134 / 25%), rgb(53 91 134 / 25%)) 5px 8% / 1px 84% no-repeat,
+    #fff;
+  box-shadow: none;
+}
+
+.home-learning-boundary > svg {
+  color: var(--home-blue-pen);
+}
+
+.home-principle-grid article:nth-child(1) h3 {
+  background: linear-gradient(179deg, transparent 0 58%, var(--home-yellow-marker) 60% 88%, transparent 90%);
+}
+
+.home-principle-grid article:nth-child(2) h3 {
+  background: linear-gradient(179deg, transparent 0 58%, var(--home-green-marker) 60% 88%, transparent 90%);
+}
+
+.home-principle-grid article:nth-child(3) h3 {
+  background: linear-gradient(179deg, transparent 0 58%, var(--home-blue-marker) 60% 88%, transparent 90%);
+}
+
+.home-principle-grid article h3 {
+  width: fit-content;
+}
+
+.home-principle-grid article:nth-child(1)::after {
+  background: #a77b24;
+}
+
+.home-principle-grid article:nth-child(2)::after {
+  background: var(--home-sage);
+}
+
+.home-principle-grid article:nth-child(3)::after {
+  background: var(--home-blue-pen);
+}
+
+.home-draft-row:hover,
+.home-local-row:hover {
+  background:
+    linear-gradient(179deg, transparent 0 18%, var(--home-yellow-marker) 20% 88%, transparent 90%),
+    #fff;
+}
+
+.home-role-owner {
+  border-color: rgb(63 107 82 / 48%);
+  color: var(--home-sage);
+}
+
+.home-role-editor,
+.home-role-commenter {
+  border-color: rgb(53 91 134 / 48%);
+  color: var(--home-blue-pen);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .home-brand img,
+  .home-welcome svg:not(.home-sketch-defs),
+  .home-catalogue svg:not(.home-sketch-defs),
+  .home-hero-product-preview::after,
+  .home-workspace-demo::after,
+  .home-learning-guide::after,
+  .home-showcase-description::before {
+    filter: none;
+  }
+}
