@@ -136,10 +136,8 @@ function DemoCodePanel() {
 
 function DemoTopbar({
   activeFeature,
-  staticPreview = false,
 }: {
   activeFeature: HomeShowcaseFeatureId
-  staticPreview?: boolean
 }) {
   return (
     <div className="home-demo-topbar">
@@ -147,31 +145,18 @@ function DemoTopbar({
         <img src="/draftmatter-pencil-mark.svg" alt="" />
         <span><strong>Canopy recovery study</strong><small>All changes saved</small></span>
       </div>
-      {staticPreview ? (
-        <span className="home-hero-focus-meta">
-          <span><Icon name="message" size={12} />2 comments</span>
-          <span className="home-hero-focus-status">
-            <Icon name="focus" size={12} />
-            <span className="home-hero-focus-label">Focus mode</span>
-            <span className="home-hero-focus-label-short">Focus</span>
-          </span>
-        </span>
-      ) : (
-        <>
-          <div className={`home-demo-presence ${featureState(activeFeature, 'review')}`} data-preview-feature="review">
-            <span aria-label="Amira is viewing">AM</span>
-            <span aria-label="Jon is viewing">JL</span>
-            <small>2 here</small>
-          </div>
-          <div className={`home-demo-check-summary ${featureState(activeFeature, 'checks')}`} data-preview-feature="checks">
-            <Icon name="check" size={13} />
-            <span><strong>Checks</strong><small>1 issue</small></span>
-          </div>
-          <span className={`home-demo-export ${featureState(activeFeature, 'checks')}`} data-preview-feature="checks">
-            <Icon name="download" size={13} />Export
-          </span>
-        </>
-      )}
+      <div className={`home-demo-presence ${featureState(activeFeature, 'review')}`} data-preview-feature="review">
+        <span aria-label="Amira is viewing">AM</span>
+        <span aria-label="Jon is viewing">JL</span>
+        <small>2 here</small>
+      </div>
+      <div className={`home-demo-check-summary ${featureState(activeFeature, 'checks')}`} data-preview-feature="checks">
+        <Icon name="check" size={13} />
+        <span><strong>Checks</strong><small>1 issue</small></span>
+      </div>
+      <span className={`home-demo-export ${featureState(activeFeature, 'checks')}`} data-preview-feature="checks">
+        <Icon name="download" size={13} />Export
+      </span>
     </div>
   )
 }
@@ -430,22 +415,18 @@ function DemoFullPaper() {
 
 export function HomeHeroPreview() {
   return (
-    <div className="home-hero-preview" role="group" aria-label="DraftMatter complete manuscript focus-mode glimpse">
-      <div className="home-hero-product-preview" data-active-feature="complete-paper">
-        <DemoTopbar activeFeature="results" staticPreview />
-        <div className="home-demo-body home-hero-focus-canvas">
-          <article
-            className="home-demo-paper home-hero-manuscript-scroll"
-            role="region"
-            aria-label="Scrollable example manuscript"
-            tabIndex={0}
-          >
-            <div className="home-demo-paper-view" data-document-view="complete-paper">
-              <DemoFullPaper />
-            </div>
-          </article>
+    <div className="home-hero-preview" role="group" aria-label="Rendered complete example paper">
+      <article
+        className="home-hero-product-preview home-demo-paper home-hero-manuscript-scroll"
+        data-active-feature="complete-paper"
+        role="region"
+        aria-label="Scrollable rendered example paper"
+        tabIndex={0}
+      >
+        <div className="home-demo-paper-view" data-document-view="complete-paper">
+          <DemoFullPaper />
         </div>
-      </div>
+      </article>
     </div>
   )
 }

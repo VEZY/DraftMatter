@@ -71,6 +71,7 @@ import { copyPlainText } from './clipboard'
 import { parseRetainedPublishedValues } from './publishedValues'
 import { publicationFreshnessProblem } from './publicationFreshness'
 import { countWords, measurePortableManuscript } from './manuscriptMetrics'
+import { activeOutlineIdAtViewport } from './outlineViewport'
 import { ReviewTimestamp } from './ReviewTimestamp'
 import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
 import { workspaceRoleCapabilities, type WorkspaceRole } from './collaboration/workspaceService'
@@ -733,6 +734,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   })
   const [structuredMode, setStructuredMode] = useState(true)
   const [structuredOutline, setStructuredOutline] = useState<StructuredOutlineItem[]>([])
+  const [activeOutlineId, setActiveOutlineId] = useState<string>()
   const [structuredReviewSelection, setStructuredReviewSelection] = useState<StructuredReviewSelection | null>(null)
   const [reviewContextMenu, setReviewContextMenu] = useState<{ selection: StructuredReviewSelection; x: number; y: number }>()
   const [openCommentRequest, setOpenCommentRequest] = useState(0)
@@ -1228,6 +1230,57 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
       globalThis.removeEventListener('resize', schedule)
     }
   }, [citationOpen, structuredCitationSelection?.id, structuredCitationSelection?.anchor])
+
+  useEffect(() => {
+    const boundary = editorAreaRef.current
+    const outline = structuredMode ? structuredOutline : legacyOutlineItems
+    if (!boundary || !outline.length) {
+      setActiveOutlineId(undefined)
+      return
+    }
+
+    let frame: number | undefined
+    const updateActiveOutline = () => {
+      frame = undefined
+      const boundaryRect = boundary.getBoundingClientRect()
+      const structuredHeadings = new Map(
+        [...boundary.querySelectorAll<HTMLElement>('.structured-manuscript-editor [data-dm-id]')]
+          .map((element) => [element.dataset.dmId, element] as const),
+      )
+      const positions = outline.flatMap((item) => {
+        const element = structuredMode
+          ? structuredHeadings.get(item.id)
+          : item.id === 'title'
+            ? boundary.querySelector<HTMLElement>('.manuscript:not(.structured-manuscript) .paper-title')
+            : boundary.querySelector<HTMLElement>(`#${item.id}`)
+        return element ? [{ id: item.id, top: element.getBoundingClientRect().top }] : []
+      })
+      setActiveOutlineId(activeOutlineIdAtViewport(positions, {
+        top: boundaryRect.top,
+        height: boundaryRect.height,
+      }) ?? outline[0].id)
+    }
+    const scheduleUpdate = () => {
+      if (frame !== undefined) return
+      frame = window.requestAnimationFrame(updateActiveOutline)
+    }
+
+    updateActiveOutline()
+    boundary.addEventListener('scroll', scheduleUpdate, { passive: true })
+    window.addEventListener('resize', scheduleUpdate)
+    const manuscript = boundary.querySelector<HTMLElement>('.manuscript')
+    const resizeObserver = typeof ResizeObserver === 'undefined' || !manuscript
+      ? undefined
+      : new ResizeObserver(scheduleUpdate)
+    if (resizeObserver && manuscript) resizeObserver.observe(manuscript)
+
+    return () => {
+      boundary.removeEventListener('scroll', scheduleUpdate)
+      window.removeEventListener('resize', scheduleUpdate)
+      resizeObserver?.disconnect()
+      if (frame !== undefined) window.cancelAnimationFrame(frame)
+    }
+  }, [structuredMode, structuredOutline])
 
   useEffect(() => {
     const timeout = window.setTimeout(() => {
@@ -5011,7 +5064,12 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
             <div className="outline-tree">
               {structuredMode ? <>
                 {visibleStructuredOutline.length ? visibleStructuredOutline.map((item) => (
-                  <button className={`${item.level === 1 ? 'outline-title' : ''} ${item.level > 2 ? 'outline-nested' : ''} ${item.id === structuredOutline[0]?.id ? 'active' : ''}`.trim()} onClick={() => { setOutlineOptionsOpen(false); structuredEditorRef.current?.scrollToNode(item.id) }} key={item.id}>
+                  <button
+                    className={`${item.level === 1 ? 'outline-title' : ''} ${item.level > 2 ? 'outline-nested' : ''} ${item.id === activeOutlineId ? 'active' : ''}`.trim()}
+                    aria-current={item.id === activeOutlineId ? 'location' : undefined}
+                    onClick={() => { setOutlineOptionsOpen(false); setActiveOutlineId(item.id); structuredEditorRef.current?.scrollToNode(item.id) }}
+                    key={item.id}
+                  >
                     <span>{item.title}</span><small>H{item.level}</small>
                   </button>
                 )) : <p className="outline-empty">{structuredOutline.length ? 'No headings match these outline filters.' : 'Add a heading to build the outline.'}</p>}
@@ -5019,9 +5077,10 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
               </> : <>
                 {visibleLegacyOutline.length ? visibleLegacyOutline.map((item) => (
                   <button
-                    className={`${item.level === 1 ? 'outline-title' : ''} ${item.level > 2 ? 'outline-nested' : ''} ${item.id === 'title' ? 'active' : ''}`.trim()}
+                    className={`${item.level === 1 ? 'outline-title' : ''} ${item.level > 2 ? 'outline-nested' : ''} ${item.id === activeOutlineId ? 'active' : ''}`.trim()}
+                    aria-current={item.id === activeOutlineId ? 'location' : undefined}
                     key={item.id}
-                    onClick={() => { setOutlineOptionsOpen(false); scrollTo(item.id) }}
+                    onClick={() => { setOutlineOptionsOpen(false); setActiveOutlineId(item.id); scrollTo(item.id) }}
                   >
                     <span>{item.title}</span>{item.detail && <small>{item.detail}</small>}
                   </button>
