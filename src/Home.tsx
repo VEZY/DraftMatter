@@ -8,7 +8,7 @@ import {
 } from './collaboration/sessionContext'
 import type { WorkspaceRole } from './collaboration/workspaceService'
 import type { LocalProjectRecent } from './localProjectCatalogue'
-import { HomeLearningGuide } from './HomeLearningGuide'
+import { HomeLearningGuide, HomeTrustGuide } from './HomeLearningGuide'
 import { HomeHeroPreview, HomeShowcase } from './HomeShowcase'
 
 interface HomeProps {
@@ -23,6 +23,7 @@ interface HomeProps {
   localProjects: LocalProjectRecent[]
   localProblem?: string
   onOpenExample: () => void
+  onOpenBrowserDraft: () => void
   onOpenLearn: () => void
   onOpenLanguages: () => void
   onOpenTutorial: () => void
@@ -75,10 +76,11 @@ function SignedOutHome({
   localProjects,
   localProblem,
   onOpenExample,
+  onOpenBrowserDraft,
   onOpenLearn,
   onOpenLanguages,
   onOpenTutorial,
-}: Pick<HomeProps, 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenLearn' | 'onOpenLanguages' | 'onOpenTutorial'>) {
+}: Pick<HomeProps, 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenBrowserDraft' | 'onOpenLearn' | 'onOpenLanguages' | 'onOpenTutorial'>) {
   const session = useCollaborationSession()
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [serviceUrl, setServiceUrl] = useState(session.serviceUrl || 'https://')
@@ -92,7 +94,7 @@ function SignedOutHome({
       void session.signIn()
       return
     }
-    onOpenExample()
+    onOpenBrowserDraft()
   }
   const showProductPreview = () => {
     const showcase = document.getElementById('home-showcase')
@@ -109,7 +111,7 @@ function SignedOutHome({
           <span>DraftMatter</span>
         </a>
         <nav className="home-welcome-links" aria-label="Learn about DraftMatter">
-          <button className="home-link-button" onClick={onOpenLanguages}><Icon name="code" size={15} />Programming languages</button>
+          <button className="home-link-button home-languages-link" onClick={onOpenLanguages}><Icon name="code" size={15} />Languages</button>
           <button className="home-link-button home-learn-link" onClick={onOpenLearn}><Icon name="spark" size={15} />Learn DraftMatter</button>
         </nav>
       </header>
@@ -124,9 +126,13 @@ function SignedOutHome({
             <div className="home-hero-actions">
               <button className="home-primary" onClick={startWriting} disabled={!desktopHost.available && session.state === 'signing-in'}>
                 <Icon name="document" size={17} />
-                Start writing
+                Start a new paper
               </button>
-              <button onClick={showProductPreview}>
+              <button className="home-example-action" onClick={onOpenExample}>
+                <Icon name="spark" size={16} />
+                Explore the complete example
+              </button>
+              <button className="home-preview-action" onClick={showProductPreview}>
                 See how it works
                 <Icon name="arrowRight" size={17} />
               </button>
@@ -134,7 +140,7 @@ function SignedOutHome({
             <ul className="home-hero-proof" aria-label="DraftMatter principles">
               <li><Icon name="check" size={13} />Portable manuscript</li>
               <li><Icon name="check" size={13} />Local computation</li>
-              <li><Icon name="check" size={13} />Review in context</li>
+              <li><Icon name="check" size={13} />Reviews inside Markdown</li>
             </ul>
             {session.error && <p className="home-account-error" role="alert">{session.error}</p>}
           </div>
@@ -144,31 +150,7 @@ function SignedOutHome({
 
       <HomeShowcase />
 
-      <HomeLearningGuide onStartTour={onOpenTutorial} />
-
-      <section className="home-principles" aria-labelledby="home-principles-title">
-        <div className="home-section-intro">
-          <span className="home-kicker">Designed around the paper</span>
-          <h2 id="home-principles-title">One workspace for the work around writing.</h2>
-        </div>
-        <div className="home-principle-grid">
-          <article>
-            <span><Icon name="document" size={19} /></span>
-            <h3>Focus on the manuscript.</h3>
-            <p>Write in a calm environment where the paper remains central.</p>
-          </article>
-          <article>
-            <span><Icon name="code" size={19} /></span>
-            <h3>Build reproducibility into the paper.</h3>
-            <p>Produce figures, tables, and computed values from code without switching tools.</p>
-          </article>
-          <article>
-            <span><Icon name="message" size={19} /></span>
-            <h3>Review without losing context.</h3>
-            <p>Comment, suggest changes, and collaborate alongside the manuscript.</p>
-          </article>
-        </div>
-      </section>
+      <HomeTrustGuide onStartTour={onOpenTutorial} />
 
       {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} />}
 

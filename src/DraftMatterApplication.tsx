@@ -33,6 +33,7 @@ function ApplicationRouter() {
   const [newDraftLocation, setNewDraftLocation] = useState<'collaborative' | 'local'>('collaborative')
   const [localProjects, setLocalProjects] = useState(() => readLocalProjectRecents(localStorage))
   const [localProblem, setLocalProblem] = useState('')
+  const [browserDraftIsNew, setBrowserDraftIsNew] = useState(false)
 
   useEffect(() => {
     const onPopState = () => {
@@ -99,6 +100,7 @@ function ApplicationRouter() {
         localProjects={localProjects}
         localProblem={localProblem}
         onOpenExample={() => navigate({ destination: 'example' })}
+        onOpenBrowserDraft={() => { setBrowserDraftIsNew(true); navigate({ destination: 'browser-editor' }) }}
         onOpenLearn={() => navigate({ destination: 'learn' })}
         onOpenLanguages={() => navigate({ destination: 'languages' })}
         onOpenTutorial={() => navigate({ destination: 'tutorial' })}
@@ -157,7 +159,7 @@ function ApplicationRouter() {
   if (route.destination === 'learn') return <Learn onBack={() => navigate({ destination: 'home' })} onStartTour={() => navigate({ destination: 'tutorial' })} />
   if (route.destination === 'languages') return <ProgrammingLanguages onBack={() => navigate({ destination: 'home' })} />
   if (route.destination === 'tutorial') return <App initialExperience="complete-example" startExampleTour onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />
-  if (route.destination === 'browser-editor') return <App onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />
+  if (route.destination === 'browser-editor') return <App initialExperience={browserDraftIsNew ? 'browser-new' : undefined} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setBrowserDraftIsNew(false); navigate({ destination: 'home' }) }} />
 
   return home(route.workspaceId)
 }

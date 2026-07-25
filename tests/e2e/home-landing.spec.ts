@@ -16,7 +16,8 @@ test.describe('signed-out Home landing experience', () => {
     await expect(page.getByText('A calm workspace for rigorous research', { exact: true })).toBeVisible()
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your paper should be as reproducible as your research.')
     await expect(page.getByText('Research writing, with the missing pieces built in.', { exact: true })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Start writing' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Start a new paper' })).toBeVisible()
+    await expect(page.getByRole('button', { name: 'Explore the complete example' })).toBeVisible()
 
     const hero = page.locator('.home-hero-layout')
     const heroPreview = hero.locator('.home-hero-product-preview')
@@ -24,11 +25,12 @@ test.describe('signed-out Home landing experience', () => {
     await expect(heroPreview.getByRole('heading', { name: 'Canopy recovery after seasonal drought' })).toBeVisible()
     await expect(heroPreview.getByText('Rémi Vezy', { exact: false })).toBeVisible()
     await expect(heroPreview.getByRole('heading', { name: 'Abstract' })).toBeVisible()
-    await expect(heroPreview.getByText('Focus mode', { exact: true })).toBeVisible()
-    await expect(heroPreview.getByText('2 comments', { exact: true })).toBeVisible()
+    await expect(heroPreview.getByText('Focus mode', { exact: true })).toHaveCount(0)
+    await expect(heroPreview.getByText('2 comments', { exact: true })).toHaveCount(0)
     await expect(heroPreview.locator('.home-demo-outline, .home-demo-comment, .home-demo-presence')).toHaveCount(0)
     await expect(heroPreview.locator('button, [id], [aria-controls]')).toHaveCount(0)
-    await expect(heroPreview.getByRole('region', { name: 'Scrollable example manuscript' })).toHaveAttribute('tabindex', '0')
+    await expect(heroPreview).toHaveAttribute('aria-label', 'Scrollable rendered example paper')
+    await expect(heroPreview).toHaveAttribute('tabindex', '0')
     const heroLayout = await hero.evaluate((layout) => {
       const preview = layout.querySelector<HTMLElement>('.home-hero-preview')!.getBoundingClientRect()
       const copy = layout.querySelector<HTMLElement>('.home-hero-copy')!.getBoundingClientRect()
@@ -44,7 +46,7 @@ test.describe('signed-out Home landing experience', () => {
     expect(heroLayout.previewShare).toBeLessThanOrEqual(.46)
     expect(heroLayout.previewBottom).toBeLessThanOrEqual(heroLayout.viewportHeight)
     expect(heroLayout.previewBeforeCopy).toBe(true)
-    const paperVisual = await heroPreview.locator('.home-demo-paper').evaluate((paper) => {
+    const paperVisual = await heroPreview.evaluate((paper) => {
       const title = paper.querySelector<HTMLElement>('header h3')!
       const paragraph = paper.querySelector<HTMLElement>('.home-demo-introduction p')!
       const abstract = paper.querySelector<HTMLElement>('.home-demo-abstract')!
@@ -58,7 +60,7 @@ test.describe('signed-out Home landing experience', () => {
       }
     })
     expect(paperVisual.horizontalInset).toBeGreaterThanOrEqual(40)
-    expect(paperVisual.titleSize / paperVisual.paragraphSize).toBeGreaterThan(2)
+    expect(paperVisual.titleSize / paperVisual.paragraphSize).toBeGreaterThan(1.25)
     expect(paperVisual.paragraphLineHeight / paperVisual.paragraphSize).toBeGreaterThan(1.65)
     expect(paperVisual.paperBorder).toBe('solid')
     expect(paperVisual.abstractBorder).toBe('solid')
@@ -81,8 +83,9 @@ test.describe('signed-out Home landing experience', () => {
     await expect(demo.getByText('Project checks')).toBeVisible()
 
     const learning = page.locator('.home-learning-guide')
-    await expect(learning.getByRole('heading', { name: 'Explore a complete research paper.' })).toBeVisible()
-    await expect(learning.getByText('Produce reproducible results', { exact: true })).toBeVisible()
+    await expect(learning.getByRole('heading', { name: 'The paper remains yours.' })).toBeVisible()
+    await expect(learning.getByText('Portable Markdown', { exact: true })).toBeVisible()
+    await expect(learning.getByText('Comments and suggested changes are stored directly inside the Markdown manuscript.', { exact: true })).toBeVisible()
     await expect(learning.getByRole('button', { name: 'Start guided tour' })).toBeVisible()
     await expect(learning).not.toContainText('steps complete')
   })
@@ -115,7 +118,7 @@ test.describe('signed-out Home landing experience', () => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/')
 
-    const paper = page.getByRole('region', { name: 'Scrollable example manuscript' })
+    const paper = page.getByRole('region', { name: 'Scrollable rendered example paper' })
     const title = paper.getByRole('heading', { name: 'Canopy recovery after seasonal drought' })
     await expect(title).toBeInViewport()
     const scrollRange = await paper.evaluate((element) => ({

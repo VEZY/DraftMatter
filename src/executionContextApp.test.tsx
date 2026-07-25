@@ -79,8 +79,8 @@ describe('context-specific execution boundaries', () => {
     await act(async () => root.render(<App collaborationLaunch={launch} />))
 
     const banner = container.querySelector<HTMLElement>('.browser-execution-banner.shared-browser')!
-    expect(banner.textContent).toContain('Run code from DraftMatter desktop')
-    expect(banner.textContent).toContain('Writing, editing, comments, and review remain available online')
+    expect(banner.textContent).toContain('Code runs in DraftMatter desktop')
+    expect(banner.textContent).toContain('Open a local copy to refresh computed values')
     const handoff = banner.querySelector<HTMLAnchorElement>('a')!
     expect(handoff.textContent).toBe('Open in desktop')
     expect(handoff.href).toContain('draftmatter://open?source=')
@@ -113,7 +113,8 @@ describe('context-specific execution boundaries', () => {
     await act(async () => root.render(<App collaborationLaunch={launch} />))
 
     const banner = container.querySelector<HTMLElement>('.browser-execution-banner.shared-desktop')!
-    expect(banner.textContent).toContain('This shared manuscript is open in DraftMatter desktop')
+    expect(banner.textContent).toContain('Local copy required')
+    expect(banner.textContent).toContain('Create a project copy before running code')
     await act(async () => [...banner.querySelectorAll('button')].find((button) => button.textContent === 'Create local copy')!.click())
     const dialog = container.querySelector<HTMLElement>('[aria-labelledby="local-execution-copy-title"]')!
     expect(dialog.textContent).toContain('Choose where to save it')

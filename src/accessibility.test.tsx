@@ -42,7 +42,7 @@ describe('accessibility baseline', () => {
   it('keeps project execution visibly unavailable at the browser capability boundary', async () => {
     await act(async () => root.render(<App />))
     expect(container.querySelector<HTMLButtonElement>('.structured-code-run')?.disabled).toBe(true)
-    expect(container.querySelector('.browser-execution-banner')?.textContent).toContain('Code runs from a DraftMatter desktop project')
+    expect(container.querySelector('.browser-execution-banner')?.textContent).toContain('Desktop project required')
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open browser view-only code and desktop instructions"]')!.click())
     expect(container.querySelector('.code-workspace-toolbar')).toBeNull()
     expect(container.querySelector('.execution-browser-boundary')?.textContent).toContain('cannot start a terminal, package manager, or language runtime')

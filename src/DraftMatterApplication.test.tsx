@@ -45,8 +45,10 @@ describe('DraftMatter application entry', () => {
     expect(container.querySelector('h1')?.textContent).toBe('Your paper should be as reproducible as your research.')
     expect(container.textContent).toContain('Research writing, with the missing pieces built in.')
     expect(container.textContent).toContain('DraftMatter brings writing, citations, reproducible results, review, and collaboration into one focused workspace. Everything is available when needed and quiet when it is not.')
-    expect(container.textContent).toContain('Start writing')
+    expect(container.textContent).toContain('Start a new paper')
+    expect(container.textContent).toContain('Explore the complete example')
     expect(container.textContent).toContain('See how it works')
+    expect(container.textContent).toContain('Reviews inside Markdown')
     expect(container.textContent).toContain('Stay in the flow')
     expect(container.textContent).not.toContain('Keep reproducible results close to the writing.')
     const hero = container.querySelector<HTMLElement>('.home-hero-layout')!
@@ -54,8 +56,6 @@ describe('DraftMatter application entry', () => {
     const heroPreview = hero.querySelector<HTMLElement>('.home-hero-preview')!
     expect(heroCopy.compareDocumentPosition(heroPreview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
     expect(heroPreview.textContent).toContain('Reproducible figure')
-    expect(heroPreview.textContent).toContain('Focus mode')
-    expect(heroPreview.textContent).toContain('2 comments')
     expect(heroPreview.textContent).toContain('Canopy recovery after seasonal drought')
     expect(heroPreview.textContent).toContain('Automatically generated')
     expect(heroPreview.querySelector('.home-demo-outline')).toBeNull()
@@ -94,8 +94,9 @@ describe('DraftMatter application entry', () => {
     await act(async () => root.render(<DraftMatterApplication />))
 
     const guide = container.querySelector<HTMLElement>('.home-learning-guide')!
-    expect(guide.textContent).toContain('Explore a complete research paper.')
-    expect(guide.textContent).toContain('Produce reproducible results')
+    expect(guide.textContent).toContain('The paper remains yours.')
+    expect(guide.textContent).toContain('Portable Markdown')
+    expect(guide.textContent).toContain('Comments and suggested changes are stored directly inside the Markdown manuscript.')
     expect(guide.textContent).not.toContain('steps complete')
     const tourAction = guide.querySelector<HTMLButtonElement>('button')!
     expect(tourAction.textContent).toContain('Start guided tour')
@@ -113,7 +114,7 @@ describe('DraftMatter application entry', () => {
     await act(async () => root.render(<DraftMatterApplication />))
 
     const languages = [...container.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent?.includes('Programming languages'))!
+      .find((button) => button.textContent?.includes('Languages'))!
     await act(async () => languages.click())
 
     expect(window.location.pathname).toBe('/languages')
@@ -123,12 +124,24 @@ describe('DraftMatter application entry', () => {
     await act(async () => root.unmount())
   })
 
-  it('opens an editable browser copy from Start writing when no collaboration service is configured', async () => {
+  it('opens a fresh browser draft from Start a new paper when no collaboration service is configured', async () => {
     const container = document.createElement('div')
     const root = createRoot(container)
     await act(async () => root.render(<DraftMatterApplication />))
-    const start = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Start writing'))!
+    const start = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Start a new paper'))!
     await act(async () => start.click())
+
+    expect(window.location.pathname).toBe('/draft')
+    expect(container.querySelector('[data-testid="editor"]')?.textContent).toBe('browser-new')
+    await act(async () => root.unmount())
+  })
+
+  it('opens the complete example independently from the new-paper action', async () => {
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<DraftMatterApplication />))
+    const example = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Explore the complete example'))!
+    await act(async () => example.click())
 
     expect(window.location.search).toBe('?example=complete')
     expect(container.querySelector('[data-testid="editor"]')?.textContent).toBe('complete-example')

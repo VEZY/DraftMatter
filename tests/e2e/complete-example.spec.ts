@@ -1,6 +1,24 @@
 import { expect, test } from '@playwright/test'
 
 test.describe('built-in complete example', () => {
+  test('keeps Code, Review, and Export prioritized across header breakpoints', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/draft')
+
+    const code = page.locator('.topbar-code-workspace')
+    await expect(code).toBeVisible()
+    await expect(code.locator('.code-workspace-label-full')).toBeVisible()
+    await expect(page.locator('.topbar').getByRole('button', { name: /^Review,/ })).toBeVisible()
+    await expect(page.locator('.topbar').getByRole('button', { name: 'Export' })).toBeVisible()
+
+    await page.setViewportSize({ width: 1024, height: 768 })
+    await expect(code).toBeVisible()
+    await expect(code.locator('.code-workspace-label-short')).toBeVisible()
+    await expect(code.locator('.code-workspace-label-full')).toBeHidden()
+    await expect(page.locator('.topbar').getByRole('button', { name: /^Review,/ })).toBeVisible()
+    await expect(page.locator('.topbar').getByRole('button', { name: 'Export' })).toBeVisible()
+  })
+
   test('keeps long-outline click and keyboard navigation inside their panels', async ({ page }) => {
     await page.goto('/draft')
     await page.evaluate(() => localStorage.clear())
@@ -61,7 +79,7 @@ test.describe('built-in complete example', () => {
     await expect.poll(() => page.evaluate(() => JSON.parse(localStorage.getItem('draftmatter.citations.v1') ?? '[]').length)).toBe(2)
 
     await page.locator('.project-switcher').click()
-    await expect(page.locator('.project-menu-current')).toContainText('Built-in example · editable browser copy')
+    await expect(page.locator('.project-menu-current')).toContainText('Built-in example · copy before execution')
     await expect(page.getByRole('button', { name: /Open complete example/ })).toBeVisible()
   })
 })

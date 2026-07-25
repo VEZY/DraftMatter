@@ -48,9 +48,8 @@ describe('browser execution boundary', () => {
 
   it('immediately presents browser code as view-only and replaces process controls with desktop instructions', async () => {
     const banner = container.querySelector<HTMLElement>('.browser-execution-banner')
-    expect(banner?.textContent).toContain('Code runs from a DraftMatter desktop project')
-    expect(banner?.textContent).toContain('writing, editing, commenting, and reviewing here')
-    expect(banner?.textContent).toContain('trust and run its code')
+    expect(banner?.textContent).toContain('Desktop project required')
+    expect(banner?.textContent).toContain('Open this manuscript locally to run its code')
     expect(banner?.querySelector('button')?.textContent).toBe('Desktop instructions')
     expect(container.querySelector('.rail-terminal-button')).toBeNull()
     expect(container.querySelector('[aria-label="Shared kernel terminal"]')).toBeNull()

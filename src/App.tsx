@@ -71,7 +71,7 @@ import { copyPlainText } from './clipboard'
 import { parseRetainedPublishedValues } from './publishedValues'
 import { publicationFreshnessProblem } from './publicationFreshness'
 import { countWords, measurePortableManuscript } from './manuscriptMetrics'
-import { activeOutlineIdAtViewport } from './outlineViewport'
+import { activeOutlineIdAtViewport, keepActiveOutlineItemVisible } from './outlineViewport'
 import { ReviewTimestamp } from './ReviewTimestamp'
 import { citationLinkUrl, type CitationLinkRequest } from './citationLinks'
 import { workspaceRoleCapabilities, type WorkspaceRole } from './collaboration/workspaceService'
@@ -565,7 +565,7 @@ export interface AppProps {
   collaborationLaunch?: CollaborationProjectLaunch
   desktopProjectLaunch?: ProjectSnapshot
   onNavigateHome?: () => void
-  initialExperience?: 'complete-example'
+  initialExperience?: 'complete-example' | 'browser-new'
   startExampleTour?: boolean
   startCollaborationOnMount?: boolean
   browserDocumentLaunch?: { source: string; filename: string; projectName: string }
@@ -577,13 +577,27 @@ function emptyCollaborativeSource(name: string) {
   return `---\ntitle: "${name.replaceAll('"', '\\"')}"\n---\n\n`
 }
 
+const EMPTY_BROWSER_DRAFT_SOURCE = `---
+title: "Untitled paper"
+format:
+  html:
+    number-sections: true
+---
+
+# Untitled paper
+
+Start writing here.
+`
+
 function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initialExperience, startExampleTour = false, startCollaborationOnMount = false, browserDocumentLaunch, onOpenLearn, onOpenLanguages }: AppProps = {}) {
   const collaborationSession = useOptionalCollaborationSession()
   const collaborativeProject = collaborationLaunch?.projects.find((project) => project.id === collaborationLaunch.projectId)
   const collaborativeInitialSource = collaborationLaunch
     ? collaborationLaunch.bootstrapSource ?? emptyCollaborativeSource(collaborativeProject?.name ?? 'Untitled draft')
     : null
-  const routeInitialSource = collaborativeInitialSource ?? browserDocumentLaunch?.source ?? null
+  const routeInitialSource = collaborativeInitialSource
+    ?? browserDocumentLaunch?.source
+    ?? (initialExperience === 'browser-new' ? EMPTY_BROWSER_DRAFT_SOURCE : null)
   const initialProjectMeta = useMemo(() => collaborationLaunch ? {
     filename: `${collaborationLaunch.projectId}.qmd`,
     projectName: collaborativeProject?.name ?? collaborationLaunch.projectId,
@@ -594,7 +608,12 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
     projectName: browserDocumentLaunch.projectName,
     citationStyle: 'draftmatter-author-date' as CitationStyleId,
     citationLocale: 'en-US' as CitationLocale,
-  } : getInitialProjectMeta(), [browserDocumentLaunch, collaborationLaunch, collaborativeProject?.name])
+  } : initialExperience === 'browser-new' ? {
+    filename: 'untitled-paper.qmd',
+    projectName: 'Untitled paper',
+    citationStyle: 'draftmatter-author-date' as CitationStyleId,
+    citationLocale: 'en-US' as CitationLocale,
+  } : getInitialProjectMeta(), [browserDocumentLaunch, collaborationLaunch, collaborativeProject?.name, initialExperience])
   const initialDraftState = useMemo(() => routeInitialSource
     ? parsePortableDocument(routeInitialSource, initialDraft).draft
     : getInitialDraftState(), [routeInitialSource])
@@ -656,7 +675,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
   const [exampleTourOpen, setExampleTourOpen] = useState(startExampleTour)
   const [builtInProject, setBuiltInProject] = useState<'complete-example' | null>(() =>
-    localStorage.getItem(BUILT_IN_PROJECT_KEY) === 'complete-example' ? 'complete-example' : null,
+    initialExperience !== 'browser-new' && localStorage.getItem(BUILT_IN_PROJECT_KEY) === 'complete-example' ? 'complete-example' : null
   )
   const [projectChecksOpen, setProjectChecksOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -703,7 +722,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   const [doiLookupState, setDoiLookupState] = useState<'idle' | 'resolving'>('idle')
   const [scholarHelpOpen, setScholarHelpOpen] = useState(false)
   const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>(() => readRecoverySnapshots(localStorage))
-  const [citations, setCitations] = useState<CitationRecord[]>(() => collaborationLaunch || browserDocumentLaunch ? [] : getInitialCitations())
+  const [citations, setCitations] = useState<CitationRecord[]>(() => collaborationLaunch || browserDocumentLaunch || initialExperience === 'browser-new' ? [] : getInitialCitations())
   const [stagedCitationRecords, setStagedCitationRecords] = useState<CitationRecord[]>([])
   const [citationQuery, setCitationQuery] = useState('')
   const [citationAcquisitionState, setCitationAcquisitionState] = useState<'idle' | 'saving'>('idle')
@@ -776,6 +795,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   const structuredEditorRef = useRef<StructuredManuscriptEditorHandle>(null)
   const structuredCitationDetailRef = useRef<HTMLDivElement>(null)
   const editorAreaRef = useRef<HTMLElement>(null)
+  const outlineTreeRef = useRef<HTMLDivElement>(null)
   const draftRef = useRef(draft)
   const manuscriptSourceRef = useRef(manuscriptSource)
   const desktopSessionRef = useRef<DesktopSession | null>(null)
@@ -1283,6 +1303,10 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   }, [structuredMode, structuredOutline])
 
   useEffect(() => {
+    keepActiveOutlineItemVisible(outlineTreeRef.current)
+  }, [activeOutlineId, leftPanelOpen, outlineMaxDepth, outlineQuery])
+
+  useEffect(() => {
     const timeout = window.setTimeout(() => {
       const next = { ...draft, lastSavedAt: new Date().toISOString() }
       try {
@@ -1404,6 +1428,10 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
     }, 1800)
     return () => window.clearTimeout(timeout)
   }, [draft, filename, manuscriptSource])
+
+  useEffect(() => {
+    if (initialExperience === 'browser-new') localStorage.removeItem(BUILT_IN_PROJECT_KEY)
+  }, [initialExperience])
 
   useEffect(() => {
     localStorage.setItem(PROJECT_META_KEY, JSON.stringify({ filename, projectName, citationStyle, citationLocale }))
@@ -4779,6 +4807,19 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   const outlineCount = structuredMode ? structuredOutline.length : legacyOutlineItems.length
   const visibleOutlineCount = structuredMode ? visibleStructuredOutline.length : visibleLegacyOutline.length
   const outlineFiltered = Boolean(normalizedOutlineQuery) || outlineMaxDepth < 6
+  const codeWorkspaceState = !desktopSession
+    ? executionBoundaryKind === 'template'
+      ? 'Template'
+      : executionBoundaryKind === 'shared-desktop'
+        ? 'Copy first'
+        : 'View only'
+    : executableCells.length === 0
+      ? 'Setup needed'
+      : executionSummaryStatus === 'current'
+        ? 'Ready'
+        : executionSummaryStatus === 'running'
+          ? 'Running'
+          : 'Needs run'
   const renderExecutionCellRow = (cell: ExecutableCell) => {
     const index = executableCells.findIndex((candidate) => candidate.id === cell.id)
     const state = executionCellStates.find((candidate) => candidate.cellId === cell.id)
@@ -4907,31 +4948,40 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
         </div>
 
         <div className="topbar-actions">
-          <button className={`collaboration-toggle ${collaborationStatus}`} onClick={() => desktopProject && collaborationSession && !desktopProject.config.collaboration ? setStartCollaborationOpen(true) : setCollaborationOpen(true)} aria-label={desktopProject && collaborationSession && !desktopProject.config.collaboration ? 'Start collaboration' : 'Open online collaboration'}>
-            <Icon name="users" size={16} />
-            <span>{collaborationStatus === 'connected' ? `Live${collaborationRole ? ` · ${collaborationRole[0].toUpperCase()}${collaborationRole.slice(1)}` : ''}` : desktopProject?.config.collaboration ? 'Reconnect' : desktopProject && collaborationSession ? 'Start collaboration' : 'Collaborate'}</span>
-            <i />
-          </button>
-          {structuredMode && <button
-            className={`topbar-code-workspace ${executionWorkspaceOpen ? 'active' : ''} ${desktopSession ? '' : 'browser-view-only'}`.trim()}
-            aria-label={desktopSession ? 'Open Code and computation' : executionBoundaryKind === 'template' ? 'Open example code and project copy options' : executionBoundaryKind === 'shared-desktop' ? 'Open shared code and local project copy options' : 'Open browser view-only code and desktop instructions'}
-            aria-expanded={executionWorkspaceOpen}
-            onClick={() => setExecutionWorkspaceOpen(true)}
-            title={desktopSession ? 'Open Code & computation' : executionBoundaryKind === 'template' ? 'Example code · make a project copy to execute' : executionBoundaryKind === 'shared-desktop' ? 'Shared code · create a local project copy to execute' : 'Code is view-only in the browser · open for desktop instructions'}
-          ><Icon name={desktopSession ? 'code' : executionBoundaryKind === 'template' ? 'spark' : 'eye'} size={15} /><span>Code</span>{!desktopSession && <span className="code-view-only-badge">{executionBoundaryKind === 'template' ? 'Template' : executionBoundaryKind === 'shared-desktop' ? 'Copy first' : 'View only'}</span>}{executableCells.length > 0 && <span className="count-badge" aria-hidden="true">{executableCells.length}</span>}</button>}
-          <button className="icon-button command-button" onClick={() => setCommandOpen(true)} aria-label="Open command menu" title={`Open command menu (${commandUsesMetaKey ? 'Command' : 'Control'} P)`}>
-            <Icon name="search" />
-            <span className="shortcut">{commandUsesMetaKey ? <><Icon name="command" size={12} />P</> : 'Ctrl+P'}</span>
-          </button>
-          <button className="icon-button focus-mode-toggle" onClick={() => setFocusMode(true)} aria-label="Enter focus mode" title="Focus mode"><Icon name="focus" size={17} /></button>
-          {onOpenLearn && <button className="icon-button" onClick={onOpenLearn} aria-label="Learn DraftMatter" title="Learn DraftMatter"><Icon name="info" size={17} /></button>}
-          <span className="topbar-divider" />
-          <button className={`review-toggle ${activeNav === 'review' ? 'active' : ''}`} onClick={showReviewPanel} aria-label={`Review, ${totalOpenReviewCount} open item${totalOpenReviewCount === 1 ? '' : 's'}`}>
-            <Icon name="message" size={16} />
-            Review
-            {totalOpenReviewCount > 0 && <span className="count-badge" aria-hidden="true">{totalOpenReviewCount}</span>}
-          </button>
-          <div className="export-wrap">
+          <div className="topbar-primary-workspaces">
+            {structuredMode && <button
+              className={`topbar-code-workspace ${executionWorkspaceOpen ? 'active' : ''} ${desktopSession ? '' : 'browser-view-only'}`.trim()}
+              aria-label={desktopSession ? 'Open Code and computation' : executionBoundaryKind === 'template' ? 'Open example code and project copy options' : executionBoundaryKind === 'shared-desktop' ? 'Open shared code and local project copy options' : 'Open browser view-only code and desktop instructions'}
+              aria-expanded={executionWorkspaceOpen}
+              onClick={() => setExecutionWorkspaceOpen(true)}
+              title={desktopSession ? 'Open Code & computation' : executionBoundaryKind === 'template' ? 'Example code · make a project copy to execute' : executionBoundaryKind === 'shared-desktop' ? 'Shared code · create a local project copy to execute' : 'Code is view-only in the browser · open for desktop instructions'}
+            >
+              <Icon name={desktopSession ? 'code' : executionBoundaryKind === 'template' ? 'spark' : 'eye'} size={15} />
+              <span className="code-workspace-label"><span className="code-workspace-label-full">Code &amp; computation</span><span className="code-workspace-label-short">Code</span></span>
+              <span className="code-workspace-state">{codeWorkspaceState}</span>
+              {executableCells.length > 0 && <span className="count-badge" aria-hidden="true">{executableCells.length}</span>}
+            </button>}
+            <button className={`collaboration-toggle ${collaborationStatus}`} onClick={() => desktopProject && collaborationSession && !desktopProject.config.collaboration ? setStartCollaborationOpen(true) : setCollaborationOpen(true)} aria-label={desktopProject && collaborationSession && !desktopProject.config.collaboration ? 'Start collaboration' : 'Open online collaboration'}>
+              <Icon name="users" size={16} />
+              <span>{collaborationStatus === 'connected' ? `Live${collaborationRole ? ` · ${collaborationRole[0].toUpperCase()}${collaborationRole.slice(1)}` : ''}` : desktopProject?.config.collaboration ? 'Reconnect' : desktopProject && collaborationSession ? 'Start collaboration' : 'Collaborate'}</span>
+              <i />
+            </button>
+          </div>
+          <div className="topbar-utilities" aria-label="Workspace utilities">
+            <button className="icon-button command-button" onClick={() => setCommandOpen(true)} aria-label="Open command menu" title={`Open command menu (${commandUsesMetaKey ? 'Command' : 'Control'} P)`}>
+              <Icon name="search" />
+              <span className="shortcut">{commandUsesMetaKey ? <><Icon name="command" size={12} />P</> : 'Ctrl+P'}</span>
+            </button>
+            <button className="icon-button focus-mode-toggle" onClick={() => setFocusMode(true)} aria-label="Enter focus mode" title="Focus mode"><Icon name="focus" size={17} /></button>
+            {onOpenLearn && <button className="icon-button" onClick={onOpenLearn} aria-label="Learn DraftMatter" title="Learn DraftMatter"><Icon name="info" size={17} /></button>}
+          </div>
+          <div className="topbar-completion-actions">
+            <button className={`review-toggle ${activeNav === 'review' ? 'active' : ''}`} onClick={showReviewPanel} aria-label={`Review, ${totalOpenReviewCount} open item${totalOpenReviewCount === 1 ? '' : 's'}`}>
+              <Icon name="message" size={16} />
+              Review
+              {totalOpenReviewCount > 0 && <span className="count-badge" aria-hidden="true">{totalOpenReviewCount}</span>}
+            </button>
+            <div className="export-wrap">
             <button className="primary-button" onClick={() => setExportOpen((open) => !open)}>
               <Icon name="download" size={16} />
               Export
@@ -4955,6 +5005,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
                 </div></details>
               </div>
             )}
+            </div>
           </div>
           <Avatar initials={currentAuthorInitials} label={activeReviewAuthor.name} />
           <button className="icon-button mobile-panel-button" aria-label="Toggle review panel" onClick={() => setRightPanelOpen((open) => !open)}>
@@ -5061,7 +5112,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
               </div>
             </div>
 
-            <div className="outline-tree">
+            <div className="outline-tree" ref={outlineTreeRef}>
               {structuredMode ? <>
                 {visibleStructuredOutline.length ? visibleStructuredOutline.map((item) => (
                   <button
@@ -5091,10 +5142,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
 
             <div className="left-panel-spacer" />
 
-            <div className="project-health">
-              <div className="project-health-title"><Icon name="spark" size={16} /> Project health</div>
-              <div><span><i className={`health-dot ${cslState === 'error' ? 'warning' : 'okay'}`} /> Citations</span><small>{documentCitationKeys.length} cited · {citations.length} indexed{cslState === 'loading' ? ' · formatting' : ''}{citations.some((record) => record.availability === 'cached') ? ' · offline cache active' : ''}</small></div>
-              <div><span><i className={`health-dot ${draft.cellStatus === 'current' ? 'okay' : 'warning'}`} /> Figures</span><small>{draft.cellStatus === 'current' ? 'Up to date' : cellStatusLabel(draft.cellStatus)}</small></div>
+            <div className="project-health project-health-compact">
               <button
                 className="project-health-checks"
                 type="button"
@@ -5103,7 +5151,11 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
                 aria-haspopup="dialog"
                 aria-expanded={projectChecksOpen}
                 aria-label={`Project checks, ${prioritizedDiagnostics.length ? `${prioritizedDiagnostics.length} check${prioritizedDiagnostics.length === 1 ? '' : 's'}, highest severity ${prioritizedDiagnostics[0].level}` : 'no project issues detected'}`}
-              ><span><i className={`health-dot ${prioritizedDiagnostics.some((item) => item.level !== 'info') ? 'warning' : 'okay'}`} /> Project checks</span><small>{prioritizedDiagnostics.length ? `${prioritizedDiagnostics.length} check${prioritizedDiagnostics.length === 1 ? '' : 's'} · ${prioritizedDiagnostics[0].level}` : 'No issues'}</small></button>
+              >
+                <span><Icon name="spark" size={15} /><i className={`health-dot ${prioritizedDiagnostics.some((item) => item.level !== 'info') ? 'warning' : 'okay'}`} /> Project checks</span>
+                <small>{prioritizedDiagnostics.length ? `${prioritizedDiagnostics.length} check${prioritizedDiagnostics.length === 1 ? '' : 's'} · ${prioritizedDiagnostics[0].level}` : 'No issues'}</small>
+                <Icon name="arrowRight" size={13} />
+              </button>
             </div>
 
             <div className="panel-footer">
@@ -5197,17 +5249,13 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
               <section className={`browser-execution-banner ${executionBoundaryKind}`} role="note" aria-label={executionBoundaryKind === 'template' ? 'Example execution requires a project copy' : 'Code execution unavailable in the current document'}>
                 <span className="browser-execution-banner-icon"><Icon name={executionBoundaryKind === 'template' ? 'spark' : 'eye'} size={17} /></span>
                 {executionBoundaryKind === 'template' ? <span>
-                  <strong>This example must be copied before its code can run</strong>
-                  <small>The example is a reusable template. Its retained results are safe to inspect here; make your own project copy to edit the code, trust it, and refresh the values.</small>
+                  <strong>Template example</strong><small>Make a project copy to edit or run code.</small>
                 </span> : executionBoundaryKind === 'shared-desktop' ? <span>
-                  <strong>Create a local project before running code</strong>
-                  <small>This shared manuscript is open in DraftMatter desktop, but it does not have a local project folder yet. Choose a saved or temporary copy, then trust it when you run code.</small>
+                  <strong>Local copy required</strong><small>Create a project copy before running code.</small>
                 </span> : executionBoundaryKind === 'shared-browser' ? <span>
-                  <strong>Run code from DraftMatter desktop</strong>
-                  <small>Writing, editing, comments, and review remain available online. For safety, the browser does not run project code; open a local desktop copy to trust it and refresh computed values.</small>
+                  <strong>Code runs in DraftMatter desktop</strong><small>Open a local copy to refresh computed values.</small>
                 </span> : <span>
-                  <strong>Code runs from a DraftMatter desktop project</strong>
-                  <small>You can keep writing, editing, commenting, and reviewing here. Open this portable manuscript as a local desktop project to trust and run its code.</small>
+                  <strong>Desktop project required</strong><small>Open this manuscript locally to run its code.</small>
                 </span>}
                 {executionBoundaryKind === 'template'
                   ? desktopHost.available

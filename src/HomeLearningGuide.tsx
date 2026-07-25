@@ -40,3 +40,34 @@ export function HomeLearningGuide({ onStartTour }: { onStartTour: () => void }) 
     </section>
   )
 }
+
+const homeTrustTopics = [
+  ['Portable Markdown', 'The manuscript stays readable and editable outside DraftMatter.', 'document'],
+  ['Local computation', 'R, Python, and Julia run from a trusted project on your computer.', 'code'],
+  ['Reviews inside Markdown', 'Comments and suggested changes are stored directly inside the Markdown manuscript.', 'message'],
+] as const
+
+export function HomeTrustGuide({ onStartTour }: { onStartTour: () => void }) {
+  return (
+    <section className="home-learning-guide home-trust-guide" aria-labelledby="home-trust-title">
+      <div className="home-learning-intro">
+        <span className="home-kicker">A workflow you can inspect</span>
+        <h2 id="home-trust-title">The paper remains yours.</h2>
+        <p>Explore the complete example to see writing, computation, citations, and review working together in one portable manuscript.</p>
+        <div className="home-learning-action">
+          <button className="home-primary" onClick={onStartTour}><Icon name="spark" size={16} />Start guided tour</button>
+          <small>Short, skippable, and safe to explore.</small>
+        </div>
+      </div>
+
+      <ul className="home-learning-topics home-trust-topics">
+        {homeTrustTopics.map(([title, detail, icon]) => (
+          <li key={title}>
+            <i><Icon name={icon} size={17} /></i>
+            <div><h3>{title}</h3><p>{detail}</p></div>
+          </li>
+        ))}
+      </ul>
+    </section>
+  )
+}

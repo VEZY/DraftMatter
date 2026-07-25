@@ -3,7 +3,7 @@
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { HomeLearningGuide } from './HomeLearningGuide'
+import { HomeLearningGuide, HomeTrustGuide } from './HomeLearningGuide'
 
 describe('Home learning guide', () => {
   let container: HTMLDivElement
@@ -35,6 +35,19 @@ describe('Home learning guide', () => {
     const action = container.querySelector<HTMLButtonElement>('.home-learning-action button')!
     expect(action.textContent).toContain('Start guided tour')
     await act(async () => action.click())
+    expect(startTour).toHaveBeenCalledOnce()
+  })
+
+  it('explains portable source, local computation, and reviews stored in Markdown', async () => {
+    const startTour = vi.fn()
+    await act(async () => root.render(<HomeTrustGuide onStartTour={startTour} />))
+
+    expect(container.querySelector('h2')?.textContent).toBe('The paper remains yours.')
+    expect(container.querySelectorAll('.home-trust-topics li')).toHaveLength(3)
+    expect(container.textContent).toContain('Portable Markdown')
+    expect(container.textContent).toContain('Local computation')
+    expect(container.textContent).toContain('Comments and suggested changes are stored directly inside the Markdown manuscript.')
+    await act(async () => container.querySelector<HTMLButtonElement>('.home-learning-action button')!.click())
     expect(startTour).toHaveBeenCalledOnce()
   })
 })

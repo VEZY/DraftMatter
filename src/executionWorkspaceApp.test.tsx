@@ -133,6 +133,15 @@ describe('shared Jupyter execution workspace', () => {
     container.remove()
   })
 
+  it('keeps Code and computation visible as a primary workspace with concise state', () => {
+    const codeWorkspace = container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!
+    expect(codeWorkspace).not.toBeNull()
+    expect(codeWorkspace.querySelector('.code-workspace-label-full')?.textContent).toBe('Code & computation')
+    expect(codeWorkspace.querySelector('.code-workspace-label-short')?.textContent).toBe('Code')
+    expect(codeWorkspace.querySelector('.code-workspace-state')?.textContent).toBe('Needs run')
+    expect(codeWorkspace.querySelector('.count-badge')?.textContent).toBe('4')
+  })
+
   it('runs setup before the first ordinary cell in the exact same selected kernel', async () => {
     expect(container.querySelector('.structured-code-cell[data-dm-id="py-setup"]')).toBeNull()
     expect(container.querySelector('.structured-panel-code-placeholder[data-dm-id="py-setup"]')).not.toBeNull()

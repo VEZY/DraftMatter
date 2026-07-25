@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest'
-import { activeOutlineIdAtViewport } from './outlineViewport'
+import { describe, expect, it, vi } from 'vitest'
+// @vitest-environment jsdom
+
+import { activeOutlineIdAtViewport, keepActiveOutlineItemVisible } from './outlineViewport'
 
 describe('active manuscript outline section', () => {
   const items = [
@@ -21,5 +23,33 @@ describe('active manuscript outline section', () => {
 
   it('uses the first heading when layout measurements are unavailable', () => {
     expect(activeOutlineIdAtViewport(items, { top: 0, height: 0 })).toBe('title')
+  })
+
+  it('keeps an offscreen active outline row visible without collapsing the outline', () => {
+    const tree = document.createElement('div')
+    const active = document.createElement('button')
+    active.setAttribute('aria-current', 'location')
+    tree.append(active)
+    tree.getBoundingClientRect = () => ({ top: 100, bottom: 400 } as DOMRect)
+    active.getBoundingClientRect = () => ({ top: 430, bottom: 464 } as DOMRect)
+    const scrollIntoView = vi.fn()
+    active.scrollIntoView = scrollIntoView
+
+    expect(keepActiveOutlineItemVisible(tree)).toBe(true)
+    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'nearest', inline: 'nearest' })
+    expect(tree.children).toHaveLength(1)
+  })
+
+  it('does not move the outline when the active row is already visible', () => {
+    const tree = document.createElement('div')
+    const active = document.createElement('button')
+    active.setAttribute('aria-current', 'location')
+    tree.append(active)
+    tree.getBoundingClientRect = () => ({ top: 100, bottom: 400 } as DOMRect)
+    active.getBoundingClientRect = () => ({ top: 180, bottom: 214 } as DOMRect)
+    active.scrollIntoView = vi.fn()
+
+    expect(keepActiveOutlineItemVisible(tree)).toBe(false)
+    expect(active.scrollIntoView).not.toHaveBeenCalled()
   })
 })

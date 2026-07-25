@@ -38,8 +38,10 @@ describe('Project checks entry points', () => {
     container.remove()
   })
 
-  it('opens from the keyboard-ready Project health row and restores focus after Escape', async () => {
+  it('opens from the compact keyboard-ready Project checks summary and restores focus after Escape', async () => {
+    const compactHealth = container.querySelector<HTMLElement>('.project-health-compact')!
     const trigger = container.querySelector<HTMLButtonElement>('.project-health-checks')!
+    expect(compactHealth.querySelectorAll(':scope > div')).toHaveLength(0)
     expect(trigger.tagName).toBe('BUTTON')
     expect(trigger.type).toBe('button')
     expect(trigger.textContent).toContain('Project checks')

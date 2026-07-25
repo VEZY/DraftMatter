@@ -70,7 +70,8 @@ describe('built-in complete example project', () => {
 
     await act(async () => container.querySelector<HTMLButtonElement>('.project-switcher')!.click())
     expect(container.querySelector('.project-menu-current')?.textContent).toContain('Built-in example · copy before execution')
-    expect(container.querySelector('.browser-execution-banner')?.textContent).toContain('This example must be copied before its code can run')
+    expect(container.querySelector('.browser-execution-banner')?.textContent).toContain('Template example')
+    expect(container.querySelector('.browser-execution-banner')?.textContent).toContain('Make a project copy to edit or run code')
     expect(container.querySelector('.browser-execution-banner')?.textContent).not.toContain('unavailable in a browser')
     expect(manuscript.querySelector('.structured-cell-status')?.textContent).toBe('Example · copy to run')
 

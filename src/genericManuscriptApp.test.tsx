@@ -120,4 +120,16 @@ describe('generic portable manuscript app workflow', () => {
     expect(container.querySelector('.structured-code-editor .cm-content')?.textContent).toBe('println("before")')
     expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('Keep this opaque block exactly.')
   })
+
+  it('starts a fresh browser paper independently from a previously opened example', async () => {
+    localStorage.setItem('draftmatter.structured-source.v1', source)
+    localStorage.setItem('draftmatter.built-in-project.v1', 'complete-example')
+
+    await act(async () => root.render(<App initialExperience="browser-new" />))
+
+    expect(container.querySelector('.project-switcher-name')?.textContent).toBe('Untitled paper')
+    expect(container.querySelector('.structured-manuscript-editor h1')?.textContent).toBe('Untitled paper')
+    expect(container.querySelector('.structured-manuscript-editor')?.textContent).toContain('Start writing here.')
+    expect(container.querySelector('.browser-execution-banner')).toBeNull()
+  })
 })
