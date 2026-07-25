@@ -1,4 +1,4 @@
-import { useRef, useState, type KeyboardEvent } from 'react'
+import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Icon } from './Icon'
 
 export type HomeShowcaseFeatureId = 'writing' | 'results' | 'citations' | 'review' | 'checks'
@@ -414,9 +414,43 @@ function DemoFullPaper() {
 }
 
 export function HomeHeroPreview() {
+  const paper = useRef<HTMLElement | null>(null)
+  const [showScrollCue, setShowScrollCue] = useState(true)
+
+  useEffect(() => {
+    const preview = paper.current
+    if (!preview) return
+    if (preview.scrollHeight <= preview.clientHeight) {
+      setShowScrollCue(false)
+      return
+    }
+
+    let dismissed = false
+    const dismissCue = () => {
+      if (dismissed) return
+      dismissed = true
+      setShowScrollCue(false)
+    }
+
+    preview.addEventListener('scroll', dismissCue, { passive: true })
+    preview.addEventListener('wheel', dismissCue, { passive: true })
+    preview.addEventListener('touchstart', dismissCue, { passive: true })
+    preview.addEventListener('pointerdown', dismissCue, { passive: true })
+    preview.addEventListener('keydown', dismissCue)
+
+    return () => {
+      preview.removeEventListener('scroll', dismissCue)
+      preview.removeEventListener('wheel', dismissCue)
+      preview.removeEventListener('touchstart', dismissCue)
+      preview.removeEventListener('pointerdown', dismissCue)
+      preview.removeEventListener('keydown', dismissCue)
+    }
+  }, [])
+
   return (
     <div className="home-hero-preview" role="group" aria-label="Rendered complete example paper">
       <article
+        ref={paper}
         className="home-hero-product-preview home-demo-paper home-hero-manuscript-scroll"
         data-active-feature="complete-paper"
         role="region"
@@ -427,6 +461,12 @@ export function HomeHeroPreview() {
           <DemoFullPaper />
         </div>
       </article>
+      {showScrollCue && (
+        <span className="home-hero-scroll-cue" aria-hidden="true">
+          Scroll the paper
+          <Icon name="chevronDown" size={12} />
+        </span>
+      )}
     </div>
   )
 }

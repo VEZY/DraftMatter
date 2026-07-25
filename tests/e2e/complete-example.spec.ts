@@ -1,6 +1,19 @@
 import { expect, test } from '@playwright/test'
 
 test.describe('built-in complete example', () => {
+  test('introduces the command palette in the guided tour', async ({ page }) => {
+    await page.goto('/tutorial')
+
+    const tour = page.locator('.example-tour')
+    await expect(tour).toContainText('Explore a finished paper')
+    await tour.getByRole('button', { name: 'Next' }).click()
+
+    await expect(tour).toContainText('Find any tool in seconds')
+    await expect(tour).toContainText('Press ⌘P (Ctrl+P on Windows and Linux)')
+    await expect(page.locator('.command-button')).toHaveClass(/example-tour-target/)
+    await expect(tour.locator('.example-tour-progress > span')).toHaveCount(6)
+  })
+
   test('keeps Code, Review, and Export prioritized across header breakpoints', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/draft')

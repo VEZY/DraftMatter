@@ -9,6 +9,27 @@ const features = [
 ] as const
 
 test.describe('signed-out Home landing experience', () => {
+  test('quietly teaches that the hero paper scrolls without moving it automatically', async ({ page }) => {
+    await page.goto('/')
+
+    const paper = page.locator('.home-hero-product-preview')
+    const cue = page.locator('.home-hero-scroll-cue')
+    await expect(cue).toHaveText(/Scroll the paper/)
+    await expect(cue).toHaveAttribute('aria-hidden', 'true')
+    const cuePlacement = await page.locator('.home-hero-preview').evaluate((preview) => {
+      const paperBounds = preview.querySelector('.home-hero-product-preview')!.getBoundingClientRect()
+      const cueBounds = preview.querySelector('.home-hero-scroll-cue')!.getBoundingClientRect()
+      return cueBounds.top - paperBounds.bottom
+    })
+    expect(cuePlacement).toBeGreaterThanOrEqual(6)
+    await page.waitForTimeout(1_500)
+    await expect(paper).toHaveJSProperty('scrollTop', 0)
+    await expect(cue).toBeVisible()
+
+    await paper.dispatchEvent('wheel')
+    await expect(cue).toHaveCount(0)
+  })
+
   test('presents the approved story and scrolls to a usable guided preview', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/')

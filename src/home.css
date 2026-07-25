@@ -6333,6 +6333,56 @@
   }
 }
 
+/* A quiet affordance for the independently scrollable hero manuscript. */
+.home-hero-preview {
+  padding-bottom: 46px;
+}
+
+.home-hero-preview::after {
+  bottom: 30px;
+}
+
+.home-hero-scroll-cue {
+  align-items: center;
+  backdrop-filter: blur(5px);
+  background: rgb(255 255 255 / 82%);
+  border: 1px solid rgb(36 36 36 / 18%);
+  border-radius: 999px;
+  bottom: 5px;
+  box-shadow: 0 3px 10px rgb(36 36 36 / 7%);
+  color: var(--home-muted);
+  display: inline-flex;
+  font-size: 10.5px;
+  font-weight: 650;
+  gap: 5px;
+  left: 50%;
+  letter-spacing: .01em;
+  padding: 5px 9px 5px 11px;
+  pointer-events: none;
+  position: absolute;
+  transform: translateX(-50%);
+  white-space: nowrap;
+  z-index: 6;
+}
+
+.home-hero-scroll-cue svg {
+  color: var(--home-blue-pen);
+}
+
+@media (max-width: 760px) {
+  .home-hero-preview {
+    padding-bottom: 43px;
+  }
+
+  .home-hero-preview::after {
+    bottom: 27px;
+  }
+
+  .home-hero-scroll-cue {
+    bottom: 3px;
+  }
+}
+
 @media (max-width: 760px) {
   .home-trust-topics {
     grid-template-columns: 1fr;
@@ -6415,4 +6465,28 @@
     inset 0 2px 4px rgb(0 0 0 / 20%),
     .6px .7px 0 rgb(36 36 36 / 24%) !important;
   transform: translate(.5px, .5px);
+}
+
+/* Stable sticky header: avoid re-compositing filtered sections on scroll. */
+
+.home-welcome-header {
+  border-bottom: 0;
+  background: #fff;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  box-shadow: none;
+  isolation: isolate;
+  z-index: 100;
+}
+
+.home-welcome-header::after {
+  display: block;
+  height: 4px;
+  bottom: 0;
+  background:
+    linear-gradient(90deg, #fff, #b9b9b9 7%, #d3d3d3 58%, #bdbdbd 92%, #fff) 0 1px / 100% 1px no-repeat,
+    linear-gradient(90deg, #fff 3%, #e6e6e6 15% 79%, #fff 96%) 11px 3px / calc(100% - 22px) 1px no-repeat,
+    #fff;
+  filter: none;
+  transform: none;
 }
