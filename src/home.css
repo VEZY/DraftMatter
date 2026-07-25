@@ -6467,16 +6467,32 @@
   transform: translate(.5px, .5px);
 }
 
-/* Stable sticky header: avoid re-compositing filtered sections on scroll. */
+/* Keep the header outside the filtered page's scrolling paint layer. */
 
 .home-welcome-header {
   border-bottom: 0;
   background: #fff;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  backface-visibility: hidden;
   box-shadow: none;
   isolation: isolate;
+  left: 0;
+  position: fixed;
+  right: 0;
+  top: 0;
+  transform: translateZ(0);
+  will-change: transform;
   z-index: 100;
+}
+
+.home-welcome {
+  padding-top: 68px;
+}
+
+.home-welcome-header .home-brand img,
+.home-welcome-header svg {
+  filter: none;
 }
 
 .home-welcome-header::after {
