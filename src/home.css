@@ -6345,3 +6345,74 @@
     grid-template-columns: auto 1fr;
   }
 }
+
+/* Dense graphite buttons: irregular pencil grain instead of digital stripes */
+
+:root {
+  --home-pencil-button-top: #4a4a47;
+  --home-pencil-button-bottom: #363635;
+  --home-pencil-button-grain:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='92' height='54' viewBox='0 0 92 54'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.38' numOctaves='3' seed='19'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)' opacity='.24'/%3E%3C/svg%3E"),
+    repeating-linear-gradient(
+      166deg,
+      transparent 0 2px,
+      rgb(255 255 255 / 7%) 2.2px 2.8px,
+      transparent 3px 6px
+    ),
+    repeating-linear-gradient(
+      13deg,
+      transparent 0 3px,
+      rgb(0 0 0 / 13%) 3.2px 3.9px,
+      transparent 4.1px 8px
+    ),
+    linear-gradient(
+      178deg,
+      var(--home-pencil-button-top),
+      var(--home-pencil-button-bottom)
+    );
+}
+
+.home-primary {
+  border: 1px solid #292928 !important;
+  border-radius: 9px 8px 10px 7px !important;
+  background-color: #3e3e3c !important;
+  background-image: var(--home-pencil-button-grain) !important;
+  background-position: 3px -2px, 1px 0, -2px 1px, 0 0 !important;
+  background-size: 92px 54px, 17px 13px, 19px 15px, 100% 100% !important;
+  background-blend-mode: soft-light, screen, multiply, normal;
+  box-shadow:
+    inset 0 1px 0 rgb(255 255 255 / 12%),
+    inset 0 -1px 0 rgb(0 0 0 / 22%),
+    inset 2px 0 3px rgb(255 255 255 / 3%),
+    1.2px 1.4px 0 rgb(36 36 36 / 28%),
+    0 4px 8px rgb(36 36 36 / 8%) !important;
+  text-shadow:
+    .35px .45px 0 rgb(255 255 255 / 18%),
+    0 1px 1px rgb(0 0 0 / 35%);
+}
+
+.home-primary::before {
+  border-color: rgb(36 36 36 / 58%);
+  border-radius: 10px 7px 9px 8px;
+  inset: -1px -2px -2px -1px;
+  transform: rotate(.12deg);
+}
+
+.home-primary:hover {
+  --home-pencil-button-top: #424240;
+  --home-pencil-button-bottom: #2f2f2e;
+  border-color: #202020 !important;
+  background-color: #363634 !important;
+  background-image: var(--home-pencil-button-grain) !important;
+  background-position: -4px 2px, -2px 1px, 2px -1px, 0 0 !important;
+  transform: translateY(-1px) rotate(-.04deg);
+}
+
+.home-primary:active {
+  --home-pencil-button-top: #383836;
+  --home-pencil-button-bottom: #30302f;
+  box-shadow:
+    inset 0 2px 4px rgb(0 0 0 / 20%),
+    .6px .7px 0 rgb(36 36 36 / 24%) !important;
+  transform: translate(.5px, .5px);
+}

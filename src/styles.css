@@ -5235,7 +5235,21 @@ kbd {
 .structured-link-actions { display: flex; gap: 6px; justify-content: flex-end; }
 .structured-link-actions button { font-size: 8px; padding: 5px 8px; }
 .structured-cross-reference { align-items: baseline; display: inline-flex; gap: 2px; position: relative; white-space: nowrap; }
-.structured-cross-reference-edit { background: transparent; border: 0; color: #738279; font-size: 8px; font-weight: 700; opacity: 0; padding: 1px 2px; transition: opacity .12s ease; }
+.structured-cross-reference-edit {
+  background: rgba(255, 255, 255, .96);
+  border: 0;
+  color: #738279;
+  font-size: 8px;
+  font-weight: 700;
+  left: 100%;
+  opacity: 0;
+  padding: 2px 4px;
+  position: absolute;
+  top: -18px;
+  transition: opacity .12s ease;
+  white-space: nowrap;
+  z-index: 4;
+}
 .structured-cross-reference:hover > .structured-cross-reference-edit,
 .structured-cross-reference-edit:focus-visible { opacity: 1; }
 .structured-cross-reference-edit:disabled { cursor: default; opacity: 0; pointer-events: none; }
@@ -6043,6 +6057,10 @@ textarea.structured-output-input { min-height: 58px; }
 }
 
 /* Editor hierarchy refinement. */
+.topbar {
+  column-gap: clamp(18px, 2vw, 30px);
+}
+
 .topbar-primary-workspaces,
 .topbar-utilities,
 .topbar-completion-actions {

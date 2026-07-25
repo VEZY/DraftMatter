@@ -10,6 +10,12 @@ test.describe('built-in complete example', () => {
     await expect(code.locator('.code-workspace-label-full')).toBeVisible()
     await expect(page.locator('.topbar').getByRole('button', { name: /^Review,/ })).toBeVisible()
     await expect(page.locator('.topbar').getByRole('button', { name: 'Export' })).toBeVisible()
+    const wideHeaderGap = await page.locator('.topbar').evaluate((header) => {
+      const saveState = header.querySelector('.document-state')!.getBoundingClientRect()
+      const codeWorkspace = header.querySelector('.topbar-code-workspace')!.getBoundingClientRect()
+      return codeWorkspace.left - saveState.right
+    })
+    expect(wideHeaderGap).toBeGreaterThanOrEqual(18)
 
     await page.setViewportSize({ width: 1024, height: 768 })
     await expect(code).toBeVisible()
@@ -60,6 +66,16 @@ test.describe('built-in complete example', () => {
     await expect(page.getByRole('button', { name: 'Manage manuscript authors, 3 listed' })).toBeVisible()
     await expect(manuscript.getByText(/Chen and Silva, 2025; Vezy and Martin, 2024/)).toBeVisible()
     await expect(manuscript.locator('.structured-cross-reference[data-reference-status="valid"]')).toHaveCount(7)
+    const inlineReferenceWidths = await manuscript.locator('.structured-cross-reference[data-reference-status="valid"]').evaluateAll((references) =>
+      references.map((reference) => ({
+        reference: reference.getBoundingClientRect().width,
+        link: reference.querySelector('.structured-cross-reference-link')!.getBoundingClientRect().width,
+        editPosition: getComputedStyle(reference.querySelector('.structured-cross-reference-edit')!).position,
+      })),
+    )
+    expect(inlineReferenceWidths.every(({ reference, link, editPosition }) =>
+      editPosition === 'absolute' && Math.abs(reference - link) <= 1,
+    )).toBe(true)
     await expect(manuscript.locator('.structured-output-image')).toHaveCount(3)
     await expect(manuscript.locator('.structured-output-table')).toHaveCount(3)
     await expect(manuscript.locator('.structured-code-cell[data-language="python"]')).toHaveCount(2)

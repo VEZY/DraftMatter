@@ -14,6 +14,11 @@ const steps: ReadonlyArray<{
     target: '.structured-manuscript',
   },
   {
+    title: 'Find any tool in seconds',
+    detail: 'Press ⌘P (Ctrl+P on Windows and Linux) to open the command palette and jump straight to tools and actions without breaking your writing flow.',
+    target: '.command-button',
+  },
+  {
     title: 'Add a citation',
     detail: 'Place the cursor in the manuscript, then open Sources. Search or import a reference, select it, and insert the citation.',
     target: '[aria-label="Sources"]',

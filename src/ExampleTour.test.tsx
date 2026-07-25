@@ -12,7 +12,7 @@ describe('complete example guided tour', () => {
   beforeEach(() => {
     ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
     container = document.createElement('div')
-    container.innerHTML = '<article class="structured-manuscript"></article><button aria-label="Sources"></button><button aria-label="Insert"></button><button class="topbar-code-workspace"></button>'
+    container.innerHTML = '<article class="structured-manuscript"></article><button class="command-button"></button><button aria-label="Sources"></button><button aria-label="Insert"></button><button class="topbar-code-workspace"></button>'
     document.body.append(container)
     root = createRoot(container.appendChild(document.createElement('div')))
   })
@@ -30,6 +30,12 @@ describe('complete example guided tour', () => {
     expect(container.querySelector('.structured-manuscript')?.classList).toContain('example-tour-target')
 
     const next = () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Next'))!
+    await act(async () => next().click())
+    expect(container.textContent).toContain('Find any tool in seconds')
+    expect(container.textContent).toContain('Press ⌘P (Ctrl+P on Windows and Linux)')
+    expect(container.querySelector('.command-button')?.classList).toContain('example-tour-target')
+    expect(container.querySelectorAll('.example-tour-progress > span')).toHaveLength(6)
+
     await act(async () => next().click())
     expect(container.textContent).toContain('Add a citation')
     expect(container.querySelector('[aria-label="Sources"]')?.classList).toContain('example-tour-target')
