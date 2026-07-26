@@ -74,6 +74,25 @@ describe('DM-P1-GATE local project workflow', () => {
     vi.spyOn(desktopHost, 'readCitationLock').mockResolvedValue(null)
     vi.spyOn(desktopHost, 'readCitationCache').mockResolvedValue(null)
     vi.spyOn(desktopHost, 'readExecutionManifests').mockResolvedValue([])
+    vi.spyOn(desktopHost, 'agentIntegrationStatus').mockResolvedValue({
+      schemaVersion: 1,
+      protocolVersion: '1.0',
+      enabled: true,
+      instructionsReady: true,
+      skillReady: true,
+      manifestReady: true,
+      installedSkillVersion: 1,
+      configuredClients: ['codex', 'vibe'],
+      draftmatterCommand: '/usr/local/bin/draftmatter',
+      repairCommand: 'draftmatter ai update --project-root . --apply',
+      doctorCommand: 'draftmatter ai doctor --json --project-root .',
+      notes: [],
+    })
+    vi.spyOn(desktopHost, 'executionTrustStatus').mockResolvedValue({
+      trusted: false,
+      scope: 'session',
+      warning: 'Review this project before running code.',
+    })
     vi.spyOn(desktopHost, 'documentStatus').mockImplementation(async () => ({
       kind: 'current',
       hash: persistedHash,
@@ -143,6 +162,7 @@ describe('DM-P1-GATE local project workflow', () => {
       inputSetter?.call(name, 'Portable research article')
       name.dispatchEvent(new Event('input', { bubbles: true }))
     })
+    await act(async () => createDialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click())
     await act(async () => createDialog.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
     await flush(30)
 
@@ -150,7 +170,7 @@ describe('DM-P1-GATE local project workflow', () => {
     expect(desktopHost.createProject).toHaveBeenCalledWith(projectParent, 'Portable research article', {
       name: 'Remi Vezy',
       affiliations: [],
-    })
+    }, true)
     expect(container.querySelector('.structured-manuscript-editor h1')?.textContent).toBe('Phase 1 article')
     expect(localStorage.getItem('draftmatter.last-project-root.v1')).toBe(projectRoot)
 
@@ -212,6 +232,25 @@ describe('DM-P1-GATE local project workflow', () => {
     expect(container.querySelector('.structured-manuscript-editor')?.textContent).toContain('Changed safely in another editor.')
     expect(container.querySelector('.save-alert')).toBeNull()
     expect(container.querySelector('.toast')?.textContent).toContain('Reloaded external changes')
+  })
+
+  it('shows local AI guidance, adapters, trust, and repair diagnostics without contacting a model', async () => {
+    localStorage.setItem('draftmatter.last-project-root.v1', projectRoot)
+    await act(async () => appRoot.render(<App />))
+    await flush(50)
+
+    await act(async () => container.querySelector<HTMLButtonElement>('.project-switcher')!.click())
+    await act(async () => buttonWithText(container, 'AI integration status').click())
+    await flush()
+
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="agent-integration-title"]')!
+    expect(dialog.textContent).toContain('Project guidance ready')
+    expect(dialog.textContent).toContain('codex, vibe')
+    expect(dialog.textContent).toContain('Project code trust')
+    expect(dialog.textContent).toContain('Not granted')
+    expect(dialog.textContent).toContain('draftmatter ai doctor --json --project-root .')
+    expect(desktopHost.agentIntegrationStatus).toHaveBeenCalledWith(projectRoot)
+    expect(desktopHost.executionTrustStatus).toHaveBeenCalledWith(projectRoot)
   })
 
   it('snapshots the newest editor copy immediately before blocking on a save conflict', async () => {

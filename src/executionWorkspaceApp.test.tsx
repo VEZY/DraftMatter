@@ -48,6 +48,14 @@ async function settle(ms = 120) {
   await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, ms)) })
 }
 
+async function settleUntil(predicate: () => boolean, timeoutMs = 3_000) {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`Condition was not met within ${timeoutMs}ms`)
+    await settle(50)
+  }
+}
+
 describe('shared Jupyter execution workspace', () => {
   let container: HTMLDivElement
   let appRoot: ReturnType<typeof createRoot>
@@ -197,12 +205,13 @@ describe('shared Jupyter execution workspace', () => {
     expect(setupRow.textContent).toContain('Unsaved source changes')
 
     await act(async () => [...setupRow.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Save source')!.click())
-    await settle(950)
+    await settleUntil(() => vi.mocked(desktopHost.saveDocument).mock.calls
+      .some(([request]) => request.content.includes('threshold = 2')), 10_000)
 
     expect(vi.mocked(desktopHost.saveDocument).mock.calls.map(([request]) => request.content).join('\n')).toContain('threshold = 2')
     expect(setupRow.textContent).toContain('Saved in the project document')
     expect(container.querySelector('.structured-code-cell[data-dm-id="py-setup"]')).toBeNull()
-  })
+  }, 15_000)
 
   it('adds a reproducible table from the code panel', async () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())

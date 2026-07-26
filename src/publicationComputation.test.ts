@@ -31,12 +31,13 @@ ${retainedEstimate()}
 | dry | 12.4 |
 <!-- dm-output:end -->
 `
-    const projected = projectComputationsForPublication(source)
+    const projected = projectComputationsForPublication(source, { stripOutputMarkers: true })
 
     expect(projected).toContain('The estimate was 12.4.')
     expect(projected).toContain('| dry | 12.4 |')
     expect(projected).not.toContain('print(')
     expect(projected).not.toContain('dm-published-value')
+    expect(projected).not.toContain('dm-output:')
   })
 
   it('keeps ordinary non-executable code examples', () => {

@@ -19,6 +19,8 @@ describe('desktop host adapter', () => {
 
     await expect(host.openProject('/research/canopy')).resolves.toEqual(project)
     await host.createProject('/research', 'Canopy study', { name: 'Alice Martin', orcid: '0000-0002-1825-0097', affiliations: ['Plant Research Institute'] })
+    await host.initializeAiIntegration('/research/canopy')
+    await host.agentIntegrationStatus('/research/canopy')
     await host.createTemporaryProject('Canopy scratch')
     await host.readDocument('/research/canopy', 'paper.qmd')
     await host.readBibliography('/research/canopy', 'references.bib')
@@ -112,6 +114,8 @@ describe('desktop host adapter', () => {
         name: 'Canopy study',
         firstAuthor: { name: 'Alice Martin', orcid: '0000-0002-1825-0097', affiliations: ['Plant Research Institute'] },
       }],
+      ['initialize_ai_integration', { root: '/research/canopy' }],
+      ['agent_integration_status', { root: '/research/canopy' }],
       ['create_temporary_project', { name: 'Canopy scratch' }],
       ['read_document', { root: '/research/canopy', path: 'paper.qmd' }],
       ['read_bibliography', { root: '/research/canopy', path: 'references.bib' }],
@@ -192,6 +196,7 @@ describe('desktop host adapter', () => {
     const host = createDesktopHost(invoke, picker, false)
 
     await expect(host.pickProjectFolder()).resolves.toBeNull()
+    await expect(host.agentIntegrationStatus('/project')).rejects.toMatchObject({ kind: 'integration' })
     await expect(host.executionTrustStatus('/project')).rejects.toMatchObject({ kind: 'integration' })
     await expect(host.trustProjectForSession('/project', 'run-project-code-with-user-permissions')).rejects.toMatchObject({ kind: 'integration' })
     await expect(host.listJuliaPackages('/project')).rejects.toMatchObject({ kind: 'integration' })

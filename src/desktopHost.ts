@@ -65,6 +65,29 @@ export interface NewProjectAuthor {
   affiliations: string[]
 }
 
+export interface AgentIntegrationInitialization {
+  schemaVersion: 1
+  protocolVersion: string
+  initialized: boolean
+  files: string[]
+  nextSteps: string[]
+}
+
+export interface AgentIntegrationStatus {
+  schemaVersion: 1
+  protocolVersion: string
+  enabled: boolean
+  instructionsReady: boolean
+  skillReady: boolean
+  manifestReady: boolean
+  installedSkillVersion?: number
+  configuredClients: string[]
+  draftmatterCommand?: string
+  repairCommand: string
+  doctorCommand: string
+  notes: string[]
+}
+
 export interface DocumentSnapshot {
   path: string
   content: string
@@ -479,6 +502,10 @@ export function createDesktopHost(
     kind: 'integration',
     message: 'External desktop renderers are unavailable in browser collaboration sessions.',
   } satisfies HostFailure)
+  const agentIntegrationUnavailable = () => Promise.reject<never>({
+    kind: 'integration',
+    message: 'Local AI integration is available only in a desktop project.',
+  } satisfies HostFailure)
   return {
     available,
     async pickProjectFolder(title = 'Choose a DraftMatter project folder') {
@@ -489,8 +516,23 @@ export function createDesktopHost(
     openProject(root: string) {
       return invokeBridge<ProjectSnapshot>('open_project', { root })
     },
-    createProject(parent: string, name: string, firstAuthor?: NewProjectAuthor) {
-      return invokeBridge<ProjectSnapshot>('create_project', firstAuthor ? { parent, name, firstAuthor } : { parent, name })
+    createProject(parent: string, name: string, firstAuthor?: NewProjectAuthor, enableAi?: boolean) {
+      return invokeBridge<ProjectSnapshot>('create_project', {
+        parent,
+        name,
+        ...(firstAuthor ? { firstAuthor } : {}),
+        ...(enableAi ? { enableAi: true } : {}),
+      })
+    },
+    initializeAiIntegration(root: string) {
+      return available
+        ? invokeBridge<AgentIntegrationInitialization>('initialize_ai_integration', { root })
+        : agentIntegrationUnavailable()
+    },
+    agentIntegrationStatus(root: string) {
+      return available
+        ? invokeBridge<AgentIntegrationStatus>('agent_integration_status', { root })
+        : agentIntegrationUnavailable()
     },
     createTemporaryProject(name: string) {
       return invokeBridge<ProjectSnapshot>('create_temporary_project', { name })

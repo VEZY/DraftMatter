@@ -1,0 +1,39 @@
+{
+  "name": "draftmatter",
+  "version": "0.1.0",
+  "description": "Safe local AI authoring for DraftMatter research projects.",
+  "author": {
+    "name": "DraftMatter contributors",
+    "url": "https://github.com/VEZY/DraftMatter"
+  },
+  "homepage": "https://github.com/VEZY/DraftMatter",
+  "repository": "https://github.com/VEZY/DraftMatter",
+  "license": "MIT",
+  "keywords": [
+    "scientific-writing",
+    "reproducibility",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "DraftMatter",
+    "shortDescription": "Author research manuscripts through local tools.",
+    "longDescription": "Inspect, review, cite, validate, and create reproducible results in local DraftMatter projects without editing managed manuscript syntax.",
+    "developerName": "DraftMatter contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write",
+      "Local execution"
+    ],
+    "brandColor": "#153B5B",
+    "composerIcon": "./assets/icon.svg",
+    "websiteURL": "https://github.com/VEZY/DraftMatter",
+    "defaultPrompt": [
+      "Review this DraftMatter manuscript with tracked suggestions.",
+      "Add and inspect a reproducible figure.",
+      "Validate citations, results, and publication readiness."
+    ]
+  },
+  "mcpServers": "./.mcp.json"
+}

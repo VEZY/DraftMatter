@@ -68,4 +68,46 @@ describe('DraftMatter CLI', () => {
     expect(result.stdout).toEqual([])
     expect(result.writes).toEqual([])
   })
+
+  it('reports the agent protocol schema as one JSON document', async () => {
+    const result = harness()
+    expect(await runDraftMatterCli(['agent', 'schema'], result.io)).toBe(0)
+    expect(result.stderr).toEqual([])
+    expect(result.stdout).toHaveLength(1)
+    expect(JSON.parse(result.stdout[0])).toMatchObject({
+      protocolVersion: '1.0',
+      command: 'draftmatter agent',
+      operations: {
+        project: expect.arrayContaining(['inspect']),
+        manuscript: expect.arrayContaining(['read', 'mutate']),
+      },
+    })
+  })
+
+  it('rejects caller-selected generated identities before opening a project', async () => {
+    const request = JSON.stringify({
+      protocolVersion: '1.0',
+      projectRoot: '/unopened',
+      domain: 'computation',
+      action: 'create',
+      mode: 'apply',
+      expectedRevision: `sha256:${'0'.repeat(64)}`,
+      idempotencyKey: 'unsafe-cell-id-001',
+      actor: { id: 'agent:test', name: 'Test agent' },
+      cellId: 'chosen-by-caller',
+      language: 'python',
+      role: 'ordinary',
+      source: '1 + 1',
+      selector: { kind: 'document-boundary', edge: 'end' },
+      placement: 'after',
+    })
+    const result = harness(request)
+    expect(await runDraftMatterCli(['agent', '--request', '-'], result.io)).toBe(64)
+    expect(result.stderr).toEqual([])
+    expect(result.stdout).toHaveLength(1)
+    expect(JSON.parse(result.stdout[0])).toMatchObject({
+      ok: false,
+      error: { category: 'invalid-request', code: 'unknown-field' },
+    })
+  })
 })

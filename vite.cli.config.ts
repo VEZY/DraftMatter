@@ -1,23 +1,24 @@
 import { defineConfig } from 'vite'
-import { chmod, copyFile, readFile, writeFile } from 'node:fs/promises'
+import { chmod, copyFile, cp, readFile, writeFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 
 export default defineConfig({
   publicDir: false,
   plugins: [{
     name: 'draftmatter-cli-executable',
-    async closeBundle() {
+    async writeBundle() {
       const rootPackage = JSON.parse(await readFile(resolve('package.json'), 'utf8')) as { version: string }
       await Promise.all([
         chmod(resolve('dist-cli/draftmatter.js'), 0o755),
         copyFile(resolve('LICENSE'), resolve('dist-cli/LICENSE')),
+        cp(resolve('integrations'), resolve('dist-cli/integrations'), { recursive: true }),
         writeFile(resolve('dist-cli/package.json'), `${JSON.stringify({
           name: 'draftmatter',
           version: rootPackage.version,
-          description: 'Clean, inert Markdown/Quarto review projections from DraftMatter.',
+          description: 'DraftMatter clean exports and provider-neutral local AI authoring tools.',
           type: 'module',
           bin: { draftmatter: 'draftmatter.js' },
-          files: ['draftmatter.js', 'draftmatter.js.map'],
+          files: ['draftmatter.js', 'draftmatter.js.map', 'integrations/**'],
           engines: { node: '>=20' },
           license: 'MIT',
         }, null, 2)}\n`, 'utf8'),
@@ -33,6 +34,11 @@ draftmatter review-report paper.qmd -o review-report.md
 \`\`\`
 
 Final rendering exits with status 2 and writes no output while a review conflict is unresolved. Use \`draftmatter --help\` for the complete command reference.
+
+The package also contains the canonical \`draftmatter-authoring\` skill and
+Codex plugin under \`integrations/\`. Local MCP computation requires the
+platform \`draftmatter-agent-host\` executable from the matching DraftMatter
+desktop release on PATH or in \`DRAFTMATTER_AGENT_HOST\`.
 `, 'utf8'),
       ])
     },

@@ -11,7 +11,12 @@ The portability workflow type-checks, tests, and packages debug bundles for thes
 
 The web application remains a browser-safe fallback on all three operating-system families. It does not receive desktop host commands.
 
-The same portability matrix builds and process-tests the dependency-free Node.js 20+ clean-export CLI. Tagged releases attach one platform-neutral `draftmatter-<version>.tgz` archive alongside the signed desktop installers and verified release metadata.
+The same portability matrix builds and process-tests the Node.js 20+ CLI.
+The CLI package includes clean export, the JSON agent interface, the stdio MCP
+server, the canonical skill, and the thin Codex plugin. Tagged releases attach
+one platform-neutral `draftmatter-<version>.tgz` archive and one
+`draftmatter-agent-host` executable per target alongside the signed desktop
+installers and verified release metadata.
 
 ## Reproducible release checks
 
@@ -24,12 +29,22 @@ npm test
 npm run test:e2e
 npm run build
 npm run test:cli
+npm run test:mcp
+npm run test:agent-adapters
+npm run validate:agent-skill
 cargo test --manifest-path src-tauri/Cargo.toml --locked
 npm run compliance:check
 npm run compliance:generate
 ```
 
 `compliance:check` resolves the locked npm and target-filtered Cargo graphs and rejects every SPDX token outside `compliance/license-allowlist.json`. `compliance:generate` emits target-specific third-party notices and a CycloneDX 1.5 SBOM. The portability workflow attaches both files beside each platform build.
+
+`npm run release:verify` also locks the MCP SDK version, verifies the Codex
+plugin/application version match, and requires a scoped record for the current
+unused Hono HTTP-adapter advisory in
+`compliance/security-exceptions.json`. DraftMatter exposes MCP only over stdio;
+the exception must be re-reviewed by its deadline and cannot cover a reachable,
+high, or critical advisory.
 
 `test:e2e` starts the browser-safe application on loopback, exercises the rendered manuscript/review workflow in pinned Chromium, checks keyboard access, and compares the result with the committed visual baseline. The dedicated browser workflow installs the Playwright-pinned browser before running this gate.
 
@@ -59,6 +74,10 @@ Unsigned or unnotarized desktop artifacts must be labelled development builds an
 - **External export:** reports installed Pandoc/Quarto versions, the exact project-relative output path, overwrite conflicts, and bounded renderer failures.
 - **Citations:** reports local Zotero availability, Crossref/offline failures, citation-lock conflicts, and cached metadata state without logging manuscript content or credentials.
 - **Collaboration:** reports sign-in/discovery failures, live/reconnecting state, active presence, pending owner checkpoint state, invitation/member activity, and named recovery status. Access and refresh tokens remain memory-only. A one-use invitation may be held in origin-scoped session storage only for the bounded OIDC redirect, then is removed on callback; all of these secrets remain absent from public metrics/logs.
+- **Local AI integration:** reports generated instruction/skill/manifest state,
+  protocol and skill versions, configured clients, CLI availability,
+  session-only execution trust, runtime readiness, and copyable doctor/update
+  commands. The check does not contact a model.
 
 ## Privilege and data boundaries
 

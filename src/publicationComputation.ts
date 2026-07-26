@@ -13,7 +13,10 @@ function closingFence(value: string, fence: string) {
   return new RegExp(`^[ \\t]*\\${marker}{${fence.length},}[ \\t]*$`).test(value)
 }
 
-export function projectComputationsForPublication(source: string) {
+export function projectComputationsForPublication(
+  source: string,
+  options: { stripOutputMarkers?: boolean } = {},
+) {
   const ending = source.includes('\r\n') ? '\r\n' : source.includes('\r') ? '\r' : '\n'
   const lines = source.replaceAll('\r\n', '\n').replaceAll('\r', '\n').split('\n')
   const retained = parseRetainedPublishedValues(source)
@@ -26,6 +29,10 @@ export function projectComputationsForPublication(source: string) {
       continue
     }
     if (/^<!--\s*dm-published-value\b[^>]*-->\s*$/.test(lines[index])) continue
+    if (
+      options.stripOutputMarkers
+      && /^<!--\s*dm-output:(?:start\b[^>]*|end\s*)-->\s*$/.test(lines[index])
+    ) continue
     projected.push(lines[index])
   }
   return replacePublishedValueMarkup(projected.join(ending), retained.values)

@@ -14,6 +14,8 @@ use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 
 mod code_formatting;
+mod agent_host;
+mod agent_integration;
 mod execution_artifacts;
 mod execution_manifests;
 mod execution_trust;
@@ -26,6 +28,12 @@ use code_formatting::{
     format_code_impl, install_code_formatter_with_progress_impl, probe_code_formatter_impl,
     CodeFormatRequest, CodeFormatResult, CodeFormatterRequest, CodeFormatterStatus,
 };
+use agent_integration::{
+    agent_integration_status_impl, initialize_ai_integration_impl, AgentIntegrationInitialization,
+    AgentIntegrationStatus,
+};
+#[cfg(test)]
+use agent_integration::initialize_ai_integration_with_failure_impl;
 use execution_artifacts::{
     fingerprint_execution_inputs_impl, inspect_execution_artifacts_impl,
     ExecutionArtifactFingerprint, ExecutionInput,
@@ -34,6 +42,7 @@ use execution_manifests::{
     read_execution_manifests_impl, save_execution_manifest_impl, SaveExecutionManifestRequest,
 };
 mod runtime;
+pub use agent_host::run_agent_host;
 use execution_trust::{
     execution_trust_status_impl, revoke_project_trust_impl, trust_project_for_session_impl,
     ExecutionTrustStatus, ExecutionTrustStore,
@@ -2760,6 +2769,7 @@ fn create_project(
     parent: String,
     name: String,
     first_author: Option<NewProjectAuthor>,
+    enable_ai: Option<bool>,
 ) -> Result<ProjectSnapshot, HostError> {
     let parent_path = canonical_root(&parent)?;
     let normalized_name = normalized_project_name(&name)?;
@@ -2778,13 +2788,30 @@ fn create_project(
             HostError::Io(error.to_string())
         }
     })?;
-    match initialize_project_root(&root_path, &normalized_name, first_author.as_ref()) {
+    match initialize_project_root(&root_path, &normalized_name, first_author.as_ref()).and_then(
+        |snapshot| {
+            if enable_ai.unwrap_or(false) {
+                initialize_ai_integration_impl(root_path.to_string_lossy().as_ref())?;
+            }
+            Ok(snapshot)
+        },
+    ) {
         Ok(snapshot) => Ok(snapshot),
         Err(error) => {
             let _ = fs::remove_dir_all(&root_path);
             Err(error)
         }
     }
+}
+
+#[tauri::command]
+fn initialize_ai_integration(root: String) -> Result<AgentIntegrationInitialization, HostError> {
+    initialize_ai_integration_impl(&root)
+}
+
+#[tauri::command]
+fn agent_integration_status(root: String) -> Result<AgentIntegrationStatus, HostError> {
+    agent_integration_status_impl(&root)
 }
 
 fn create_temporary_project_in(parent: &Path, name: &str) -> Result<ProjectSnapshot, HostError> {
@@ -3389,6 +3416,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             open_project,
             create_project,
+            initialize_ai_integration,
+            agent_integration_status,
             create_temporary_project,
             read_document,
             read_bibliography,
@@ -3812,6 +3841,7 @@ mod tests {
                 orcid: Some("0000-0002-1825-0097".into()),
                 affiliations: vec!["Plant Research Institute".into()],
             }),
+            None,
         )
         .unwrap();
         let root = temporary.path().join("Canopy study");
@@ -3866,6 +3896,112 @@ mod tests {
             fs::read_to_string(temporary.path().join("another-download.txt")).unwrap(),
             "keep me"
         );
+    }
+
+    #[test]
+    fn creates_an_opt_in_ai_project_without_configuring_clients() {
+        let temporary = tempdir().unwrap();
+        let snapshot = create_project(
+            temporary.path().to_string_lossy().into_owned(),
+            "AI-assisted study".into(),
+            None,
+            Some(true),
+        )
+        .unwrap();
+        let root = Path::new(&snapshot.root);
+        assert!(fs::read_to_string(root.join("AGENTS.md"))
+            .unwrap()
+            .contains("draftmatter-authoring"));
+        assert!(root
+            .join(".agents/skills/draftmatter-authoring/SKILL.md")
+            .is_file());
+        let manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(root.join(".draftmatter/ai-integration.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["schemaVersion"], 1);
+        assert_eq!(manifest["configuredClients"], serde_json::json!([]));
+        let status = serde_json::to_value(
+            agent_integration_status_impl(root.to_string_lossy().as_ref()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(status["enabled"], true);
+        assert_eq!(status["instructionsReady"], true);
+        assert_eq!(status["skillReady"], true);
+        assert_eq!(status["installedSkillVersion"], 1);
+        assert_eq!(status["configuredClients"], serde_json::json!([]));
+        assert!(!root.join(".codex/config.toml").exists());
+        assert!(!root.join(".mcp.json").exists());
+        assert!(!root.join(".vibe/config.toml").exists());
+    }
+
+    #[test]
+    fn merges_existing_ai_guidance_atomically_and_preserves_configured_clients() {
+        let temporary = tempdir().unwrap();
+        let snapshot = create_project(
+            temporary.path().to_string_lossy().into_owned(),
+            "Existing instructions".into(),
+            None,
+            None,
+        )
+        .unwrap();
+        let root = Path::new(&snapshot.root);
+        let original_agents = "# Team instructions\n\nPreserve this exact line.\n";
+        fs::write(root.join("AGENTS.md"), original_agents).unwrap();
+        fs::create_dir_all(root.join(".codex")).unwrap();
+        fs::write(
+            root.join(".codex/config.toml"),
+            "[mcp_servers.draftmatter]\ncommand = \"draftmatter\"\n",
+        )
+        .unwrap();
+        fs::write(
+            root.join(".draftmatter/ai-integration.json"),
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "schemaVersion": 1,
+                    "protocolVersion": "1.0",
+                    "draftmatterVersion": "0.1.0",
+                    "skill": { "name": "draftmatter-authoring", "version": 1 },
+                    "configuredClients": ["codex"],
+                    "files": [{
+                        "path": ".codex/config.toml",
+                        "owner": "managed-block",
+                        "clients": ["codex"],
+                        "created": true,
+                        "generatedRevision": "sha256:fixture"
+                    }]
+                })
+            ),
+        )
+        .unwrap();
+
+        let failure = initialize_ai_integration_with_failure_impl(
+            root.to_string_lossy().as_ref(),
+            2,
+        )
+        .unwrap_err();
+        assert!(failure.to_string().contains("rolled back"));
+        assert_eq!(fs::read_to_string(root.join("AGENTS.md")).unwrap(), original_agents);
+        assert!(!root.join("CLAUDE.md").exists());
+        assert!(!root
+            .join(".agents/skills/draftmatter-authoring/SKILL.md")
+            .exists());
+
+        initialize_ai_integration_impl(root.to_string_lossy().as_ref()).unwrap();
+        let agents = fs::read_to_string(root.join("AGENTS.md")).unwrap();
+        assert!(agents.starts_with(original_agents));
+        assert!(agents.contains("draftmatter-authoring"));
+        let manifest: serde_json::Value = serde_json::from_str(
+            &fs::read_to_string(root.join(".draftmatter/ai-integration.json")).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(manifest["configuredClients"], serde_json::json!(["codex"]));
+        assert!(manifest["files"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|entry| entry["path"] == ".codex/config.toml"));
     }
 
     #[test]
@@ -4007,6 +4143,7 @@ mod tests {
             temporary.path().to_string_lossy().into_owned(),
             "Unsafe".into(),
             None,
+            None,
         )
         .unwrap_err();
         assert!(matches!(error, HostError::InvalidProject(_)));
@@ -4022,6 +4159,7 @@ mod tests {
         let snapshot = create_project(
             temporary.path().to_string_lossy().into_owned(),
             "  Canopy: water / 2026  ".into(),
+            None,
             None,
         )
         .unwrap();

@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "draftmatter": {
+      "command": "draftmatter",
+      "args": [
+        "mcp",
+        "--stdio",
+        "--project-root",
+        "."
+      ]
+    }
+  }
+}

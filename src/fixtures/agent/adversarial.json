@@ -1,0 +1,124 @@
+[
+  {
+    "name": "caller supplied generated cell identity",
+    "expectedCode": "unknown-field",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "computation",
+      "action": "create",
+      "mode": "apply",
+      "expectedRevision": "sha256:current",
+      "idempotencyKey": "unsafe-cell-id-001",
+      "actor": { "id": "agent:test", "name": "Test agent" },
+      "cellId": "chosen-by-caller",
+      "language": "python",
+      "role": "ordinary",
+      "source": "1 + 1",
+      "selector": { "kind": "document-boundary", "edge": "end" },
+      "placement": "after"
+    }
+  },
+  {
+    "name": "same idempotency key changed payload",
+    "expectedCode": "idempotency-conflict",
+    "sequence": [
+      {
+        "protocolVersion": "1.0",
+        "domain": "review",
+        "action": "suggest",
+        "mode": "suggest",
+        "expectedRevision": "sha256:current",
+        "idempotencyKey": "duplicate-key-001",
+        "actor": { "id": "agent:test", "name": "Test agent" },
+        "selector": { "kind": "quote", "quote": "Original sentence." },
+        "proposal": "First proposal."
+      },
+      {
+        "protocolVersion": "1.0",
+        "domain": "review",
+        "action": "suggest",
+        "mode": "suggest",
+        "expectedRevision": "sha256:current",
+        "idempotencyKey": "duplicate-key-001",
+        "actor": { "id": "agent:test", "name": "Test agent" },
+        "selector": { "kind": "quote", "quote": "Original sentence." },
+        "proposal": "Different proposal."
+      }
+    ]
+  },
+  {
+    "name": "stale revision",
+    "expectedCode": "stale-revision",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "manuscript",
+      "action": "mutate",
+      "mode": "apply",
+      "expectedRevision": "sha256:stale",
+      "idempotencyKey": "stale-write-001",
+      "actor": { "id": "agent:test", "name": "Test agent" },
+      "mutation": {
+        "kind": "text",
+        "operation": "replace",
+        "selector": { "kind": "quote", "quote": "Original sentence." },
+        "text": "Replacement."
+      }
+    }
+  },
+  {
+    "name": "ambiguous quote selector",
+    "expectedCode": "ambiguous-selector",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "manuscript",
+      "action": "read",
+      "selector": { "kind": "quote", "quote": "Repeated sentence." }
+    }
+  },
+  {
+    "name": "project traversal",
+    "expectedCode": "path-outside-project",
+    "request": {
+      "protocolVersion": "1.0",
+      "projectRoot": "../outside",
+      "domain": "project",
+      "action": "inspect"
+    }
+  },
+  {
+    "name": "oversized logs",
+    "expectedCode": "output-truncated",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "computation",
+      "action": "logs",
+      "reference": "cell:oversized-output",
+      "pageSize": 100
+    }
+  },
+  {
+    "name": "fabricated reference metadata",
+    "expectedCode": "unknown-field",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "references",
+      "action": "add",
+      "mode": "apply",
+      "expectedRevision": "sha256:current",
+      "idempotencyKey": "fabricated-reference-001",
+      "actor": { "id": "agent:test", "name": "Test agent" },
+      "metadata": { "title": "Invented paper", "DOI": "10.0000/invented" }
+    }
+  },
+  {
+    "name": "untrusted execution",
+    "expectedCode": "project-not-trusted",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "computation",
+      "action": "run",
+      "reference": "cell:analysis"
+    }
+  }
+]
+

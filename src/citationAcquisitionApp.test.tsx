@@ -46,6 +46,14 @@ function buttonContaining(container: ParentNode, text: string) {
     .find((button) => button.textContent?.includes(text))!
 }
 
+async function settleUntil(predicate: () => boolean, timeoutMs = 3_000) {
+  const deadline = Date.now() + timeoutMs
+  while (!predicate()) {
+    if (Date.now() >= deadline) throw new Error(`Condition was not met within ${timeoutMs}ms`)
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 50)) })
+  }
+}
+
 describe('rendered portable citation acquisition', () => {
   let container: HTMLDivElement
   let appRoot: ReturnType<typeof createRoot>
@@ -196,9 +204,10 @@ describe('rendered portable citation acquisition', () => {
 
     const search = container.querySelector<HTMLInputElement>('input[aria-label="Search citation sources"]')!
     await enter(search, 'independent')
-    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 330)) })
-    const zoteroResult = [...container.querySelectorAll<HTMLButtonElement>('.source-result')]
-      .find((button) => button.textContent?.includes('Independent Zotero evidence'))!
+    const findZoteroResult = () => [...container.querySelectorAll<HTMLButtonElement>('.source-result')]
+      .find((button) => button.textContent?.includes('Independent Zotero evidence'))
+    await settleUntil(() => findZoteroResult()?.textContent?.includes('@sharedKey-2') ?? false)
+    const zoteroResult = findZoteroResult()!
     expect(zoteroResult.textContent).toContain('@sharedKey-2')
     await act(async () => zoteroResult.click())
     await act(async () => {

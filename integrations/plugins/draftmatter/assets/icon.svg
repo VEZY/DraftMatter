@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-labelledby="title">
+  <title id="title">DraftMatter</title>
+  <rect width="128" height="128" rx="24" fill="#153b5b"/>
+  <path d="M32 24h47l17 17v63H32z" fill="#fff"/>
+  <path d="M79 24v18h17" fill="#bdd9e8"/>
+  <path d="M45 58h38M45 72h38M45 86h25" fill="none" stroke="#157a7a" stroke-width="7" stroke-linecap="round"/>
+</svg>

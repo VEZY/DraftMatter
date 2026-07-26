@@ -15,6 +15,19 @@ Open the folder as a project and use `paper.qmd` as the main manuscript. It incl
 
 The paper, data, institutions, people, and references are deliberately synthetic. The example is suitable for UI demonstrations, export checks, portability tests, and learning the source format; it is not a scientific dataset.
 
+## Local-agent acceptance coverage
+
+The complete example is also the publication-side fixture for the
+provider-neutral AI integration. It contains the same classes of durable state
+that an agent can create through the DraftMatter service: attributed review,
+Python/R/Julia computations, retained figures and tables, named in-text values,
+citations, provenance, and freshness manifests. `src/phase7AlphaAuthoringGate.test.ts`
+proves that this state reopens and produces clean HTML and DOCX, while
+`scripts/verify-agent-e2e.mjs` creates the corresponding state from agent
+requests over MCP, performs a real R clean run, reconnects, and verifies clean
+Markdown and HTML publication output. Browser publication tests cover the PDF
+path without executing manuscript code.
+
 ## Runtime notes
 
 The code cells avoid third-party packages. Re-execution requires Python 3, R, or Julia only for the cells written in that language. DraftMatter will ask for explicit trust before starting a local kernel, and it will mark retained results stale when their code or inputs change.

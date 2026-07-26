@@ -1,0 +1,117 @@
+[
+  {
+    "name": "tracked prose rewrite",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "review",
+      "action": "suggest",
+      "mode": "suggest",
+      "expectedRevision": "sha256:current",
+      "idempotencyKey": "rewrite-introduction-001",
+      "actor": { "id": "agent:reviewer", "name": "Local research assistant" },
+      "selector": { "kind": "quote", "quote": "Leaf area increased.", "prefix": "Results: " },
+      "proposal": "Leaf area increased after treatment.",
+      "rationale": "State the experimental condition."
+    }
+  },
+  {
+    "name": "reproducible figure",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "computation",
+      "action": "create",
+      "mode": "apply",
+      "expectedRevision": "sha256:current",
+      "idempotencyKey": "figure-treatment-response-001",
+      "actor": { "id": "agent:analyst", "name": "Local research assistant" },
+      "language": "python",
+      "role": "figure",
+      "source": "plot_response(data)",
+      "selector": { "kind": "section-label", "label": "sec-results" },
+      "placement": "end",
+      "caption": "Treatment response by date.",
+      "alt": "Lines show the response through time for each treatment."
+    }
+  },
+  {
+    "name": "reproducible table and named values",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "computation",
+      "action": "create",
+      "mode": "apply",
+      "expectedRevision": "sha256:current",
+      "idempotencyKey": "table-summary-001",
+      "actor": { "id": "agent:analyst", "name": "Local research assistant" },
+      "language": "r",
+      "role": "table",
+      "source": "summary_table <- analyse(data)",
+      "selector": { "kind": "heading", "text": "Results" },
+      "placement": "end",
+      "caption": "Model estimates.",
+      "publishedValues": ["sample_size", "mean_response"]
+    }
+  },
+  {
+    "name": "failed cell inspection",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "computation",
+      "action": "logs",
+      "reference": "cell:failed-analysis"
+    }
+  },
+  {
+    "name": "stale-output validation",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "validate",
+      "action": "freshness"
+    }
+  },
+  {
+    "name": "authoritative duplicate reference search",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "references",
+      "action": "search",
+      "query": "10.1016/j.envsoft.2019.104609",
+      "sources": ["project", "zotero", "crossref"],
+      "allowNetwork": true
+    }
+  },
+  {
+    "name": "citation cluster",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "references",
+      "action": "cite",
+      "mode": "apply",
+      "expectedRevision": "sha256:current",
+      "idempotencyKey": "cite-methods-001",
+      "actor": { "id": "agent:writer", "name": "Local research assistant" },
+      "citekeys": ["vezy2024", "martin2023"],
+      "selector": { "kind": "quote", "quote": "The model was calibrated", "suffix": "." },
+      "placement": "after",
+      "prefix": "see",
+      "locator": "pp. 18–20"
+    }
+  },
+  {
+    "name": "review conflict inspection",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "review",
+      "action": "inspect"
+    }
+  },
+  {
+    "name": "malformed managed markup validation",
+    "request": {
+      "protocolVersion": "1.0",
+      "domain": "validate",
+      "action": "project"
+    }
+  }
+]
+

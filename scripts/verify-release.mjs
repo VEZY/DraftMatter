@@ -7,6 +7,9 @@ const packageLock = JSON.parse(readFileSync(resolve(root, 'package-lock.json'), 
 const tauri = JSON.parse(readFileSync(resolve(root, 'src-tauri/tauri.conf.json'), 'utf8'))
 const cargo = readFileSync(resolve(root, 'src-tauri/Cargo.toml'), 'utf8')
 const cargoVersion = cargo.match(/^version\s*=\s*"([^"]+)"/m)?.[1]
+const plugin = JSON.parse(readFileSync(resolve(root, 'integrations/plugins/draftmatter/.codex-plugin/plugin.json'), 'utf8'))
+const sdkVersion = packageJson.dependencies?.['@modelcontextprotocol/sdk']
+const securityExceptions = JSON.parse(readFileSync(resolve(root, 'compliance/security-exceptions.json'), 'utf8'))
 const versions = new Map([
   ['package.json', packageJson.version],
   ['package-lock.json', packageLock.version],
@@ -22,6 +25,15 @@ if (rawTag && rawTag !== `v${expected}`) failures.push(['release tag', `${rawTag
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(expected)) failures.push(['application version', `${expected} (not SemVer)`])
 if (tauri.bundle?.active !== true) failures.push(['Tauri bundle', 'disabled'])
 if (tauri.bundle?.targets !== 'all') failures.push(['Tauri bundle targets', String(tauri.bundle?.targets)])
+if (plugin.version !== expected) failures.push(['Codex plugin manifest', plugin.version])
+if (sdkVersion !== '1.29.0') failures.push(['MCP SDK pin', `${sdkVersion ?? 'missing'} (expected 1.29.0)`])
+if (!Array.isArray(securityExceptions.exceptions)
+  || !securityExceptions.exceptions.some((entry) =>
+    entry.advisory === 'GHSA-frvp-7c67-39w9'
+    && entry.package === '@hono/node-server'
+    && entry.transportExposed === false)) {
+  failures.push(['MCP dependency security exception', 'missing scoped GHSA-frvp-7c67-39w9 record'])
+}
 
 if (failures.length) {
   console.error('Release identity verification failed:')

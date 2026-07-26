@@ -10,6 +10,12 @@ The design document carries the product-level status and interaction decisions;
 this file remains the task-level source for tests, fixtures, and implementation
 commits.
 
+The provider-neutral local AI integration is certified separately in
+[`agent-integration-evidence.md`](agent-integration-evidence.md). That record
+covers the headless service, JSON and MCP interfaces, Agent Skill and client
+adapters, real-kernel workflows, safety boundaries, publication output, and
+cross-client verification.
+
 ## Certification snapshot
 
 The implementation tree was last audited on 2026-07-16 from a clean

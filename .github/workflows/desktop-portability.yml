@@ -84,8 +84,18 @@ jobs:
       - name: Test standalone clean-export CLI
         run: npm run test:cli
 
+      - name: Verify local agent protocol, adapters, skill, and MCP
+        run: |
+          npm run test:mcp
+          npm run test:agent-adapters
+          npm run test:agent-performance
+          npm run validate:agent-skill
+
       - name: Test native project host
         run: cargo test --manifest-path src-tauri/Cargo.toml --locked
+
+      - name: Build local agent execution host
+        run: cargo build --manifest-path src-tauri/Cargo.toml --locked --bin draftmatter-agent-host
 
       - name: Build platform application
         uses: tauri-apps/tauri-action@v1

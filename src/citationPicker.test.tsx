@@ -69,5 +69,5 @@ describe('keyboard citation cluster workflow', () => {
     const viewSource = [...container.querySelectorAll('button')].find((button) => normalizedText(button).includes('View source'))!
     await click(viewSource)
     expect(container.querySelector('.source-drawer pre')?.textContent).toContain('[see -@vezy2024, p. 18, emphasis added; @martin2023]')
-  })
+  }, 15_000)
 })

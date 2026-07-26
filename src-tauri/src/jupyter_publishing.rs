@@ -58,7 +58,8 @@ publish <- function(name, value, unit = NULL, digits = NULL) {
   encoded <- jsonlite::toJSON(payload, auto_unbox = TRUE, null = "null", digits = NA)
   bundle <- list(encoded)
   names(bundle) <- "application/vnd.draftmatter.published-value+json"
-  IRdisplay::publish_mimebundle(bundle, metadata = list())
+  empty_metadata <- structure(list(), names = character())
+  IRdisplay::publish_mimebundle(bundle, metadata = empty_metadata)
   invisible(value)
 }
 "#;
@@ -136,6 +137,8 @@ mod tests {
         }
         assert!(publishing_helper(RuntimeLanguage::Python).contains("def publish"));
         assert!(publishing_helper(RuntimeLanguage::R).contains("publish <- function"));
+        assert!(publishing_helper(RuntimeLanguage::R)
+            .contains("structure(list(), names = character())"));
         assert!(publishing_helper(RuntimeLanguage::Julia)
             .contains("publish(name::AbstractString, value;"));
         assert!(publishing_helper(RuntimeLanguage::Julia).contains("macro publish"));

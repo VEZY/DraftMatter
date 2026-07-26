@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, 
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, parseBibliographyFile, searchCitations } from './bibliography'
-import { desktopHost, normaliseHostFailure, resolveMainDocument, type CodeFormatterStatus, type JuliaEnvironment, type ProjectExecutionPreferences, type ProjectSnapshot, type ZoteroAttachment } from './desktopHost'
+import { desktopHost, normaliseHostFailure, resolveMainDocument, type AgentIntegrationStatus, type CodeFormatterStatus, type JuliaEnvironment, type ProjectExecutionPreferences, type ProjectSnapshot, type ZoteroAttachment } from './desktopHost'
 import { parsePortableDocument, parseReviewMarkup } from './sharedEditor'
 import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
@@ -38,7 +38,7 @@ import { extractExecutableCells, isPanelManagedCell, isSetupCell, type Executabl
 import { ExecutionFreshnessTracker, parseExecutionManifest, serializeExecutionManifest, type CleanRunCertification, type ExecutionCellFreshness, type ExecutionManifest } from './executionFreshness'
 import { createKernelExecutionManager, executionEnvironmentFingerprint, executionInputsFingerprint, sha256, type NormalizedExecutionResult } from './kernelExecution'
 import { cleanExecutePortableDocument } from './cleanExecution'
-import { EXECUTION_TRUST_ACKNOWLEDGEMENT, createTrustedKernelExecution } from './executionTrust'
+import { EXECUTION_TRUST_ACKNOWLEDGEMENT, createTrustedKernelExecution, type ExecutionTrustStatus } from './executionTrust'
 import { ExecutionOutputView } from './ExecutionOutputView'
 import { materializeExecutionOutput } from './outputMaterializer'
 import { buildExecutionAvailability, parseRetainedOutputs } from './retainedOutputs'
@@ -678,6 +678,11 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
     initialExperience !== 'browser-new' && localStorage.getItem(BUILT_IN_PROJECT_KEY) === 'complete-example' ? 'complete-example' : null
   )
   const [projectChecksOpen, setProjectChecksOpen] = useState(false)
+  const [agentIntegrationOpen, setAgentIntegrationOpen] = useState(false)
+  const [agentIntegrationStatus, setAgentIntegrationStatus] = useState<AgentIntegrationStatus>()
+  const [agentIntegrationTrust, setAgentIntegrationTrust] = useState<ExecutionTrustStatus>()
+  const [agentIntegrationBusy, setAgentIntegrationBusy] = useState(false)
+  const [agentIntegrationProblem, setAgentIntegrationProblem] = useState('')
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [settingsName, setSettingsName] = useState(userSettings.author.name)
   const [settingsProblem, setSettingsProblem] = useState('')
@@ -734,6 +739,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   const [newProjectName, setNewProjectName] = useState('')
   const [newProjectAuthorSelection, setNewProjectAuthorSelection] = useState('new')
   const [newProjectAuthor, setNewProjectAuthor] = useState<PublicationAuthorDraft>(() => publicationAuthorDraft({ name: userSettings.author.name }))
+  const [newProjectAiEnabled, setNewProjectAiEnabled] = useState(false)
   const [newProjectProblem, setNewProjectProblem] = useState('')
   const [localExecutionCopyOpen, setLocalExecutionCopyOpen] = useState(false)
   const [localExecutionCopyName, setLocalExecutionCopyName] = useState('')
@@ -4015,6 +4021,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
       setNewProjectAuthor(firstAuthor
         ? { ...publicationAuthorDraft(firstAuthor), id: firstAuthor.id }
         : publicationAuthorDraft({ name: userSettings.author.name }))
+      setNewProjectAiEnabled(false)
       setNewProjectProblem('')
       setProjectMenuOpen(false)
       setCreateProjectOpen(true)
@@ -4037,10 +4044,15 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
       }])
       saveAuthorBank(localStorage, nextBank)
       setAuthorBank(nextBank)
-      const project = await desktopHost.createProject(newProjectParent, name, firstAuthor)
+      const project = newProjectAiEnabled
+        ? await desktopHost.createProject(newProjectParent, name, firstAuthor, true)
+        : await desktopHost.createProject(newProjectParent, name, firstAuthor)
       await applyDesktopProject(project)
       setCreateProjectOpen(false)
       setNewProjectProblem('')
+      if (newProjectAiEnabled) {
+        setToast('Project created · local AI guidance enabled; client configuration still requires review')
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : normaliseHostFailure(error).message
       setNewProjectProblem(message)
@@ -4048,6 +4060,59 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
     } finally {
       setProjectBusy(false)
     }
+  }
+
+  const loadAgentIntegrationStatus = async () => {
+    if (!desktopSession || agentIntegrationBusy) return
+    setAgentIntegrationBusy(true)
+    setAgentIntegrationProblem('')
+    try {
+      const [status, trust] = await Promise.all([
+        desktopHost.agentIntegrationStatus(desktopSession.root),
+        desktopHost.executionTrustStatus(desktopSession.root),
+      ])
+      setAgentIntegrationStatus(status)
+      setAgentIntegrationTrust(trust)
+    } catch (error) {
+      setAgentIntegrationProblem(normaliseHostFailure(error).message)
+    } finally {
+      setAgentIntegrationBusy(false)
+    }
+  }
+
+  const openAgentIntegration = () => {
+    if (!desktopSession) return
+    setProjectMenuOpen(false)
+    setAgentIntegrationOpen(true)
+    setAgentIntegrationStatus(undefined)
+    setAgentIntegrationTrust(undefined)
+    setAgentIntegrationProblem('')
+    void loadAgentIntegrationStatus()
+  }
+
+  const enableAgentIntegration = async () => {
+    if (!desktopSession || agentIntegrationBusy) return
+    setAgentIntegrationBusy(true)
+    setAgentIntegrationProblem('')
+    try {
+      await desktopHost.initializeAiIntegration(desktopSession.root)
+      const [status, trust] = await Promise.all([
+        desktopHost.agentIntegrationStatus(desktopSession.root),
+        desktopHost.executionTrustStatus(desktopSession.root),
+      ])
+      setAgentIntegrationStatus(status)
+      setAgentIntegrationTrust(trust)
+      setToast('Local AI guidance enabled · client configuration still requires review')
+    } catch (error) {
+      setAgentIntegrationProblem(normaliseHostFailure(error).message)
+    } finally {
+      setAgentIntegrationBusy(false)
+    }
+  }
+
+  const copyAgentCommand = async (command: string, label: string) => {
+    const copied = await copyPlainText(command)
+    setToast(copied ? `Copied ${label}` : command)
   }
 
   const beginLocalExecutionCopy = () => {
@@ -4926,6 +4991,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
                   <button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={16} /><span><strong>Attach bibliography…</strong><small>BibTeX, CSL JSON, RIS, or EndNote · {citations.length} indexed</small></span></button>
                   <button onClick={createSnapshot}><Icon name="clock" size={16} /><span><strong>Save recovery snapshot</strong><small>Keep a private safety copy on this device</small></span></button>
                   <button onClick={() => { setRecoveryOpen(true); setProjectMenuOpen(false) }}><Icon name="history" size={16} /><span><strong>Recovery history</strong><small>{recoveries.length ? `${recoveries.length} local version${recoveries.length === 1 ? '' : 's'}` : 'No local versions yet'}</small></span><span className="menu-count">{recoveries.length}</span></button>
+                  {desktopSession && <button onClick={openAgentIntegration}><Icon name="code" size={16} /><span><strong>AI integration status</strong><small>Guidance, MCP command, trust, and runtimes</small></span></button>}
                   <button onClick={() => download('reviewed')}><Icon name="download" size={16} /><span><strong>Download portable source</strong><small>Save {filename} to this computer</small></span></button>
                 </div>
                 <ProjectDiagnostics diagnostics={allDiagnostics} onViewAll={openProjectChecks} />
@@ -6182,10 +6248,89 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
                 <label><span>Affiliations <em>optional · one per line</em></span><textarea value={newProjectAuthor.affiliations.join('\n')} onChange={(event) => setNewProjectAuthor((current) => ({ ...current, affiliations: event.target.value.split(/\r\n|\r|\n/).map((value) => value.trim()).filter(Boolean) }))} rows={2} placeholder="Research institute or university" /></label>
               </div>
             </section>
+            <label className="create-project-ai-option">
+              <input
+                type="checkbox"
+                checked={newProjectAiEnabled}
+                onChange={(event) => setNewProjectAiEnabled(event.target.checked)}
+              />
+              <span>
+                <strong>Enable local AI assistants</strong>
+                <small>
+                  Adds provider-neutral instructions and the DraftMatter authoring skill.
+                  It never runs code, contacts a model, or configures Codex, Claude,
+                  Copilot, or Vibe automatically.
+                </small>
+              </span>
+            </label>
             <div className="create-project-location"><Icon name="folder" size={15} /><span title={newProjectParent}>New project folder inside: {newProjectParent}</span></div>
             {newProjectProblem && <div className="create-project-problem" role="alert">{newProjectProblem}</div>}
             <div className="create-project-actions"><button type="button" onClick={() => setCreateProjectOpen(false)}>Cancel</button><button className="primary-button" type="submit" disabled={!newProjectName.trim() || !newProjectAuthor.name.trim() || projectBusy}>{projectBusy ? 'Creating…' : 'Create project'}</button></div>
           </form>
+        </div>
+      )}
+
+      {agentIntegrationOpen && (
+        <div className="modal-backdrop execution-dialog-backdrop" onMouseDown={() => setAgentIntegrationOpen(false)}>
+          <div className="agent-integration-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="agent-integration-title">
+            <div className="execution-dialog-head">
+              <span className="execution-shield"><Icon name="code" size={19} /></span>
+              <div><span className="eyebrow">Local AI integration</span><h2 id="agent-integration-title">Assistant readiness</h2><p>DraftMatter checks project guidance, the local authoring skill, client adapters, execution trust, and runtime readiness. It does not contact a model.</p></div>
+              <button className="icon-button" onClick={() => setAgentIntegrationOpen(false)} aria-label="Close AI integration status"><Icon name="close" /></button>
+            </div>
+            <div className="agent-integration-body">
+              {agentIntegrationBusy && !agentIntegrationStatus && <p className="agent-integration-loading">Checking this project…</p>}
+              {agentIntegrationStatus && (
+                <>
+                  <div className={`agent-integration-summary ${agentIntegrationStatus.enabled ? 'ready' : 'needs-attention'}`}>
+                    <span><strong>{agentIntegrationStatus.enabled ? 'Project guidance ready' : 'Setup needs attention'}</strong><small>Schema {agentIntegrationStatus.schemaVersion} · protocol {agentIntegrationStatus.protocolVersion}{agentIntegrationStatus.installedSkillVersion ? ` · skill ${agentIntegrationStatus.installedSkillVersion}` : ''}</small></span>
+                    <span>{agentIntegrationStatus.enabled ? 'Ready' : 'Incomplete'}</span>
+                  </div>
+                  <div className="agent-integration-grid">
+                    <section>
+                      <strong>Project files</strong>
+                      <ul>
+                        <li data-ready={agentIntegrationStatus.instructionsReady}>AGENTS.md guidance <span>{agentIntegrationStatus.instructionsReady ? 'Ready' : 'Missing'}</span></li>
+                        <li data-ready={agentIntegrationStatus.skillReady}>Canonical skill <span>{agentIntegrationStatus.skillReady ? 'Ready' : 'Missing'}</span></li>
+                        <li data-ready={agentIntegrationStatus.manifestReady}>Integration manifest <span>{agentIntegrationStatus.manifestReady ? 'Ready' : 'Missing'}</span></li>
+                      </ul>
+                    </section>
+                    <section>
+                      <strong>Safety and execution</strong>
+                      <ul>
+                        <li data-ready={Boolean(agentIntegrationStatus.draftmatterCommand)}>DraftMatter command <span>{agentIntegrationStatus.draftmatterCommand ? 'Available' : 'Not on PATH'}</span></li>
+                        <li data-ready={Boolean(agentIntegrationTrust?.trusted)}>Project code trust <span>{agentIntegrationTrust?.trusted ? 'This session' : 'Not granted'}</span></li>
+                        {(['python', 'r', 'julia'] as const).map((language) => {
+                          const ready = Boolean(runtimeInventory && healthyKernelsFor(runtimeInventory, language).length)
+                          return <li data-ready={ready} key={language}>{runtimeName(language)} runtime <span>{ready ? 'Ready' : runtimeInventory ? 'Needs setup' : 'Not checked'}</span></li>
+                        })}
+                      </ul>
+                    </section>
+                  </div>
+                  <section className="agent-integration-clients">
+                    <strong>Configured clients</strong>
+                    <p>{agentIntegrationStatus.configuredClients.length
+                      ? agentIntegrationStatus.configuredClients.join(', ')
+                      : 'None. DraftMatter never changes Codex, Claude, Copilot, or Vibe configuration without an explicit reviewed command.'}</p>
+                  </section>
+                  <section className="agent-integration-commands">
+                    <strong>Local diagnostics and repair</strong>
+                    {[['Doctor', agentIntegrationStatus.doctorCommand], ['Update generated files', agentIntegrationStatus.repairCommand]].map(([label, command]) => (
+                      <div key={label}><span><small>{label}</small><code>{command}</code></span><button onClick={() => void copyAgentCommand(command, label)}>Copy</button></div>
+                    ))}
+                  </section>
+                  {agentIntegrationStatus.notes.length > 0 && <ul className="agent-integration-notes">{agentIntegrationStatus.notes.map((note) => <li key={note}>{note}</li>)}</ul>}
+                </>
+              )}
+              {agentIntegrationProblem && <div className="user-settings-problem" role="alert">{agentIntegrationProblem}</div>}
+            </div>
+            <div className="execution-dialog-actions">
+              <button onClick={() => void loadAgentIntegrationStatus()} disabled={agentIntegrationBusy}>Refresh</button>
+              <span />
+              {agentIntegrationStatus && !agentIntegrationStatus.enabled && <button className="primary-button" onClick={() => void enableAgentIntegration()} disabled={agentIntegrationBusy}>{agentIntegrationBusy ? 'Enabling…' : 'Enable project guidance'}</button>}
+              <button onClick={() => setAgentIntegrationOpen(false)}>Done</button>
+            </div>
+          </div>
         </div>
       )}
 
