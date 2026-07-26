@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Icon } from './Icon'
 
-export type HomeShowcaseFeatureId = 'writing' | 'results' | 'citations' | 'review' | 'checks'
+export type HomeShowcaseFeatureId = 'writing' | 'results' | 'ai' | 'citations' | 'review' | 'checks'
 type HomeDemoSource = 'figure' | 'table'
 
 export const homeShowcaseFeatures: ReadonlyArray<{
@@ -18,6 +18,11 @@ export const homeShowcaseFeatures: ReadonlyArray<{
     id: 'results',
     label: 'Results from code',
     description: 'Use Julia, R, or Python with a local terminal and project packages. DraftMatter parses outputs into manuscript figures, tables, and in-text values while keeping every result linked to its source.',
+  },
+  {
+    id: 'ai',
+    label: 'AI, on your terms',
+    description: 'Connect the model or coding assistant you already use through a local, permissioned interface. Let it propose edits, create reproducible results, and find citations—or leave it disconnected. DraftMatter works either way.',
   },
   {
     id: 'citations',
@@ -64,6 +69,7 @@ const homeDemoOutlineSections: Record<
 > = {
   writing: 'Introduction',
   results: 'Results',
+  ai: 'Results',
   citations: 'References',
   review: 'Discussion',
   checks: null,
@@ -154,6 +160,12 @@ function DemoTopbar({
         <Icon name="check" size={13} />
         <span><strong>Checks</strong><small>1 issue</small></span>
       </div>
+      {activeFeature === 'ai' && (
+        <div className="home-demo-ai-status is-preview-active" data-preview-feature="ai">
+          <Icon name="spark" size={13} />
+          <span><strong>Local AI</strong><small>Optional</small></span>
+        </div>
+      )}
       <span className={`home-demo-export ${featureState(activeFeature, 'checks')}`} data-preview-feature="checks">
         <Icon name="download" size={13} />Export
       </span>
@@ -282,6 +294,65 @@ function DemoDiscussionSection() {
         <ins>longer monitoring is needed to determine whether treatment differences persisted into the next dry period</ins>.
       </p>
     </section>
+  )
+}
+
+function DemoAiPaper() {
+  return (
+    <section className="home-demo-ai-paper is-preview-active" data-preview-feature="ai">
+      <div className="home-demo-section-heading">
+        <small>04</small><h4>Results</h4>
+      </div>
+      <div className="home-demo-ai-origin">
+        <span><Icon name="spark" size={12} />Proposed by your assistant</span>
+        <small>Nothing applied without review</small>
+      </div>
+      <p className="home-demo-revision">
+        Irrigated plots <del>performed better</del>{' '}
+        <ins>recovered canopy cover more rapidly during the first three weeks</ins> after rainfall resumed.
+      </p>
+      <p>
+        Across <span className="home-demo-computed">24 plots<small>computed</small></span>, the retained analysis estimated an 18.4% increase above the dry-season baseline. The proposed interpretation is linked to the supporting result and to{' '}
+        <span className="home-demo-inline-citation">(Meyer and Okafor, 2025)</span>.
+      </p>
+      <div className="home-demo-ai-objects" aria-label="Assistant-proposed manuscript objects">
+        <span><Icon name="message" size={14} /><strong>Tracked edit</strong><small>Attributed and reversible</small></span>
+        <span><Icon name="image" size={14} /><strong>Figure 1</strong><small>Source and environment linked</small></span>
+        <span><Icon name="book" size={14} /><strong>1 citation</strong><small>Saved to the reference bank</small></span>
+      </div>
+      <div className="home-demo-ai-review">
+        <span><strong>3 proposed changes</strong><small>Inspect each one in the manuscript</small></span>
+        <em>Review before applying</em>
+      </div>
+    </section>
+  )
+}
+
+function DemoAiPanel() {
+  return (
+    <div className="home-demo-ai-panel is-preview-active" data-preview-feature="ai" role="note" aria-label="Optional local AI integration">
+      <div className="home-demo-ai-panel-head">
+        <span><Icon name="spark" size={15} /></span>
+        <span><small>External assistant · local connection</small><strong>Bring your own model</strong></span>
+        <em>You control access</em>
+      </div>
+      <div className="home-demo-ai-panel-body">
+        <div className="home-demo-ai-clients">
+          <small>Use what you already have</small>
+          <div><span>Codex</span><span>Claude</span><span>Copilot</span><span>Mistral Vibe</span><span>Any MCP client</span></div>
+        </div>
+        <div className="home-demo-ai-request">
+          <small>Requested by you</small>
+          <p>“Review this result, add its reproducible figure, and find the supporting citation.”</p>
+        </div>
+      </div>
+      <div className="home-demo-ai-guardrails">
+        <span><Icon name="settings" size={12} />Off until you enable it</span>
+        <span><Icon name="eye" size={12} />Changes stay reviewable</span>
+        <span><Icon name="play" size={12} />Code needs your approval</span>
+        <strong>DraftMatter works without AI.</strong>
+      </div>
+    </div>
   )
 }
 
@@ -504,7 +575,7 @@ export function HomeShowcase() {
       <div className="home-section-intro home-showcase-intro">
         <span className="home-kicker">A guided product preview</span>
         <h2 id="home-showcase-title">Stay in the flow</h2>
-        <p>Write, compute, cite, and review in one focused workspace.</p>
+        <p>Write, compute, cite, and review—and optionally connect the AI assistant you choose—in one focused workspace.</p>
       </div>
 
       <div className="home-showcase-layout">
@@ -582,6 +653,8 @@ export function HomeShowcase() {
                     onToggleSource={(source) => setOpenSource((current) => current === source ? null : source)}
                   />
                 )}
+
+                {activeFeature === 'ai' && <DemoAiPaper />}
 
                 {activeFeature === 'citations' && (
                   <div className="is-preview-active" data-preview-feature="citations">
@@ -674,6 +747,7 @@ export function HomeShowcase() {
             </aside>
           </div>
           {activeFeature === 'results' && <DemoCodePanel />}
+          {activeFeature === 'ai' && <DemoAiPanel />}
         </div>
       </div>
     </section>

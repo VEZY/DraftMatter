@@ -81,6 +81,23 @@ describe('signed-out Home product showcase', () => {
     expect(checks.getAttribute('aria-selected')).toBe('true')
   })
 
+  it('frames external AI as optional, local, and controlled by the author', async () => {
+    await act(async () => container.querySelector<HTMLButtonElement>('#home-showcase-tab-ai')!.click())
+
+    const integration = container.querySelector<HTMLElement>('[aria-label="Optional local AI integration"]')!
+    expect(integration.textContent).toContain('Bring your own model')
+    expect(integration.textContent).toContain('Codex')
+    expect(integration.textContent).toContain('Claude')
+    expect(integration.textContent).toContain('Copilot')
+    expect(integration.textContent).toContain('Mistral Vibe')
+    expect(integration.textContent).toContain('Any MCP client')
+    expect(integration.textContent).toContain('Off until you enable it')
+    expect(integration.textContent).toContain('Changes stay reviewable')
+    expect(integration.textContent).toContain('Code needs your approval')
+    expect(integration.textContent).toContain('DraftMatter works without AI.')
+    expect(container.querySelector('.home-demo-ai-paper')?.textContent).toContain('Review before applying')
+  })
+
   it('guides readers to inspect hidden figure and table source inline', async () => {
     expect(container.querySelector('[aria-label="View source for Figure 1"]')).toBeNull()
     expect(container.querySelector('.home-demo-source-panel')).toBeNull()

@@ -141,6 +141,7 @@ function SignedOutHome({
               <li><Icon name="check" size={13} />Portable manuscript</li>
               <li><Icon name="check" size={13} />Local computation</li>
               <li><Icon name="check" size={13} />Reviews inside Markdown</li>
+              <li><Icon name="check" size={13} />AI integration, on your terms</li>
             </ul>
             {session.error && <p className="home-account-error" role="alert">{session.error}</p>}
           </div>

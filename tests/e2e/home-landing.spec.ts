@@ -3,6 +3,7 @@ import { expect, test } from '@playwright/test'
 const features = [
   ['Writing', 'writing', 'Write in a calm, structured editor where the manuscript stays central.'],
   ['Results from code', 'results', 'Use Julia, R, or Python with a local terminal and project packages. DraftMatter parses outputs into manuscript figures, tables, and in-text values while keeping every result linked to its source.'],
+  ['AI, on your terms', 'ai', 'Connect the model or coding assistant you already use through a local, permissioned interface. Let it propose edits, create reproducible results, and find citations—or leave it disconnected. DraftMatter works either way.'],
   ['Citations', 'citations', 'Search, insert, and format citations without leaving the manuscript.'],
   ['Review and collaboration', 'review', 'Comment, suggest changes, and work with co-authors in the context of the paper.'],
   ['Checks and export', 'checks', 'Review citation, computation, output, and export issues before sharing the paper.'],
@@ -37,6 +38,7 @@ test.describe('signed-out Home landing experience', () => {
     await expect(page.getByText('A calm workspace for rigorous research', { exact: true })).toBeVisible()
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your paper should be as reproducible as your research.')
     await expect(page.getByText('Research writing, with the missing pieces built in.', { exact: true })).toBeVisible()
+    await expect(page.getByText('AI integration, on your terms', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Start a new paper' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Explore the complete example' })).toBeVisible()
 
@@ -185,6 +187,27 @@ test.describe('signed-out Home landing experience', () => {
       await expect(demo.locator('.home-demo-paper-view')).toHaveAttribute('data-document-view', id)
       await expect(demo.locator('.home-demo-document-location')).toHaveCount(0)
     }
+  })
+
+  test('presents AI as an optional local integration controlled by the author', async ({ page }) => {
+    await page.goto('/')
+
+    await page.getByRole('tab', { name: /AI, on your terms/ }).click()
+    const demo = page.locator('.home-workspace-demo')
+    const integration = demo.getByRole('note', { name: 'Optional local AI integration' })
+
+    await expect(demo).toHaveAttribute('data-active-feature', 'ai')
+    await expect(integration).toContainText('Bring your own model')
+    await expect(integration).toContainText('Codex')
+    await expect(integration).toContainText('Claude')
+    await expect(integration).toContainText('Copilot')
+    await expect(integration).toContainText('Mistral Vibe')
+    await expect(integration).toContainText('Any MCP client')
+    await expect(integration).toContainText('Off until you enable it')
+    await expect(integration).toContainText('Changes stay reviewable')
+    await expect(integration).toContainText('Code needs your approval')
+    await expect(integration).toContainText('DraftMatter works without AI.')
+    await expect(demo.getByText('Review before applying')).toBeVisible()
   })
 
   test('uses focused document excerpts instead of combining distant sections on one page', async ({ page }) => {
