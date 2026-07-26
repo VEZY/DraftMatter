@@ -156,30 +156,30 @@ function SignedOutHome({
 
       <HomeShowcase />
 
-      {desktopHost.available && (
-        <section className="home-ai-connect" aria-labelledby="home-ai-connect-title">
-          <div>
-            <span className="home-kicker">Optional · bring your own model</span>
-            <h2 id="home-ai-connect-title">AI integration, on your terms</h2>
-            <p>Connect Codex, Claude Code, GitHub Copilot, or Mistral Vibe once on this computer. Then choose separately which projects each connected assistant may access.</p>
-            <nav className="home-ai-brands" aria-label="Supported AI assistant product pages">
-              <a href="https://openai.com/codex/" target="_blank" rel="noreferrer" aria-label="Open the OpenAI Codex product page">
-                <img src="/ai-openai.svg" alt="" /><span>Codex</span>
-              </a>
-              <a href="https://claude.com/product/claude-code" target="_blank" rel="noreferrer" aria-label="Open the Anthropic Claude Code product page">
-                <img src="/ai-anthropic.svg" alt="" /><span>Claude Code</span>
-              </a>
-              <a href="https://mistral.ai/products/vibe/code/" target="_blank" rel="noreferrer" aria-label="Open the Mistral Vibe Code product page">
-                <img src="/ai-mistral.svg" alt="" /><span>Mistral Vibe</span>
-              </a>
-            </nav>
-          </div>
-          <div>
-            <button className="home-primary" onClick={onConnectAssistants}><Icon name="spark" size={16} />Connect AI assistants</button>
-            <button onClick={onOpenAiLearn}>How the two-step setup works <Icon name="arrowRight" size={15} /></button>
-          </div>
-        </section>
-      )}
+      <section className="home-ai-connect" aria-labelledby="home-ai-connect-title">
+        <div>
+          <span className="home-kicker">Optional · bring your own model</span>
+          <h2 id="home-ai-connect-title">AI integration, on your terms</h2>
+          <p>Connect Codex, Claude Code, GitHub Copilot, or Mistral Vibe once on this computer. Then choose separately which projects each connected assistant may access.</p>
+          <nav className="home-ai-brands" aria-label="Supported AI assistant product pages">
+            <a href="https://openai.com/codex/" target="_blank" rel="noreferrer" aria-label="Open the OpenAI Codex product page">
+              <img src="/ai-openai.svg" alt="" /><span>Codex</span>
+            </a>
+            <a href="https://claude.com/product/claude-code" target="_blank" rel="noreferrer" aria-label="Open the Anthropic Claude Code product page">
+              <img src="/ai-anthropic.svg" alt="" /><span>Claude Code</span>
+            </a>
+            <a href="https://mistral.ai/products/vibe/code/" target="_blank" rel="noreferrer" aria-label="Open the Mistral Vibe Code product page">
+              <img src="/ai-mistral.svg" alt="" /><span>Mistral Vibe</span>
+            </a>
+          </nav>
+        </div>
+        <div>
+          {desktopHost.available
+            ? <button className="home-primary" onClick={onConnectAssistants}><Icon name="spark" size={16} />Connect AI assistants</button>
+            : <button className="home-primary" onClick={onOpenAiLearn}><Icon name="spark" size={16} />See desktop AI setup</button>}
+          <button onClick={onOpenAiLearn}>How the two-step setup works <Icon name="arrowRight" size={15} /></button>
+        </div>
+      </section>
 
       <HomeTrustGuide onStartTour={onOpenTutorial} />
 

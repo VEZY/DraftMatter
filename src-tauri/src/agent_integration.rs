@@ -336,6 +336,12 @@ fn plan_project_changes(
     enable: bool,
     portable_fallback: bool,
 ) -> Result<Vec<PlannedWrite>, HostError> {
+    let legacy_manifest = existing_text(&project_path(root, MANIFEST_PATH))?
+        .and_then(|content| serde_json::from_str::<Value>(&content).ok())
+        .is_some_and(|value| {
+            value.get("schemaVersion").and_then(Value::as_u64) == Some(1)
+                && value.get("protocolVersion").and_then(Value::as_str) == Some(PROTOCOL_VERSION)
+        });
     let mut writes = Vec::new();
     for (path, block) in [("AGENTS.md", AGENTS_BLOCK), ("CLAUDE.md", CLAUDE_BLOCK)] {
         let existing = existing_text(&project_path(root, path))?;
@@ -381,47 +387,49 @@ fn plan_project_changes(
         }
     }
 
-    for (path, block) in [
-        (".codex/config.toml", LEGACY_CODEX_BLOCK),
-        (".vibe/config.toml", LEGACY_VIBE_BLOCK),
-    ] {
-        let existing = existing_text(&project_path(root, path))?;
-        let content = transform_block(
-            existing.as_deref(),
-            block,
-            TOML_START,
-            TOML_END,
-            true,
-            path,
-        )?;
-        if content.as_deref() != existing.as_deref() {
-            writes.push(PlannedWrite {
-                path: path.to_string(),
-                content: content.map(String::into_bytes),
-            });
-        }
-    }
-    if let Some(change) = remove_legacy_json_adapter(root, ".mcp.json", false)? {
-        writes.push(change);
-    }
-    if let Some(change) = remove_legacy_json_adapter(root, ".github/mcp.json", true)? {
-        writes.push(change);
-    }
-    for base in [
-        format!(".claude/skills/{SKILL_NAME}"),
-        format!(".vibe/skills/{SKILL_NAME}"),
-    ] {
-        for (relative, source) in SKILL_FILES {
-            let path = skill_path(&base, relative);
-            let Some(existing) = existing_bytes(&project_path(root, &path))? else {
-                continue;
-            };
-            if existing != normalize_ending(source).into_bytes() {
-                return Err(HostError::InvalidProject(format!(
-                    "{path} was modified and was preserved."
-                )));
+    if legacy_manifest {
+        for (path, block) in [
+            (".codex/config.toml", LEGACY_CODEX_BLOCK),
+            (".vibe/config.toml", LEGACY_VIBE_BLOCK),
+        ] {
+            let existing = existing_text(&project_path(root, path))?;
+            let content = transform_block(
+                existing.as_deref(),
+                block,
+                TOML_START,
+                TOML_END,
+                true,
+                path,
+            )?;
+            if content.as_deref() != existing.as_deref() {
+                writes.push(PlannedWrite {
+                    path: path.to_string(),
+                    content: content.map(String::into_bytes),
+                });
             }
-            writes.push(PlannedWrite { path, content: None });
+        }
+        if let Some(change) = remove_legacy_json_adapter(root, ".mcp.json", false)? {
+            writes.push(change);
+        }
+        if let Some(change) = remove_legacy_json_adapter(root, ".github/mcp.json", true)? {
+            writes.push(change);
+        }
+        for base in [
+            format!(".claude/skills/{SKILL_NAME}"),
+            format!(".vibe/skills/{SKILL_NAME}"),
+        ] {
+            for (relative, source) in SKILL_FILES {
+                let path = skill_path(&base, relative);
+                let Some(existing) = existing_bytes(&project_path(root, &path))? else {
+                    continue;
+                };
+                if existing != normalize_ending(source).into_bytes() {
+                    return Err(HostError::InvalidProject(format!(
+                        "{path} was modified and was preserved."
+                    )));
+                }
+                writes.push(PlannedWrite { path, content: None });
+            }
         }
     }
 

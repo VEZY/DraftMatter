@@ -35,12 +35,14 @@ assert.equal(manifest.license, 'MIT')
 assert.equal(manifest.interface.composerIcon, './assets/icon.svg')
 assert.match(await readFile(join(plugin, 'LICENSE'), 'utf8'), /^MIT License/)
 assert.match(await readFile(join(plugin, 'README.md'), 'utf8'), /provider-neutral/)
+assert.match(await readFile(join(plugin, 'README.md'), 'utf8'), /No separate MCP executable is required/)
 assert.match(await readFile(join(plugin, 'assets', 'icon.svg'), 'utf8'), /<svg/)
 const mcp = JSON.parse(await readFile(join(plugin, '.mcp.json'), 'utf8'))
 assert.deepEqual(mcp.mcpServers.draftmatter, {
-  command: 'draftmatter',
-  args: ['mcp', '--stdio', '--project-root', '.'],
+  command: 'draftmatter-mcp',
+  args: ['mcp', '--stdio'],
 })
+assert.doesNotMatch(JSON.stringify(mcp), /project-root/)
 
 const marketplace = JSON.parse(await readFile(join(root, 'integrations', '.agents', 'plugins', 'marketplace.json'), 'utf8'))
 const listing = marketplace.plugins.find((entry) => entry.name === 'draftmatter')

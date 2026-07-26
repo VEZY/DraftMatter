@@ -2,6 +2,8 @@ import { mkdir, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js'
 import {
   diagnoseDraftMatterAi,
   DRAFTMATTER_MCP_TOOLS,
@@ -73,6 +75,40 @@ describe('DraftMatter project AI enablement', () => {
     await connection.server.close()
   })
 
+  it('resolves a global MCP launch from cwd and rejects later root injection', async () => {
+    const root = await projectFixture()
+    const otherRoot = await projectFixture()
+    await planDraftMatterAiIntegration({ projectRoot: root, operation: 'enable', apply: true })
+    await planDraftMatterAiIntegration({ projectRoot: otherRoot, operation: 'enable', apply: true })
+    const previousCwd = process.cwd()
+    process.chdir(root)
+    try {
+      const connection = await createDraftMatterMcpServer()
+      expect(connection.root).toBe(await realpath(root))
+      const client = new Client({ name: 'root-pinning-test', version: '1.0.0' })
+      const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair()
+      await connection.server.connect(serverTransport)
+      await client.connect(clientTransport)
+      const injected = await client.callTool({
+        name: 'draftmatter_project',
+        arguments: { action: 'inspect', projectRoot: otherRoot },
+      })
+      expect(injected).toMatchObject({ isError: true })
+      expect(injected.content).toEqual(expect.arrayContaining([
+        expect.objectContaining({ text: expect.stringContaining('Unrecognized key') }),
+      ]))
+      const inspection = await client.callTool({
+        name: 'draftmatter_project',
+        arguments: { action: 'inspect' },
+      })
+      expect((inspection.structuredContent as { result?: { project?: { root?: string } } }).result?.project?.root).not.toBe(await realpath(otherRoot))
+      await client.close()
+      await connection.server.close()
+    } finally {
+      process.chdir(previousCwd)
+    }
+  })
+
   it('diagnoses an enabled project and discovers the six semantic tools', async () => {
     const root = await projectFixture()
     await planDraftMatterAiIntegration({ projectRoot: root, operation: 'enable', apply: true })
@@ -119,6 +155,26 @@ args = ["mcp", "--stdio", "--project-root", "."]
     const manifest = JSON.parse(await readFile(join(root, '.draftmatter', 'ai-integration.json'), 'utf8'))
     expect(manifest.schemaVersion).toBe(2)
     expect(manifest).not.toHaveProperty('configuredClients')
+  })
+
+  it('does not treat unowned project-local client files as migration targets', async () => {
+    const root = await projectFixture()
+    const manualAdapter = `${JSON.stringify({
+      note: 'Maintained by the project team',
+      mcpServers: {
+        draftmatter: { command: 'draftmatter', args: ['mcp', '--stdio', '--project-root', '.'] },
+      },
+    }, null, 2)}\n`
+    await writeFile(join(root, '.mcp.json'), manualAdapter)
+
+    const result = await planDraftMatterAiIntegration({
+      projectRoot: root,
+      operation: 'enable',
+      apply: true,
+    })
+
+    expect(result.ok).toBe(true)
+    expect(await readFile(join(root, '.mcp.json'), 'utf8')).toBe(manualAdapter)
   })
 
   it('disables reversibly without changing manuscript content or unrelated instructions', async () => {

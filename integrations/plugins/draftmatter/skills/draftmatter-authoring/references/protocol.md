@@ -1,8 +1,18 @@
 # DraftMatter agent protocol
 
-Use protocol `1.0`. The MCP server binds one project root at startup. The JSON
-CLI request includes `protocolVersion`, `projectRoot` (or uses
-`--project-root`), `domain`, and `action`.
+Use protocol `1.0`. A globally registered MCP server resolves one project from
+the client working directory by default, or from an explicit root supplied only
+at process startup. It accepts the project only when the versioned schema-2
+`.draftmatter/ai-integration.json` manifest says AI is enabled, then
+canonicalizes and pins the directory identity.
+
+No MCP tool accepts `projectRoot`. Attempts to inject a different root into a
+later inspection or mutation fail schema validation. Traversal, symlink
+escapes, and moved or replaced roots fail closed.
+
+The structured JSON CLI is an advanced fallback and includes `projectRoot` (or
+uses `--project-root`) at startup alongside `protocolVersion`, `domain`, and
+`action`. It applies the same project-enablement check.
 
 ## Domains and actions
 

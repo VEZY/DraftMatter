@@ -4038,6 +4038,25 @@ mod tests {
     }
 
     #[test]
+    fn preserves_unowned_project_client_configuration() {
+        let temporary = tempdir().unwrap();
+        let snapshot = create_project(
+            temporary.path().to_string_lossy().into_owned(),
+            "Manual client configuration".into(),
+            None,
+            None,
+        )
+        .unwrap();
+        let root = Path::new(&snapshot.root);
+        let manual = "{\n  \"note\": \"Maintained by the project team\",\n  \"mcpServers\": {\n    \"draftmatter\": {\n      \"command\": \"draftmatter\",\n      \"args\": [\"mcp\", \"--stdio\", \"--project-root\", \".\"]\n    }\n  }\n}\n";
+        fs::write(root.join(".mcp.json"), manual).unwrap();
+
+        initialize_ai_integration_impl(root.to_string_lossy().as_ref()).unwrap();
+
+        assert_eq!(fs::read_to_string(root.join(".mcp.json")).unwrap(), manual);
+    }
+
+    #[test]
     fn creates_an_isolated_temporary_project_without_running_content() {
         let temporary = tempdir().unwrap();
         let snapshot =

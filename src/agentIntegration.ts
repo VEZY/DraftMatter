@@ -404,7 +404,9 @@ export async function planDraftMatterAiIntegration(options: {
   if (portableSkillFallback || remove) {
     prepared.push(...await preparePortableSkill(store, remove, ownedByPath))
   }
-  prepared.push(...await prepareLegacyCleanup(store, ownedByPath))
+  if (manifest.legacy) {
+    prepared.push(...await prepareLegacyCleanup(store, ownedByPath))
+  }
 
   const conflicts = prepared.filter((entry) => entry.plan.action === 'conflict').map((entry) => entry.plan)
   const nextFiles = prepared.flatMap((entry) => entry.managed ? [entry.managed] : [])

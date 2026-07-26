@@ -131,13 +131,13 @@ export interface AssistantConnectionPlan {
     changes: Array<{
       path: string
       action: 'create' | 'update' | 'delete' | 'unchanged' | 'conflict'
-      kind: 'mcp-registration' | 'skill' | 'receipt'
+      kind: 'mcp-registration' | 'skill' | 'plugin' | 'receipt'
       message: string
     }>
     conflicts: Array<{
       path: string
       action: 'conflict'
-      kind: 'mcp-registration' | 'skill' | 'receipt'
+      kind: 'mcp-registration' | 'skill' | 'plugin' | 'receipt'
       message: string
     }>
     guarantees: string[]

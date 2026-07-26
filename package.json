@@ -27,6 +27,7 @@
     "test:agent-cli": "node scripts/verify-cli.mjs",
     "test:agent-e2e": "node scripts/verify-agent-e2e.mjs",
     "build:agent-host": "cargo build --manifest-path src-tauri/Cargo.toml --locked --bin draftmatter-agent-host",
+    "build:desktop-sidecars": "node scripts/build-desktop-sidecars.mjs",
     "test:agent-host": "node scripts/verify-agent-host.mjs",
     "test:agent-adapters": "node scripts/verify-agent-adapters.mjs",
     "test:agent-clients": "node scripts/verify-installed-agent-clients.mjs",

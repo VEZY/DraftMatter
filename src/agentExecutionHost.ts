@@ -64,6 +64,7 @@ async function executableCandidate(projectRoot: string) {
   if (configured) return configured
   const executable = process.platform === 'win32' ? 'draftmatter-agent-host.exe' : 'draftmatter-agent-host'
   const candidates = [
+    join(dirname(process.execPath), executable),
     join(dirname(process.argv[1] ?? ''), executable),
     join(projectRoot, 'src-tauri', 'target', 'debug', executable),
     join(process.cwd(), 'src-tauri', 'target', 'debug', executable),
