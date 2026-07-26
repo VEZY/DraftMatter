@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react'
+import { AssistantConnectionsDialog } from './AssistantConnectionsDialog'
 import { desktopHost } from './desktopHost'
 import { Icon } from './Icon'
 import {
@@ -25,6 +26,7 @@ interface HomeProps {
   onOpenExample: () => void
   onOpenBrowserDraft: () => void
   onOpenLearn: () => void
+  onOpenAiLearn: () => void
   onOpenLanguages: () => void
   onOpenTutorial: () => void
 }
@@ -80,7 +82,9 @@ function SignedOutHome({
   onOpenLearn,
   onOpenLanguages,
   onOpenTutorial,
-}: Pick<HomeProps, 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenBrowserDraft' | 'onOpenLearn' | 'onOpenLanguages' | 'onOpenTutorial'>) {
+  onConnectAssistants,
+  onOpenAiLearn,
+}: Pick<HomeProps, 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenBrowserDraft' | 'onOpenLearn' | 'onOpenAiLearn' | 'onOpenLanguages' | 'onOpenTutorial'> & { onConnectAssistants: () => void }) {
   const session = useCollaborationSession()
   const [advancedOpen, setAdvancedOpen] = useState(false)
   const [serviceUrl, setServiceUrl] = useState(session.serviceUrl || 'https://')
@@ -111,6 +115,7 @@ function SignedOutHome({
           <span>DraftMatter</span>
         </a>
         <nav className="home-welcome-links" aria-label="Learn about DraftMatter">
+          {desktopHost.available && <button className="home-link-button home-ai-connect-link" onClick={onConnectAssistants}><Icon name="spark" size={15} />Connect AI assistants</button>}
           <button className="home-link-button home-languages-link" onClick={onOpenLanguages}><Icon name="code" size={15} />Languages</button>
           <button className="home-link-button home-learn-link" onClick={onOpenLearn}><Icon name="spark" size={15} />Learn DraftMatter</button>
         </nav>
@@ -150,6 +155,31 @@ function SignedOutHome({
       </section>
 
       <HomeShowcase />
+
+      {desktopHost.available && (
+        <section className="home-ai-connect" aria-labelledby="home-ai-connect-title">
+          <div>
+            <span className="home-kicker">Optional · bring your own model</span>
+            <h2 id="home-ai-connect-title">AI integration, on your terms</h2>
+            <p>Connect Codex, Claude Code, GitHub Copilot, or Mistral Vibe once on this computer. Then choose separately which projects each connected assistant may access.</p>
+            <nav className="home-ai-brands" aria-label="Supported AI assistant product pages">
+              <a href="https://openai.com/codex/" target="_blank" rel="noreferrer" aria-label="Open the OpenAI Codex product page">
+                <img src="/ai-openai.svg" alt="" /><span>Codex</span>
+              </a>
+              <a href="https://claude.com/product/claude-code" target="_blank" rel="noreferrer" aria-label="Open the Anthropic Claude Code product page">
+                <img src="/ai-anthropic.svg" alt="" /><span>Claude Code</span>
+              </a>
+              <a href="https://mistral.ai/products/vibe/code/" target="_blank" rel="noreferrer" aria-label="Open the Mistral Vibe Code product page">
+                <img src="/ai-mistral.svg" alt="" /><span>Mistral Vibe</span>
+              </a>
+            </nav>
+          </div>
+          <div>
+            <button className="home-primary" onClick={onConnectAssistants}><Icon name="spark" size={16} />Connect AI assistants</button>
+            <button onClick={onOpenAiLearn}>How the two-step setup works <Icon name="arrowRight" size={15} /></button>
+          </div>
+        </section>
+      )}
 
       <HomeTrustGuide onStartTour={onOpenTutorial} />
 
@@ -191,7 +221,8 @@ function Catalogue({
   onOpenLearn,
   onOpenLanguages,
   onOpenTutorial,
-}: Pick<HomeProps, 'preferredWorkspaceId' | 'onOpenDraft' | 'onNewDraft' | 'onNewLocalDraft' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'localProjects' | 'localProblem' | 'onOpenLearn' | 'onOpenLanguages' | 'onOpenTutorial'>) {
+  onConnectAssistants,
+}: Pick<HomeProps, 'preferredWorkspaceId' | 'onOpenDraft' | 'onNewDraft' | 'onNewLocalDraft' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'localProjects' | 'localProblem' | 'onOpenLearn' | 'onOpenLanguages' | 'onOpenTutorial'> & { onConnectAssistants: () => void }) {
   const session = useCollaborationSession()
   const [query, setQuery] = useState('')
   const [workspaceId, setWorkspaceId] = useState(() => (
@@ -234,6 +265,7 @@ function Catalogue({
           <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search drafts" />
         </label>
         <button className="home-link-button" onClick={onOpenLanguages}>Languages</button>
+        {desktopHost.available && <button className="home-link-button" onClick={onConnectAssistants}>Connect AI</button>}
         <button className="home-link-button" onClick={onOpenLearn}>Help</button>
         <div className="home-account">
           <span aria-hidden="true">{accountName.slice(0, 1).toUpperCase()}</span>
@@ -358,10 +390,21 @@ function HomeSketchDefinitions() {
 
 export function Home(props: HomeProps) {
   const session = useCollaborationSession()
+  const [assistantConnectionsOpen, setAssistantConnectionsOpen] = useState(false)
   return (
     <>
       <HomeSketchDefinitions />
-      {session.profile ? <Catalogue {...props} /> : <SignedOutHome {...props} />}
+      {session.profile
+        ? <Catalogue {...props} onConnectAssistants={() => setAssistantConnectionsOpen(true)} />
+        : <SignedOutHome {...props} onConnectAssistants={() => setAssistantConnectionsOpen(true)} />}
+      <AssistantConnectionsDialog
+        open={assistantConnectionsOpen}
+        onClose={() => setAssistantConnectionsOpen(false)}
+        onOpenLearn={() => {
+          setAssistantConnectionsOpen(false)
+          props.onOpenAiLearn()
+        }}
+      />
     </>
   )
 }

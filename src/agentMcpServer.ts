@@ -11,6 +11,7 @@ import {
   reviewToolSchema,
   validateToolSchema,
 } from './agentMcpSchemas'
+import { assertDraftMatterAiProjectEnabled } from './agentProjectEnablement'
 import { NodeAgentProjectStore } from './agentProjectStore'
 import { invalidAgentRequest, parseAgentRequest } from './agentRequestValidation'
 import { createDraftMatterAgentService } from './agentService'
@@ -59,8 +60,9 @@ interface McpInvocationExtra {
   sendNotification(notification: ServerNotification): Promise<void>
 }
 
-export async function createDraftMatterMcpServer(projectRoot: string) {
+export async function createDraftMatterMcpServer(projectRoot = process.cwd()) {
   const store = await NodeAgentProjectStore.open(projectRoot)
+  await assertDraftMatterAiProjectEnabled(store)
   const service = createDraftMatterAgentService(store)
   const server = new McpServer({
     name: 'draftmatter',
@@ -246,7 +248,7 @@ export async function createDraftMatterMcpServer(projectRoot: string) {
   return { server, service, root: store.root }
 }
 
-export async function serveDraftMatterMcpStdio(projectRoot: string) {
+export async function serveDraftMatterMcpStdio(projectRoot = process.cwd()) {
   const { server } = await createDraftMatterMcpServer(projectRoot)
   const transport = new StdioServerTransport()
   await server.connect(transport)

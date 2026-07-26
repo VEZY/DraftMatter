@@ -16,6 +16,7 @@ use uuid::Uuid;
 mod code_formatting;
 mod agent_host;
 mod agent_integration;
+mod assistant_connections;
 mod execution_artifacts;
 mod execution_manifests;
 mod execution_trust;
@@ -29,8 +30,11 @@ use code_formatting::{
     CodeFormatRequest, CodeFormatResult, CodeFormatterRequest, CodeFormatterStatus,
 };
 use agent_integration::{
-    agent_integration_status_impl, initialize_ai_integration_impl, AgentIntegrationInitialization,
-    AgentIntegrationStatus,
+    agent_integration_status_impl, disable_ai_integration_impl, initialize_ai_integration_impl,
+    AgentIntegrationInitialization, AgentIntegrationStatus,
+};
+use assistant_connections::{
+    assistant_connection_action_impl, assistant_connections_status_impl,
 };
 #[cfg(test)]
 use agent_integration::initialize_ai_integration_with_failure_impl;
@@ -2814,6 +2818,31 @@ fn agent_integration_status(root: String) -> Result<AgentIntegrationStatus, Host
     agent_integration_status_impl(&root)
 }
 
+#[tauri::command]
+fn disable_ai_integration(root: String) -> Result<AgentIntegrationInitialization, HostError> {
+    disable_ai_integration_impl(&root)
+}
+
+#[tauri::command]
+async fn assistant_connections_status() -> Result<serde_json::Value, HostError> {
+    tauri::async_runtime::spawn_blocking(assistant_connections_status_impl)
+        .await
+        .map_err(|error| HostError::Integration(error.to_string()))?
+}
+
+#[tauri::command]
+async fn assistant_connection_action(
+    client: String,
+    operation: String,
+    apply: bool,
+) -> Result<serde_json::Value, HostError> {
+    tauri::async_runtime::spawn_blocking(move || {
+        assistant_connection_action_impl(&client, &operation, apply)
+    })
+    .await
+    .map_err(|error| HostError::Integration(error.to_string()))?
+}
+
 fn create_temporary_project_in(parent: &Path, name: &str) -> Result<ProjectSnapshot, HostError> {
     let normalized_name = normalized_project_name(name)?;
     let folder_name = portable_project_folder_name(&normalized_name)?;
@@ -3418,6 +3447,9 @@ pub fn run() {
             create_project,
             initialize_ai_integration,
             agent_integration_status,
+            disable_ai_integration,
+            assistant_connections_status,
+            assistant_connection_action,
             create_temporary_project,
             read_document,
             read_bibliography,
@@ -3919,24 +3951,25 @@ mod tests {
             &fs::read_to_string(root.join(".draftmatter/ai-integration.json")).unwrap(),
         )
         .unwrap();
-        assert_eq!(manifest["schemaVersion"], 1);
-        assert_eq!(manifest["configuredClients"], serde_json::json!([]));
+        assert_eq!(manifest["schemaVersion"], 2);
+        assert_eq!(manifest["enabled"], true);
+        assert_eq!(manifest["localAdapters"], serde_json::json!([]));
         let status = serde_json::to_value(
             agent_integration_status_impl(root.to_string_lossy().as_ref()).unwrap(),
         )
         .unwrap();
-        assert_eq!(status["enabled"], true);
+        assert_eq!(status["projectEnabled"], true);
         assert_eq!(status["instructionsReady"], true);
-        assert_eq!(status["skillReady"], true);
+        assert_eq!(status["portableSkillReady"], true);
         assert_eq!(status["installedSkillVersion"], 1);
-        assert_eq!(status["configuredClients"], serde_json::json!([]));
+        assert_eq!(status["localAdapters"], serde_json::json!([]));
         assert!(!root.join(".codex/config.toml").exists());
         assert!(!root.join(".mcp.json").exists());
         assert!(!root.join(".vibe/config.toml").exists());
     }
 
     #[test]
-    fn merges_existing_ai_guidance_atomically_and_preserves_configured_clients() {
+    fn migrates_existing_ai_guidance_atomically_without_project_client_state() {
         let temporary = tempdir().unwrap();
         let snapshot = create_project(
             temporary.path().to_string_lossy().into_owned(),
@@ -3951,7 +3984,7 @@ mod tests {
         fs::create_dir_all(root.join(".codex")).unwrap();
         fs::write(
             root.join(".codex/config.toml"),
-            "[mcp_servers.draftmatter]\ncommand = \"draftmatter\"\n",
+            "sandbox_mode = \"workspace-write\"\n\n# draftmatter-ai:start\n[mcp_servers.draftmatter]\ncommand = \"draftmatter\"\nargs = [\"mcp\", \"--stdio\", \"--project-root\", \".\"]\n# draftmatter-ai:end\n",
         )
         .unwrap();
         fs::write(
@@ -3996,12 +4029,12 @@ mod tests {
             &fs::read_to_string(root.join(".draftmatter/ai-integration.json")).unwrap(),
         )
         .unwrap();
-        assert_eq!(manifest["configuredClients"], serde_json::json!(["codex"]));
-        assert!(manifest["files"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .any(|entry| entry["path"] == ".codex/config.toml"));
+        assert_eq!(manifest["schemaVersion"], 2);
+        assert_eq!(manifest["localAdapters"], serde_json::json!([]));
+        assert_eq!(
+            fs::read_to_string(root.join(".codex/config.toml")).unwrap(),
+            "sandbox_mode = \"workspace-write\"\n"
+        );
     }
 
     #[test]

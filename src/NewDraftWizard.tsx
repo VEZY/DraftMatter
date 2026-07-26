@@ -56,6 +56,7 @@ export function NewDraftWizard({
   const [workspaceName, setWorkspaceName] = useState('')
   const [workspacePortableId, setWorkspacePortableId] = useState('')
   const [localParent, setLocalParent] = useState('')
+  const [enableAi, setEnableAi] = useState(false)
   const [busy, setBusy] = useState(false)
   const [problem, setProblem] = useState('')
   const createdRemoteRef = useRef<{ workspaceId: string; project: WorkspaceProject } | null>(null)
@@ -174,7 +175,7 @@ export function NewDraftWizard({
       const portableSource = source()
       if (location === 'local') {
         if (!localParent) throw new Error('Choose the folder where DraftMatter should create this project.')
-        const created = await desktopHost.createProject(localParent, title.trim(), { name: leadAuthor.trim(), affiliations: [] })
+        const created = await desktopHost.createProject(localParent, title.trim(), { name: leadAuthor.trim(), affiliations: [] }, enableAi)
         const manuscript = created.documents.find((document) => document.path === created.config.mainDocument)
         if (!manuscript) throw new Error('The new local project did not contain its main manuscript.')
         await desktopHost.saveDocument({
@@ -296,7 +297,13 @@ export function NewDraftWizard({
                 {createWorkspace ? <div className="new-draft-field-row"><label><span>Workspace name</span><input value={workspaceName} onChange={(event) => { setWorkspaceName(event.target.value); setWorkspacePortableId(portableDraftId(event.target.value)) }} /></label><label><span>Workspace ID</span><input value={workspacePortableId} onChange={(event) => setWorkspacePortableId(event.target.value)} /></label></div> : <label><span>Workspace</span><select value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)}>{session.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name} · {workspace.role}</option>)}</select></label>}
               </section>
             ) : (
-              <section className="new-draft-location-details"><span>Folder location</span><div className="new-draft-folder"><code title={localParent}>{localParent || 'No folder chosen'}</code><button type="button" onClick={() => void chooseLocalParent()}>Choose…</button></div><small>DraftMatter creates a new folder named from the working title inside this location.</small></section>
+              <section className="new-draft-local-options">
+                <div className="new-draft-location-details"><span>Folder location</span><div className="new-draft-folder"><code title={localParent}>{localParent || 'No folder chosen'}</code><button type="button" onClick={() => void chooseLocalParent()}>Choose…</button></div><small>DraftMatter creates a new folder named from the working title inside this location.</small></div>
+                <label className="new-draft-ai-enable">
+                  <input type="checkbox" checked={enableAi} onChange={(event) => setEnableAi(event.target.checked)} />
+                  <span><strong>Enable AI for this project</strong><small>Add managed instruction pointers, an enablement manifest, and a portable skill fallback. Connecting assistants is a separate device-wide step.</small></span>
+                </label>
+              </section>
             )}
             <p className="new-draft-summary"><Icon name={location === 'collaborative' ? 'users' : 'folder'} size={16} /><span><strong>{selectedTemplate.name}</strong><small>{location === 'collaborative' ? 'The remote record and its portable manuscript are initialized together.' : 'The selected manuscript is written into a new local project folder.'}</small></span></p>
           </div>

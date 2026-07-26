@@ -6,6 +6,8 @@ import { Home } from './Home'
 import { InvitationEntry } from './InvitationEntry'
 import { NewDraftWizard } from './NewDraftWizard'
 import { Learn } from './Learn'
+import { AiLearn } from './AiLearn'
+import { AssistantConnectionsDialog } from './AssistantConnectionsDialog'
 import { ProgrammingLanguages } from './ProgrammingLanguages'
 import { applicationRoutePath, parseApplicationRoute, type ApplicationRoute } from './applicationRoute'
 import {
@@ -34,6 +36,7 @@ function ApplicationRouter() {
   const [localProjects, setLocalProjects] = useState(() => readLocalProjectRecents(localStorage))
   const [localProblem, setLocalProblem] = useState('')
   const [browserDraftIsNew, setBrowserDraftIsNew] = useState(false)
+  const [assistantConnectionsOpen, setAssistantConnectionsOpen] = useState(false)
 
   useEffect(() => {
     const onPopState = () => {
@@ -102,6 +105,7 @@ function ApplicationRouter() {
         onOpenExample={() => navigate({ destination: 'example' })}
         onOpenBrowserDraft={() => { setBrowserDraftIsNew(true); navigate({ destination: 'browser-editor' }) }}
         onOpenLearn={() => navigate({ destination: 'learn' })}
+        onOpenAiLearn={() => navigate({ destination: 'learn-ai' })}
         onOpenLanguages={() => navigate({ destination: 'languages' })}
         onOpenTutorial={() => navigate({ destination: 'tutorial' })}
       />
@@ -141,7 +145,7 @@ function ApplicationRouter() {
 
   if (route.destination === 'collaborative-editor') {
     if (launch) {
-      return <App collaborationLaunch={launch} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLaunch(null); navigate({ destination: 'home', workspaceId: launch.workspaceId }) }} />
+      return <App collaborationLaunch={launch} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLaunch(null); navigate({ destination: 'home', workspaceId: launch.workspaceId }) }} />
     }
     if (!session.profile) {
       return home()
@@ -152,11 +156,17 @@ function ApplicationRouter() {
 
   if (route.destination === 'local-editor') {
     if (!localLaunch) return <main className="home-route-status"><section><h1>Open the local project from Home</h1><p>DraftMatter needs permission to read a project folder on this computer.</p><button onClick={() => navigate({ destination: 'home' })}>Return to Home</button></section></main>
-    return <App desktopProjectLaunch={localLaunch} startCollaborationOnMount={startCollaborationRoot === localLaunch.root} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLocalProjects(readLocalProjectRecents(localStorage)); setStartCollaborationRoot(''); setLocalLaunch(null); navigate({ destination: 'home' }) }} />
+    return <App desktopProjectLaunch={localLaunch} startCollaborationOnMount={startCollaborationRoot === localLaunch.root} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLocalProjects(readLocalProjectRecents(localStorage)); setStartCollaborationRoot(''); setLocalLaunch(null); navigate({ destination: 'home' }) }} />
   }
 
   if (route.destination === 'example') return <App initialExperience="complete-example" onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />
   if (route.destination === 'learn') return <Learn onBack={() => navigate({ destination: 'home' })} onStartTour={() => navigate({ destination: 'tutorial' })} />
+  if (route.destination === 'learn-ai') return (
+    <>
+      <AiLearn onBack={() => navigate({ destination: 'home' })} onConnectAssistants={() => setAssistantConnectionsOpen(true)} />
+      <AssistantConnectionsDialog open={assistantConnectionsOpen} onClose={() => setAssistantConnectionsOpen(false)} />
+    </>
+  )
   if (route.destination === 'languages') return <ProgrammingLanguages onBack={() => navigate({ destination: 'home' })} />
   if (route.destination === 'tutorial') return <App initialExperience="complete-example" startExampleTour onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />
   if (route.destination === 'browser-editor') return <App initialExperience={browserDraftIsNew ? 'browser-new' : undefined} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setBrowserDraftIsNew(false); navigate({ destination: 'home' }) }} />

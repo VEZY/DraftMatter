@@ -6,6 +6,7 @@ import {
   AGENT_PROTOCOL_VERSION,
   agentExitCode,
 } from './agentProtocol'
+import { assertDraftMatterAiProjectEnabled } from './agentProjectEnablement'
 import { NodeAgentProjectStore } from './agentProjectStore'
 import { invalidAgentRequest, parseAgentRequest } from './agentRequestValidation'
 import { createDraftMatterAgentService } from './agentService'
@@ -130,6 +131,7 @@ export async function runAgentJsonCli(options: AgentCliRequestOptions, io: Agent
   }
   try {
     const store = await NodeAgentProjectStore.open(projectRoot)
+    await assertDraftMatterAiProjectEnabled(store)
     const service = createDraftMatterAgentService(store)
     try {
       if (!sessionEnvelope) {

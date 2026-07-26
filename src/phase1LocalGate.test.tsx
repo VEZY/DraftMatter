@@ -75,15 +75,15 @@ describe('DM-P1-GATE local project workflow', () => {
     vi.spyOn(desktopHost, 'readCitationCache').mockResolvedValue(null)
     vi.spyOn(desktopHost, 'readExecutionManifests').mockResolvedValue([])
     vi.spyOn(desktopHost, 'agentIntegrationStatus').mockResolvedValue({
-      schemaVersion: 1,
+      schemaVersion: 2,
       protocolVersion: '1.0',
-      enabled: true,
+      projectEnabled: true,
       instructionsReady: true,
-      skillReady: true,
+      portableSkillReady: true,
+      portableSkillFallback: true,
       manifestReady: true,
       installedSkillVersion: 1,
-      configuredClients: ['codex', 'vibe'],
-      draftmatterCommand: '/usr/local/bin/draftmatter',
+      localAdapters: [],
       repairCommand: 'draftmatter ai update --project-root . --apply',
       doctorCommand: 'draftmatter ai doctor --json --project-root .',
       notes: [],
@@ -92,6 +92,28 @@ describe('DM-P1-GATE local project workflow', () => {
       trusted: false,
       scope: 'session',
       warning: 'Review this project before running code.',
+    })
+    vi.spyOn(desktopHost, 'assistantConnectionsStatus').mockResolvedValue({
+      ok: true,
+      scope: 'device',
+      clients: [{
+        client: 'codex',
+        name: 'Codex',
+        detected: true,
+        executable: '/usr/local/bin/codex',
+        connected: true,
+        mcpInstalled: true,
+        mcpCurrent: true,
+        skillInstalled: true,
+        skillCurrent: true,
+        registrationScope: 'user',
+        registrationMethod: 'global-config',
+        projectLocalRequired: false,
+        recommendedAction: 'none',
+        configPath: '/users/test/.codex/config.toml',
+        skillPath: '/users/test/.codex/skills/draftmatter-authoring',
+        notes: [],
+      }],
     })
     vi.spyOn(desktopHost, 'documentStatus').mockImplementation(async () => ({
       kind: 'current',
@@ -234,20 +256,23 @@ describe('DM-P1-GATE local project workflow', () => {
     expect(container.querySelector('.toast')?.textContent).toContain('Reloaded external changes')
   })
 
-  it('shows local AI guidance, adapters, trust, and repair diagnostics without contacting a model', async () => {
+  it('shows separate assistant, project, trust, and network states without contacting a model', async () => {
     localStorage.setItem('draftmatter.last-project-root.v1', projectRoot)
     await act(async () => appRoot.render(<App />))
     await flush(50)
 
     await act(async () => container.querySelector<HTMLButtonElement>('.project-switcher')!.click())
-    await act(async () => buttonWithText(container, 'AI integration status').click())
+    await act(async () => buttonWithText(container, 'AI for this project').click())
     await flush()
 
     const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="agent-integration-title"]')!
-    expect(dialog.textContent).toContain('Project guidance ready')
-    expect(dialog.textContent).toContain('codex, vibe')
-    expect(dialog.textContent).toContain('Project code trust')
+    expect(dialog.textContent).toContain('Assistant connected')
+    expect(dialog.textContent).toContain('Codex')
+    expect(dialog.textContent).toContain('AI enabled for this project')
+    expect(dialog.textContent).toContain('Project trusted for code execution')
     expect(dialog.textContent).toContain('Not granted')
+    expect(dialog.textContent).toContain('Network access')
+    expect(dialog.textContent).not.toContain('Ready')
     expect(dialog.textContent).toContain('draftmatter ai doctor --json --project-root .')
     expect(desktopHost.agentIntegrationStatus).toHaveBeenCalledWith(projectRoot)
     expect(desktopHost.executionTrustStatus).toHaveBeenCalledWith(projectRoot)

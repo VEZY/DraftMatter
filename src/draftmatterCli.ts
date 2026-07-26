@@ -1,7 +1,9 @@
 import packageMetadata from '../package.json'
 import { agentSchemaDocument, runAgentJsonCli } from './agentCli'
+import { runAssistantIntegrationCli } from './assistantIntegrationCli'
+import type { AssistantConnectionOperation, DraftMatterAssistantClient } from './assistantIntegration'
 import { runDraftMatterAiCli } from './agentIntegrationCli'
-import type { DraftMatterAiOperation, DraftMatterAiTarget } from './agentIntegration'
+import type { DraftMatterAiOperation } from './agentIntegration'
 import { serveDraftMatterMcpStdio } from './agentMcpServer'
 import { renderNativeHtmlExport } from './nativeHtmlExport'
 import { projectComputationsForPublication } from './publicationComputation'
@@ -41,18 +43,25 @@ interface AgentCommand {
 
 interface McpCommand {
   command: 'mcp'
-  projectRoot: string
+  projectRoot?: string
 }
 
 interface AiCommand {
   command: 'ai'
   operation: DraftMatterAiOperation | 'doctor'
-  target?: DraftMatterAiTarget
   projectRoot: string
+  apply: boolean
+  portableSkillFallback?: boolean
+}
+
+interface AssistantsCommand {
+  command: 'assistants'
+  operation: AssistantConnectionOperation | 'status'
+  client: DraftMatterAssistantClient | 'all'
   apply: boolean
 }
 
-type ParsedCommand = RenderCommand | ReportCommand | AgentCommand | McpCommand | AiCommand | { command: 'agent-schema' } | { command: 'help' } | { command: 'version' }
+type ParsedCommand = RenderCommand | ReportCommand | AgentCommand | McpCommand | AiCommand | AssistantsCommand | { command: 'agent-schema' } | { command: 'help' } | { command: 'version' }
 
 const HELP = `DraftMatter ${packageMetadata.version}
 
@@ -64,15 +73,14 @@ Usage:
   draftmatter review-report <input> [--output <path>]
   draftmatter agent --request <path|-> [--project-root <path>]
   draftmatter agent schema
-  draftmatter mcp --stdio --project-root <path>
-  draftmatter ai init [--project-root <path>] [--apply]
+  draftmatter mcp --stdio [--project-root <path>]
+  draftmatter assistants status [codex|claude|copilot|vibe|all] --json
+  draftmatter assistants <install|update|repair|remove>
+                         <codex|claude|copilot|vibe|all> [--apply]
+  draftmatter ai enable [--project-root <path>] [--apply]
   draftmatter ai doctor --json [--project-root <path>]
-  draftmatter ai configure <codex|claude|copilot|vibe|all>
-                           [--project-root <path>] [--apply]
-  draftmatter ai update [codex|claude|copilot|vibe|all]
-                        [--project-root <path>] [--apply]
-  draftmatter ai remove [codex|claude|copilot|vibe|all]
-                        [--project-root <path>] [--apply]
+  draftmatter ai update [--project-root <path>] [--apply]
+  draftmatter ai disable [--project-root <path>] [--apply]
   draftmatter --help
 
 Use - as the input or output path for standard input or standard output. Final
@@ -214,21 +222,24 @@ function parseMcp(arguments_: string[]): ParsedCommand | { error: string } {
     return argumentError(`Unknown MCP option “${argument}”.`)
   }
   if (!stdio) return argumentError('The local MCP server requires --stdio.')
-  if (!projectRoot) return argumentError('The local MCP server requires --project-root <path>.')
-  return { command: 'mcp', projectRoot }
+  return { command: 'mcp', ...(projectRoot ? { projectRoot } : {}) }
 }
 
 function parseAi(arguments_: string[]): ParsedCommand | { error: string } {
   const [rawOperation, ...rest] = arguments_
   if (rawOperation === '--help' || rawOperation === '-h') return { command: 'help' }
-  if (!rawOperation || !['init', 'doctor', 'configure', 'update', 'remove'].includes(rawOperation)) {
-    return argumentError('The ai command requires init, doctor, configure, update, or remove.')
+  if (!rawOperation || !['enable', 'doctor', 'update', 'disable', 'init', 'remove'].includes(rawOperation)) {
+    return argumentError('The ai command requires enable, doctor, update, or disable.')
   }
-  const operation = rawOperation as DraftMatterAiOperation | 'doctor'
+  const operation = rawOperation === 'init'
+    ? 'enable'
+    : rawOperation === 'remove'
+      ? 'disable'
+      : rawOperation as DraftMatterAiOperation | 'doctor'
   let projectRoot = '.'
   let apply = false
   let json = false
-  let target: DraftMatterAiTarget | undefined
+  let portableSkillFallback: boolean | undefined
   for (let index = 0; index < rest.length; index += 1) {
     const argument = rest[index]
     if (argument === '--project-root' || argument.startsWith('--project-root=')) {
@@ -246,23 +257,58 @@ function parseAi(arguments_: string[]): ParsedCommand | { error: string } {
       json = true
       continue
     }
-    if (!argument.startsWith('-') && ['codex', 'claude', 'copilot', 'vibe', 'all'].includes(argument) && !target) {
-      target = argument as DraftMatterAiTarget
+    if (argument === '--portable-skill') {
+      portableSkillFallback = true
+      continue
+    }
+    if (argument === '--no-portable-skill') {
+      portableSkillFallback = false
       continue
     }
     return argumentError(`Unknown AI integration option “${argument}”.`)
   }
   if (operation === 'doctor' && !json) return argumentError('The ai doctor command requires --json.')
-  if (operation === 'doctor' && (apply || target)) return argumentError('The ai doctor command does not accept a target or --apply.')
-  if (operation === 'init' && target) return argumentError('The ai init command does not accept a client target.')
-  if (operation === 'configure' && !target) return argumentError('The ai configure command requires a client or all.')
+  if (operation === 'doctor' && (apply || portableSkillFallback !== undefined)) return argumentError('The ai doctor command does not accept --apply or portable-skill options.')
   return {
     command: 'ai',
     operation,
-    ...(target ? { target } : {}),
     projectRoot,
     apply,
+    ...(portableSkillFallback === undefined ? {} : { portableSkillFallback }),
   }
+}
+
+function parseAssistants(arguments_: string[]): ParsedCommand | { error: string } {
+  const [rawOperation, ...rest] = arguments_
+  if (!rawOperation || !['status', 'install', 'update', 'repair', 'remove'].includes(rawOperation)) {
+    return argumentError('The assistants command requires status, install, update, repair, or remove.')
+  }
+  const operation = rawOperation as AssistantConnectionOperation | 'status'
+  let client: DraftMatterAssistantClient | 'all' | undefined
+  let apply = false
+  let json = false
+  for (const argument of rest) {
+    if (argument === '--apply') {
+      apply = true
+      continue
+    }
+    if (argument === '--json') {
+      json = true
+      continue
+    }
+    if (!argument.startsWith('-') && ['codex', 'claude', 'copilot', 'vibe', 'all'].includes(argument) && !client) {
+      client = argument as DraftMatterAssistantClient | 'all'
+      continue
+    }
+    return argumentError(`Unknown assistant connection option “${argument}”.`)
+  }
+  if (operation === 'status') {
+    if (!json) return argumentError('The assistants status command requires --json.')
+    if (apply) return argumentError('The assistants status command does not accept --apply.')
+  } else if (!client) {
+    return argumentError(`The assistants ${operation} command requires a client or all.`)
+  }
+  return { command: 'assistants', operation, client: client ?? 'all', apply }
 }
 
 function parseCommand(arguments_: string[]): ParsedCommand | { error: string } {
@@ -274,6 +320,7 @@ function parseCommand(arguments_: string[]): ParsedCommand | { error: string } {
   if (command === 'review-report' || command === 'report') return parseReport(rest)
   if (command === 'agent') return parseAgent(rest)
   if (command === 'mcp') return parseMcp(rest)
+  if (command === 'assistants') return parseAssistants(rest)
   if (command === 'ai') return parseAi(rest)
   return argumentError(`Unknown command “${command}”.`)
 }
@@ -348,12 +395,19 @@ export async function runDraftMatterCli(arguments_: string[], io: DraftMatterCli
       return 70
     }
   }
+  if (parsed.command === 'assistants') {
+    return await runAssistantIntegrationCli({
+      operation: parsed.operation,
+      client: parsed.client,
+      apply: parsed.apply,
+    }, io)
+  }
   if (parsed.command === 'ai') {
     return await runDraftMatterAiCli({
       operation: parsed.operation,
       projectRoot: parsed.projectRoot,
-      ...(parsed.target ? { target: parsed.target } : {}),
       apply: parsed.apply,
+      ...(parsed.portableSkillFallback === undefined ? {} : { portableSkillFallback: parsed.portableSkillFallback }),
     }, io)
   }
 

@@ -5,6 +5,7 @@ export type ApplicationRoute =
   | { destination: 'invitation' }
   | { destination: 'example' }
   | { destination: 'learn' }
+  | { destination: 'learn-ai' }
   | { destination: 'languages' }
   | { destination: 'tutorial' }
   | { destination: 'browser-editor' }
@@ -30,6 +31,7 @@ export function parseApplicationRoute(location: Pick<Location, 'pathname' | 'sea
     ...(new URLSearchParams(location.search).get('start') === 'collaboration' ? { startCollaboration: true } : {}),
   }
   if (parts[0] === 'invite') return { destination: 'invitation' }
+  if (parts[0] === 'learn' && parts[1] === 'ai') return { destination: 'learn-ai' }
   if (parts[0] === 'learn') return { destination: 'learn' }
   if (parts[0] === 'languages') return { destination: 'languages' }
   if (parts[0] === 'tutorial') return { destination: 'tutorial' }
@@ -44,6 +46,7 @@ export function applicationRoutePath(route: ApplicationRoute) {
   if (route.destination === 'invitation') return '/invite'
   if (route.destination === 'example') return '/?example=complete'
   if (route.destination === 'learn') return '/learn'
+  if (route.destination === 'learn-ai') return '/learn/ai'
   if (route.destination === 'languages') return '/languages'
   if (route.destination === 'tutorial') return '/tutorial'
   if (route.destination === 'browser-editor') return '/draft'

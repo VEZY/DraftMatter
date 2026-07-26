@@ -1,4 +1,4 @@
-import { diagnoseDraftMatterAi, planDraftMatterAiIntegration, type DraftMatterAiOperation, type DraftMatterAiTarget } from './agentIntegration'
+import { diagnoseDraftMatterAi, planDraftMatterAiIntegration, type DraftMatterAiOperation } from './agentIntegration'
 
 export interface DraftMatterAiCliIo {
   stdout(content: string): void
@@ -8,8 +8,8 @@ export interface DraftMatterAiCliIo {
 export interface DraftMatterAiCliOptions {
   operation: DraftMatterAiOperation | 'doctor'
   projectRoot: string
-  target?: DraftMatterAiTarget
   apply: boolean
+  portableSkillFallback?: boolean
 }
 
 function emit(io: DraftMatterAiCliIo, value: unknown) {
@@ -26,15 +26,15 @@ export async function runDraftMatterAiCli(options: DraftMatterAiCliOptions, io: 
     const result = await planDraftMatterAiIntegration({
       projectRoot: options.projectRoot,
       operation: options.operation,
-      ...(options.target ? { target: options.target } : {}),
       apply: options.apply,
+      ...(options.portableSkillFallback === undefined ? {} : { portableSkillFallback: options.portableSkillFallback }),
     })
     emit(io, result)
     return result.ok ? 0 : 73
   } catch (error) {
     emit(io, {
       ok: false,
-      schemaVersion: 1,
+      schemaVersion: 2,
       error: {
         code: 'ai-integration-failed',
         message: error instanceof Error ? error.message : String(error),

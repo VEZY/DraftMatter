@@ -66,26 +66,83 @@ export interface NewProjectAuthor {
 }
 
 export interface AgentIntegrationInitialization {
-  schemaVersion: 1
+  schemaVersion: 2
   protocolVersion: string
-  initialized: boolean
+  projectEnabled: boolean
+  portableSkillFallback: boolean
   files: string[]
   nextSteps: string[]
 }
 
 export interface AgentIntegrationStatus {
-  schemaVersion: 1
+  schemaVersion: 2
   protocolVersion: string
-  enabled: boolean
+  projectEnabled: boolean
   instructionsReady: boolean
-  skillReady: boolean
+  portableSkillReady: boolean
+  portableSkillFallback: boolean
   manifestReady: boolean
   installedSkillVersion?: number
-  configuredClients: string[]
-  draftmatterCommand?: string
+  localAdapters: string[]
   repairCommand: string
   doctorCommand: string
   notes: string[]
+}
+
+export type AssistantClientId = 'codex' | 'claude' | 'copilot' | 'vibe'
+export type AssistantConnectionOperation = 'install' | 'update' | 'repair' | 'remove'
+
+export interface AssistantConnectionStatus {
+  client: AssistantClientId
+  name: string
+  detected: boolean
+  executable?: string
+  connected: boolean
+  mcpInstalled: boolean
+  mcpCurrent: boolean
+  skillInstalled: boolean
+  skillCurrent: boolean
+  registrationScope: 'user'
+  registrationMethod: 'codex-plugin' | 'global-config'
+  projectLocalRequired: boolean
+  recommendedAction: AssistantConnectionOperation | 'none'
+  configPath: string
+  skillPath: string
+  notes: string[]
+}
+
+export interface AssistantConnectionsStatus {
+  ok: boolean
+  scope: 'device'
+  clients: AssistantConnectionStatus[]
+}
+
+export interface AssistantConnectionPlan {
+  ok: boolean
+  scope: 'device'
+  applied: boolean
+  results: Array<{
+    ok: boolean
+    operation: AssistantConnectionOperation
+    client: AssistantClientId
+    applied: boolean
+    statusBefore: AssistantConnectionStatus
+    statusAfter?: AssistantConnectionStatus
+    changes: Array<{
+      path: string
+      action: 'create' | 'update' | 'delete' | 'unchanged' | 'conflict'
+      kind: 'mcp-registration' | 'skill' | 'receipt'
+      message: string
+    }>
+    conflicts: Array<{
+      path: string
+      action: 'conflict'
+      kind: 'mcp-registration' | 'skill' | 'receipt'
+      message: string
+    }>
+    guarantees: string[]
+    advancedCommand: string
+  }>
 }
 
 export interface DocumentSnapshot {
@@ -532,6 +589,21 @@ export function createDesktopHost(
     agentIntegrationStatus(root: string) {
       return available
         ? invokeBridge<AgentIntegrationStatus>('agent_integration_status', { root })
+        : agentIntegrationUnavailable()
+    },
+    disableAiIntegration(root: string) {
+      return available
+        ? invokeBridge<AgentIntegrationInitialization>('disable_ai_integration', { root })
+        : agentIntegrationUnavailable()
+    },
+    assistantConnectionsStatus() {
+      return available
+        ? invokeBridge<AssistantConnectionsStatus>('assistant_connections_status')
+        : agentIntegrationUnavailable()
+    },
+    assistantConnectionAction(client: AssistantClientId, operation: AssistantConnectionOperation, apply: boolean) {
+      return available
+        ? invokeBridge<AssistantConnectionPlan>('assistant_connection_action', { client, operation, apply })
         : agentIntegrationUnavailable()
     },
     createTemporaryProject(name: string) {
