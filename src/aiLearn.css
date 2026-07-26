@@ -117,6 +117,20 @@
   margin-top: auto;
 }
 
+.ai-learn-scopes .ai-learn-desktop-note {
+  width: auto;
+  height: auto;
+  margin-top: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border-radius: 0;
+  background: transparent;
+  color: #3f715e;
+  font-size: 13px;
+  font-weight: 750;
+}
+
 .ai-learn-states {
   margin-top: 70px;
   display: grid;

@@ -9,7 +9,9 @@ tool descriptions are guidance, not a sandbox.
 
 DraftMatter therefore enforces safety in code:
 
-- one canonical project root is bound before tool use;
+- one enabled schema-2 project is required before tools are advertised;
+- one canonical project root and directory identity are pinned before tool use;
+- later project-root injection and root replacement are rejected;
 - relative paths reject absolute paths, prefixes, `..`, and symlink escapes;
 - writes verify the nearest existing parent's real path;
 - strict request schemas reject unknown fields and caller-selected generated
@@ -39,9 +41,17 @@ cannot become a reference record through the add operation.
 
 ## Secrets and privacy
 
-Generated instructions and adapters contain command names and relative project
-paths only. They must not contain credentials, tokens, absolute
+Generated project instructions contain no credentials, tokens, absolute
 developer-machine paths, environment dumps, or hidden model reasoning.
+Device-wide registrations necessarily contain the absolute path to the MCP
+sidecar bundled with that installed DraftMatter application. Connection
+receipts record managed revisions and that launch path, but never client
+credentials, model tokens, project enablement, execution trust, network
+approval, or saved tool approvals.
+
+Removal is scoped independently: disconnecting a client does not alter a
+project, and disabling a project does not alter any user-level client
+configuration.
 
 The compact audit stores operation name, timestamp, versions, optional actor,
 input/output revisions, affected opaque references, request hash, idempotency
@@ -93,4 +103,3 @@ npm run test:agent-adapters
 npm run test:agent-clients
 npm audit
 ```
-

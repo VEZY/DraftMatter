@@ -38,9 +38,21 @@ test.describe('signed-out Home landing experience', () => {
     await expect(page.getByText('A calm workspace for rigorous research', { exact: true })).toBeVisible()
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your paper should be as reproducible as your research.')
     await expect(page.getByText('Research writing, with the missing pieces built in.', { exact: true })).toBeVisible()
-    await expect(page.getByText('AI integration, on your terms', { exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { level: 2, name: 'AI integration, on your terms' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Start a new paper' })).toBeVisible()
     await expect(page.getByRole('button', { name: 'Explore the complete example' })).toBeVisible()
+
+    const assistantFeature = page.locator('.home-ai-connect')
+    await expect(assistantFeature.getByRole('link', { name: 'Open the OpenAI Codex product page' })).toHaveAttribute('href', 'https://openai.com/codex/')
+    await expect(assistantFeature.getByRole('link', { name: 'Open the Anthropic Claude Code product page' })).toHaveAttribute('href', 'https://claude.com/product/claude-code')
+    await expect(assistantFeature.getByRole('link', { name: 'Open the Mistral Vibe Code product page' })).toHaveAttribute('href', 'https://mistral.ai/products/vibe/code/')
+    const brandFills = await page.evaluate(async () => await Promise.all(
+      ['/ai-openai.svg', '/ai-anthropic.svg', '/ai-mistral.svg'].map(async (path) => {
+        const source = await (await fetch(path)).text()
+        return source.match(/fill="([^"]+)"/)?.[1]
+      }),
+    ))
+    expect(brandFills).toEqual(['#3f715e', '#3f715e', '#3f715e'])
 
     const hero = page.locator('.home-hero-layout')
     const heroPreview = hero.locator('.home-hero-product-preview')

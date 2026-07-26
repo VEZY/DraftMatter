@@ -1,6 +1,7 @@
 # Local agent integration architecture
 
-Status: integration schema `1`, agent protocol `1.0`, DraftMatter `0.1.x`.
+Status: project enablement schema `2`, connection receipt schema `1`, agent
+protocol `1.0`, DraftMatter `0.1.x`.
 
 The local agent integration has one provider-neutral domain implementation:
 
@@ -14,7 +15,17 @@ Client instructions → canonical skill → MCP stdio tools
 ```
 
 Provider adapters configure discovery only. They do not implement manuscript
-behavior.
+behavior. Assistant connection and project enablement are separate:
+
+```text
+Device/client scope                         Project scope
+DraftMatter app sidecars                    AGENTS.md / CLAUDE.md pointers
+        ↓                                   schema-2 enabled manifest
+user MCP + canonical skill registration             ↓
+        └──────── assistant starts in project ───────┘
+                              ↓
+                  canonical, pinned MCP root
+```
 
 ## Boundaries
 
@@ -28,26 +39,38 @@ behavior.
   multi-file transactions with journals and rollback.
 - `src/agentExecutionHost.ts` owns a long-lived, line-delimited JSON connection
   to the Rust execution host. Kernel sessions live for one service/MCP process.
-- `src/agentMcpServer.ts` maps six strict SDK tools and bounded resources to the
-  service. It contains no provider-specific document behavior.
+- `src/agentMcpServer.ts` verifies project enablement, then maps six strict SDK
+  tools and bounded resources to the service. It contains no provider-specific
+  document behavior.
 - `src/agentCli.ts` exposes one-request JSON operation and schema reporting.
-- `src/agentIntegration.ts` previews, merges, updates, diagnoses, and removes
-  client-discovery files.
+- `src/assistantIntegration.ts` previews, merges, updates, repairs, and removes
+  user/device-wide client discovery without an open project.
+- `src/agentIntegration.ts` previews, enables, updates, diagnoses, and disables
+  project instruction pointers, portable fallback, and the schema-2 marker.
+- `src/agentProjectEnablement.ts` owns manifest validation and the fail-closed
+  project gate shared by MCP and JSON CLI entry points.
+- `src-tauri/src/assistant_connections.rs` locates the application-bundled MCP
+  sidecar and invokes its connection installer outside project state.
 - `integrations/skills/draftmatter-authoring/` is the canonical skill source.
 
 The desktop project-creation implementation embeds the same canonical skill
 files at compile time and creates the same managed instruction block and
-manifest. It intentionally does not configure clients.
+manifest. It intentionally does not configure clients. Conversely, connecting
+an assistant never creates or edits a project.
 
 ## Sessions and roots
 
-The CLI opens one project for one request. An MCP process binds one canonical
-project root from the required startup argument and rejects project roots
-inside tool input. No later request can replace or escape that root. A future
-transport may resolve the same startup value from negotiated MCP roots before
-constructing the service; tool calls will remain root-free. A project session
-reads `.draftmatter/project.json` and the configured main document, then
-reports their revisions.
+The CLI opens one enabled project for one request. An MCP process resolves the
+project from its working directory by default or from an explicit startup-only
+root. Before advertising tools, it canonicalizes the directory, requires a
+valid enabled schema-2 `.draftmatter/ai-integration.json`, and pins the root's
+canonical path and filesystem identity.
+
+Project roots are absent from all tool schemas. Strict validation rejects
+later root injection. The project store rejects traversal, absolute paths,
+platform prefixes, symlink escapes, and a root whose directory identity changes
+after startup. A future transport may resolve the same startup value from an
+MCP initialization-roots handshake; tool calls will remain root-free.
 
 Execution sessions are persistent only for the MCP/server lifetime. Reconnect
 creates a new session. Durable execution manifests and retained outputs allow
@@ -133,7 +156,9 @@ Protocol compatibility follows semantic-version-like rules:
 - a different major protocol is rejected;
 - compatible minor releases may add optional result fields, resources, or new
   action discriminators without changing existing meanings;
-- generated integration schema changes require an explicit previewed
+- device registration changes require a previewed
+  `draftmatter assistants update|repair`;
+- project enablement schema changes require an explicit previewed
   `draftmatter ai update`;
 - the plugin, generated manifest, doctor, CLI schema result, and server all
   report versions used for diagnosis;

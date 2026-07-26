@@ -409,7 +409,10 @@ export async function planDraftMatterAiIntegration(options: {
   }
 
   const conflicts = prepared.filter((entry) => entry.plan.action === 'conflict').map((entry) => entry.plan)
-  const nextFiles = prepared.flatMap((entry) => entry.managed ? [entry.managed] : [])
+  const nextFiles = prepared.flatMap((entry) => entry.managed ? [{
+    ...entry.managed,
+    created: ownedByPath.get(entry.managed.path)?.created ?? entry.managed.created,
+  }] : [])
     .sort((left, right) => left.path.localeCompare(right.path))
   const nextManifest: DraftMatterAiProjectManifest = {
     schemaVersion: AI_INTEGRATION_SCHEMA_VERSION,

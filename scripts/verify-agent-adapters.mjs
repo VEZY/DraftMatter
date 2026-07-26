@@ -1,50 +1,38 @@
 import assert from 'node:assert/strict'
 import { execFile } from 'node:child_process'
-import { chmod, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { delimiter, join, resolve } from 'node:path'
+import { join, resolve } from 'node:path'
 import { promisify } from 'node:util'
 
 const run = promisify(execFile)
 const root = resolve(import.meta.dirname, '..')
 const cli = join(root, 'dist-cli', 'draftmatter.js')
-const temporary = await mkdtemp(join(tmpdir(), 'draftmatter-agent-adapters-'))
+const temporary = await mkdtemp(join(tmpdir(), 'draftmatter-project-ai-'))
 const project = join(temporary, 'Scientific project with spaces')
-const bin = join(temporary, 'bin')
 
 await mkdir(join(project, '.draftmatter'), { recursive: true })
-await mkdir(bin, { recursive: true })
 await writeFile(join(project, '.draftmatter', 'project.json'), `${JSON.stringify({
   schemaVersion: 1,
-  name: 'Packaged adapter verification',
+  name: 'Project AI verification',
   mainDocument: 'paper.qmd',
   citationStyle: 'draftmatter-author-date',
   citationLocale: 'en-US',
   citationBibliography: 'references.json',
   execution: { python: {}, r: {}, julia: {} },
 }, null, 2)}\n`)
-await writeFile(join(project, 'paper.qmd'), '# Packaged adapter verification\n')
+await writeFile(join(project, 'paper.qmd'), '# Project AI verification\n')
 await writeFile(join(project, 'AGENTS.md'), '# Team instructions\n\nPreserve this line.\n')
-await writeFile(join(project, '.mcp.json'), `${JSON.stringify({
+const unownedAdapter = `${JSON.stringify({
+  note: 'Project-team configuration',
   mcpServers: { existing: { command: 'existing', args: [] } },
-}, null, 2)}\n`)
-const shim = join(bin, process.platform === 'win32' ? 'draftmatter.cmd' : 'draftmatter')
-if (process.platform === 'win32') {
-  await writeFile(shim, `@node "${cli}" %*\r\n`)
-} else {
-  await copyFile(cli, shim)
-  await chmod(shim, 0o755)
-}
-const environment = {
-  ...process.env,
-  PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`,
-}
+}, null, 2)}\n`
+await writeFile(join(project, '.mcp.json'), unownedAdapter)
 
 async function command(arguments_, expectedExit = 0) {
   try {
     const result = await run(process.execPath, [cli, ...arguments_], {
-      cwd: temporary,
-      env: environment,
+      cwd: project,
       maxBuffer: 4 * 1024 * 1024,
     })
     assert.equal(expectedExit, 0)
@@ -58,25 +46,36 @@ async function command(arguments_, expectedExit = 0) {
 }
 
 try {
-  const preview = await command(['ai', 'configure', 'all', '--project-root', project])
+  const preview = await command(['ai', 'enable', '--project-root', project])
   assert.equal(preview.ok, true)
   assert.equal(preview.applied, false)
   assert.equal(await readFile(join(project, 'AGENTS.md'), 'utf8'), '# Team instructions\n\nPreserve this line.\n')
 
-  const configured = await command(['ai', 'configure', 'all', '--project-root', project, '--apply'])
-  assert.equal(configured.ok, true)
-  assert.equal(configured.applied, true)
-  assert.ok(configured.transactionId)
+  const enabled = await command(['ai', 'enable', '--project-root', project, '--apply'])
+  assert.equal(enabled.ok, true)
+  assert.equal(enabled.applied, true)
+  assert.ok(enabled.transactionId)
+  assert.match(await readFile(join(project, 'AGENTS.md'), 'utf8'), /draftmatter-ai:start/)
+  const manifest = JSON.parse(await readFile(join(project, '.draftmatter', 'ai-integration.json'), 'utf8'))
+  assert.equal(manifest.schemaVersion, 2)
+  assert.equal(manifest.protocolVersion, '1.0')
+  assert.equal(manifest.enabled, true)
+  assert.equal(manifest.skill.name, 'draftmatter-authoring')
+  assert.equal(manifest.skill.discovery, 'global')
+  assert.equal(manifest.skill.portableFallback, true)
+  assert.deepEqual(manifest.localAdapters, [])
+  assert.ok(Array.isArray(manifest.files))
 
-  const agents = await readFile(join(project, 'AGENTS.md'), 'utf8')
-  assert.match(agents, /Preserve this line\./)
-  assert.match(agents, /draftmatter-ai:start/)
-  const sharedMcp = JSON.parse(await readFile(join(project, '.mcp.json'), 'utf8'))
-  assert.equal(sharedMcp.mcpServers.existing.command, 'existing')
-  assert.equal(sharedMcp.mcpServers.draftmatter.command, 'draftmatter')
+  assert.equal(await readFile(join(project, '.mcp.json'), 'utf8'), unownedAdapter)
+  await assert.rejects(readFile(join(project, '.codex', 'config.toml'), 'utf8'))
+  await assert.rejects(readFile(join(project, '.github', 'mcp.json'), 'utf8'))
+  await assert.rejects(readFile(join(project, '.vibe', 'config.toml'), 'utf8'))
 
   const doctor = await command(['ai', 'doctor', '--json', '--project-root', project])
   assert.equal(doctor.ok, true)
+  assert.equal(doctor.project.aiEnabled, true)
+  assert.equal(doctor.project.executionTrust.trusted, false)
+  assert.equal(doctor.project.networkAccess.approved, false)
   assert.deepEqual(doctor.mcp.tools, [
     'draftmatter_project',
     'draftmatter_manuscript',
@@ -85,26 +84,21 @@ try {
     'draftmatter_review',
     'draftmatter_validate',
   ])
-  assert.equal(typeof doctor.runtime.execution.available, 'boolean')
-  assert.ok(
-    doctor.runtime.execution.host || doctor.runtime.execution.reason,
-    JSON.stringify(doctor.runtime.execution),
-  )
 
-  const updated = await command(['ai', 'update', 'all', '--project-root', project, '--apply'])
+  const updated = await command(['ai', 'update', '--project-root', project, '--apply'])
   assert.equal(updated.ok, true)
   assert.ok(
     updated.changes.every((change) => change.action === 'unchanged'),
     JSON.stringify(updated.changes, null, 2),
   )
 
-  const removed = await command(['ai', 'remove', 'all', '--project-root', project, '--apply'])
-  assert.equal(removed.ok, true)
+  const disabled = await command(['ai', 'disable', '--project-root', project, '--apply'])
+  assert.equal(disabled.ok, true)
   assert.equal(await readFile(join(project, 'AGENTS.md'), 'utf8'), '# Team instructions\n\nPreserve this line.\n')
-  const remainingMcp = JSON.parse(await readFile(join(project, '.mcp.json'), 'utf8'))
-  assert.deepEqual(remainingMcp, { mcpServers: { existing: { command: 'existing', args: [] } } })
+  assert.equal(await readFile(join(project, '.mcp.json'), 'utf8'), unownedAdapter)
+  await assert.rejects(readFile(join(project, '.draftmatter', 'ai-integration.json'), 'utf8'))
 
-  process.stdout.write('DraftMatter AI adapters verified: preview, configure, doctor, update, remove, preservation, MCP discovery, and paths with spaces.\n')
+  process.stdout.write('DraftMatter project AI verified: preview, schema-2 enablement, doctor, idempotent update, reversible disable, and preservation of unowned client configuration.\n')
 } finally {
   await rm(temporary, { recursive: true, force: true })
 }

@@ -11,14 +11,18 @@ change manuscript behavior.
 
 - JSON CLI: `draftmatter agent --request <path>` or
   `draftmatter agent --request -`
-- Local MCP: `draftmatter mcp --stdio --project-root <path>`
+- Local MCP: `draftmatter mcp --stdio` from an enabled project working
+  directory; `--project-root <path>` is an optional startup-only compatibility
+  argument
 - MCP tools: `draftmatter_project`, `draftmatter_manuscript`,
   `draftmatter_computation`, `draftmatter_references`,
   `draftmatter_review`, and `draftmatter_validate`
 
-The CLI receives one JSON request or bounded session envelope and emits one JSON result. The MCP process is
-bound to one validated project root at startup. Individual MCP tool calls never
-select arbitrary filesystem roots.
+The CLI receives one JSON request or bounded session envelope and emits one
+JSON result. Both entry points require a valid enabled schema-2 project AI
+manifest. The MCP process canonicalizes and pins one validated project root at
+startup. Individual MCP tool calls never select arbitrary filesystem roots,
+and strict schemas reject a later `projectRoot` field.
 
 ## Operation vocabulary
 

@@ -47,7 +47,7 @@ async function codexPluginContext() {
     }
   }
 
-  const installed = /(?:^|\s)draftmatter(?:@|\s|$)/imu.test(listOutput)
+  let installed = /(?:^|[^a-z0-9_-])draftmatter(?:@|[^a-z0-9_-]|$)/imu.test(listOutput)
 
   return {
     codexPluginAvailable: true,
@@ -59,6 +59,7 @@ async function codexPluginContext() {
             env: process.env,
             timeout: 30_000,
           })
+          installed = false
         }
         return
       }
@@ -67,6 +68,7 @@ async function codexPluginContext() {
           env: process.env,
           timeout: 30_000,
         })
+        installed = true
       }
     },
   }

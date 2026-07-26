@@ -13,8 +13,9 @@ commits.
 The provider-neutral local AI integration is certified separately in
 [`agent-integration-evidence.md`](agent-integration-evidence.md). That record
 covers the headless service, JSON and MCP interfaces, Agent Skill and client
-adapters, real-kernel workflows, safety boundaries, publication output, and
-cross-client verification.
+adapters, separate device connection and project enablement, real-kernel
+workflows, safety boundaries, publication output, and cross-client
+verification.
 
 ## Certification snapshot
 

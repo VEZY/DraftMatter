@@ -60,6 +60,8 @@ try {
   }, null, 2))
   await writeFile(join(agentProject, 'paper.qmd'), '# Test\n\n## Introduction {#sec-introduction}\n\nOriginal sentence.\n')
   await writeFile(join(agentProject, 'references.json'), '[]\n')
+  const enabled = run(['ai', 'enable', '--project-root', agentProject, '--apply'])
+  assert.equal(enabled.status, 0, enabled.stderr)
 
   const inspected = run(['agent', '--request', '-', '--project-root', agentProject], JSON.stringify({
     protocolVersion: '1.0',

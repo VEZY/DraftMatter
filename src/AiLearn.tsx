@@ -1,4 +1,5 @@
 import { Icon } from './Icon'
+import { desktopHost } from './desktopHost'
 import './aiLearn.css'
 
 export function AiLearn({
@@ -24,7 +25,9 @@ export function AiLearn({
             <span>1</span>
             <div><small>Device/client-wide</small><h2>Connect AI assistants</h2></div>
             <p>DraftMatter registers its bundled MCP server and canonical authoring skill with Codex, Claude Code, GitHub Copilot, or Mistral Vibe. Unrelated client settings are preserved.</p>
-            <button className="home-primary" onClick={onConnectAssistants}><Icon name="spark" size={16} />Connect assistants</button>
+            {desktopHost.available
+              ? <button className="home-primary" onClick={onConnectAssistants}><Icon name="spark" size={16} />Connect assistants</button>
+              : <span className="ai-learn-desktop-note"><Icon name="command" size={15} />Connect from the DraftMatter desktop app</span>}
           </section>
           <Icon name="arrowRight" size={22} />
           <section>

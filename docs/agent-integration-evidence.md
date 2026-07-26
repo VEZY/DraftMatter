@@ -1,107 +1,132 @@
 # Local AI integration evidence
 
-Status: complete for integration schema `1` and agent protocol `1.0`.
+Status: implemented for project enablement schema `2`, connection receipt schema
+`1`, and agent protocol `1.0`.
 
-This page is the permanent verification record for DraftMatter's
-provider-neutral local-agent integration. The implementation goal was developed
-under the temporary `DM-AI-P0` through `DM-AI-P8` register and certified on
-2026-07-25.
+This is the permanent verification record for DraftMatter's provider-neutral
+local-agent integration, including the 2026-07-26 architecture correction that
+separates device/client connection from project enablement.
 
 ## Shipped architecture
 
-- The headless service owns semantic manuscript, review, computation,
-  reference, validation, transaction, audit, and idempotency behavior.
-- `draftmatter agent` exposes the same protocol as one JSON request or a
-  bounded sequential session envelope.
-- `draftmatter mcp --stdio --project-root <project>` exposes six strict MCP
-  tools and targeted resources without opening a network listener.
-- `draftmatter-authoring` is the canonical provider-neutral skill.
-- Project `AGENTS.md`/`CLAUDE.md` blocks and Codex, Claude, Copilot, and Vibe
-  adapters are generated from one versioned integration source.
-- The Codex plugin packages the same MCP command and skill; it contains no
-  Codex-specific manuscript operations.
+### Device/client-wide connection
 
-Detailed design and safety rationale are in
-[agent-integration.md](architecture/agent-integration.md),
-[local-agent-protocol.md](architecture/local-agent-protocol.md), and
-[agent-integration.md](security/agent-integration.md).
+- **Home** and **application settings** expose **Connect AI assistants** without
+  requiring an open project.
+- `src/assistantIntegration.ts` detects Codex, Claude Code, GitHub Copilot, and
+  Mistral Vibe; inspects MCP and skill state; previews and applies
+  Install/Update/Repair/Remove; records managed revisions; and preserves
+  unrelated configuration.
+- Codex uses the DraftMatter plugin when `codex plugin list` proves the installed
+  unified client supports plugin management. Older clients receive equivalent
+  user-wide `~/.codex/config.toml` and skill registration.
+- `src-tauri/src/assistant_connections.rs` locates the bundled MCP sidecar and
+  invokes connection actions with no project state.
+- `.github/workflows/desktop-release.yml` builds and bundles target-native
+  `draftmatter-mcp` and `draftmatter-agent-host` sidecars for Windows, Linux,
+  and both macOS architectures.
+
+### Project-wide enablement
+
+- Project creation, the Project menu, project AI status, and the post-open
+  prompt expose **Enable AI for this project**.
+- `src/agentIntegration.ts` merges managed `AGENTS.md`/`CLAUDE.md` pointers,
+  optionally installs the portable `.agents/skills/` fallback, and writes
+  `.draftmatter/ai-integration.json` schema `2`.
+- Supported clients require no project-local MCP adapter. Schema-1 adapters are
+  removed only when the legacy DraftMatter manifest proves ownership.
+- Disable removes only unchanged DraftMatter-managed enablement files and does
+  not touch manuscripts, references, outputs, review history, audit, or
+  idempotency data.
+
+### Project gate and pinned MCP root
+
+- `draftmatter mcp --stdio` resolves the startup project from `cwd` by default;
+  `--project-root` remains startup-only for compatibility.
+- `src/agentProjectEnablement.ts` rejects absent, disabled, malformed, or
+  unsupported project manifests before MCP or JSON-agent access.
+- `src/agentMcpServer.ts` and `src/agentProjectStore.ts` canonicalize and pin
+  the project path and filesystem identity.
+- Tool schemas contain no project-root field. Strict validation rejects later
+  injection, traversal, symlink escape, and root replacement.
+
+### Independent sensitive approvals
+
+The UI and protocol keep four states distinct:
+
+1. assistant connected to DraftMatter;
+2. AI enabled for this project;
+3. project trusted for code execution;
+4. network approved for this specific request.
+
+Setup does not contact a model, execute manuscript code, grant execution trust,
+enable Zotero/Crossref access, or approve future client tool calls.
 
 ## Acceptance evidence
 
-| Scenario | Evidence |
+| Requirement | Evidence |
 | --- | --- |
-| Attributed tracked prose review | `src/agentService.test.ts`; `scripts/verify-agent-e2e.mjs`; ordinary review UI and reopen tests |
-| Generated reproducible figure | Generic MCP creates an R figure without a caller ID, label, filename, or path; the real Jupyter run returns progress, provenance, freshness, and image content; reconnect reopens the manifest and artifact |
-| Generated table and named value | Generic MCP creates/runs the R table and `sample_size`, retains CSV/table/value state, inserts the semantic value reference, clean-runs, and reopens it |
-| Reference acquisition and citation | Service tests cover local records and explicitly approved Crossref acquisition, deduplication, CSL JSON, citation lock/cache, and atomic add-and-cite; Rust tests cover bounded Zotero and Crossref protocols; generic MCP inserts a saved project citation |
-| Clean reproduction and recovery | Real R clean-run, progress, cancellation, interruption status, timeout unit test, kernel lifecycle controls, and persistent manifests |
-| Concurrent external edit | External-edit stale rejection, simultaneous-client serialization, expected revisions, idempotent retry after reconnect, and rebase-oriented diagnostics |
-| Missing integration | Preview-only `ai init/configure/update/remove`, doctor repairs, managed instruction pointers, and structured CLI fallback |
-| Cross-client portability | Codex and Vibe matrix below; generic MCP SDK drives the complete workflow without provider extensions |
-| Publication output | Agent-created state produces clean Markdown and HTML; the complete scientific fixture verifies clean HTML/DOCX and browser PDF with figures, tables, values, citations, references, equations, and cross-references but no code or agent/review protocol state |
+| Device scope works without a project | `src/assistantIntegration.test.ts`; `src-tauri/src/assistant_connections.rs`; `src/AssistantConnectionsDialog.tsx` |
+| Detect/current/preview/Install/Update/Repair/Remove | `src/assistantIntegration.ts`; device connection tests; advanced CLI `draftmatter assistants …` |
+| Preserve unrelated client config | Claude/Copilot/TOML merge tests, Codex marketplace preservation test, modified-file Repair gate |
+| Bundled MCP and execution host | `scripts/build-desktop-sidecars.mjs`; desktop release target matrix and `externalBin` configuration |
+| Codex plugin with safe fallback | plugin capability probe, generated local marketplace/plugin files, fallback status note, canonical plugin validator |
+| Project creation/menu/status/post-open surfaces | `src/NewLocalProjectDialog.tsx`; `src/ProjectNavigationMenu.tsx`; `src/AgentIntegrationDialog.tsx`; app post-open banner |
+| Schema-2 enable/update/disable | `src/agentIntegration.test.ts`; native project creation/migration/rollback tests |
+| Legacy migration only with ownership | schema-1 migration tests plus unowned project-client preservation tests in TypeScript and Rust |
+| Disabled projects rejected | MCP startup and post-disable rejection tests |
+| Root pinning/injection rejection | in-memory MCP test starts from `cwd`, injects another enabled root, and verifies strict failure |
+| Traversal/symlink/root replacement | `src/agentProjectStore.test.ts` and agent security/service suites |
+| Reversible without content/history damage | project disable test and adapter verification script |
+| Four states remain separate | `src/AgentIntegrationDialog.tsx`; `/learn/ai`; phase gate UI fixtures; doctor result |
+| Home feature and linked monochrome brands | `src/Home.tsx`, `src/Home.css`, `public/ai-openai.svg`, `public/ai-anthropic.svg`, `public/ai-mistral.svg`, browser visual QA |
+| Provider-neutral semantic workflow | service/MCP/CLI tests and `scripts/verify-agent-e2e.mjs` |
 
-## Client compatibility matrix
+## Client compatibility
 
-| Client | Verified behavior | Limitation |
+| Client | User/device registration | Project-local requirement |
 | --- | --- | --- |
-| Codex CLI `0.146.0-alpha.3.1` from the unified desktop app | Loads trusted project `AGENTS.md` and the project canonical skill; accepts the DraftMatter stdio MCP registration shape through its real config parser | No model/API call was made. Project-local `.codex/config.toml` MCP discovery varies by release, so the validated thin plugin is the recommended unified-app registration path |
-| Mistral Vibe `2.2.1` | Loads `AGENTS.md`, canonical skill, project MCP server, and all six tools; directly invokes its MCP proxy to persist and reinspect a tracked suggestion | No Mistral model/API call was needed |
-| Claude Code | Generated `.mcp.json`, `CLAUDE.md` forwarding block, and byte-identical `.claude/skills/` copy are merge/update/remove tested | Client executable was not installed on the verification host |
-| GitHub Copilot | Generated repository MCP JSON and shared `AGENTS.md`/skill path are merge/update/remove tested against the documented adapter shape | Copilot CLI was not installed on the verification host |
-| Generic MCP SDK `1.29.0` | Initializes over stdio, discovers tools/resources, drives the full scientific workflow, cancels, closes, and reconnects | Provider-neutral reference client rather than a model host |
+| Codex unified app/CLI | DraftMatter plugin where supported; otherwise user MCP config and canonical skill | `AGENTS.md` pointer only; optional portable skill |
+| Claude Code | `~/.claude.json` and user skill | `CLAUDE.md` forwards to `AGENTS.md`; no MCP file |
+| GitHub Copilot CLI | `~/.copilot/mcp-config.json` and user skill | `AGENTS.md`; no MCP file |
+| Mistral Vibe Code | `~/.vibe/config.toml` and user skill | `AGENTS.md`; no MCP file |
 
-Client versions are detected by `scripts/verify-installed-agent-clients.mjs`;
-missing locally installed clients are reported rather than simulated.
+The actual model provider is outside DraftMatter. All four clients reach the
+same six strict MCP tools:
 
-## Security and recovery evidence
+- `draftmatter_project`
+- `draftmatter_manuscript`
+- `draftmatter_computation`
+- `draftmatter_references`
+- `draftmatter_review`
+- `draftmatter_validate`
 
-- Traversal, absolute paths, symlink escapes, moved/replaced roots, stale
-  revisions, simultaneous writers, and malformed generated state fail closed.
-- A deterministic interrupted multi-file transaction restores every replaced
-  file and leaves a `rolled-back` journal.
-- Execution requires exact session trust, supports deadlines/cancellation, and
-  never runs while opening or exporting.
-- Manuscript prompt injection remains readable data and cannot grant trust,
-  change the root, authorize network access, or bypass the path boundary.
-- Request validation covers unknown generated IDs, malformed objects, deep
-  nesting, oversized text, and bounded output.
-- The audit records actor/provenance/revisions/references without request
-  bodies, prompts, model reasoning, manuscript text, secrets, or logs.
-- Durable artifact fingerprints make direct or interrupted artifact changes
-  stale and recoverable by an explicit rerun even though kernel code writes the
-  artifact before the retained-output/manifest transaction.
+## Reproducible verification
 
-## Release verification
+```sh
+npm run check
+npm test
+npm run build
+npm run test:cli
+npm run test:mcp
+npm run test:agent-adapters
+npm run test:agent-e2e
+npm run test:agent-performance
+npm run validate:agent-skill
+cargo test --manifest-path src-tauri/Cargo.toml --locked
+```
 
-The certification run on 2026-07-25 passed:
+The tests and setup previews use local fixtures only. Installed-client probes
+do not send a prompt to a model or make an API request.
 
-| Command | Result |
-| --- | --- |
-| `npm run check` | TypeScript application check passed |
-| `npm test` | 154 files / 759 tests passed, including permitted loopback collaboration tests |
-| `cargo test --manifest-path src-tauri/Cargo.toml --locked` | 89 native tests passed |
-| `npm run test:e2e` | 50 Chromium desktop tests passed |
-| `npm run build` | Collaboration service, CLI, TypeScript app, and browser bundle built |
-| `npm run test:cli` | Clean export plus JSON request/session protocol passed |
-| `npm run test:mcp` | Initialization, six tools, resources, bounds, invalid input, close, and reconnect passed |
-| `npm run test:agent-adapters` | Preview/configure/doctor/update/remove and preservation passed |
-| `npm run test:agent-host` | Persistent real R Jupyter host passed |
-| `npm run test:agent-e2e` | Real R MCP and JSON-session scientific workflow passed |
-| `npm run test:agent-clients` | Installed Codex boundary and direct Vibe MCP mutation passed |
-| `npm run test:agent-performance` | All five budgets passed; measured startup/discovery 81.13 ms, inspect 5.67 ms, read 8.20 ms, preview 10.74 ms, artifact 2.53 ms |
-| `npm run validate:agent-skill` | Canonical sync, plugin metadata, isolated marketplace install/uninstall, and generated-copy checks passed |
-| Official skill/plugin validators | Skill and plugin both passed |
-| `npm run compliance:check` | 694 locked components passed the target license/SBOM inventory |
-| `npm run release:verify` | npm/Cargo/Tauri/plugin versions, MCP SDK pin, and scoped dependency exception passed |
-| `npm pack ./dist-cli --dry-run --json` | 19-file package contains CLI, canonical skill, personal marketplace, and plugin dotfiles |
+## Implementation checkpoints
 
-`npm audit` reported two moderate entries for the SDK's unused Hono HTTP
-adapter path and no high or critical findings. The stdio-only, time-bounded
-exception is recorded in `compliance/security-exceptions.json` and must be
-reviewed by 2026-08-25.
+- `927c882` — separate assistant connections from project AI access
+- `4f83089` — bundle device-wide assistant connections and Codex plugin
+  fallback
 
-The Playwright certification refreshed three visually inspected semantic-editor
-baselines for the pinned Chromium release; the table change was a one-pixel
-empty-edge crop, not a product-layout change. Publication export also waits for
-the bibliography title before initiating export, removing an asynchronous test
-race without weakening output assertions.
+The canonical user guide is [AI integration, on your terms](ai-integration.md).
+The design and threat model are
+[Local agent integration architecture](architecture/agent-integration.md),
+[Local agent protocol](architecture/local-agent-protocol.md), and
+[Local agent integration security](security/agent-integration.md).

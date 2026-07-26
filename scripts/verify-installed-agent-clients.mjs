@@ -58,12 +58,14 @@ if (!codex || !vibe) {
 const temporary = await mkdtemp(join(tmpdir(), 'draftmatter-installed-clients-'))
 const project = join(temporary, 'client project with spaces')
 const bin = join(temporary, 'bin')
-const vibeHome = join(temporary, 'vibe-home')
-const codexHome = join(temporary, 'codex-home')
+const deviceHome = join(temporary, 'device-home')
+const vibeHome = join(deviceHome, '.vibe')
+const codexHome = join(deviceHome, '.codex')
 try {
   await Promise.all([
     mkdir(join(project, '.draftmatter'), { recursive: true }),
     mkdir(bin, { recursive: true }),
+    mkdir(deviceHome, { recursive: true }),
     mkdir(vibeHome, { recursive: true }),
     mkdir(codexHome, { recursive: true }),
   ])
@@ -85,6 +87,10 @@ try {
   const clientEnvironment = {
     ...process.env,
     PATH: `${bin}${delimiter}${process.env.PATH ?? ''}`,
+    HOME: deviceHome,
+    USERPROFILE: deviceHome,
+    CODEX_HOME: codexHome,
+    VIBE_HOME: vibeHome,
     DRAFTMATTER_AGENT_HOST: host,
   }
   const codexVersion = run(codex, ['--version'], {
@@ -94,27 +100,39 @@ try {
 
   run(process.execPath, [
     cli,
+    'assistants',
+    'install',
+    'codex',
+    '--apply',
+  ], { cwd: repository, env: clientEnvironment })
+  run(process.execPath, [
+    cli,
+    'assistants',
+    'install',
+    'vibe',
+    '--apply',
+  ], { cwd: repository, env: clientEnvironment })
+  run(process.execPath, [
+    cli,
     'ai',
-    'configure',
-    'all',
+    'enable',
     '--project-root',
     project,
     '--apply',
   ], { cwd: repository, env: clientEnvironment })
 
-  await writeFile(join(codexHome, 'config.toml'), `[projects.${JSON.stringify(project)}]\ntrust_level = "trusted"\n`)
+  const codexConfigPath = join(codexHome, 'config.toml')
+  const codexConfig = await readFile(codexConfigPath, 'utf8').catch(() => '')
+  await writeFile(codexConfigPath, `${codexConfig}${codexConfig ? '\n' : ''}[projects.${JSON.stringify(project)}]\ntrust_level = "trusted"\n`)
   const codexPrompt = JSON.parse(run(codex, ['-C', project, 'debug', 'prompt-input', 'Verify project discovery only.'], {
     cwd: project,
     env: { ...clientEnvironment, CODEX_HOME: codexHome },
   }))
-  assert.match(JSON.stringify(codexPrompt), /DraftMatter local AI authoring/)
+  assert.match(JSON.stringify(codexPrompt), /draftmatter-authoring/)
+  assert.match(JSON.stringify(codexPrompt), /DraftMatter AI authoring/)
   const codexMcp = JSON.parse(run(codex, [
     '-C',
     project,
-    '-c',
-    'mcp_servers.draftmatter.command="draftmatter"',
-    '-c',
-    'mcp_servers.draftmatter.args=["mcp","--stdio","--project-root","."]',
     'mcp',
     'list',
     '--json',
@@ -123,8 +141,8 @@ try {
     env: { ...clientEnvironment, CODEX_HOME: codexHome },
   }))
   assert.match(JSON.stringify(codexMcp), /draftmatter/)
-  assert.match(JSON.stringify(codexMcp), /project-root/)
-  assert.match(await readFile(join(project, '.codex', 'config.toml'), 'utf8'), /\[mcp_servers\.draftmatter\]/)
+  assert.doesNotMatch(JSON.stringify(codexMcp), /project-root/)
+  await assert.rejects(readFile(join(project, '.codex', 'config.toml'), 'utf8'))
 
   const vibeLauncher = await readFile(vibe, 'utf8')
   const python = vibeLauncher.match(/^#!([^\r\n]+)/)?.[1]
@@ -208,7 +226,8 @@ print(json.dumps({
   assert.equal(vibeResult.workflow.reviewCount, 1)
   assert.match(await readFile(join(project, 'paper.qmd'), 'utf8'), /Vibe compatibility verifier/)
   assert.match(await readFile(join(project, 'AGENTS.md'), 'utf8'), /draftmatter-authoring/)
-  process.stdout.write(`Installed client compatibility verified without a model/API call: ${codexVersion} loaded the trusted project instructions and canonical skill and accepted the DraftMatter stdio MCP registration shape; Mistral Vibe ${vibeResult.version} loaded the project MCP server, all six tools, AGENTS.md, and the canonical skill, then persisted and reinspected a tracked suggestion through its MCP adapter.\n`)
+  await assert.rejects(readFile(join(project, '.vibe', 'config.toml'), 'utf8'))
+  process.stdout.write(`Installed client compatibility verified without a model/API call: ${codexVersion} loaded enabled-project instructions and discovered the device-wide DraftMatter MCP registration; Mistral Vibe ${vibeResult.version} loaded the device-wide MCP server and canonical skill, then persisted and reinspected a tracked suggestion in the separately enabled project.\n`)
 } finally {
   await rm(temporary, { recursive: true, force: true })
 }

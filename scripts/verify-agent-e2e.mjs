@@ -47,13 +47,25 @@ await writeFile(join(project, 'references.json'), `${JSON.stringify([{
   issued: { 'date-parts': [[2020]] },
   DOI: '10.1016/j.envsoft.2019.104609',
 }], null, 2)}\n`)
+const enabled = spawnSync(process.execPath, [
+  cli,
+  'ai',
+  'enable',
+  '--project-root',
+  project,
+  '--apply',
+], {
+  cwd: project,
+  encoding: 'utf8',
+})
+assert.equal(enabled.status, 0, enabled.stderr || enabled.stdout)
 
 async function connect(clientName) {
   const client = new Client({ name: clientName, version: '1.0.0' })
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [cli, 'mcp', '--stdio', '--project-root', project],
-    cwd: temporary,
+    args: [cli, 'mcp', '--stdio'],
+    cwd: project,
     env: {
       ...process.env,
       DRAFTMATTER_AGENT_HOST: host,

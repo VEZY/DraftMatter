@@ -13,10 +13,11 @@ The web application remains a browser-safe fallback on all three operating-syste
 
 The same portability matrix builds and process-tests the Node.js 20+ CLI.
 The CLI package includes clean export, the JSON agent interface, the stdio MCP
-server, the canonical skill, and the thin Codex plugin. Tagged releases attach
-one platform-neutral `draftmatter-<version>.tgz` archive and one
-`draftmatter-agent-host` executable per target alongside the signed desktop
-installers and verified release metadata.
+server, the canonical skill, and the thin Codex plugin. Each desktop bundle
+contains a target-native `draftmatter-mcp` standalone sidecar and
+`draftmatter-agent-host` execution sidecar; users do not install either
+separately. Tagged releases also attach one platform-neutral
+`draftmatter-<version>.tgz` archive and verified release metadata.
 
 ## Reproducible release checks
 
@@ -74,10 +75,13 @@ Unsigned or unnotarized desktop artifacts must be labelled development builds an
 - **External export:** reports installed Pandoc/Quarto versions, the exact project-relative output path, overwrite conflicts, and bounded renderer failures.
 - **Citations:** reports local Zotero availability, Crossref/offline failures, citation-lock conflicts, and cached metadata state without logging manuscript content or credentials.
 - **Collaboration:** reports sign-in/discovery failures, live/reconnecting state, active presence, pending owner checkpoint state, invitation/member activity, and named recovery status. Access and refresh tokens remain memory-only. A one-use invitation may be held in origin-scoped session storage only for the bounded OIDC redirect, then is removed on callback; all of these secrets remain absent from public metrics/logs.
-- **Local AI integration:** reports generated instruction/skill/manifest state,
-  protocol and skill versions, configured clients, CLI availability,
-  session-only execution trust, runtime readiness, and copyable doctor/update
-  commands. The check does not contact a model.
+- **AI assistant connections:** works without a project and reports client
+  detection, user/device-wide MCP and skill state, registration method,
+  previewed Install/Update/Repair/Remove changes, and advanced commands.
+- **Project AI status:** separately reports instruction/skill/manifest state,
+  protocol and skill versions, project enablement, session-only execution
+  trust, runtime readiness, and request-scoped network state. Neither check
+  contacts a model.
 
 ## Privilege and data boundaries
 

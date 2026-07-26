@@ -1,131 +1,168 @@
-# Local AI assistants
+# AI integration, on your terms
 
-DraftMatter can expose a project to Codex, Claude Code, GitHub Copilot, Mistral
-Vibe, and generic MCP clients without giving a model responsibility for
-DraftMatter's managed Markdown. The integration is local, provider-neutral,
-and optional.
+DraftMatter works without AI. When AI is useful, it connects local assistants
+to DraftMatter without giving a model responsibility for managed Markdown,
+generated IDs, output paths, citation records, or project security.
 
-Three pieces work together:
+Setup has two independent scopes:
 
-| Piece | Purpose |
+| Scope | Frequency | What it changes |
+| --- | --- | --- |
+| **Connect AI assistants** | Once per computer and client | Registers DraftMatter's bundled MCP server and canonical authoring skill with Codex, Claude Code, GitHub Copilot, or Mistral Vibe |
+| **Enable AI for this project** | Once per project | Adds managed instruction pointers and a schema-2 project enablement manifest; optionally adds a portable skill fallback |
+
+Neither operation contacts a model, runs manuscript code, grants project
+execution trust, enables Zotero/Crossref network access, or pre-approves future
+tool calls.
+
+## 1. Connect assistants on this computer
+
+Open **Home → Connect AI assistants** or **Settings → Connect AI assistants**.
+This area works without an open project. For each supported client it reports:
+
+- whether the client executable was detected;
+- whether DraftMatter's MCP registration and canonical skill are installed and
+  current;
+- whether the registration uses the Codex plugin or the client's user
+  configuration;
+- the exact files and configuration entries an action would change.
+
+**Install**, **Update**, **Repair**, and **Remove** always show a preview first.
+DraftMatter merges only its named entry or marked files and preserves unrelated
+client configuration. The MCP executable and execution host are sidecars in the
+DraftMatter application bundle; there is no separate MCP installation.
+
+Client registrations are user/device-wide:
+
+| Client | Preferred registration |
 | --- | --- |
-| `AGENTS.md` and `CLAUDE.md` | Short project rules and discovery pointers |
-| `draftmatter-authoring` skill | The reusable inspect–change–verify workflow |
-| DraftMatter MCP server | Six typed tools that generate IDs, structures, paths, citations, and transactions |
+| Codex | DraftMatter Codex plugin when the installed unified client exposes plugin management; otherwise `~/.codex/config.toml` plus `~/.codex/skills/draftmatter-authoring/` |
+| Claude Code | `~/.claude.json` plus `~/.claude/skills/draftmatter-authoring/` |
+| GitHub Copilot CLI | `~/.copilot/mcp-config.json` plus `~/.copilot/skills/draftmatter-authoring/` |
+| Mistral Vibe Code | `~/.vibe/config.toml` plus `~/.vibe/skills/draftmatter-authoring/` |
 
-This is the recommended pattern for an agent-enabled project: project
-instructions carry only durable invariants, a skill carries the workflow, and
-MCP performs authoritative operations. Instructions or a skill alone cannot
-provide safe live mutations, execution, or reference acquisition.
+These locations follow the clients' user-level discovery models. See the
+official [Anthropic MCP documentation](https://docs.anthropic.com/en/docs/mcp),
+[GitHub Copilot CLI configuration reference](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-config-dir-reference),
+and [Mistral Vibe skill documentation](https://docs.mistral.ai/vibe/code/cli/skills).
 
-## Enable a project
-
-For a new desktop project, select **Enable local AI assistants** in the project
-creation dialog. This creates or merges the project instructions, installs the
-canonical skill under `.agents/skills/draftmatter-authoring/`, and records
-generated-file ownership. It does not configure a client, execute code, use the
-network, or contact a model.
-
-For an existing project, preview before applying:
+The advanced CLI fallback has the same preview/apply model:
 
 ```sh
-draftmatter ai init --project-root .
-draftmatter ai init --project-root . --apply
+draftmatter assistants status all --json
+draftmatter assistants install codex
+draftmatter assistants install codex --apply
+draftmatter assistants update all
+draftmatter assistants repair claude --apply
+draftmatter assistants remove vibe
+draftmatter assistants remove vibe --apply
+```
+
+Installing a connection records managed-file revisions but stores no client
+credential, model token, project approval, or tool-approval decision. Repair is
+explicit when a DraftMatter-owned path was edited outside DraftMatter.
+
+## 2. Enable AI for one project
+
+Choose **Enable AI for this project** during project creation, from the
+**Project** menu, or in the project's AI status dialog. DraftMatter also offers
+this action after opening a project when at least one assistant is connected
+but that project has not been enabled.
+
+Previewing project enablement shows only project-wide files:
+
+- a managed DraftMatter block merged into `AGENTS.md`;
+- a small `CLAUDE.md` forwarding block where useful;
+- `.draftmatter/ai-integration.json` with schema version `2`;
+- optionally, `.agents/skills/draftmatter-authoring/` as a portable fallback.
+
+The manifest points to the globally installed canonical skill and records that
+the project is enabled. Supported clients need no project-local MCP
+configuration. Legacy schema-1 project adapters are removed only when an old
+DraftMatter manifest proves ownership; unrelated or unowned files are
+preserved.
+
+CLI fallback:
+
+```sh
+draftmatter ai enable --project-root .
+draftmatter ai enable --project-root . --apply
 draftmatter ai doctor --json --project-root .
+draftmatter ai update --project-root .
+draftmatter ai update --project-root . --apply
+draftmatter ai disable --project-root .
+draftmatter ai disable --project-root . --apply
 ```
 
-Open **Project → AI integration status** in the desktop app to check the
-instruction block, skill and manifest versions, configured clients, CLI
-availability, execution trust, and discovered runtimes.
+Disabling project AI removes only unchanged DraftMatter-managed pointers,
+fallback files, and the enablement marker. It does not touch manuscripts,
+references, retained outputs, idempotency data, audit data, or review history,
+and it does not disconnect any assistant on the computer.
 
-## Configure a client
+## Root binding and fail-closed startup
 
-Each command previews changes unless `--apply` is present:
+A globally registered MCP process resolves one project when it starts:
+
+1. use the client's working directory by default, or an explicit startup root
+   for a compatible adapter;
+2. canonicalize the root and open the DraftMatter project store;
+3. require an enabled schema-2 `.draftmatter/ai-integration.json`;
+4. pin the canonical path and filesystem identity for the server lifetime.
+
+Tool schemas contain no project-root field. Unknown fields are rejected, so a
+later mutation cannot inject or switch to another root. Project-store path
+checks reject absolute paths, traversal, platform prefixes, symlink escapes,
+and a project directory replaced after startup. A client that cannot safely
+preserve this startup working directory must use an explicitly explained
+project-scoped adapter instead of the global registration.
+
+The stdio command normally needs no project argument:
 
 ```sh
-draftmatter ai configure codex --project-root .
-draftmatter ai configure claude --project-root .
-draftmatter ai configure copilot --project-root .
-draftmatter ai configure vibe --project-root .
-draftmatter ai configure all --project-root .
+cd /path/to/enabled-project
+draftmatter mcp --stdio
 ```
 
-Review the preview, then repeat the chosen command with `--apply`.
+`--project-root` remains an advanced startup-only compatibility option. It is
+never accepted in a tool call.
 
-- **Codex:** merges a managed `[mcp_servers.draftmatter]` block into
-  `.codex/config.toml` and leaves the shared skill under `.agents/skills/`.
-  Project-local MCP loading still varies between Codex CLI/app releases even
-  for trusted projects; the thin DraftMatter Codex plugin is therefore the
-  recommended MCP registration path in the unified desktop host. `AGENTS.md`,
-  skill discovery, and the JSON CLI fallback remain project-local regardless.
-- **Claude Code:** merges `mcpServers.draftmatter` into `.mcp.json`, adds a
-  generated `.claude/skills/draftmatter-authoring/` copy, and adds a managed
-  `@AGENTS.md` forwarding block to `CLAUDE.md`.
-- **GitHub Copilot:** merges the server into `.github/mcp.json`. The repository
-  `AGENTS.md` and shared `.agents/skills/` copy provide the workflow.
-- **Mistral Vibe:** merges a conservative stdio server and tool-permission block
-  into `.vibe/config.toml` and adds a generated `.vibe/skills/` copy.
+## Four separate security states
 
-The generated copies come from
-`integrations/skills/draftmatter-authoring/`; they are adapters, not separate
-skill implementations. If a client does not discover skills natively, its
-project instructions tell it to read
-`.agents/skills/draftmatter-authoring/SKILL.md` directly.
+DraftMatter never collapses these into one “Ready” flag:
 
-Run the doctor after configuring a client:
+| State | Meaning |
+| --- | --- |
+| **Assistant connected to DraftMatter** | This client can discover the bundled MCP server and canonical skill on this computer |
+| **AI enabled for this project** | The pinned MCP may expose DraftMatter tools for this project |
+| **Project trusted for code execution** | The current DraftMatter session may run project code with the user's permissions |
+| **Network approved for this request** | This specific Zotero/Crossref acquisition may contact an external source |
 
-```sh
-draftmatter ai doctor --json --project-root .
-```
-
-The doctor starts an in-memory MCP probe and verifies the six tool names. It
-also reports whether the execution host and Jupyter kernels can be discovered.
-It does not grant project trust or perform a model request.
-
-## Approvals and trust
-
-Reading a project never executes code. Computation execution needs two
-independent decisions:
-
-1. the MCP client approves the execution-capable tool call according to its
-   policy; and
-2. DraftMatter has session-only execution trust for the selected project.
-
-Zotero and Crossref searches require an explicit network-enabled request.
-Project bibliography search is local. A model must select a returned
-`citation-candidate:` reference; it must not fabricate bibliographic metadata.
-
-Treat `AGENTS.md`, `CLAUDE.md`, skills, MCP configuration, manuscript content,
-code, logs, outputs, and imported metadata as untrusted inputs when opening an
-unfamiliar project. Review them before granting execution or network access.
+Execution requires both session-only DraftMatter project trust and the
+assistant client's tool approval. Network-backed reference acquisition
+requires an explicit request-scoped approval. Connecting or enabling never
+changes either state.
 
 ## Normal authoring loop
 
-An assistant should:
+The canonical `draftmatter-authoring` skill tells an assistant to:
 
 1. inspect the project and current revision;
-2. inspect the semantic target and relevant diagnostics;
+2. inspect the semantic target and diagnostics;
 3. preview a non-trivial mutation;
-4. submit it with `expectedRevision`, a unique `idempotencyKey`, and actor
-   attribution;
+4. submit it with an expected revision, unique idempotency key, and actor;
 5. reinspect the result;
-6. run and inspect computations when approved;
+6. run and inspect computations only after both execution approvals;
 7. validate references, freshness, review state, and publication readiness.
 
-Prose rewrites default to tracked suggestions. Computation creation requests do
-not contain caller-selected IDs, labels, or filenames. For generated artifacts,
-DraftMatter binds its chosen relative paths inside the cell:
+Prose rewrites default to tracked suggestions. Creation requests omit
+caller-selected IDs, labels, and filenames. DraftMatter generates those values
+and binds artifact paths through `DRAFTMATTER_OUTPUT_PATH` and
+`DRAFTMATTER_OUTPUT_PATHS`. Citation acquisition returns short-lived
+`citation-candidate:` references; an assistant selects a returned candidate
+instead of fabricating metadata.
 
-- Python and Julia: `DRAFTMATTER_OUTPUT_PATH` and
-  `DRAFTMATTER_OUTPUT_PATHS`
-- R: `DRAFTMATTER_OUTPUT_PATH` and `DRAFTMATTER_OUTPUT_PATHS`
-
-Code should write to those bindings. The path is generated and confined by
-DraftMatter.
-
-## CLI fallback
-
-If MCP is unavailable, use the same protocol through JSON:
+If MCP is unavailable, the project-gated JSON API exposes the same semantic
+protocol:
 
 ```sh
 draftmatter agent schema
@@ -133,74 +170,20 @@ draftmatter agent --request request.json --project-root .
 draftmatter agent --request - --project-root .
 ```
 
-The CLI reads one JSON request and writes one JSON result. Direct editing of
-managed review markup, computation fences, retained-output blocks, citation
-locks, or IDs is not a fallback.
-
-For an operation that must retain session-only state—most importantly explicit
-project trust followed by execution—the input may instead be one bounded
-session envelope:
-
-```json
-{
-  "protocolVersion": "1.0",
-  "session": [
-    {
-      "protocolVersion": "1.0",
-      "domain": "project",
-      "action": "trust",
-      "acknowledgement": "run-project-code-with-user-permissions"
-    },
-    {
-      "protocolVersion": "1.0",
-      "domain": "computation",
-      "action": "run",
-      "reference": "cell:<returned-reference>",
-      "expectedRevision": "sha256:<inspected-revision>",
-      "idempotencyKey": "unique-retry-key",
-      "actor": { "id": "agent:local", "name": "Local assistant" }
-    }
-  ]
-}
-```
-
-The CLI executes at most 50 requests sequentially in one service process,
-stops at the first failure, closes the execution host, and never persists
-trust.
-
-## Update or remove generated integration
-
-Preview updates and removals before applying:
-
-```sh
-draftmatter ai update all --project-root .
-draftmatter ai update all --project-root . --apply
-draftmatter ai remove all --project-root .
-draftmatter ai remove all --project-root . --apply
-```
-
-DraftMatter changes only its marked blocks, exact MCP property, and unchanged
-generated files. A locally modified generated file produces a conflict and
-prevents the multi-file transaction. Removing client integration does not
-remove manuscripts, results, references, audit records, or the optional Codex
-plugin.
+Direct editing of managed review markup, computation fences, retained-output
+blocks, citation locks, or generated IDs is not a fallback.
 
 ## Troubleshooting
 
-- **`draftmatter` is not on PATH:** install the CLI or add its package binary
-  directory. Packaged execution also needs the platform
-  `draftmatter-agent-host` executable on PATH or in
-  `DRAFTMATTER_AGENT_HOST`.
-- **Client does not list tools:** verify the project is trusted by that client,
-  restart the client after configuration, and run the doctor.
-- **Execution is blocked:** grant DraftMatter project trust for the current
-  session and approve the execution tool call. Do not edit trust files.
-- **Kernel missing:** use DraftMatter's Execution environments panel to set up
-  or select a project Python, R, or Julia Jupyter kernel.
-- **Reference provider unavailable:** continue with saved project records or
-  retry the explicitly approved provider later. Do not invent a record.
-- **Stale revision:** inspect again and re-express the semantic operation
-  against the returned current revision.
+- **Assistant is detected but disconnected:** review **Update**. If a managed
+  entry was changed externally, review **Repair**.
+- **Assistant is connected but tools are absent:** verify the client started in
+  the enabled project directory and restart it after connection changes.
+- **MCP rejects the project:** enable it in DraftMatter and check the schema-2
+  manifest with `draftmatter ai doctor --json`.
+- **Execution is blocked:** grant DraftMatter session trust and approve the
+  execution-capable client tool call separately.
+- **Reference search is blocked:** approve only the current Zotero/Crossref
+  request, or continue with local saved records.
 - **Generated-file conflict:** keep the local edit, compare it with the
-  canonical skill, then resolve it deliberately before rerunning update or
-  removal.
+  canonical skill, and use Repair only after reviewing the replacement.

@@ -66,6 +66,21 @@ describe('DraftMatter project AI enablement', () => {
     await expect(readFile(join(root, '.codex', 'config.toml'), 'utf8')).rejects.toThrow()
   })
 
+  it('keeps an already enabled project byte-stable on update', async () => {
+    const root = await projectFixture()
+    await planDraftMatterAiIntegration({ projectRoot: root, operation: 'enable', apply: true })
+    const manifestBefore = await readFile(join(root, '.draftmatter', 'ai-integration.json'), 'utf8')
+
+    const updated = await planDraftMatterAiIntegration({
+      projectRoot: root,
+      operation: 'update',
+      apply: true,
+    })
+
+    expect(updated.changes.every((change) => change.action === 'unchanged')).toBe(true)
+    expect(await readFile(join(root, '.draftmatter', 'ai-integration.json'), 'utf8')).toBe(manifestBefore)
+  })
+
   it('rejects MCP startup until the project is enabled and then pins it', async () => {
     const root = await projectFixture()
     await expect(createDraftMatterMcpServer(root)).rejects.toThrow('has not enabled AI integration')

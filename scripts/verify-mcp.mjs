@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict'
+import { execFile } from 'node:child_process'
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
+import { promisify } from 'node:util'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js'
 
@@ -9,6 +11,7 @@ const root = resolve(import.meta.dirname, '..')
 const cli = join(root, 'dist-cli', 'draftmatter.js')
 const temporary = await mkdtemp(join(tmpdir(), 'draftmatter-mcp-'))
 const project = join(temporary, 'MCP project with spaces')
+const run = promisify(execFile)
 
 await mkdir(join(project, '.draftmatter'), { recursive: true })
 await writeFile(join(project, '.draftmatter', 'project.json'), JSON.stringify({
@@ -32,13 +35,21 @@ bibliography: references.json
 Original sentence. ${'Bounded context. '.repeat(5_000)}
 `)
 await writeFile(join(project, 'references.json'), '[]\n')
+await run(process.execPath, [
+  cli,
+  'ai',
+  'enable',
+  '--project-root',
+  project,
+  '--apply',
+])
 
 async function connect() {
   const client = new Client({ name: 'draftmatter-generic-mcp-verifier', version: '1.0.0' })
   const transport = new StdioClientTransport({
     command: process.execPath,
-    args: [cli, 'mcp', '--stdio', '--project-root', project],
-    cwd: temporary,
+    args: [cli, 'mcp', '--stdio'],
+    cwd: project,
     stderr: 'pipe',
   })
   let stderr = ''

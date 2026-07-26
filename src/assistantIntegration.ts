@@ -761,7 +761,12 @@ export async function planAssistantConnection(options: AssistantIntegrationOptio
   if (options.apply && !conflicts.length) {
     if (useCodexPlugin && options.operation === 'remove') {
       await options.applyCodexPlugin?.(options.operation)
-      await applyFileChanges(allChanges)
+      try {
+        await applyFileChanges(allChanges)
+      } catch (error) {
+        await options.applyCodexPlugin?.('install').catch(() => undefined)
+        throw error
+      }
     } else {
       await applyFileChanges(allChanges)
       try {

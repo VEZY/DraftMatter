@@ -54,6 +54,14 @@ DraftMatter does not replace your languages, IDE, Git client, or project structu
 - Run an explicit clean reproduction workflow with setup-first execution, interrupt, restart, and diagnostics.
 - Never execute code merely because a project was opened; execution requires an explicitly trusted desktop project.
 
+### AI integration, on your terms
+
+- Use DraftMatter fully without AI, or connect Codex, Claude Code, GitHub Copilot, and Mistral Vibe once at device/client scope.
+- Enable AI separately for each project; a connected assistant cannot use DraftMatter tools in an unenabled folder.
+- Let assistants propose tracked rewrites and use typed semantic tools for figures, tables, values, citations, and validation instead of inventing managed IDs or editing internal markup.
+- Keep assistant connection, project AI enablement, session-only code trust, and request-scoped network approval as four independent controls.
+- Use the MCP server, execution host, and canonical authoring skill bundled with the desktop app—there is no separate MCP executable to install.
+
 ### Track changes, comments, and decisions
 
 - Turn on Track changes for grouped insertions, deletions, paste, and replacements.
