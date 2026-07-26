@@ -6,6 +6,7 @@ authors = ["DraftMatter contributors"]
 edition = "2021"
 license = "MIT"
 rust-version = "1.77.2"
+default-run = "draftmatter"
 
 [lib]
 name = "draftmatter_lib"
