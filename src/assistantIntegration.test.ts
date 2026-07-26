@@ -158,6 +158,25 @@ describe('device-wide assistant connections', () => {
     expect(await readFile(join(options.homeDir, '.vibe', 'config.toml'), 'utf8')).toContain(movedBundle)
   })
 
+  it('keeps a PATH-resolved development launcher while preserving its script argument', async () => {
+    const options = await fixture()
+    const script = join(options.homeDir, 'dist-cli', 'draftmatter.js')
+    await planAssistantConnection({
+      ...options,
+      bundledCommand: 'node',
+      bundledArgs: [script],
+      client: 'claude',
+      operation: 'install',
+      apply: true,
+    })
+
+    const config = JSON.parse(await readFile(join(options.homeDir, '.claude.json'), 'utf8'))
+    expect(config.mcpServers.draftmatter).toEqual({
+      command: 'node',
+      args: [script, 'mcp', '--stdio'],
+    })
+  })
+
   it('removes only DraftMatter entries and leaves unrelated configuration intact', async () => {
     const options = await fixture()
     await planAssistantConnection({ ...options, client: 'claude', operation: 'install', apply: true })

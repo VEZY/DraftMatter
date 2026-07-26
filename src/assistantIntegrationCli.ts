@@ -22,7 +22,16 @@ export interface AssistantIntegrationCliIo {
 
 function bundledLaunch() {
   const override = process.env.DRAFTMATTER_BUNDLED_MCP_COMMAND
-  if (override) return { bundledCommand: override, bundledArgs: [] as string[] }
+  if (override) {
+    let bundledArgs: string[] = []
+    try {
+      const parsed = JSON.parse(process.env.DRAFTMATTER_BUNDLED_MCP_ARGS ?? '[]') as unknown
+      if (Array.isArray(parsed) && parsed.every((entry) => typeof entry === 'string')) bundledArgs = parsed
+    } catch {
+      // Invalid development overrides fall back to no extra arguments.
+    }
+    return { bundledCommand: override, bundledArgs }
+  }
   if (/^node(?:\.exe)?$/iu.test(basename(process.execPath))) {
     return {
       bundledCommand: process.execPath,

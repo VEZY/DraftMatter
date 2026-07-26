@@ -154,7 +154,9 @@ function tomlString(value: string) {
 }
 
 function expectedMcp(options: AssistantIntegrationOptions) {
-  const command = resolve(options.bundledCommand)
+  const command = options.bundledCommand.includes('/') || options.bundledCommand.includes('\\')
+    ? resolve(options.bundledCommand)
+    : options.bundledCommand
   const args = [...(options.bundledArgs ?? []), 'mcp', '--stdio']
   return { command, args }
 }

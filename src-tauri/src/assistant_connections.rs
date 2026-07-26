@@ -42,9 +42,33 @@ pub(crate) fn bundled_assistant_cli() -> Result<PathBuf, HostError> {
 
 fn run_assistant_cli(arguments: &[String]) -> Result<Value, HostError> {
     let executable = bundled_assistant_cli()?;
-    let output = Command::new(&executable)
+    let javascript_bundle = executable.extension().is_some_and(|extension| extension == "js");
+    let mut command = if javascript_bundle {
+        let mut command = Command::new("node");
+        command.arg(&executable);
+        command
+    } else {
+        Command::new(&executable)
+    };
+    let output = command
         .args(arguments)
-        .env("DRAFTMATTER_BUNDLED_MCP_COMMAND", &executable)
+        .env(
+            "DRAFTMATTER_BUNDLED_MCP_COMMAND",
+            if javascript_bundle {
+                std::ffi::OsStr::new("node")
+            } else {
+                executable.as_os_str()
+            },
+        )
+        .env(
+            "DRAFTMATTER_BUNDLED_MCP_ARGS",
+            if javascript_bundle {
+                serde_json::to_string(&vec![executable.to_string_lossy().into_owned()])
+                    .map_err(|error| HostError::Integration(error.to_string()))?
+            } else {
+                "[]".to_string()
+            },
+        )
         .output()
         .map_err(|error| {
             HostError::Integration(format!(
