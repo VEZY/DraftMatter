@@ -165,8 +165,8 @@ function SignedOutHome({
             <a href="https://openai.com/codex/" target="_blank" rel="noreferrer" aria-label="Open the OpenAI Codex product page">
               <img src="/ai-openai.svg" alt="" /><span>Codex</span>
             </a>
-            <a href="https://claude.com/product/claude-code" target="_blank" rel="noreferrer" aria-label="Open the Anthropic Claude Code product page">
-              <img src="/ai-anthropic.svg" alt="" /><span>Claude Code</span>
+            <a href="https://claude.com/product/claude-code" target="_blank" rel="noreferrer" aria-label="Open the Claude Code product page">
+              <img src="/ai-claude-code.svg" alt="" /><span>Claude Code</span>
             </a>
             <a href="https://mistral.ai/products/vibe/code/" target="_blank" rel="noreferrer" aria-label="Open the Mistral Vibe Code product page">
               <img src="/ai-mistral.svg" alt="" /><span>Mistral Vibe</span>

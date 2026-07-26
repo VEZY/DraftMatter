@@ -79,7 +79,7 @@ enable Zotero/Crossref access, or approve future client tool calls.
 | Traversal/symlink/root replacement | `src/agentProjectStore.test.ts` and agent security/service suites |
 | Reversible without content/history damage | project disable test and adapter verification script |
 | Four states remain separate | `src/AgentIntegrationDialog.tsx`; `/learn/ai`; phase gate UI fixtures; doctor result |
-| Home feature and linked monochrome brands | `src/Home.tsx`, `src/Home.css`, `public/ai-openai.svg`, `public/ai-anthropic.svg`, `public/ai-mistral.svg`, browser visual QA |
+| Home feature and linked monochrome brands | `src/Home.tsx`, `src/Home.css`, `public/ai-openai.svg`, `public/ai-claude-code.svg`, `public/ai-mistral.svg`, browser visual QA |
 | Provider-neutral semantic workflow | service/MCP/CLI tests and `scripts/verify-agent-e2e.mjs` |
 
 ## Client compatibility
