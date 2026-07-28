@@ -1,5 +1,6 @@
 node_modules/
 dist/
+dist-website/
 dist-cli/
 dist-service/
 test-results/

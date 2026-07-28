@@ -140,6 +140,19 @@ npm run desktop:dev
 
 See [collaboration self-hosting](./docs/self-hosting.md) to run the optional collaboration service locally.
 
+## Public website
+
+The product website is a separate static Vite entry in [`website/`](./website). It preserves the paper-led product preview while the application home stays focused on opening papers, recent projects, help, AI connections, and account setup.
+
+```sh
+npm run dev:website
+npm run build:website
+```
+
+The GitHub Pages workflow publishes `dist-website` from `main`. In the repository settings, select **GitHub Actions** as the Pages source. The site defaults to the `/DraftMatter/` project path; set `DRAFTMATTER_SITE_BASE=/` when building for a root custom domain.
+
+The alpha call to action deliberately avoids collecting an email until an intake page exists. Add a repository Actions variable named `DRAFTMATTER_ALPHA_SIGNUP_URL` to point **Request alpha access** at a privacy-reviewed signup form. Without it, the site links to GitHub releases and clearly states that no public download is available yet.
+
 ## Explore the complete research project
 
 Choose **Explore complete example** on the home page, or **Open complete example** from the project menu, to open an editable browser copy of [`src/fixtures/projects/alpha-article`](src/fixtures/projects/alpha-article/README.md).

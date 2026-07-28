@@ -35,32 +35,21 @@ function jsonResponse(payload: unknown) {
 }
 
 describe('DraftMatter application entry', () => {
-  it('shows the approved signed-out Home story without opening editor content', async () => {
+  it('shows the signed-out application workspace without the public marketing story', async () => {
     const container = document.createElement('div')
     const root = createRoot(container)
     await act(async () => root.render(<DraftMatterApplication />))
 
     expect(container.querySelector('[data-testid="editor"]')).toBeNull()
-    expect(container.textContent).toContain('A calm workspace for rigorous research')
-    expect(container.querySelector('h1')?.textContent).toBe('Your paper should be as reproducible as your research.')
-    expect(container.textContent).toContain('Research writing, with the missing pieces built in.')
-    expect(container.textContent).toContain('DraftMatter brings writing, citations, reproducible results, review, and collaboration into one focused workspace. Everything is available when needed and quiet when it is not.')
-    expect(container.textContent).toContain('Start a new paper')
-    expect(container.textContent).toContain('Explore the complete example')
-    expect(container.textContent).toContain('See how it works')
-    expect(container.textContent).toContain('Reviews inside Markdown')
-    expect(container.textContent).toContain('Stay in the flow')
-    expect(container.textContent).not.toContain('Keep reproducible results close to the writing.')
-    const hero = container.querySelector<HTMLElement>('.home-hero-layout')!
-    const heroCopy = hero.querySelector<HTMLElement>('.home-hero-copy')!
-    const heroPreview = hero.querySelector<HTMLElement>('.home-hero-preview')!
-    expect(heroCopy.compareDocumentPosition(heroPreview) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
-    expect(heroPreview.textContent).toContain('Reproducible figure')
-    expect(heroPreview.textContent).toContain('Canopy recovery after seasonal drought')
-    expect(heroPreview.textContent).toContain('Automatically generated')
-    expect(heroPreview.querySelector('.home-demo-outline')).toBeNull()
-    expect(heroPreview.querySelector('.home-demo-comment')).toBeNull()
-    expect(heroPreview.querySelector('button')).toBeNull()
+    expect(container.querySelector('h1')?.textContent).toBe('Your papers')
+    expect(container.textContent).toContain('Browser workspace')
+    expect(container.textContent).toContain('New browser draft')
+    expect(container.textContent).toContain('Open the complete example')
+    expect(container.textContent).toContain('Set up DraftMatter')
+    expect(container.textContent).toContain('AI connections')
+    expect(container.textContent).toContain('Account & collaboration')
+    expect(container.querySelector('.home-showcase')).toBeNull()
+    expect(container.textContent).not.toContain('Your paper should be as reproducible as your research.')
     await act(async () => root.unmount())
     container.remove()
   })
@@ -68,7 +57,7 @@ describe('DraftMatter application entry', () => {
   it.each([
     { reducedMotion: false, behavior: 'smooth' },
     { reducedMotion: true, behavior: 'auto' },
-  ] as const)('scrolls the See how it works action to the guided showcase with $behavior behavior', async ({ reducedMotion, behavior }) => {
+  ] as const)('scrolls the settings action to application setup with $behavior behavior', async ({ reducedMotion, behavior }) => {
     const scrollIntoView = vi.fn()
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
@@ -79,26 +68,25 @@ describe('DraftMatter application entry', () => {
     document.body.append(container)
     const root = createRoot(container)
     await act(async () => root.render(<DraftMatterApplication />))
-    const action = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('See how it works'))!
+    const action = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Settings & account'))!
     await act(async () => action.click())
 
-    expect(container.querySelector('#home-showcase')).not.toBeNull()
+    expect(container.querySelector('#home-setup')).not.toBeNull()
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior, block: 'start' })
     await act(async () => root.unmount())
     container.remove()
   })
 
-  it('offers a concise learning overview with a direct guided-tour action', async () => {
+  it('offers app setup with a direct guided-tour action', async () => {
     const container = document.createElement('div')
     const root = createRoot(container)
     await act(async () => root.render(<DraftMatterApplication />))
 
-    const guide = container.querySelector<HTMLElement>('.home-learning-guide')!
-    expect(guide.textContent).toContain('The paper remains yours.')
-    expect(guide.textContent).toContain('Portable Markdown')
-    expect(guide.textContent).toContain('Comments and suggested changes are stored directly inside the Markdown manuscript.')
-    expect(guide.textContent).not.toContain('steps complete')
-    const tourAction = guide.querySelector<HTMLButtonElement>('button')!
+    const setup = container.querySelector<HTMLElement>('.home-app-setup')!
+    expect(setup.textContent).toContain('Learn the workflow')
+    expect(setup.textContent).toContain('How to use DraftMatter')
+    expect(setup.textContent).toContain('Account & collaboration')
+    const tourAction = [...setup.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Start guided tour'))!
     expect(tourAction.textContent).toContain('Start guided tour')
     await act(async () => tourAction.click())
 
@@ -114,7 +102,7 @@ describe('DraftMatter application entry', () => {
     await act(async () => root.render(<DraftMatterApplication />))
 
     const languages = [...container.querySelectorAll<HTMLButtonElement>('button')]
-      .find((button) => button.textContent?.includes('Languages'))!
+      .find((button) => button.textContent === 'Languages')!
     await act(async () => languages.click())
 
     expect(window.location.pathname).toBe('/languages')
@@ -124,11 +112,11 @@ describe('DraftMatter application entry', () => {
     await act(async () => root.unmount())
   })
 
-  it('opens a fresh browser draft from Start a new paper when no collaboration service is configured', async () => {
+  it('opens a fresh browser draft from the application home', async () => {
     const container = document.createElement('div')
     const root = createRoot(container)
     await act(async () => root.render(<DraftMatterApplication />))
-    const start = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Start a new paper'))!
+    const start = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('New browser draft'))!
     await act(async () => start.click())
 
     expect(window.location.pathname).toBe('/draft')
@@ -140,7 +128,7 @@ describe('DraftMatter application entry', () => {
     const container = document.createElement('div')
     const root = createRoot(container)
     await act(async () => root.render(<DraftMatterApplication />))
-    const example = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Explore the complete example'))!
+    const example = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Open the complete example'))!
     await act(async () => example.click())
 
     expect(window.location.search).toBe('?example=complete')
@@ -190,7 +178,7 @@ describe('DraftMatter application entry', () => {
     const root = createRoot(container)
     await act(async () => root.render(<DraftMatterApplication collaboration={{ initialServiceUrl: 'http://127.0.0.1:4319' }} />))
 
-    const advanced = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Advanced connection setup'))!
+    const advanced = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Collaboration account setup'))!
     await act(async () => advanced.click())
     const token = container.querySelector<HTMLInputElement>('input[type="password"]')!
     await act(async () => {

@@ -9,8 +9,7 @@ import {
 } from './collaboration/sessionContext'
 import type { WorkspaceRole } from './collaboration/workspaceService'
 import type { LocalProjectRecent } from './localProjectCatalogue'
-import { HomeLearningGuide, HomeTrustGuide } from './HomeLearningGuide'
-import { HomeHeroPreview, HomeShowcase } from './HomeShowcase'
+import { HomeLearningGuide } from './HomeLearningGuide'
 
 interface HomeProps {
   preferredWorkspaceId?: string
@@ -69,7 +68,35 @@ function DraftRow({
   )
 }
 
-function SignedOutHome({
+function AdvancedConnectionSetup() {
+  const session = useCollaborationSession()
+  const [advancedOpen, setAdvancedOpen] = useState(false)
+  const [serviceUrl, setServiceUrl] = useState(session.serviceUrl || 'https://')
+  const [accessToken, setAccessToken] = useState('')
+
+  return (
+    <section id="home-account-setup" className="home-advanced home-app-account">
+      <button className="home-disclosure" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((open) => !open)}>
+        Collaboration account setup
+        <Icon name="chevronDown" size={15} />
+      </button>
+      {advancedOpen && (
+        <form onSubmit={(event) => {
+          event.preventDefault()
+          session.configureDevelopmentService(serviceUrl)
+          if (accessToken.trim()) void session.useAccessToken(serviceUrl, accessToken.trim())
+        }}>
+          <p>Connect to a DraftMatter collaboration service. Access tokens are held in memory only.</p>
+          <label><span>Collaboration service</span><input value={serviceUrl} onChange={(event) => setServiceUrl(event.target.value)} inputMode="url" autoCapitalize="none" spellCheck={false} /></label>
+          <label><span>Short-lived access token</span><input type="password" value={accessToken} onChange={(event) => setAccessToken(event.target.value)} autoComplete="one-time-code" /></label>
+          <button type="submit">Use this service</button>
+        </form>
+      )}
+    </section>
+  )
+}
+
+function AppHome({
   onOpenLocalProject,
   onOpenLocalRecent,
   onForgetLocalRecent,
@@ -86,123 +113,108 @@ function SignedOutHome({
   onOpenAiLearn,
 }: Pick<HomeProps, 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenBrowserDraft' | 'onOpenLearn' | 'onOpenAiLearn' | 'onOpenLanguages' | 'onOpenTutorial'> & { onConnectAssistants: () => void }) {
   const session = useCollaborationSession()
-  const [advancedOpen, setAdvancedOpen] = useState(false)
-  const [serviceUrl, setServiceUrl] = useState(session.serviceUrl || 'https://')
-  const [accessToken, setAccessToken] = useState('')
-  const startWriting = () => {
-    if (desktopHost.available) {
-      onNewLocalDraft()
-      return
-    }
-    if (session.serviceUrl) {
-      void session.signIn()
-      return
-    }
-    onOpenBrowserDraft()
-  }
-  const showProductPreview = () => {
-    const showcase = document.getElementById('home-showcase')
-    if (!showcase) return
+  const [query, setQuery] = useState('')
+  const normalizedQuery = query.trim().toLocaleLowerCase()
+  const visibleProjects = useMemo(() => localProjects.filter((project) => (
+    !normalizedQuery || `${project.name} ${project.root}`.toLocaleLowerCase().includes(normalizedQuery)
+  )), [localProjects, normalizedQuery])
+  const scrollToSetup = () => {
+    const setup = document.getElementById('home-setup')
+    if (!setup) return
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
-    showcase.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' })
+    setup.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' })
   }
 
   return (
-    <main className="home-welcome">
-      <header className="home-welcome-header">
+    <main className="home-catalogue home-app-home">
+      <header className="home-catalogue-bar">
         <a className="home-brand" href="/" aria-label="DraftMatter home">
-          <img src="/draftmatter-pencil-mark.svg" alt="" />
+          <img src={`${import.meta.env.BASE_URL}draftmatter-pencil-mark.svg`} alt="" />
           <span>DraftMatter</span>
         </a>
-        <nav className="home-welcome-links" aria-label="Learn about DraftMatter">
-          {desktopHost.available && <button className="home-link-button home-ai-connect-link" onClick={onConnectAssistants}><Icon name="spark" size={15} />Connect AI assistants</button>}
-          <button className="home-link-button home-languages-link" onClick={onOpenLanguages}><Icon name="code" size={15} />Languages</button>
-          <button className="home-link-button home-learn-link" onClick={onOpenLearn}><Icon name="spark" size={15} />Learn DraftMatter</button>
+        {desktopHost.available && (
+          <label className="home-search">
+            <Icon name="search" size={16} />
+            <span className="sr-only">Search recent projects</span>
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search papers on this computer" />
+          </label>
+        )}
+        <nav className="home-app-nav" aria-label="DraftMatter setup and help">
+          {desktopHost.available && <button className="home-link-button" onClick={onConnectAssistants}><Icon name="spark" size={15} />AI connections</button>}
+          <button className="home-link-button" onClick={onOpenLearn}><Icon name="book" size={15} />How to</button>
+          <button className="home-link-button" onClick={scrollToSetup}><Icon name="settings" size={15} />Settings &amp; account</button>
         </nav>
       </header>
 
-      <section className="home-hero" aria-labelledby="home-title">
-        <div className="home-hero-layout">
-          <div className="home-hero-copy">
-            <span className="home-kicker">A calm workspace for rigorous research</span>
-            <h1 id="home-title">Your paper should be as <span>reproducible</span> as your research.</h1>
-            <p className="home-hero-support">Research writing, with the missing pieces built in.</p>
-            <p className="home-hero-summary">DraftMatter brings writing, citations, reproducible results, review, and collaboration into one focused workspace. Everything is available when needed and quiet when it is not.</p>
-            <div className="home-hero-actions">
-              <button className="home-primary" onClick={startWriting} disabled={!desktopHost.available && session.state === 'signing-in'}>
-                <Icon name="document" size={17} />
-                Start a new paper
-              </button>
-              <button className="home-example-action" onClick={onOpenExample}>
-                <Icon name="spark" size={16} />
-                Explore the complete example
-              </button>
-              <button className="home-preview-action" onClick={showProductPreview}>
-                See how it works
-                <Icon name="arrowRight" size={17} />
-              </button>
-            </div>
-            <ul className="home-hero-proof" aria-label="DraftMatter principles">
-              <li><Icon name="check" size={13} />Portable manuscript</li>
-              <li><Icon name="check" size={13} />Local computation</li>
-              <li><Icon name="check" size={13} />Reviews inside Markdown</li>
-              <li><Icon name="check" size={13} />AI integration, on your terms</li>
-            </ul>
-            {session.error && <p className="home-account-error" role="alert">{session.error}</p>}
+      <div className="home-catalogue-content">
+        <section className="home-catalogue-heading home-app-heading">
+          <div>
+            <span className="home-kicker">{desktopHost.available ? 'Your research workspace' : 'Browser workspace'}</span>
+            <h1>Your papers</h1>
+            <p>{desktopHost.available
+              ? 'Open an existing research project, or start a new portable paper on this computer.'
+              : 'Start a portable browser draft, open the complete example, or connect to a collaboration account.'}</p>
           </div>
-          <HomeHeroPreview />
-        </div>
-      </section>
+          <div className="home-app-heading-actions">
+            {desktopHost.available
+              ? <button className="home-primary" onClick={onOpenLocalProject}><Icon name="folder" size={16} />Open existing paper</button>
+              : <button className="home-primary" onClick={onOpenBrowserDraft}><Icon name="plus" size={16} />New browser draft</button>}
+            {desktopHost.available && <button onClick={onNewLocalDraft}><Icon name="plus" size={16} />New paper</button>}
+          </div>
+        </section>
 
-      <HomeShowcase />
-
-      <section className="home-ai-connect" aria-labelledby="home-ai-connect-title">
-        <div>
-          <span className="home-kicker">Optional · bring your own model</span>
-          <h2 id="home-ai-connect-title">AI integration, on your terms</h2>
-          <p>Connect Codex, Claude Code, GitHub Copilot, or Mistral Vibe once on this computer. Then choose separately which projects each connected assistant may access.</p>
-          <nav className="home-ai-brands" aria-label="Supported AI assistant product pages">
-            <a href="https://openai.com/codex/" target="_blank" rel="noreferrer" aria-label="Open the OpenAI Codex product page">
-              <img src="/ai-openai.svg" alt="" /><span>Codex</span>
-            </a>
-            <a href="https://claude.com/product/claude-code" target="_blank" rel="noreferrer" aria-label="Open the Claude Code product page">
-              <img src="/ai-claude-code.svg" alt="" /><span>Claude Code</span>
-            </a>
-            <a href="https://mistral.ai/products/vibe/code/" target="_blank" rel="noreferrer" aria-label="Open the Mistral Vibe Code product page">
-              <img src="/ai-mistral.svg" alt="" /><span>Mistral Vibe</span>
-            </a>
-          </nav>
-        </div>
-        <div>
-          {desktopHost.available
-            ? <button className="home-primary" onClick={onConnectAssistants}><Icon name="spark" size={16} />Connect AI assistants</button>
-            : <button className="home-primary" onClick={onOpenAiLearn}><Icon name="spark" size={16} />See desktop AI setup</button>}
-          <button onClick={onOpenAiLearn}>How the two-step setup works <Icon name="arrowRight" size={15} /></button>
-        </div>
-      </section>
-
-      <HomeTrustGuide onStartTour={onOpenTutorial} />
-
-      {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} />}
-
-      <section className="home-advanced">
-        <button className="home-disclosure" aria-expanded={advancedOpen} onClick={() => setAdvancedOpen((open) => !open)}>
-          Advanced connection setup
-          <Icon name="chevronDown" size={15} />
-        </button>
-        {advancedOpen && (
-          <form onSubmit={(event) => {
-            event.preventDefault()
-            session.configureDevelopmentService(serviceUrl)
-            if (accessToken.trim()) void session.useAccessToken(serviceUrl, accessToken.trim())
-          }}>
-            <p>For development and self-hosted installations. Access tokens are held in memory only.</p>
-            <label><span>Collaboration service</span><input value={serviceUrl} onChange={(event) => setServiceUrl(event.target.value)} inputMode="url" autoCapitalize="none" spellCheck={false} /></label>
-            <label><span>Short-lived access token</span><input type="password" value={accessToken} onChange={(event) => setAccessToken(event.target.value)} autoComplete="one-time-code" /></label>
-            <button type="submit">Use this service</button>
-          </form>
+        {desktopHost.available ? (
+          <>
+            {normalizedQuery && (
+              <div className="home-app-filter-status" role="status">
+                <span>{visibleProjects.length} matching paper{visibleProjects.length === 1 ? '' : 's'}</span>
+                <button onClick={() => setQuery('')}>Clear search</button>
+              </div>
+            )}
+            <LocalProjectsSection
+              projects={visibleProjects}
+              problem={localProblem}
+              onOpen={onOpenLocalRecent}
+              onForget={onForgetLocalRecent}
+              onStartCollaboration={onStartLocalCollaboration}
+              onOpenFolder={onOpenLocalProject}
+              onCreate={onNewLocalDraft}
+              kicker="On this computer"
+              title={normalizedQuery ? 'Search results' : 'Recent papers'}
+              showActions={false}
+            />
+          </>
+        ) : (
+          <section className="home-browser-actions" aria-label="Browser paper actions">
+            <button onClick={onOpenExample}><span><Icon name="spark" size={19} /></span><strong>Open the complete example</strong><small>Explore a finished research project without changing the original.</small><Icon name="arrowRight" size={16} /></button>
+            <button onClick={onOpenTutorial}><span><Icon name="book" size={19} /></span><strong>Take the guided tour</strong><small>Learn writing, citations, results, and review inside one paper.</small><Icon name="arrowRight" size={16} /></button>
+          </section>
         )}
-      </section>
+
+        <section id="home-setup" className="home-app-setup" aria-labelledby="home-setup-title">
+          <div className="home-section-title"><h2 id="home-setup-title">Set up DraftMatter</h2></div>
+          <div className="home-app-setup-grid">
+            <article>
+              <span><Icon name="book" size={19} /></span>
+              <div><h3>Learn the workflow</h3><p>Use the short guide, tour the complete example, or review supported programming languages.</p></div>
+              <div><button onClick={onOpenLearn}>How to use DraftMatter</button><button onClick={onOpenTutorial}>Start guided tour</button><button onClick={onOpenLanguages}>Languages</button></div>
+            </article>
+            <article>
+              <span><Icon name="spark" size={19} /></span>
+              <div><h3>AI connections</h3><p>DraftMatter works without AI. On desktop, connect assistants once, then enable them separately for each project.</p></div>
+              <div>{desktopHost.available && <button onClick={onConnectAssistants}>Manage AI connections</button>}<button onClick={onOpenAiLearn}>How AI access works</button></div>
+            </article>
+            <article>
+              <span><Icon name="users" size={19} /></span>
+              <div><h3>Account &amp; collaboration</h3><p>{session.serviceUrl ? 'A collaboration service is configured. Sign in to access shared papers.' : 'You are working locally. Add an account only when you need shared papers or browser collaboration.'}</p></div>
+              <div>{session.serviceUrl && <button onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}>Sign in</button>}<button onClick={() => document.getElementById('home-account-setup')?.querySelector<HTMLButtonElement>('.home-disclosure')?.click()}>Configure collaboration</button></div>
+            </article>
+          </div>
+        </section>
+
+        {session.error && <p className="home-account-error" role="alert">{session.error}</p>}
+        <AdvancedConnectionSetup />
+      </div>
     </main>
   )
 }
@@ -256,7 +268,7 @@ function Catalogue({
     <main className="home-catalogue">
       <header className="home-catalogue-bar">
         <a className="home-brand" href="/" aria-label="DraftMatter home">
-          <img src="/draftmatter-pencil-mark.svg" alt="" />
+          <img src={`${import.meta.env.BASE_URL}draftmatter-pencil-mark.svg`} alt="" />
           <span>DraftMatter</span>
         </a>
         <label className="home-search">
@@ -333,6 +345,9 @@ function LocalProjectsSection({
   onStartCollaboration,
   onOpenFolder,
   onCreate,
+  kicker = 'Desktop',
+  title = 'On this computer',
+  showActions = true,
 }: {
   projects: LocalProjectRecent[]
   problem?: string
@@ -341,12 +356,15 @@ function LocalProjectsSection({
   onStartCollaboration: (project: LocalProjectRecent) => void
   onOpenFolder: () => void
   onCreate: () => void
+  kicker?: string
+  title?: string
+  showActions?: boolean
 }) {
   return (
     <section className="home-local-projects" aria-labelledby="local-projects-title">
       <div className="home-local-heading">
-        <div><span className="home-kicker">Desktop</span><h2 id="local-projects-title">On this computer</h2></div>
-        <div><button onClick={onOpenFolder}><Icon name="folder" size={15} />Open project</button><button onClick={onCreate}><Icon name="plus" size={15} />New local draft</button></div>
+        <div><span className="home-kicker">{kicker}</span><h2 id="local-projects-title">{title}</h2></div>
+        {showActions && <div><button onClick={onOpenFolder}><Icon name="folder" size={15} />Open project</button><button onClick={onCreate}><Icon name="plus" size={15} />New local draft</button></div>}
       </div>
       {problem && <p className="home-account-error" role="alert">{problem}</p>}
       {projects.length ? (
@@ -396,7 +414,7 @@ export function Home(props: HomeProps) {
       <HomeSketchDefinitions />
       {session.profile
         ? <Catalogue {...props} onConnectAssistants={() => setAssistantConnectionsOpen(true)} />
-        : <SignedOutHome {...props} onConnectAssistants={() => setAssistantConnectionsOpen(true)} />}
+        : <AppHome {...props} onConnectAssistants={() => setAssistantConnectionsOpen(true)} />}
       <AssistantConnectionsDialog
         open={assistantConnectionsOpen}
         onClose={() => setAssistantConnectionsOpen(false)}

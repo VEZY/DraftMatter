@@ -148,7 +148,7 @@ function DemoTopbar({
   return (
     <div className="home-demo-topbar">
       <div className="home-demo-project">
-        <img src="/draftmatter-pencil-mark.svg" alt="" />
+        <img src={`${import.meta.env.BASE_URL}draftmatter-pencil-mark.svg`} alt="" />
         <span><strong>Canopy recovery study</strong><small>All changes saved</small></span>
       </div>
       <div className={`home-demo-presence ${featureState(activeFeature, 'review')}`} data-preview-feature="review">
