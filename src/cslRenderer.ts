@@ -1,6 +1,8 @@
 import authorDateStyle from './csl/styles/draftmatter-author-date.csl?raw'
 import numericStyle from './csl/styles/draftmatter-numeric.csl?raw'
 import frenchLocale from './csl/locales/locales-fr-FR.xml?raw'
+import initBrowserCiteproc, * as browserCiteprocModule from '@citeproc-rs/wasm/_web/citeproc_rs_wasm.js'
+import browserCiteprocWasmUrl from '@citeproc-rs/wasm/_web/citeproc_rs_wasm_bg.wasm?url'
 import { normalizeCitationItems } from './citation'
 import type { CitationItem, CitationRecord, DocumentDiagnostic } from './types'
 
@@ -153,17 +155,13 @@ function normalizeCslData(data: Record<string, unknown>) {
   return normalized
 }
 
-let browserCiteproc: Promise<typeof import('@citeproc-rs/wasm/_web/citeproc_rs_wasm.js')> | undefined
+let browserCiteproc: Promise<typeof browserCiteprocModule> | undefined
 
 async function loadCiteproc() {
   if (import.meta.env.MODE === 'test') return import('@citeproc-rs/wasm')
   if (!browserCiteproc) {
-    browserCiteproc = Promise.all([
-      import('@citeproc-rs/wasm/_web/citeproc_rs_wasm.js'),
-      import('@citeproc-rs/wasm/_web/citeproc_rs_wasm_bg.wasm?url'),
-    ]).then(async ([module, wasmUrl]) => {
-      await module.default(wasmUrl.default)
-      return module
+    browserCiteproc = initBrowserCiteproc(browserCiteprocWasmUrl).then(() => {
+      return browserCiteprocModule
     })
   }
   return browserCiteproc

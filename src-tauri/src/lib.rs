@@ -680,6 +680,26 @@ fn read_entry(root: &Path, path: &Path, kind: ProjectEntryKind) -> Result<Projec
     })
 }
 
+fn ignored_discovery_directory(name: &OsStr) -> bool {
+    matches!(
+        name.to_str(),
+        Some(
+            ".git"
+                | ".draftmatter"
+                | ".venv"
+                | "venv"
+                | ".tox"
+                | ".nox"
+                | "node_modules"
+                | "target"
+                | "__pycache__"
+                | ".quarto"
+                | "_freeze"
+                | "_site"
+        )
+    )
+}
+
 fn discover_entries(
     root: &Path,
     directory: &Path,
@@ -695,7 +715,7 @@ fn discover_entries(
         let path = entry.path();
         let name = entry.file_name();
         if path.is_dir() {
-            if name != OsStr::new(".git") && name != OsStr::new(".draftmatter") {
+            if !ignored_discovery_directory(&name) {
                 discover_entries(root, &path, depth + 1, documents, bibliographies)?;
             }
             continue;
@@ -4313,6 +4333,43 @@ mod tests {
             read_bibliography_impl(root.to_str().unwrap(), "../references.bib"),
             Err(HostError::InvalidPath(_))
         ));
+    }
+
+    #[test]
+    fn ignores_dependency_and_generated_directories_during_project_discovery() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("project");
+        create_project_at_root(&root, "Test").unwrap();
+        fs::write(root.join("references.json"), "[]\n").unwrap();
+        fs::create_dir_all(root.join(".venv/lib/python/site-packages/package.dist-info")).unwrap();
+        fs::write(
+            root.join(".venv/lib/python/site-packages/package.dist-info/metadata.json"),
+            "{\"name\":\"not-a-bibliography\"}\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("node_modules/package")).unwrap();
+        fs::write(
+            root.join("node_modules/package/package.json"),
+            "{\"name\":\"not-a-bibliography\"}\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join(".quarto/cache")).unwrap();
+        fs::write(
+            root.join(".quarto/cache/notebook.json"),
+            "{\"cells\":[]}\n",
+        )
+        .unwrap();
+
+        let discovered = open_project_impl(root.to_str().unwrap()).unwrap();
+
+        assert_eq!(
+            discovered
+                .bibliographies
+                .iter()
+                .map(|entry| entry.path.as_str())
+                .collect::<Vec<_>>(),
+            vec!["references.json"]
+        );
     }
 
     #[test]

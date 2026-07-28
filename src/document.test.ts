@@ -56,6 +56,68 @@ describe('portable document core', () => {
     expect(exported).toContain('## Data availability\n\nRaw measurements are archived under accession 1234.')
   })
 
+  it('recognizes modeled sections with Quarto heading attributes', () => {
+    const source = reviewedProjection(initialDraft)
+      .replace('## Abstract', '## Abstract {.unnumbered}')
+      .replace('## Introduction', '## Introduction {#sec-introduction}')
+      .replace('## Methods', '## Methods {#sec-methods .reproducible}')
+      .replace('## Results', '## Results {#sec-results}')
+      .replace('## Conclusion', '## Conclusion {#sec-conclusion}')
+
+    const parsed = parsePortableDocument(source, initialDraft)
+
+    expect(parsed.draft).toMatchObject({
+      abstract: initialDraft.abstract,
+      introduction: initialDraft.introduction,
+      methods: initialDraft.methods,
+      resultsLead: initialDraft.resultsLead,
+      conclusion: initialDraft.conclusion,
+    })
+    expect(parsed.diagnostics.map((diagnostic) => diagnostic.code)).not.toEqual(expect.arrayContaining([
+      'section-abstract-missing',
+      'section-introduction-missing',
+      'section-methods-missing',
+      'section-results-missing',
+      'section-conclusion-missing',
+      'executable-cell-missing',
+    ]))
+  })
+
+  it('recognizes executable cells outside the methods section', () => {
+    const source = `---
+title: "Portable analysis"
+---
+
+## Abstract
+
+Abstract.
+
+## Introduction
+
+Introduction.
+
+## Methods
+
+The analysis plan was fixed in advance.
+
+## Results
+
+\`\`\`python {#cell-results .execute output="values"}
+print("estimate=18.4")
+\`\`\`
+
+## Conclusion
+
+Conclusion.
+`
+
+    const parsed = parsePortableDocument(source, initialDraft)
+
+    expect(parsed.executableCells).toHaveLength(1)
+    expect(parsed.executableCells[0]).toMatchObject({ id: 'cell-results', language: 'python' })
+    expect(parsed.diagnostics.map((diagnostic) => diagnostic.code)).not.toContain('executable-cell-missing')
+  })
+
   it('reopens semantic citation modifiers from portable Pandoc syntax', () => {
     const source = reviewedProjection({
       ...initialDraft,

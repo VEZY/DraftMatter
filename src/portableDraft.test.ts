@@ -28,6 +28,26 @@ describe('portable draft source envelope', () => {
     expect(saved.replaceAll('\r\n', '')).not.toContain('\n')
   })
 
+  it('patches modeled sections without removing Quarto heading attributes', () => {
+    const source = reviewedProjection(initialDraft)
+      .replace('## Abstract', '## Abstract {.unnumbered}')
+      .replace('## Introduction', '## Introduction {#sec-introduction}')
+      .replace('## Methods', '## Methods {#sec-methods}')
+      .replace('## Results', '## Results {#sec-results}')
+      .replace('## Conclusion', '## Conclusion {#sec-conclusion}')
+    const parsed = parsePortableDocument(source, initialDraft)
+    const saved = reviewedProjection({
+      ...parsed.draft,
+      introduction: 'A revised introduction that keeps its Quarto section label.',
+    })
+
+    expect(saved).toContain('## Introduction {#sec-introduction}\n\nA revised introduction that keeps its Quarto section label.')
+    expect(saved).toContain('## Abstract {.unnumbered}')
+    expect(saved).toContain('## Methods {#sec-methods}')
+    expect(saved).toContain('## Results {#sec-results}')
+    expect(saved).toContain('## Conclusion {#sec-conclusion}')
+  })
+
   it('patches modeled edits while preserving unknown source and review attributes', () => {
     const source = reviewedProjection(initialDraft)
       .replace('format: html', 'format: html\nfuture-yaml-key: preserve-me')

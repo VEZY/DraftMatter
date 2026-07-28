@@ -9,6 +9,7 @@ import type {
 import { citationKeys, parseCitationCluster } from './citation'
 import { extractExecutableCells } from './executionCells'
 import { parseReviewMarkup } from './reviewMarkup'
+import { normalizeSectionHeading } from './sectionHeading'
 
 const KNOWN_SECTIONS: Record<string, Exclude<SectionKey, 'frontmatter'>> = {
   abstract: 'abstract',
@@ -51,10 +52,6 @@ function parseFrontmatter(source: string, diagnostics: DocumentDiagnostic[]) {
   return { frontmatter: source.slice(0, closing + 4), body: source.slice(end) }
 }
 
-function normalizeHeading(heading: string) {
-  return heading.trim().replace(/^\d+(?:\.\d+)*[.)]?\s+/, '').toLowerCase()
-}
-
 function splitSections(body: string) {
   const matches = [...body.matchAll(/^##[ \t]+(.+?)\s*$/gm)]
   return matches.map<SourceSection>((match, index) => {
@@ -62,7 +59,7 @@ function splitSections(body: string) {
     const end = matches[index + 1]?.index ?? body.length
     const headingLineEnd = body.indexOf('\n', start)
     const contentStart = headingLineEnd < 0 ? end : headingLineEnd + 1
-    const normalized = normalizeHeading(match[1])
+    const normalized = normalizeSectionHeading(match[1])
     return {
       key: KNOWN_SECTIONS[normalized],
       heading: match[1],
@@ -96,11 +93,13 @@ function cleanCitation(section: string) {
   return { introduction, citationInserted, citationKeys: keys, citationItems }
 }
 
-function parseMethods(section: string, fallback: DraftState, diagnostics: DocumentDiagnostic[]) {
+function parseMethods(section: string, fallback: DraftState, diagnostics: DocumentDiagnostic[], hasExecutableCells: boolean) {
   const withoutOutputs = section.replace(/<!-- dm-output:start[^>]*-->[\s\S]*?<!-- dm-output:end -->/g, '').trim()
   const executable = extractExecutableCells(withoutOutputs).cells[0]
   if (!executable) {
-    diagnostics.push({ code: 'executable-cell-missing', level: 'warning', message: 'No supported executable cell was found; the sample cell remains available.' })
+    if (!hasExecutableCells) {
+      diagnostics.push({ code: 'executable-cell-missing', level: 'warning', message: 'No supported executable cell was found; the sample cell remains available.' })
+    }
     return { methods: withoutOutputs, code: fallback.code }
   }
   return {
@@ -159,7 +158,12 @@ export function parsePortableDocument(sourceInput: string, fallback: DraftState)
   const introductionContent = sectionContent(sections, 'introduction', fallback.introduction, diagnostics)
   const introductionParts = firstParagraph(introductionContent)
   const intro = cleanCitation(introductionParts.primary)
-  const methods = parseMethods(sectionContent(sections, 'methods', fallback.methods, diagnostics), fallback, diagnostics)
+  const methods = parseMethods(
+    sectionContent(sections, 'methods', fallback.methods, diagnostics),
+    fallback,
+    diagnostics,
+    execution.cells.length > 0,
+  )
   const modeledThread = reviewDocument.threads.find((thread) => thread.id === 'dm-comment-01')
   const modeledAliceChange = reviewDocument.changes.find((change) => change.id === 'dm-c01')
   const modeledMarcusChange = reviewDocument.changes.find((change) => change.id === 'dm-c02')

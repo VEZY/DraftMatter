@@ -3,6 +3,7 @@ import { parseReviewMarkup, serializeReviewMarkup, updateReviewRecordStatus, upd
 import type { DraftState, PortableDraftBaseline } from './types'
 import { citationItemsForDraft, sameCitationItems, serializeCitationCluster } from './citation'
 import { ensureReviewAuthor } from './reviewOperations'
+import { normalizeSectionHeading } from './sectionHeading'
 
 interface SourcePatch {
   start: number
@@ -25,17 +26,13 @@ const KNOWN_SECTIONS: Record<string, SectionRange['key']> = {
   conclusion: 'conclusion',
 }
 
-function normalizeHeading(heading: string) {
-  return heading.trim().replace(/^\d+(?:\.\d+)*[.)]?\s+/, '').toLowerCase()
-}
-
 function sectionRanges(source: string) {
   const matches = [...source.matchAll(/^##[ \t]+(.+?)[ \t]*\r?$/gm)]
   return matches.map<SectionRange>((match, index) => {
     const start = match.index ?? 0
     const lineEnd = source.indexOf('\n', start)
     return {
-      key: KNOWN_SECTIONS[normalizeHeading(match[1])],
+      key: KNOWN_SECTIONS[normalizeSectionHeading(match[1])],
       start,
       contentStart: lineEnd < 0 ? source.length : lineEnd + 1,
       end: matches[index + 1]?.index ?? source.length,
