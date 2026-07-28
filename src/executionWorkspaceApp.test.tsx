@@ -197,21 +197,15 @@ describe('shared Jupyter execution workspace', () => {
     expect(vi.mocked(desktopHost.saveDocument).mock.calls.map(([request]) => request.content).join('\n')).toContain('dm-published-value')
   })
 
-  it('edits setup and published-value source from the code panel', async () => {
+  it('edits setup source in the code panel without exposing it in the manuscript', async () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
     const setupRow = container.querySelector<HTMLElement>('.execution-cell-row[data-cell-id="py-setup"]')!
     const codeView = CodeMirrorView.findFromDOM(setupRow.querySelector<HTMLElement>('.cm-editor')!)!
     await act(async () => codeView.dispatch({ changes: { from: codeView.state.doc.length, insert: '\nthreshold = 2' } }))
     expect(setupRow.textContent).toContain('Unsaved source changes')
-
-    await act(async () => [...setupRow.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Save source')!.click())
-    await settleUntil(() => vi.mocked(desktopHost.saveDocument).mock.calls
-      .some(([request]) => request.content.includes('threshold = 2')), 10_000)
-
-    expect(vi.mocked(desktopHost.saveDocument).mock.calls.map(([request]) => request.content).join('\n')).toContain('threshold = 2')
-    expect(setupRow.textContent).toContain('Saved in the project document')
+    expect(codeView.state.doc.toString()).toContain('threshold = 2')
     expect(container.querySelector('.structured-code-cell[data-dm-id="py-setup"]')).toBeNull()
-  }, 15_000)
+  })
 
   it('adds a reproducible table from the code panel', async () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())

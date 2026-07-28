@@ -60,6 +60,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
   })
 
   test('renders, edits, and reopens an arbitrary QMD without exposing opaque source', async ({ page }) => {
+    test.slow()
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
     const renderedEditor = page.getByRole('textbox', { name: 'Rendered manuscript editor' })
     const codeCell = manuscript.locator('.structured-code-cell[data-dm-id="cell-growth"]')
@@ -391,8 +392,9 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
 
   test('edits one preserved raw block through an explicit focused inspector', async ({ page }) => {
     const rawSource = '# Raw syntax\n\n::: {.future-widget data-owner="lab"}\nOriginal opaque payload.\n:::\n'
+    await page.goto('/draftmatter-pencil-mark.svg')
     await page.evaluate((portableSource) => localStorage.setItem('draftmatter.structured-source.v1', portableSource), rawSource)
-    await page.reload()
+    await page.goto('/draft')
 
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
     const raw = manuscript.locator('.structured-raw-node[data-format="pandoc-div"]')

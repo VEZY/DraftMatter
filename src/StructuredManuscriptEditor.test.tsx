@@ -693,6 +693,30 @@ plot(1:3)
     expect(container.textContent).not.toContain('@publish mean_height')
   })
 
+  it('updates panel-managed computation source through the editor handle', async () => {
+    const editor = createRef<StructuredManuscriptEditorHandle>()
+    const onChange = vi.fn()
+    const projectCode = `# Analysis
+
+\`\`\`python {#py-setup .execute role="setup"}
+threshold = 1
+\`\`\`
+`
+    await act(async () => root.render(
+      <StructuredManuscriptEditor ref={editor} source={projectCode} onChange={onChange} />,
+    ))
+
+    let updated = false
+    await act(async () => {
+      updated = editor.current?.updateCodeCellSource('py-setup', 'threshold = 2') ?? false
+    })
+
+    expect(updated).toBe(true)
+    expect(onChange.mock.calls.at(-1)?.[0]).toContain('threshold = 2')
+    expect(container.querySelector('.structured-code-cell[data-dm-id="py-setup"]')).toBeNull()
+    expect(container.textContent).not.toContain('threshold = 2')
+  })
+
   it('runs, interrupts, and formats a Julia cell automatically after editing', async () => {
     const changed: string[] = []
     const runCell = vi.fn()

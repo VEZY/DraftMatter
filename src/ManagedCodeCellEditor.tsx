@@ -47,22 +47,14 @@ export function ManagedCodeCellEditor({
   const commitSource = async () => {
     const view = viewRef.current
     if (!view) return false
-    let source = view.state.doc.toString()
-    if (onFormatRef.current) {
-      setFormatting(true)
-      try {
-        const formatted = await onFormatRef.current(cell.id, source)
-        if (view.state.doc.toString() !== source) return false
-        if (formatted !== undefined && formatted !== source) {
-          view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: formatted } })
-          source = formatted
-        }
-      } finally {
-        setFormatting(false)
-      }
-    }
-    if (!onSaveRef.current(cell.id, source)) return false
+    const source = view.state.doc.toString()
+    const previousSavedSource = savedSourceRef.current
     savedSourceRef.current = source
+    if (!onSaveRef.current(cell.id, source)) {
+      savedSourceRef.current = previousSavedSource
+      setDirty(view.state.doc.toString() !== previousSavedSource)
+      return false
+    }
     setDirty(false)
     return true
   }
@@ -140,7 +132,7 @@ export function ManagedCodeCellEditor({
       <div className="managed-code-editor" ref={hostRef} aria-label={`${sourceLabel(cell)} for ${cell.id}`} />
       <div className="managed-code-actions">
         <span>{readOnly && readOnlyMessage ? readOnlyMessage : dirty ? 'Unsaved source changes' : 'Saved in the project document'}</span>
-        {cell.language === 'julia' && <button type="button" onClick={() => void format()} disabled={readOnly || formatting}>{formatting ? 'Formatting…' : 'Format'}</button>}
+        {onFormat && <button type="button" onClick={() => void format()} disabled={readOnly || formatting}>{formatting ? 'Formatting…' : 'Format'}</button>}
         <button type="button" onClick={() => {
           const view = viewRef.current
           if (!view) return

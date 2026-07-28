@@ -193,6 +193,7 @@ Production desktop installers are built from version tags as signed/notarized dr
 - [Product and architecture brief](./draftmatter-app-design.md)
 - [Implementation evidence](./docs/implementation-evidence.md)
 - [Complete example and dogfood matrix](./docs/alpha-dogfood-matrix.md)
+- [First-time assistant authoring dogfood](./docs/first-time-authoring-dogfood.md)
 - [Performance and recovery budgets](./docs/performance-and-recovery.md)
 - [Release, diagnostics, and compliance](./docs/release-compliance.md)
 - [Collaboration boundary](./docs/collaboration-boundary.md)

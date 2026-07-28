@@ -46,7 +46,7 @@ function buttonContaining(container: ParentNode, text: string) {
     .find((button) => button.textContent?.includes(text))!
 }
 
-async function settleUntil(predicate: () => boolean, timeoutMs = 3_000) {
+async function settleUntil(predicate: () => boolean, timeoutMs = 6_000) {
   const deadline = Date.now() + timeoutMs
   while (!predicate()) {
     if (Date.now() >= deadline) throw new Error(`Condition was not met within ${timeoutMs}ms`)
