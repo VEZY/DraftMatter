@@ -48,7 +48,7 @@ export const selectorSchema = z.discriminatedUnion('kind', [
   boundarySelector,
 ])
 
-const placement = z.enum(['before', 'after', 'start', 'end', 'replace'])
+const placement = z.enum(['before', 'after', 'start', 'end', 'replace', 'before-terminal-punctuation'])
 const blockPlacement = z.enum(['before', 'after', 'start', 'end'])
 const guard = {
   mode: z.enum(['preview', 'suggest', 'apply']),
@@ -215,7 +215,7 @@ const referenceMutation = {
 
 export const referencesToolSchema = z.object({
   action: z.enum(['search', 'candidate', 'add', 'cite', 'add-and-cite', 'validate']),
-  query: shortText.optional(),
+  query: z.string().max(16_384).optional(),
   sources: z.array(z.enum(['project', 'zotero', 'crossref'])).min(1).max(3).optional(),
   allowNetwork: z.boolean().optional(),
   ...page,

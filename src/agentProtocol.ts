@@ -35,7 +35,7 @@ export type AgentSelector =
   | { kind: 'quote'; quote: string; prefix?: string; suffix?: string; occurrence?: number }
   | { kind: 'document-boundary'; edge: 'start' | 'end' }
 
-export type AgentPlacement = 'before' | 'after' | 'start' | 'end' | 'replace'
+export type AgentPlacement = 'before' | 'after' | 'start' | 'end' | 'replace' | 'before-terminal-punctuation'
 
 export interface AgentPage {
   pageSize?: number
@@ -83,7 +83,7 @@ export type AgentManuscriptMutation =
   | { kind: 'published-value'; operation: 'insert'; selector: AgentSelector; placement?: AgentPlacement; name: string }
   | { kind: 'link'; operation: 'insert'; selector: AgentSelector; placement?: AgentPlacement; text: string; href: string }
   | { kind: 'footnote'; operation: 'insert'; selector: AgentSelector; placement?: AgentPlacement; text: string }
-  | { kind: 'move'; operation: 'move'; selector: AgentSelector; destination: AgentSelector; placement: Exclude<AgentPlacement, 'replace'> }
+  | { kind: 'move'; operation: 'move'; selector: AgentSelector; destination: AgentSelector; placement: Exclude<AgentPlacement, 'replace' | 'before-terminal-punctuation'> }
 
 export interface AgentManuscriptMutateRequest extends AgentRequestBase, AgentMutationGuard {
   domain: 'manuscript'
@@ -104,7 +104,7 @@ export interface AgentComputationCreateRequest extends AgentRequestBase, AgentMu
   role: ExecutionCellRole
   source: string
   selector: AgentSelector
-  placement: Exclude<AgentPlacement, 'replace'>
+  placement: Exclude<AgentPlacement, 'replace' | 'before-terminal-punctuation'>
   caption?: string
   alt?: string
   publishedValues?: string[]
@@ -117,7 +117,7 @@ export interface AgentComputationChangeRequest extends AgentRequestBase, AgentMu
   source?: string
   role?: ExecutionCellRole
   destination?: AgentSelector
-  placement?: Exclude<AgentPlacement, 'replace'>
+  placement?: Exclude<AgentPlacement, 'replace' | 'before-terminal-punctuation'>
   caption?: string
   alt?: string
 }
@@ -137,7 +137,7 @@ export interface AgentComputationLifecycleRequest extends AgentRequestBase {
 export interface AgentReferenceSearchRequest extends AgentRequestBase, AgentPage {
   domain: 'references'
   action: 'search'
-  query: string
+  query?: string
   sources?: Array<'project' | 'zotero' | 'crossref'>
   allowNetwork?: boolean
 }

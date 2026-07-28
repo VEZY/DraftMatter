@@ -80,6 +80,8 @@ const DEFAULT_PAGE_SIZE = 25
 const MAX_PAGE_SIZE = 100
 const MAX_CONTEXT_CHARACTERS = 8_000
 const MAX_SOURCE_CHARACTERS = 64_000
+const MAX_PREVIEW_TEXT_CHARACTERS = 600
+const MAX_PREVIEW_ARRAY_ITEMS = 20
 const AGENT_IDEMPOTENCY_PATH = '.draftmatter/agent-idempotency.json'
 const AGENT_AUDIT_PATH = '.draftmatter/agent-audit.jsonl'
 const MAX_IDEMPOTENCY_RECORDS = 500
@@ -178,6 +180,85 @@ function reviewActor(actor: AgentActor) {
   return { id: safeId(actor.id), name: identity }
 }
 
+function compactPreviewValue(value: unknown, depth = 0): unknown {
+  if (typeof value === 'string') {
+    if (value.length <= MAX_PREVIEW_TEXT_CHARACTERS) return value
+    return `${value.slice(0, MAX_PREVIEW_TEXT_CHARACTERS)}…`
+  }
+  if (value === null || typeof value !== 'object') return value
+  if (depth >= 5) return '[details omitted]'
+  if (Array.isArray(value)) {
+    const items = value
+      .slice(0, MAX_PREVIEW_ARRAY_ITEMS)
+      .map((item) => compactPreviewValue(item, depth + 1))
+    if (value.length > MAX_PREVIEW_ARRAY_ITEMS) items.push(`[${value.length - MAX_PREVIEW_ARRAY_ITEMS} more items]`)
+    return items
+  }
+  return Object.fromEntries(Object.entries(value)
+    .filter(([, item]) => item !== undefined)
+    .map(([key, item]) => [key, compactPreviewValue(item, depth + 1)]))
+}
+
+function mutationPreview(request: MutationRequest, changed: boolean) {
+  const base = { changed, operation: agentOperation(request) }
+  if (request.domain === 'manuscript' && request.action === 'mutate') {
+    return {
+      ...base,
+      target: compactPreviewValue(request.mutation.selector),
+      change: compactPreviewValue(request.mutation),
+    }
+  }
+  if (request.domain === 'review' && request.action === 'suggest') {
+    return {
+      ...base,
+      target: compactPreviewValue(request.selector),
+      change: compactPreviewValue({ kind: 'tracked-rewrite', proposal: request.proposal, rationale: request.rationale }),
+    }
+  }
+  if (request.domain === 'review' && request.action !== 'inspect') {
+    return {
+      ...base,
+      target: compactPreviewValue(request.reference),
+      change: compactPreviewValue({ decision: request.decision }),
+    }
+  }
+  if (request.domain === 'computation' && request.action === 'create') {
+    return {
+      ...base,
+      target: compactPreviewValue(request.selector),
+      change: compactPreviewValue({
+        kind: 'computation',
+        language: request.language,
+        role: request.role,
+        publishedValues: request.publishedValues ?? [],
+        caption: request.caption,
+        alt: request.alt,
+      }),
+    }
+  }
+  if (request.domain === 'computation') {
+    return {
+      ...base,
+      target: compactPreviewValue(request.reference),
+      change: compactPreviewValue({ kind: request.action }),
+    }
+  }
+  if (request.domain === 'references' && ['add', 'cite', 'add-and-cite'].includes(request.action)) {
+    const mutation = request as Extract<AgentRequest, { domain: 'references'; action: 'add' | 'cite' | 'add-and-cite' }>
+    return {
+      ...base,
+      target: compactPreviewValue(mutation.selector),
+      change: compactPreviewValue({
+        kind: mutation.action,
+        candidate: mutation.candidate,
+        citekeys: mutation.citekeys ?? [],
+        placement: mutation.placement,
+      }),
+    }
+  }
+  return base
+}
+
 function boundedPage<T>(values: T[], requested?: number, cursor?: string) {
   const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, requested ?? DEFAULT_PAGE_SIZE))
   const offset = cursor ? Number.parseInt(cursor.replace(/^offset:/, ''), 10) : 0
@@ -230,6 +311,24 @@ function insertionRange(
   if (placement === 'before' || placement === 'start') return { start: range.start, end: range.start }
   if (placement === 'after' || placement === 'end') return { start: range.end, end: range.end }
   return range
+}
+
+function characterBefore(document: ProseMirrorNode, position: number) {
+  if (position <= 0) return ''
+  const before = document.resolve(position).nodeBefore
+  if (before?.isText) return before.text?.at(-1) ?? ''
+  return ''
+}
+
+function citationRange(
+  document: ProseMirrorNode,
+  target: { start: number; end: number },
+  placement: AgentPlacement | undefined,
+) {
+  if (placement !== 'before-terminal-punctuation') return insertionRange(target, placement ?? 'after')
+  const terminal = characterBefore(document, target.end)
+  const position = /[.!?]/u.test(terminal) ? target.end - 1 : target.end
+  return { start: position, end: position }
 }
 
 function blockPlacement(value: AgentPlacement | undefined) {
@@ -330,7 +429,9 @@ function applyManuscriptMutation(parsed: StructuredManuscript, mutation: AgentMa
   }
 
   const target = inlineRange(document, mutation)
-  const range = insertionRange(target, mutation.placement ?? 'after')
+  const range = mutation.kind === 'citation'
+    ? citationRange(document, target, mutation.placement)
+    : insertionRange(target, mutation.placement ?? 'after')
   if (mutation.kind === 'citation') {
     const items = mutation.citekeys.map((citekey, index) => ({
       citekey,
@@ -349,7 +450,10 @@ function applyManuscriptMutation(parsed: StructuredManuscript, mutation: AgentMa
       suppressAuthor: mutation.suppressAuthor ?? false,
       rendered: serializeCitationCluster(items),
     })
-    return replaceDocumentRange(document, range.start, range.end, node)
+    const separated = characterBefore(document, range.start) && !/\s/u.test(characterBefore(document, range.start))
+      ? [manuscriptSchema.text(' '), node]
+      : node
+    return replaceDocumentRange(document, range.start, range.end, separated)
   }
   if (mutation.kind === 'published-value') {
     return replaceDocumentRange(document, range.start, range.end, manuscriptSchema.nodes.published_value.createChecked({
@@ -515,7 +619,17 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
     return value?.trim().replace(/^https?:\/\/(?:dx\.)?doi\.org\//i, '').toLowerCase()
   }
 
+  function normalizedReferenceText(value?: string) {
+    return value?.normalize('NFKC').trim().replace(/\s+/g, ' ').toLocaleLowerCase('en') ?? ''
+  }
+
   function duplicateReference(record: CitationRecord, existing: CitationRecord[]) {
+    const exactProjectRecord = existing.find((candidate) =>
+      candidate.citekey.toLowerCase() === record.citekey.toLowerCase()
+      && normalizedReferenceText(candidate.title) === normalizedReferenceText(record.title)
+      && normalizedReferenceText(candidate.year) === normalizedReferenceText(record.year)
+      && candidate.authors.map(normalizedReferenceText).join('\u0000') === record.authors.map(normalizedReferenceText).join('\u0000'))
+    if (exactProjectRecord) return exactProjectRecord
     if (record.sourceIdentity?.provider === 'zotero') {
       return existing.find((candidate) =>
         candidate.sourceIdentity?.provider === 'zotero'
@@ -566,6 +680,45 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
     if (!file) return { path }
     const parsed = parseExecutionManifest(file.content)
     return { path, file, manifest: parsed.manifest, error: parsed.error }
+  }
+
+  async function durableExecution(cell: ExecutableCell, includeDetails: boolean) {
+    const stored = await storedExecutionManifest(cell)
+    const manifest = stored.manifest
+    if (!manifest) return undefined
+    const reference = opaqueAgentReference('operation', `${stored.path}:${manifest.resultHash}`)
+    return {
+      reference,
+      cellReference: externalCellReference(cell),
+      language: manifest.language,
+      status: manifest.status,
+      startedAt: manifest.startedAt,
+      finishedAt: manifest.finishedAt,
+      durationMs: manifest.durationMs,
+      durable: true,
+      hashes: {
+        code: manifest.codeHash,
+        inputs: manifest.inputsHash,
+        environment: manifest.environmentFingerprint,
+        result: manifest.resultHash,
+      },
+      environment: {
+        identity: manifest.environmentIdentity,
+        version: manifest.environmentVersion,
+        fingerprint: manifest.environmentFingerprint,
+      },
+      artifacts: manifest.artifacts.map((artifact) => ({
+        reference: opaqueAgentReference('artifact', `${artifact.path}:${artifact.hash}`),
+        ...artifact,
+      })),
+      ...(includeDetails ? {
+        logsAvailable: false,
+        message: 'Detailed live logs are no longer available; the retained execution summary is shown instead.',
+        streams: [],
+        errors: [],
+        mime: [],
+      } : {}),
+    }
   }
 
   async function cellFreshness(cell: ExecutableCell, stored?: Awaited<ReturnType<typeof storedExecutionManifest>>) {
@@ -818,6 +971,12 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
     const reviews = parseReviewMarkup(snapshot.source)
     const values = parseRetainedPublishedValues(snapshot.source)
     const included = new Set(request.include ?? ['metadata', 'outline', 'objects', 'citations', 'cells', 'values', 'reviews', 'diagnostics', 'publication'])
+    const computationFreshness = included.has('publication')
+      ? await Promise.all(executable.cells.map(async (cell) => ({
+          reference: externalCellReference(cell),
+          ...await cellFreshness(cell),
+        })))
+      : []
     const allDiagnostics = [
       ...parsed.diagnostics,
       ...executable.diagnostics,
@@ -895,17 +1054,40 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
         publication: {
           ready: !allDiagnostics.some((item) => item.level === 'error')
             && reviews.changes.every((change) => change.status !== 'open')
-            && executable.cells.every((cell) => snapshot.source.includes(`cell="${cell.id}"`)),
+            && computationFreshness.every((state) => state.current),
           blockingDiagnostics: allDiagnostics.filter((item) => item.level === 'error').length,
           unresolvedSuggestions: reviews.changes.filter((change) => change.status === 'open').length,
+          staleComputations: computationFreshness.filter((state) => !state.current).length,
         },
       } : {}),
     }
   }
 
+  function readableLocations(document: ProseMirrorNode) {
+    const locations = documentTargets(document)
+      .filter((target) =>
+        target.node.type === manuscriptSchema.nodes.heading
+        || target.node.type === manuscriptSchema.nodes.paragraph)
+      .map((target) => ({
+        reference: target.reference,
+        kind: target.node.type === manuscriptSchema.nodes.heading ? 'heading' : 'paragraph',
+        text: target.node.textContent.slice(0, 240),
+        truncated: target.node.textContent.length > 240,
+      }))
+    return {
+      locations: locations.slice(0, MAX_PAGE_SIZE),
+      locationCount: locations.length,
+      locationsTruncated: locations.length > MAX_PAGE_SIZE,
+    }
+  }
+
   async function persistSource(request: MutationRequest, snapshot: AgentProjectSnapshot, source: string, result: Record<string, unknown>, affectedReferences: AgentExternalReference[] = []) {
     const inputRevision = snapshot.documentRevision
-    if (request.mode === 'preview') return success(request, { ...result, persisted: false, previewSource: source.slice(0, MAX_SOURCE_CHARACTERS) }, {
+    if (request.mode === 'preview') return success(request, {
+      ...result,
+      persisted: false,
+      preview: mutationPreview(request, source !== snapshot.source),
+    }, {
       revision: inputRevision,
       actor: request.actor,
       inputRevision,
@@ -1000,6 +1182,7 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
           return success(request, {
             document: 'document:main',
             text: parsed.document.textBetween(0, parsed.document.content.size, '\n').slice(0, MAX_SOURCE_CHARACTERS),
+            ...readableLocations(parsed.document),
             ...(request.includeSource ? { source: snapshot.source.slice(0, MAX_SOURCE_CHARACTERS), truncated: snapshot.source.length > MAX_SOURCE_CHARACTERS } : {}),
           }, { revision: snapshot.documentRevision, diagnostics: parsed.diagnostics.map(diagnostic) })
         }
@@ -1007,14 +1190,23 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
           const target = resolveDocumentSelector(parsed.document, request.selector)
           return success(request, {
             reference: target.reference,
+            selector: { kind: 'reference', reference: target.reference },
             kind: target.node.type.name,
             text: target.node.textContent,
           }, { revision: snapshot.documentRevision })
         }
         const selected = resolveSourceSelector(snapshot.source, request.selector)
+        let target: ReturnType<typeof resolveDocumentSelector> | undefined
+        try {
+          target = resolveDocumentSelector(parsed.document, request.selector)
+        } catch {
+          // Source selectors can address syntax that is intentionally not a document node.
+        }
         const context = Math.min(MAX_CONTEXT_CHARACTERS, Math.max(0, request.contextCharacters ?? 500))
         return success(request, {
           selection: selected.source,
+          text: target?.node.textContent ?? selected.source,
+          selector: target ? { kind: 'reference' as const, reference: target.reference } : request.selector,
           before: snapshot.source.slice(Math.max(0, selected.start - context), selected.start),
           after: snapshot.source.slice(selected.end, Math.min(snapshot.source.length, selected.end + context)),
           offsets: { start: selected.start, end: selected.end },
@@ -1100,13 +1292,34 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
         }, { revision: snapshot.documentRevision, nextCursor: page.next, diagnostics: cells.diagnostics.map(diagnostic) })
       }
       if (request.action === 'status' || request.action === 'logs') {
-        const matching = [...executions.values()].filter((record) =>
+        const live = [...executions.values()].filter((record) =>
           !request.reference || record.reference === request.reference || record.cellReference === request.reference)
+        const liveCells = new Set(live.map((record) => record.cellReference))
+        const durable = (await Promise.all(cells.cells.map((cell) =>
+          durableExecution(cell, request.action === 'logs'))))
+          .filter((record): record is NonNullable<typeof record> => Boolean(record))
+          .filter((record) =>
+            !liveCells.has(record.cellReference)
+            && (!request.reference || record.reference === request.reference || record.cellReference === request.reference))
+        const matching = [
+          ...live.map((record) => boundedExecution(record, request.action === 'logs')),
+          ...durable,
+        ]
         const page = boundedPage(matching, request.pageSize, request.cursor)
+        const durableOnlyLogs = request.action === 'logs'
+          && page.page.some((record) => 'durable' in record && record.durable)
         return success(request, {
-          executions: page.page.map((record) => boundedExecution(record, request.action === 'logs')),
+          executions: page.page,
           total: page.total,
-        }, { revision: snapshot.documentRevision, nextCursor: page.next })
+        }, {
+          revision: snapshot.documentRevision,
+          nextCursor: page.next,
+          diagnostics: durableOnlyLogs ? [{
+            code: 'volatile-logs-unavailable',
+            level: 'info',
+            message: 'Live logs ended with the earlier session; retained execution summaries remain available.',
+          }] : [],
+        })
       }
       if (request.action === 'artifact') {
         const storedArtifacts = new Map<AgentExternalReference, ExecutionManifest['artifacts'][number]>()
@@ -1479,13 +1692,17 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
       const bibliography = await loadProjectBibliographies(paths, async (path) => (await store.readText(path)).content)
       if (request.action === 'search') {
         const sources = new Set(request.sources ?? ['project'])
+        const query = request.query?.trim() ?? ''
+        if (!query && [...sources].some((source) => source !== 'project')) {
+          return failure(request, 'invalid-request', 'external-search-query-required', 'Enter a title, author, or DOI to search Zotero or Crossref.')
+        }
         if ([...sources].some((source) => source !== 'project') && !request.allowNetwork) {
           return failure(request, 'permission', 'network-approval-required', 'Zotero or Crossref search requires explicit network approval.')
         }
         const found: CitationCandidate[] = []
         const searchDiagnostics = bibliography.diagnostics.map(diagnostic)
         if (sources.has('project')) {
-          for (const record of searchCitations(bibliography.records, request.query)) {
+          for (const record of query ? searchCitations(bibliography.records, query) : bibliography.records) {
             const reference = opaqueAgentReference('citation-candidate', `${record.source}:${record.citekey}:${record.doi ?? record.title}`)
             const candidate = { reference, record, source: 'project' as const, retrievedAt: now().toISOString() }
             candidates.set(reference, candidate)
@@ -1502,7 +1719,7 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
                 message: status.message ?? 'Zotero is closed or its local API is disabled.',
               })
             } else {
-              const result = await executionHost.searchZotero(request.query, request.pageSize ?? DEFAULT_PAGE_SIZE, true)
+              const result = await executionHost.searchZotero(query, request.pageSize ?? DEFAULT_PAGE_SIZE, true)
               const occupied = [...bibliography.records]
               for (const item of result.items) {
                 const normalized = collisionSafeRecord(zoteroItemToCitation(item, result.libraryVersion), occupied).record
@@ -1523,8 +1740,8 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
         }
         if (sources.has('crossref')) {
           try {
-            const works = await executionHost.searchCrossref(request.query, true)
-            const ranked = rankCrossrefWorks(parseCrossrefQuery(request.query), works)
+            const works = await executionHost.searchCrossref(query, true)
+            const ranked = rankCrossrefWorks(parseCrossrefQuery(query), works)
             const occupied = [...bibliography.records, ...found.map((candidate) => candidate.record)]
             for (const work of ranked) {
               const normalized = collisionSafeRecord(crossrefCandidateToCitationRecord(work, occupied), occupied).record
@@ -1716,7 +1933,16 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
           duplicate: resolved.duplicate,
           bibliographyPath: targetPath,
           files: writes.map((write) => write.path),
-          previewSource: manuscriptSource.slice(0, MAX_SOURCE_CHARACTERS),
+          preview: {
+            ...mutationPreview(request, writes.length > 0),
+            reference: {
+              citekey: acquiredRecord.citekey,
+              title: acquiredRecord.title,
+              authors: acquiredRecord.authors,
+              year: acquiredRecord.year,
+              duplicate: resolved.duplicate,
+            },
+          },
         }, {
           revision: snapshot.documentRevision,
           diagnostics: [...parsedCache.diagnostics, ...cache.diagnostics].map(diagnostic),
@@ -1760,31 +1986,82 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
         message: `${state.reference}: ${state.reason ?? 'The computation is not current.'}`,
         reference: state.reference,
       }))
-    const diagnostics = [...parsed.diagnostics, ...reviews.diagnostics, ...cells.diagnostics, ...references].map(diagnostic)
-      .concat(freshnessDiagnostics)
+    const manuscriptDiagnostics = parsed.diagnostics.map(diagnostic)
+    const reviewDiagnostics = reviews.diagnostics.map(diagnostic)
+    const cellDiagnostics = cells.diagnostics.map(diagnostic)
+    const referenceDiagnostics = references.map(diagnostic)
+    const diagnostics = [
+      ...manuscriptDiagnostics,
+      ...reviewDiagnostics,
+      ...cellDiagnostics,
+      ...referenceDiagnostics,
+      ...freshnessDiagnostics,
+    ]
     if (request.action === 'reviews') {
+      const openChanges = reviews.changes.filter((change) => change.status === 'open').length
+      const openThreads = reviews.threads.filter((thread) => thread.status === 'open').length
       return success(request, {
         valid: !reviews.diagnostics.some((item) => item.level === 'error'),
-        openChanges: reviews.changes.filter((change) => change.status === 'open').length,
-        openThreads: reviews.threads.filter((thread) => thread.status === 'open').length,
-      }, { revision: snapshot.documentRevision, diagnostics })
+        openChanges,
+        openThreads,
+        message: openChanges || openThreads
+          ? `${openChanges} suggestion${openChanges === 1 ? '' : 's'} and ${openThreads} discussion${openThreads === 1 ? '' : 's'} remain open.`
+          : 'Review is complete.',
+      }, { revision: snapshot.documentRevision, diagnostics: reviewDiagnostics })
     }
     if (request.action === 'references') {
-      return success(request, { valid: !references.some((item) => item.level === 'error') }, { revision: snapshot.documentRevision, diagnostics })
+      const valid = !references.some((item) => item.level === 'error')
+      return success(request, {
+        valid,
+        message: valid ? 'References are consistent.' : 'Some citations need attention.',
+      }, { revision: snapshot.documentRevision, diagnostics: referenceDiagnostics })
     }
     if (request.action === 'freshness') {
       const stale = freshness.filter((state) => !state.current).map((state) => state.reference)
-      return success(request, { current: stale.length === 0, stale }, { revision: snapshot.documentRevision, diagnostics })
+      return success(request, {
+        current: stale.length === 0,
+        stale,
+        message: stale.length
+          ? `${stale.length} computation${stale.length === 1 ? '' : 's'} need to be run or refreshed.`
+          : 'All computations are current.',
+      }, { revision: snapshot.documentRevision, diagnostics: [...cellDiagnostics, ...freshnessDiagnostics] })
     }
     const publicationReady = !diagnostics.some((item) => item.level === 'error')
       && reviews.changes.every((change) => change.status !== 'open')
       && freshness.every((state) => state.current)
+    const manuscriptValid = !diagnostics.some((item) => item.level === 'error')
+    const unresolvedSuggestions = reviews.changes.filter((change) => change.status === 'open').length
+    const staleComputations = freshness.filter((state) => !state.current).length
+    const blockers = [
+      ...(diagnostics.some((item) => item.level === 'error') ? [{
+        kind: 'diagnostics',
+        count: diagnostics.filter((item) => item.level === 'error').length,
+        message: 'Fix the manuscript errors.',
+      }] : []),
+      ...(unresolvedSuggestions ? [{
+        kind: 'reviews',
+        count: unresolvedSuggestions,
+        message: `Decide ${unresolvedSuggestions} open suggestion${unresolvedSuggestions === 1 ? '' : 's'}.`,
+      }] : []),
+      ...(staleComputations ? [{
+        kind: 'computations',
+        count: staleComputations,
+        message: `Run or refresh ${staleComputations} computation${staleComputations === 1 ? '' : 's'}.`,
+      }] : []),
+    ]
+    const remainingSteps = blockers.reduce((total, blocker) => total + blocker.count, 0)
     return success(request, {
-      valid: !diagnostics.some((item) => item.level === 'error'),
+      valid: manuscriptValid,
       ...(request.action === 'publication' ? {
         ready: publicationReady,
-        unresolvedSuggestions: reviews.changes.filter((change) => change.status === 'open').length,
-        staleComputations: freshness.filter((state) => !state.current).length,
+        message: publicationReady
+          ? 'Ready to publish.'
+          : manuscriptValid
+            ? `${remainingSteps} authoring step${remainingSteps === 1 ? '' : 's'} remain before publishing.`
+            : 'The manuscript has errors that must be fixed before publishing.',
+        blockers,
+        unresolvedSuggestions,
+        staleComputations,
       } : {}),
     }, { revision: snapshot.documentRevision, diagnostics })
   }

@@ -139,7 +139,7 @@ function validateStringArray(value: unknown, name: string, allowed?: readonly st
 function validateManuscriptMutation(value: unknown): ValidationIssue | undefined {
   if (!record(value) || typeof value.kind !== 'string') return { code: 'mutation-invalid', message: 'mutation must be an object with a kind.' }
   const selector = () => validateSelector(value.selector)
-  const placement = () => value.placement === undefined ? undefined : oneOf(value.placement, ['before', 'after', 'start', 'end', 'replace'], 'mutation.placement')
+  const placement = () => value.placement === undefined ? undefined : oneOf(value.placement, ['before', 'after', 'start', 'end', 'replace', 'before-terminal-punctuation'], 'mutation.placement')
   if (value.kind === 'text') {
     const extra = unknownFields(value, ['kind', 'operation', 'selector', 'placement', 'text', 'format', 'rationale'], 'text mutation')
     if (extra) return extra
@@ -329,7 +329,11 @@ function validateOperation(value: Record<string, unknown>, operation: string): V
   if (operation.startsWith('references.')) {
     const action = operation.slice('references.'.length)
     if (action === 'search') {
-      return requiredString(value.query, 'query')
+      return (value.query === undefined
+        ? undefined
+        : typeof value.query !== 'string' || value.query.length > MAX_SHORT_TEXT
+          ? { code: 'field-invalid', message: `query must be a string no longer than ${MAX_SHORT_TEXT} characters.` }
+          : undefined)
         ?? (value.sources === undefined ? undefined : validateStringArray(value.sources, 'sources', ['project', 'zotero', 'crossref']))
         ?? (value.allowNetwork !== undefined && typeof value.allowNetwork !== 'boolean' ? { code: 'field-invalid', message: 'allowNetwork must be boolean.' } : undefined)
     }

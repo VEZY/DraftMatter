@@ -233,7 +233,79 @@ describe('headless DraftMatter agent service', () => {
       contextCharacters: 30,
     })
     expect(read.ok).toBe(true)
-    if (read.ok) expect((read.result as { selection: string }).selection).toContain('Original sentence.')
+    if (read.ok) {
+      expect((read.result as { selection: string }).selection).toContain('Original sentence.')
+      expect(read.result).toMatchObject({
+        text: expect.stringContaining('Original sentence.'),
+        selector: { kind: 'reference', reference: expect.stringMatching(/^node:/) },
+      })
+    }
+
+    const fullRead = await execute({
+      protocolVersion: '1.0',
+      domain: 'manuscript',
+      action: 'read',
+    })
+    expect(fullRead).toMatchObject({
+      ok: true,
+      result: {
+        locations: expect.arrayContaining([
+          expect.objectContaining({
+            reference: expect.stringMatching(/^node:/),
+            kind: 'paragraph',
+            text: expect.stringContaining('Original sentence.'),
+          }),
+        ]),
+      },
+    })
+  })
+
+  it('returns compact semantic previews instead of echoing the manuscript', async () => {
+    const before = await readFile(join(root, 'paper.qmd'), 'utf8')
+    const preview = await execute({
+      protocolVersion: '1.0',
+      domain: 'review',
+      action: 'suggest',
+      mode: 'preview',
+      expectedRevision: await revision(),
+      idempotencyKey: 'preview-original-sentence-001',
+      actor: { id: 'agent:reviewer', name: 'Research assistant' },
+      selector: { kind: 'quote', quote: 'Original sentence.' },
+      proposal: 'A more precise sentence.',
+      rationale: 'Improve specificity.',
+    })
+
+    expect(preview).toMatchObject({
+      ok: true,
+      result: {
+        persisted: false,
+        preview: {
+          changed: true,
+          operation: 'review.suggest',
+          target: { kind: 'quote', quote: 'Original sentence.' },
+          change: { kind: 'tracked-rewrite', proposal: 'A more precise sentence.' },
+        },
+      },
+    })
+    expect(JSON.stringify(preview)).not.toContain('previewSource')
+    expect(JSON.stringify(preview).length).toBeLessThan(2_500)
+    expect(await readFile(join(root, 'paper.qmd'), 'utf8')).toBe(before)
+
+    const longPreview = await execute({
+      protocolVersion: '1.0',
+      domain: 'review',
+      action: 'suggest',
+      mode: 'preview',
+      expectedRevision: await revision(),
+      idempotencyKey: 'preview-long-sentence-001',
+      actor: { id: 'agent:reviewer', name: 'Research assistant' },
+      selector: { kind: 'quote', quote: 'Original sentence.' },
+      proposal: `A precise result ${'with supporting detail '.repeat(500)}`,
+      rationale: 'Keep a large proposed edit from flooding the assistant response.',
+    })
+    expect(JSON.stringify(longPreview).length).toBeLessThan(3_000)
+    expect(JSON.stringify(longPreview)).toContain('…')
+    expect(await readFile(join(root, 'paper.qmd'), 'utf8')).toBe(before)
   })
 
   it('persists an attributed tracked rewrite and makes retries idempotent', async () => {
@@ -517,6 +589,39 @@ describe('headless DraftMatter agent service', () => {
         })],
       },
     })
+    const durableStatus = await reopenedService.execute({
+      protocolVersion: '1.0',
+      domain: 'computation',
+      action: 'status',
+      reference: cellReference,
+    })
+    expect(durableStatus).toMatchObject({
+      ok: true,
+      result: {
+        executions: [expect.objectContaining({
+          cellReference,
+          status: 'succeeded',
+          durable: true,
+        })],
+      },
+    })
+    const durableLogs = await reopenedService.execute({
+      protocolVersion: '1.0',
+      domain: 'computation',
+      action: 'logs',
+      reference: cellReference,
+    })
+    expect(durableLogs).toMatchObject({
+      ok: true,
+      result: {
+        executions: [expect.objectContaining({
+          cellReference,
+          durable: true,
+          logsAvailable: false,
+        })],
+      },
+      diagnostics: [expect.objectContaining({ code: 'volatile-logs-unavailable' })],
+    })
     expect(await reopenedService.execute(request)).toEqual(run)
     await reopenedService.close()
     expect(executionHost.executions).toBe(1)
@@ -644,6 +749,124 @@ describe('headless DraftMatter agent service', () => {
       action: 'validate',
     })
     expect(validation).toMatchObject({ ok: true, result: { valid: true, missing: [] } })
+  })
+
+  it('lists saved references and deduplicates a project candidate without a DOI', async () => {
+    const saved = [
+      ...JSON.parse(references),
+      {
+        id: 'chen2025',
+        type: 'article-journal',
+        title: 'Review-aware drought analysis in executable manuscripts',
+        author: [
+          { family: 'Chen', given: 'Lin' },
+          { family: 'Silva', given: 'Marta' },
+        ],
+        issued: { 'date-parts': [[2025]] },
+      },
+    ]
+    await writeFile(join(root, 'references.json'), `${JSON.stringify(saved, null, 2)}\n`)
+
+    const listed = await execute({
+      protocolVersion: '1.0',
+      domain: 'references',
+      action: 'search',
+      sources: ['project'],
+    })
+    expect(listed).toMatchObject({ ok: true, result: { total: 2 } })
+    if (!listed.ok) return
+    const candidate = (listed.result as {
+      candidates: Array<{ reference: `citation-candidate:${string}`; citekey: string }>
+    }).candidates.find((item) => item.citekey === 'chen2025')!
+
+    const preview = await execute({
+      protocolVersion: '1.0',
+      domain: 'references',
+      action: 'add-and-cite',
+      mode: 'preview',
+      expectedRevision: await revision(),
+      idempotencyKey: 'preview-existing-chen-citation-001',
+      actor: { id: 'agent:writer', name: 'Research assistant' },
+      candidate: candidate.reference,
+      selector: { kind: 'quote', quote: 'provides context.' },
+      placement: 'before-terminal-punctuation',
+    })
+    expect(preview).toMatchObject({
+      ok: true,
+      result: {
+        persisted: false,
+        duplicate: true,
+        citekey: 'chen2025',
+        preview: {
+          reference: { duplicate: true, citekey: 'chen2025' },
+        },
+      },
+    })
+    expect(JSON.stringify(preview)).not.toContain('previewSource')
+
+    const applied = await execute({
+      protocolVersion: '1.0',
+      domain: 'references',
+      action: 'add-and-cite',
+      mode: 'apply',
+      expectedRevision: await revision(),
+      idempotencyKey: 'apply-existing-chen-citation-001',
+      actor: { id: 'agent:writer', name: 'Research assistant' },
+      candidate: candidate.reference,
+      selector: { kind: 'quote', quote: 'provides context.' },
+      placement: 'before-terminal-punctuation',
+    })
+    expect(applied).toMatchObject({
+      ok: true,
+      result: { persisted: true, duplicate: true, citekey: 'chen2025' },
+    })
+    expect(JSON.parse(await readFile(join(root, 'references.json'), 'utf8'))).toHaveLength(2)
+    expect(await readFile(join(root, 'paper.qmd'), 'utf8')).toContain('provides context [@chen2025].')
+  })
+
+  it('keeps validation diagnostics scoped and explains publication readiness', async () => {
+    const created = await execute({
+      protocolVersion: '1.0',
+      domain: 'computation',
+      action: 'create',
+      mode: 'apply',
+      expectedRevision: await revision(),
+      idempotencyKey: 'create-unrun-validation-cell-001',
+      actor: { id: 'agent:analyst', name: 'Research assistant' },
+      language: 'python',
+      role: 'ordinary',
+      source: '1 + 1',
+      selector: { kind: 'section-label', label: 'sec-results' },
+      placement: 'end',
+    })
+    expect(created.ok).toBe(true)
+
+    const referenceValidation = await execute({
+      protocolVersion: '1.0',
+      domain: 'validate',
+      action: 'references',
+    })
+    expect(referenceValidation).toMatchObject({
+      ok: true,
+      result: { valid: true, message: 'References are consistent.' },
+      diagnostics: [],
+    })
+
+    const publication = await execute({
+      protocolVersion: '1.0',
+      domain: 'validate',
+      action: 'publication',
+    })
+    expect(publication).toMatchObject({
+      ok: true,
+      result: {
+        valid: true,
+        ready: false,
+        staleComputations: 1,
+        blockers: [expect.objectContaining({ kind: 'computations', count: 1 })],
+      },
+      diagnostics: expect.arrayContaining([expect.objectContaining({ code: 'computation-never-run' })]),
+    })
   })
 
   it('acquires an authoritative Crossref candidate atomically and cites the saved record', async () => {
