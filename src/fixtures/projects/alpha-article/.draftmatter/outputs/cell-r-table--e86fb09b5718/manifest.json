@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 2,
+  "cellId": "cell-r-table",
+  "language": "r",
+  "status": "succeeded",
+  "codeHash": "sha256:b4f4aeecfab745a47c1ef6f85fe70246c916997e16d3f02a0dec88a02e0b8e4c",
+  "inputsHash": "sha256:d2c44ce336c5bc90487affbb9a69fb84a05bdcf90b9a82fb0760f1d3993364c0",
+  "environmentFingerprint": "sha256:10a44999a206a8feda7ca8bfac1a0143b1b6b428c83b8994fb6357c2b8f344d8",
+  "environmentIdentity": "DraftMatter complete example snapshot",
+  "environmentVersion": "1",
+  "resultHash": "sha256:870637a6a80cc67f15a6151182e3f462b72358fcae4cafdfe6727228655bd897",
+  "artifacts": [],
+  "sessionGeneration": 1,
+  "executionSequence": 2,
+  "executionCount": 2,
+  "startedAt": "2026-07-18T08:00:00.000Z",
+  "finishedAt": "2026-07-18T08:00:00.000Z",
+  "durationMs": 0,
+  "sequence": 3,
+  "cleanRunId": "complete-example-snapshot-v1"
+}

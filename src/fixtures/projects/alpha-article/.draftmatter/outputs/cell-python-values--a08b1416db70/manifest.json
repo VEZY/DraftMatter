@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 2,
+  "cellId": "cell-python-values",
+  "language": "python",
+  "status": "succeeded",
+  "codeHash": "sha256:a7ac6be07413ded67bbf6824259cc02ca9ff15ed5f4c26adad50a0797af8d54e",
+  "inputsHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "environmentFingerprint": "sha256:7b253529b9fe5b8911d1465a24720720cb921c841a368ae86ff37b154b13085e",
+  "environmentIdentity": "DraftMatter complete example snapshot",
+  "environmentVersion": "1",
+  "resultHash": "sha256:83c81c912f7880a10ada299e9744e696b8f6042d46095c9a077764d62056879f",
+  "artifacts": [],
+  "sessionGeneration": 1,
+  "executionSequence": 3,
+  "executionCount": 3,
+  "startedAt": "2026-07-18T08:00:00.000Z",
+  "finishedAt": "2026-07-18T08:00:00.000Z",
+  "durationMs": 0,
+  "sequence": 6,
+  "cleanRunId": "complete-example-snapshot-v1"
+}

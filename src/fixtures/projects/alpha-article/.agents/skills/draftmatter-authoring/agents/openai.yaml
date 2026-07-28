@@ -1,0 +1,4 @@
+interface:
+  display_name: "DraftMatter Authoring"
+  short_description: "Author scientific manuscripts safely"
+  default_prompt: "Use $draftmatter-authoring to inspect and improve this DraftMatter project safely."

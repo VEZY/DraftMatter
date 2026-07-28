@@ -1,0 +1,51 @@
+{
+  "schemaVersion": 2,
+  "protocolVersion": "1.0",
+  "draftmatterVersion": "0.1.0",
+  "enabled": true,
+  "skill": {
+    "name": "draftmatter-authoring",
+    "version": 1,
+    "discovery": "global",
+    "portableFallback": true
+  },
+  "localAdapters": [],
+  "files": [
+    {
+      "path": ".agents/skills/draftmatter-authoring/agents/openai.yaml",
+      "owner": "generated-file",
+      "created": true,
+      "generatedRevision": "sha256:1bc33631f2de97e7e24504310989399f98b787c2c4bb3a72777123382332dba5"
+    },
+    {
+      "path": ".agents/skills/draftmatter-authoring/references/examples.md",
+      "owner": "generated-file",
+      "created": true,
+      "generatedRevision": "sha256:7447d141f44ac98baf5ed0586ce29e5f3c50824011a541bef629c89927283fa1"
+    },
+    {
+      "path": ".agents/skills/draftmatter-authoring/references/protocol.md",
+      "owner": "generated-file",
+      "created": true,
+      "generatedRevision": "sha256:3208dc717d82bbd4fdc5d0a5fb699683294deadf53b0329e151d096767c47d5e"
+    },
+    {
+      "path": ".agents/skills/draftmatter-authoring/SKILL.md",
+      "owner": "generated-file",
+      "created": true,
+      "generatedRevision": "sha256:f9eb5e9ed6fbe4d9ccfdddc4954cc1d01c50783ecf0737975ec3836a3aee2021"
+    },
+    {
+      "path": "AGENTS.md",
+      "owner": "managed-block",
+      "created": true,
+      "generatedRevision": "sha256:97d56041f82bcbc08a5f5a12657378e39426a30f7cdaaf4a3328326401811611"
+    },
+    {
+      "path": "CLAUDE.md",
+      "owner": "managed-block",
+      "created": true,
+      "generatedRevision": "sha256:aa69589c6419de49f0b32a123483a0db55d0d3257ef21bbb58f6954d66a445c9"
+    }
+  ]
+}

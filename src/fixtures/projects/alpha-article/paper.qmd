@@ -78,7 +78,7 @@ Every executable cell has a stable identifier and an explicit output role. Draft
 
 Control and drought trajectories began together and separated after week 4. By week 12, mean canopy area reached 78.6 cm² in the control and 64.1 cm² under drought, a relative reduction of {{canopy_reduction}} (@fig-python-canopy; @tbl-python-means).
 
-```python {#cell-python-figure .execute output="figure" reference="fig-python-canopy" produces="figures/python-canopy.svg"}
+```python {#cell-python-figure .execute output="figure" reference="fig-python-canopy" inputs="data/canopy.csv" produces="figures/python-canopy.svg"}
 from csv import DictReader
 from pathlib import Path
 
@@ -126,7 +126,7 @@ Path("figures/python-canopy.svg").write_text("\n".join(parts), encoding="utf-8")
 : Canopy area trajectories generated in Python. Points are treatment means; the synthetic series contains 24 plants per treatment.
 <!-- dm-output:end -->
 
-```python {#cell-python-table .execute output="table" reference="tbl-python-means"}
+```python {#cell-python-table .execute output="table" reference="tbl-python-means" inputs="data/canopy.csv"}
 from csv import DictReader
 from pathlib import Path
 
@@ -149,7 +149,7 @@ for row in rows:
 
 The drought treatment shifted allocation toward roots and away from leaves. The root-allocation contrast was 0.09 (95% CI 0.02–0.16), while the leaf contrast was −0.08 (95% CI −0.15 to −0.01; @fig-r-allocation). The model summary in @tbl-r-coefficients retained the exact demonstration value *p* = {{allocation_p}}.
 
-```r {#cell-r-figure .execute output="figure" reference="fig-r-allocation" produces="figures/r-allocation.svg"}
+```r {#cell-r-figure .execute output="figure" reference="fig-r-allocation" inputs="data/allocation.csv" produces="figures/r-allocation.svg"}
 allocation <- read.csv("data/allocation.csv", stringsAsFactors = FALSE)
 dir.create("figures", showWarnings = FALSE)
 scale_x <- function(value) 110 + (value + 0.2) / 0.4 * 540
@@ -185,7 +185,7 @@ writeLines(svg, "figures/r-allocation.svg", useBytes = TRUE)
 : Allocation contrasts generated in R. Points are drought-minus-control estimates and horizontal lines are 95% confidence intervals.
 <!-- dm-output:end -->
 
-```r {#cell-r-table .execute output="table" reference="tbl-r-coefficients"}
+```r {#cell-r-table .execute output="table" reference="tbl-r-coefficients" inputs="data/allocation.csv"}
 allocation <- read.csv("data/allocation.csv", stringsAsFactors = FALSE)
 cat("| Component | Estimate | 95% CI | p-value |\n")
 cat("| :--- | ---: | :---: | ---: |\n")
@@ -209,7 +209,7 @@ for (i in seq_len(nrow(allocation))) {
 
 Predictions followed the observed mean response across the measurement period (@fig-julia-model). Residuals remained within 3.0 cm² at every displayed week, and the retained diagnostic table reports $R^2$ = {{prediction_r2}} (@tbl-julia-predictions).
 
-```julia {#cell-julia-figure .execute output="figure" reference="fig-julia-model" produces="figures/julia-model.svg"}
+```julia {#cell-julia-figure .execute output="figure" reference="fig-julia-model" inputs="data/model-predictions.csv" produces="figures/julia-model.svg"}
 lines = readlines("data/model-predictions.csv")[2:end]
 fields = split.(lines, ',')
 week = parse.(Int, getindex.(fields, 1))
@@ -240,7 +240,7 @@ write("figures/julia-model.svg", svg)
 : Observed and predicted canopy response generated in Julia. Points show synthetic observations and the line shows fitted values.
 <!-- dm-output:end -->
 
-```julia {#cell-julia-table .execute output="table" reference="tbl-julia-predictions"}
+```julia {#cell-julia-table .execute output="table" reference="tbl-julia-predictions" inputs="data/model-predictions.csv"}
 lines = readlines("data/model-predictions.csv")[2:end]
 fields = split.(lines, ',')
 println("| Week | Observed (cm²) | Predicted (cm²) | Residual (cm²) |")
@@ -275,7 +275,7 @@ publish("canopy_reduction", reduction, unit="%", digits=1)
 <!-- dm-published-value data="%7B%22version%22%3A1%2C%22name%22%3A%22canopy_reduction%22%2C%22value%22%3A18.4%2C%22unit%22%3A%22%25%22%2C%22formatting%22%3A%7B%22digits%22%3A1%7D%2C%22rendered%22%3A%22%22%2C%22provenance%22%3A%7B%22cellId%22%3A%22cell-python-values%22%2C%22language%22%3A%22python%22%2C%22runHash%22%3A%22sha256%3Acell-python-values%22%2C%22codeHash%22%3A%22sha256%3Acode-cell-python-values%22%2C%22environmentFingerprint%22%3A%22sha256%3Aalpha-python%22%2C%22sessionGeneration%22%3A1%2C%22executionSequence%22%3A3%2C%22retainedOutputHashes%22%3A%5B%22sha256%3Acell-python-values%22%5D%7D%7D" -->
 <!-- dm-output:end -->
 
-```r {#cell-r-values .execute output="values"}
+```r {#cell-r-values .execute output="values" inputs="data/allocation.csv"}
 allocation <- read.csv("data/allocation.csv", stringsAsFactors = FALSE)
 allocation_p <- allocation$p_value[allocation$component == "Leaf"]
 publish("allocation_p", allocation_p, digits = 3)

@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 2,
+  "cellId": "cell-julia-values",
+  "language": "julia",
+  "status": "succeeded",
+  "codeHash": "sha256:d1eff19d3838e074498dba8127e10368a3199e970c43e23a17bd2d6d7504d97b",
+  "inputsHash": "sha256:4f53cda18c2baa0c0354bb5f9a3ecbe5ed12ab4d8e11ba873c2f11161202b945",
+  "environmentFingerprint": "sha256:bfe951704e2b6dafe7ef6d677dddb72be325db3c0a9cfdf7b6fff9d3951e4b3b",
+  "environmentIdentity": "DraftMatter complete example snapshot",
+  "environmentVersion": "1",
+  "resultHash": "sha256:0130f6d2bf4091d6996861b9f9dc01b97f73be02d5a22ca0f2cbeef3b169208c",
+  "artifacts": [],
+  "sessionGeneration": 1,
+  "executionSequence": 3,
+  "executionCount": 3,
+  "startedAt": "2026-07-18T08:00:00.000Z",
+  "finishedAt": "2026-07-18T08:00:00.000Z",
+  "durationMs": 0,
+  "sequence": 8,
+  "cleanRunId": "complete-example-snapshot-v1"
+}

@@ -4076,7 +4076,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
       setCreateProjectOpen(false)
       setNewProjectProblem('')
       if (newProjectAiEnabled) {
-        setToast('Project created · AI enabled for this project; assistant connection remains a separate device-wide step')
+        setToast('Project created · assistant access is allowed for this project')
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : normaliseHostFailure(error).message
@@ -4130,7 +4130,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
       setAgentIntegrationStatus(status)
       setAgentIntegrationTrust(trust)
       setDismissedAiPromptRoot(desktopSession.root)
-      setToast('AI enabled for this project · assistant connections and sensitive approvals remain separate')
+      setToast('Assistant access is now allowed for this project')
     } catch (error) {
       setAgentIntegrationProblem(normaliseHostFailure(error).message)
     } finally {
@@ -4146,7 +4146,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
       await desktopHost.disableAiIntegration(desktopSession.root)
       const status = await desktopHost.agentIntegrationStatus(desktopSession.root)
       setAgentIntegrationStatus(status)
-      setToast('AI disabled for this project · manuscript content and assistant connections were unchanged')
+      setToast('Assistant access is off for this project')
     } catch (error) {
       setAgentIntegrationProblem(normaliseHostFailure(error).message)
     } finally {
@@ -5153,8 +5153,8 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
         && (
           <div className="ai-project-enable-prompt" role="status">
             <Icon name="spark" size={17} />
-            <span><strong>An assistant is connected; this project has not enabled AI.</strong><small>Review the project-only instruction and manifest files before allowing DraftMatter MCP access.</small></span>
-            <button className="primary-button" onClick={openAgentIntegration}>Enable AI for this project…</button>
+            <span><strong>Want help from your connected assistant?</strong><small>Allow access to this project. Running code and online searches will still ask first.</small></span>
+            <button className="primary-button" onClick={openAgentIntegration}>Allow access…</button>
             <button className="icon-button" onClick={() => setDismissedAiPromptRoot(desktopSession.root)} aria-label="Dismiss AI project enablement prompt"><Icon name="close" size={14} /></button>
           </div>
         )}
@@ -6337,13 +6337,9 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
                 checked={newProjectAiEnabled}
                 onChange={(event) => setNewProjectAiEnabled(event.target.checked)}
               />
-              <span>
-                <strong>Enable AI for this project</strong>
-                <small>
-                  Adds managed instruction pointers, a versioned enablement manifest,
-                  and a portable skill fallback. Connecting Codex, Claude, Copilot,
-                  or Vibe is a separate device-wide step.
-                </small>
+            <span>
+                <strong>Allow assistant access</strong>
+                <small>A connected assistant can help with this project. Running code and searching online sources still require separate approval.</small>
               </span>
             </label>
             <div className="create-project-location"><Icon name="folder" size={15} /><span title={newProjectParent}>New project folder inside: {newProjectParent}</span></div>
@@ -6358,7 +6354,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
           <div className="agent-integration-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="agent-integration-title">
             <div className="execution-dialog-head">
               <span className="execution-shield"><Icon name="code" size={19} /></span>
-              <div><span className="eyebrow">Project-wide scope</span><h2 id="agent-integration-title">AI for this project</h2><p>Project access is separate from connecting an assistant on this computer. These controls do not contact a model or grant sensitive approvals.</p></div>
+              <div><span className="eyebrow">This project only</span><h2 id="agent-integration-title">Assistant access</h2><p>Choose whether a connected assistant may work with this project. Running code and searching online sources still require separate approval.</p></div>
               <button className="icon-button" onClick={() => setAgentIntegrationOpen(false)} aria-label="Close AI integration status"><Icon name="close" /></button>
             </div>
             <div className="agent-integration-body">
@@ -6368,57 +6364,57 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
                   <div className="agent-state-grid" aria-label="Independent AI integration states">
                     <section data-state={assistantConnectionsStatus?.clients.some((client) => client.connected) ? 'on' : 'off'}>
                       <Icon name="command" size={17} />
-                      <span><strong>Assistant connected</strong><small>{assistantConnectionsStatus?.clients.some((client) => client.connected)
+                      <span><strong>Assistant app</strong><small>{assistantConnectionsStatus?.clients.some((client) => client.connected)
                         ? assistantConnectionsStatus.clients.filter((client) => client.connected).map((client) => client.name).join(', ')
-                        : 'None connected on this computer'}</small></span>
-                      <button onClick={openAssistantConnections}>Manage</button>
+                        : 'Not connected yet'}</small></span>
+                      <button onClick={openAssistantConnections}>{assistantConnectionsStatus?.clients.some((client) => client.connected) ? 'Manage' : 'Connect'}</button>
                     </section>
                     <section data-state={agentIntegrationStatus.projectEnabled ? 'on' : 'off'}>
                       <Icon name="folder" size={17} />
-                      <span><strong>AI enabled for this project</strong><small>{agentIntegrationStatus.projectEnabled ? `Schema ${agentIntegrationStatus.schemaVersion} · protocol ${agentIntegrationStatus.protocolVersion}` : 'MCP access to this project is denied'}</small></span>
+                      <span><strong>This project</strong><small>{agentIntegrationStatus.projectEnabled ? 'Assistant access allowed' : 'Assistant access off'}</small></span>
                     </section>
                     <section data-state={agentIntegrationTrust?.trusted ? 'on' : 'off'}>
                       <Icon name="play" size={17} />
-                      <span><strong>Project trusted for code execution</strong><small>{agentIntegrationTrust?.trusted ? 'Granted for this DraftMatter session' : 'Not granted'}</small></span>
+                      <span><strong>Run project code</strong><small>{agentIntegrationTrust?.trusted ? 'Allowed for this DraftMatter session' : 'Ask first'}</small></span>
                     </section>
                     <section data-state="request">
                       <Icon name="book" size={17} />
-                      <span><strong>Network access</strong><small>Approved separately for each Zotero/Crossref request</small></span>
-                    </section>
-                  </div>
-                  <div className="agent-integration-grid">
-                    <section>
-                      <strong>Project enablement files</strong>
-                      <ul>
-                        <li data-ready={agentIntegrationStatus.instructionsReady}>AGENTS.md / CLAUDE.md pointers <span>{agentIntegrationStatus.instructionsReady ? 'Current' : 'Will add'}</span></li>
-                        <li data-ready={agentIntegrationStatus.manifestReady}>Versioned enablement manifest <span>{agentIntegrationStatus.manifestReady ? 'Current' : 'Will add'}</span></li>
-                        <li data-ready={agentIntegrationStatus.portableSkillReady}>Portable skill fallback <span>{agentIntegrationStatus.portableSkillReady ? agentIntegrationStatus.portableSkillFallback ? 'Current' : 'Not requested' : 'Will add'}</span></li>
-                        <li data-ready={agentIntegrationStatus.localAdapters.length === 0}>Project-local MCP adapters <span>{agentIntegrationStatus.localAdapters.length ? agentIntegrationStatus.localAdapters.join(', ') : 'Not required'}</span></li>
-                      </ul>
-                    </section>
-                    <section>
-                      <strong>Separate sensitive approvals</strong>
-                      <ul>
-                        <li data-ready={Boolean(agentIntegrationTrust?.trusted)}>Project code trust <span>{agentIntegrationTrust?.trusted ? 'This session' : 'Not granted'}</span></li>
-                        <li data-ready={false}>Client tool approval <span>Asked by client</span></li>
-                        <li data-ready={false}>Citation network access <span>Per request</span></li>
-                        <li data-ready={true}>Model contact during setup <span>Never</span></li>
-                      </ul>
+                      <span><strong>Search online sources</strong><small>Ask each time</small></span>
                     </section>
                   </div>
                   <section className="agent-integration-clients">
-                    <strong>{agentIntegrationStatus.projectEnabled ? 'What disabling removes' : 'What enabling adds'}</strong>
+                    <strong>{agentIntegrationStatus.projectEnabled ? 'Assistant access is on' : 'Assistant access is off'}</strong>
                     <p>{agentIntegrationStatus.projectEnabled
-                      ? 'Only DraftMatter-managed instruction blocks, the project AI manifest, and unchanged portable fallback files. Manuscripts, references, outputs, review history, assistant connections, and execution trust are untouched.'
-                      : 'Managed instruction pointers, a versioned project AI manifest, and an optional portable skill fallback. No client configuration, manuscript content, model access, execution trust, or network approval is changed.'}</p>
+                      ? 'A connected assistant may read this project and propose changes through DraftMatter. Your manuscript remains local, and sensitive actions still ask first.'
+                      : 'Connected assistants cannot open this project through DraftMatter until you allow access.'}</p>
                   </section>
                   <details className="agent-integration-commands">
-                    <summary>Advanced CLI diagnostics</summary>
-                    {[['Doctor', agentIntegrationStatus.doctorCommand], ['Update project AI files', agentIntegrationStatus.repairCommand]].map(([label, command]) => (
-                      <div key={label}><span><small>{label}</small><code>{command}</code></span><button onClick={() => void copyAgentCommand(command, label)}>Copy</button></div>
-                    ))}
+                    <summary>Connection details</summary>
+                    <div className="agent-integration-grid">
+                      <section>
+                        <strong>Project connection</strong>
+                        <ul>
+                          <li data-ready={agentIntegrationStatus.instructionsReady}>Assistant guidance <span>{agentIntegrationStatus.instructionsReady ? 'Current' : 'Will add'}</span></li>
+                          <li data-ready={agentIntegrationStatus.manifestReady}>Project permission <span>{agentIntegrationStatus.manifestReady ? 'Current' : 'Will add'}</span></li>
+                          <li data-ready={agentIntegrationStatus.portableSkillReady}>Portable fallback <span>{agentIntegrationStatus.portableSkillReady ? agentIntegrationStatus.portableSkillFallback ? 'Current' : 'Not needed' : 'Will add'}</span></li>
+                        </ul>
+                      </section>
+                      <section>
+                        <strong>Separate approvals</strong>
+                        <ul>
+                          <li data-ready={Boolean(agentIntegrationTrust?.trusted)}>Run code <span>{agentIntegrationTrust?.trusted ? 'This session' : 'Ask first'}</span></li>
+                          <li data-ready={false}>Assistant tool calls <span>Controlled by assistant</span></li>
+                          <li data-ready={false}>Online references <span>Ask each time</span></li>
+                        </ul>
+                      </section>
+                    </div>
+                    <details>
+                      <summary>Advanced troubleshooting</summary>
+                      {[['Check connection', agentIntegrationStatus.doctorCommand], ['Refresh project connection', agentIntegrationStatus.repairCommand]].map(([label, command]) => (
+                        <div key={label}><span><small>{label}</small><code>{command}</code></span><button onClick={() => void copyAgentCommand(command, label)}>Copy</button></div>
+                      ))}
+                    </details>
                   </details>
-                  {agentIntegrationStatus.notes.length > 0 && <ul className="agent-integration-notes">{agentIntegrationStatus.notes.map((note) => <li key={note}>{note}</li>)}</ul>}
                 </>
               )}
               {agentIntegrationProblem && <div className="user-settings-problem" role="alert">{agentIntegrationProblem}</div>}
@@ -6427,8 +6423,8 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
               <button onClick={() => void loadAgentIntegrationStatus()} disabled={agentIntegrationBusy}>Refresh</button>
               <span />
               {agentIntegrationStatus?.projectEnabled
-                ? <button onClick={() => void disableAgentIntegration()} disabled={agentIntegrationBusy}>{agentIntegrationBusy ? 'Disabling…' : 'Disable AI for this project'}</button>
-                : <button className="primary-button" onClick={() => void enableAgentIntegration()} disabled={agentIntegrationBusy}>{agentIntegrationBusy ? 'Enabling…' : 'Enable AI for this project'}</button>}
+                ? <button onClick={() => void disableAgentIntegration()} disabled={agentIntegrationBusy}>{agentIntegrationBusy ? 'Turning off…' : 'Turn off assistant access'}</button>
+                : <button className="primary-button" onClick={() => void enableAgentIntegration()} disabled={agentIntegrationBusy}>{agentIntegrationBusy ? 'Allowing…' : 'Allow assistant access'}</button>}
               <button onClick={() => setAgentIntegrationOpen(false)}>Done</button>
             </div>
           </div>

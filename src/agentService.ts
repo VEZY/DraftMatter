@@ -55,7 +55,7 @@ import {
   serializeExecutionManifest,
   type ExecutionManifest,
 } from './executionFreshness'
-import { sha256, type NormalizedExecutionResult } from './kernelExecution'
+import { executionInputsFingerprint, sha256, type ExecutionInput, type NormalizedExecutionResult } from './kernelExecution'
 import { manuscriptSchema } from './manuscriptSchema'
 import { materializeExecutionOutput } from './outputMaterializer'
 import { parseRetainedPublishedValues, publishedValueMarkup } from './publishedValues'
@@ -668,6 +668,15 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
     return `sha256:${[...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`
   }
 
+  async function currentInputsHash(cell: ExecutableCell) {
+    const inputs: ExecutionInput[] = []
+    for (const path of declaredInputPaths(cell)) {
+      const bytes = await store.readBytes(path)
+      inputs.push({ path, hash: await sha256Bytes(bytes) })
+    }
+    return await executionInputsFingerprint(inputs)
+  }
+
   async function executionManifestPath(cellId: string) {
     const readable = cellId.replace(/[^A-Za-z0-9_.-]/g, '_')
     const digest = (await sha256(cellId)).slice('sha256:'.length, 'sha256:'.length + 12)
@@ -740,6 +749,21 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
       current: false,
       reason: 'The computation source changed after the latest successful execution.',
       manifest,
+    }
+    try {
+      if (manifest.inputsHash !== await currentInputsHash(cell)) return {
+        status: 'stale' as const,
+        current: false,
+        reason: 'A declared input changed after the latest successful execution.',
+        manifest,
+      }
+    } catch {
+      return {
+        status: 'stale' as const,
+        current: false,
+        reason: 'A declared input is missing or unreadable.',
+        manifest,
+      }
     }
     for (const artifact of manifest.artifacts) {
       try {
@@ -2057,7 +2081,7 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
         message: publicationReady
           ? 'Ready to publish.'
           : manuscriptValid
-            ? `${remainingSteps} authoring step${remainingSteps === 1 ? '' : 's'} remain before publishing.`
+            ? `${remainingSteps} authoring step${remainingSteps === 1 ? ' remains' : 's remain'} before publishing.`
             : 'The manuscript has errors that must be fixed before publishing.',
         blockers,
         unresolvedSuggestions,

@@ -15,11 +15,13 @@ Open the folder as a project and use `paper.qmd` as the main manuscript. It incl
 
 The paper, data, institutions, people, and references are deliberately synthetic. The example is suitable for UI demonstrations, export checks, portability tests, and learning the source format; it is not a scientific dataset.
 
+The example is already prepared for a connected AI assistant. Opening it does not contact a model or run code; DraftMatter still asks separately before code execution or an online reference search.
+
 ## Local-agent acceptance coverage
 
 The complete example is also the publication-side fixture for the
 provider-neutral AI integration. It contains the same classes of durable state
-that an agent can create through the DraftMatter service: attributed review,
+that an agent can create through the DraftMatter service: project-scoped assistant access, attributed review,
 Python/R/Julia computations, retained figures and tables, named in-text values,
 citations, provenance, and freshness manifests. `src/phase7AlphaAuthoringGate.test.ts`
 proves that this state reopens and produces clean HTML and DOCX, while

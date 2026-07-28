@@ -214,7 +214,8 @@
 }
 
 .assistant-loading,
-.assistant-problem {
+.assistant-problem,
+.assistant-notice {
   margin: 20px 28px !important;
   padding: 12px 14px;
   border-radius: 8px;
@@ -225,6 +226,30 @@
   border: 1px solid #e4c8c2;
   background: #fff6f4;
   color: #8a4034;
+}
+
+.assistant-notice {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #cfe0d7;
+  background: #eff7f2;
+  color: #315f4b;
+}
+
+.assistant-connection-details {
+  margin-top: 14px;
+  color: #66736c;
+  font-size: 12px;
+}
+
+.assistant-connection-details summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.assistant-connection-details .assistant-change-list {
+  margin-bottom: 0;
 }
 
 .assistant-preview {

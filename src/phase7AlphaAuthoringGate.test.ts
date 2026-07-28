@@ -3,6 +3,9 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { NodeAgentProjectStore } from './agentProjectStore'
+import { createDraftMatterAgentService } from './agentService'
+import { assertDraftMatterAiProjectEnabled } from './agentProjectEnablement'
 import { renderDocxExport } from './docxExport'
 import { renderNativeHtmlExport } from './nativeHtmlExport'
 import { numberedManuscriptObjects } from './numberedObjects'
@@ -16,6 +19,7 @@ import { semanticManuscriptObjects, semanticCrossReferenceLabel } from './semant
 import { parseStructuredManuscript, serializeStructuredManuscript } from './structuredManuscript'
 
 const source = readFileSync(join(process.cwd(), 'src/fixtures/projects/alpha-article/paper.qmd'), 'utf8')
+const fixtureRoot = join(process.cwd(), 'src/fixtures/projects/alpha-article')
 
 function authoringSnapshot(portableSource: string) {
   const parsed = parseStructuredManuscript(portableSource)
@@ -49,6 +53,50 @@ function authoringSnapshot(portableSource: string) {
 }
 
 describe('DM-P7-GATE alpha authoring workflow', () => {
+  it('reopens every bundled computation as current while keeping the review intentionally open', async () => {
+    const store = await NodeAgentProjectStore.open(fixtureRoot)
+    const service = createDraftMatterAgentService(store)
+    try {
+      await expect(assertDraftMatterAiProjectEnabled(store)).resolves.toMatchObject({
+        enabled: true,
+        protocolVersion: '1.0',
+      })
+      const freshness = await service.execute({
+        protocolVersion: '1.0',
+        domain: 'validate',
+        action: 'freshness',
+      })
+      expect(freshness).toMatchObject({
+        ok: true,
+        result: {
+          current: true,
+          stale: [],
+          message: 'All computations are current.',
+        },
+        diagnostics: [],
+      })
+
+      const publication = await service.execute({
+        protocolVersion: '1.0',
+        domain: 'validate',
+        action: 'publication',
+      })
+      expect(publication).toMatchObject({
+        ok: true,
+        result: {
+          valid: true,
+          ready: false,
+          unresolvedSuggestions: 1,
+          staleComputations: 0,
+          message: '1 authoring step remains before publishing.',
+          blockers: [expect.objectContaining({ kind: 'reviews', count: 1 })],
+        },
+      })
+    } finally {
+      await service.close()
+    }
+  })
+
   it('revises, exports, and reopens an article with matching friendly semantic state', () => {
     const originalDocument = parseReviewMarkup(source)
     const accepted = decideReviewChange(originalDocument, {

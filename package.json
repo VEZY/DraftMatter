@@ -17,6 +17,8 @@
     "check:service": "tsc -p services/collaboration/tsconfig.json --noEmit",
     "compliance:generate": "node scripts/generate-compliance.mjs",
     "compliance:check": "node scripts/generate-compliance.mjs --verify",
+    "fixture:sync": "node scripts/sync-complete-example-manifests.mjs",
+    "fixture:check": "node scripts/sync-complete-example-manifests.mjs --check",
     "pack:cli": "npm pack ./dist-cli",
     "release:verify": "node scripts/verify-release.mjs",
     "test": "vitest run src services --maxWorkers=4",

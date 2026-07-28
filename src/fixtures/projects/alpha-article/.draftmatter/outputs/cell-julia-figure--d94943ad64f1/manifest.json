@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "cellId": "cell-julia-figure",
+  "language": "julia",
+  "status": "succeeded",
+  "codeHash": "sha256:a8c39b81dfa4a144b772300a70ef4c26d4e35f6bdaeeb809b01e0460343373b9",
+  "inputsHash": "sha256:fb57e7cb6048682a47387b22e2e70edc98464b8f72a576b81a96215977ce6648",
+  "environmentFingerprint": "sha256:bfe951704e2b6dafe7ef6d677dddb72be325db3c0a9cfdf7b6fff9d3951e4b3b",
+  "environmentIdentity": "DraftMatter complete example snapshot",
+  "environmentVersion": "1",
+  "resultHash": "sha256:c1ff9f6e80742c84e1d01942d3dbc3ac2c9eaf6067380e871d31a331559dd176",
+  "artifacts": [
+    {
+      "path": "figures/julia-model.svg",
+      "bytes": 1293,
+      "hash": "sha256:aec218ce1fcdba9302b69aab68855a982b52279659bb0dad800e6cbe6a51d000",
+      "mediaType": "image/svg+xml"
+    }
+  ],
+  "sessionGeneration": 1,
+  "executionSequence": 1,
+  "executionCount": 1,
+  "startedAt": "2026-07-18T08:00:00.000Z",
+  "finishedAt": "2026-07-18T08:00:00.000Z",
+  "durationMs": 0,
+  "sequence": 4,
+  "cleanRunId": "complete-example-snapshot-v1"
+}

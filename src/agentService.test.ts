@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import type { AgentRequest, AgentSuccess } from './agentProtocol'
 import { EXECUTION_TRUST_ACKNOWLEDGEMENT, type DraftMatterExecutionHost } from './agentExecutionHost'
 import type { ExecutableCell, ExecutionLanguage } from './executionCells'
-import type { ExecutionInput, NormalizedExecutionResult } from './kernelExecution'
+import { executionInputsFingerprint, sha256, type ExecutionInput, type NormalizedExecutionResult } from './kernelExecution'
 import { NodeAgentProjectStore } from './agentProjectStore'
 import { createDraftMatterAgentService } from './agentService'
 
@@ -40,6 +40,7 @@ class FakeExecutionHost implements DraftMatterExecutionHost {
   trusted = false
   executions = 0
   generation = 1
+  constructor(readonly root: string) {}
   crossrefWorks = [{
     doi: '10.1016/j.envsoft.2019.104609',
     title: 'DynACof: A process-based model',
@@ -65,7 +66,12 @@ class FakeExecutionHost implements DraftMatterExecutionHost {
     this.trusted = false
     return await this.trustStatus()
   }
-  async fingerprintInputs(_paths: string[]): Promise<ExecutionInput[]> { return [] }
+  async fingerprintInputs(paths: string[]): Promise<ExecutionInput[]> {
+    return await Promise.all(paths.map(async (path) => ({
+      path,
+      hash: await sha256(await readFile(join(this.root, path), 'utf8')),
+    })))
+  }
   async zoteroStatus(_approved: boolean) {
     return { available: false, message: 'Zotero unavailable' }
   }
@@ -73,7 +79,7 @@ class FakeExecutionHost implements DraftMatterExecutionHost {
     return { items: [] }
   }
   async searchCrossref(_query: string, _approved: boolean) { return this.crossrefWorks }
-  async execute(cell: ExecutableCell, _inputs: ExecutionInput[]): Promise<NormalizedExecutionResult> {
+  async execute(cell: ExecutableCell, inputs: ExecutionInput[]): Promise<NormalizedExecutionResult> {
     this.executions += 1
     return {
       cellId: cell.id,
@@ -102,7 +108,7 @@ class FakeExecutionHost implements DraftMatterExecutionHost {
       },
       hashes: {
         code: `sha256:${'1'.repeat(64)}`,
-        inputs: `sha256:${'2'.repeat(64)}`,
+        inputs: await executionInputsFingerprint(inputs),
         environment: `sha256:${'e'.repeat(64)}`,
         result: `sha256:${String(this.executions).padStart(64, '0')}`,
       },
@@ -177,7 +183,7 @@ describe('headless DraftMatter agent service', () => {
     await writeFile(join(root, 'paper.qmd'), manuscript)
     await writeFile(join(root, 'references.json'), references)
     store = await NodeAgentProjectStore.open(root)
-    executionHost = new FakeExecutionHost()
+    executionHost = new FakeExecutionHost(root)
     let sequence = 0
     service = createDraftMatterAgentService(store, {
       now: () => new Date('2026-07-25T12:00:00.000Z'),
@@ -340,7 +346,7 @@ describe('headless DraftMatter agent service', () => {
     expect(once).toContain('The original result was stated more precisely.')
 
     await service.close()
-    executionHost = new FakeExecutionHost()
+    executionHost = new FakeExecutionHost(root)
     service = createDraftMatterAgentService(store, {
       now: () => new Date('2026-07-25T12:00:00.000Z'),
       requestId: () => 'reopened-service-request',
@@ -663,7 +669,7 @@ describe('headless DraftMatter agent service', () => {
     const cellReference = (created.result as { cell: { reference: `cell:${string}` } }).cell.reference
 
     await service.close()
-    const cancellableHost = new CancellableExecutionHost()
+    const cancellableHost = new CancellableExecutionHost(root)
     cancellableHost.trusted = true
     executionHost = cancellableHost
     service = createDraftMatterAgentService(store, { executionHost })

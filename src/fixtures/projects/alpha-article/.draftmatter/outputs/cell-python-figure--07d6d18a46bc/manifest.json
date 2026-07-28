@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 2,
+  "cellId": "cell-python-figure",
+  "language": "python",
+  "status": "succeeded",
+  "codeHash": "sha256:1edaabf0139e48f97568a55bbc850d7f3f98fb88b2dbe577567ddf226ea60fdd",
+  "inputsHash": "sha256:52525b3594e4e2100c4dc4527134b2bbd3ccb59ba04ec9797ed8f8dc4549f10d",
+  "environmentFingerprint": "sha256:7b253529b9fe5b8911d1465a24720720cb921c841a368ae86ff37b154b13085e",
+  "environmentIdentity": "DraftMatter complete example snapshot",
+  "environmentVersion": "1",
+  "resultHash": "sha256:7fcbbe73d290a77cd6d6975f39b97c2c8b7181f0c5759ab1ed822a3c6df2944a",
+  "artifacts": [
+    {
+      "path": "figures/python-canopy.svg",
+      "bytes": 3332,
+      "hash": "sha256:ea006b918f9b3597828334c22092c1a284372ea713b9ea74f2aa872794923fde",
+      "mediaType": "image/svg+xml"
+    }
+  ],
+  "sessionGeneration": 1,
+  "executionSequence": 1,
+  "executionCount": 1,
+  "startedAt": "2026-07-18T08:00:00.000Z",
+  "finishedAt": "2026-07-18T08:00:00.000Z",
+  "durationMs": 0,
+  "sequence": 0,
+  "cleanRunId": "complete-example-snapshot-v1"
+}
