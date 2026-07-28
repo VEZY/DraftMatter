@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs'
+import { existsSync, readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
 const root = resolve(import.meta.dirname, '..')
@@ -25,6 +25,12 @@ if (rawTag && rawTag !== `v${expected}`) failures.push(['release tag', `${rawTag
 if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(expected)) failures.push(['application version', `${expected} (not SemVer)`])
 if (tauri.bundle?.active !== true) failures.push(['Tauri bundle', 'disabled'])
 if (tauri.bundle?.targets !== 'all') failures.push(['Tauri bundle targets', String(tauri.bundle?.targets)])
+if (tauri.bundle?.windows?.nsis?.installerHooks !== './windows/installer-hooks.nsh') {
+  failures.push(['Windows terminal launcher', 'NSIS installer hook is not configured'])
+}
+if (!existsSync(resolve(root, 'src-tauri/windows/installer-hooks.nsh'))) {
+  failures.push(['Windows terminal launcher', 'installer hook file is missing'])
+}
 if (plugin.version !== expected) failures.push(['Codex plugin manifest', plugin.version])
 if (sdkVersion !== '1.29.0') failures.push(['MCP SDK pin', `${sdkVersion ?? 'missing'} (expected 1.29.0)`])
 if (!Array.isArray(securityExceptions.exceptions)

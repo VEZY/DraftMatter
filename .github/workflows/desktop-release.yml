@@ -179,7 +179,7 @@ jobs:
           npm run build:desktop-sidecars -- ${{ matrix.target }} ${{ matrix.bunTarget }}
 
       - name: Prepare release configuration
-        run: node -e "require('node:fs').writeFileSync('src-tauri/tauri.release.conf.json', JSON.stringify({ bundle: { externalBin: ['binaries/draftmatter-mcp', 'binaries/draftmatter-agent-host'] } }, null, 2))"
+        run: node -e "require('node:fs').writeFileSync('src-tauri/tauri.release.conf.json', JSON.stringify({ bundle: { externalBin: ['binaries/draftmatter-mcp', 'binaries/draftmatter-agent-host'], windows: { nsis: { installerHooks: './windows/installer-hooks.nsh' } } } }, null, 2))"
 
       - name: Import Windows Authenticode certificate
         if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'windows-latest'
@@ -193,7 +193,7 @@ jobs:
           [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
           $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
           Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
-          $config = @{ bundle = @{ externalBin = @('binaries/draftmatter-mcp', 'binaries/draftmatter-agent-host'); windows = @{ certificateThumbprint = $env:WINDOWS_CERTIFICATE_THUMBPRINT; digestAlgorithm = 'sha256'; timestampUrl = 'http://timestamp.digicert.com' } } }
+          $config = @{ bundle = @{ externalBin = @('binaries/draftmatter-mcp', 'binaries/draftmatter-agent-host'); windows = @{ certificateThumbprint = $env:WINDOWS_CERTIFICATE_THUMBPRINT; digestAlgorithm = 'sha256'; timestampUrl = 'http://timestamp.digicert.com'; nsis = @{ installerHooks = './windows/installer-hooks.nsh' } } } }
           $config | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 'src-tauri/tauri.release.conf.json'
 
       - name: Build unsigned release candidate bundles

@@ -19,6 +19,14 @@ contains a target-native `draftmatter-mcp` standalone sidecar and
 separately. Tagged releases also attach one platform-neutral
 `draftmatter-<version>.tgz` archive and verified release metadata.
 
+The installed application executable also dispatches terminal subcommands to
+the bundled CLI. Linux packages expose it through `/usr/bin/draftmatter`; the
+Windows NSIS installer adds its per-user install directory to `PATH` and removes
+it again on uninstall. On macOS, the regular application remains directly
+launchable from Terminal with `open -a DraftMatter`, while the platform-neutral
+CLI archive provides the `draftmatter` shell command for users who want the full
+terminal surface.
+
 ## Reproducible release checks
 
 Run from a clean checkout:
@@ -76,8 +84,9 @@ Unsigned or unnotarized desktop artifacts must be labelled development builds an
 - **Citations:** reports local Zotero availability, Crossref/offline failures, citation-lock conflicts, and cached metadata state without logging manuscript content or credentials.
 - **Collaboration:** reports sign-in/discovery failures, live/reconnecting state, active presence, pending owner checkpoint state, invitation/member activity, and named recovery status. Access and refresh tokens remain memory-only. A one-use invitation may be held in origin-scoped session storage only for the bounded OIDC redirect, then is removed on callback; all of these secrets remain absent from public metrics/logs.
 - **AI assistant connections:** works without a project and reports client
-  detection, user/device-wide MCP and skill state, registration method,
-  previewed Install/Update/Repair/Remove changes, and advanced commands.
+  detection and a plain connected/not-connected state. Connect, update, and
+  reconnect are one action; disconnect is confirmed. File-level state and
+  advanced commands remain available in collapsed troubleshooting details.
 - **Project AI status:** separately reports instruction/skill/manifest state,
   protocol and skill versions, project enablement, session-only execution
   trust, runtime readiness, and request-scoped network state. Neither check

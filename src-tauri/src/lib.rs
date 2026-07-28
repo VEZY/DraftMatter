@@ -3518,6 +3518,36 @@ pub fn run() {
         .expect("error while running DraftMatter");
 }
 
+pub fn run_cli_if_requested() -> Option<i32> {
+    let arguments = std::env::args().skip(1).collect::<Vec<_>>();
+    let command = arguments.first()?.as_str();
+    if !matches!(
+        command,
+        "open"
+            | "render"
+            | "review-report"
+            | "report"
+            | "agent"
+            | "mcp"
+            | "assistants"
+            | "ai"
+            | "help"
+            | "--help"
+            | "-h"
+            | "--version"
+            | "-v"
+    ) {
+        return None;
+    }
+    Some(match assistant_connections::run_bundled_cli(&arguments) {
+        Ok(code) => code,
+        Err(error) => {
+            eprintln!("DraftMatter could not start its terminal command: {error}");
+            1
+        }
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

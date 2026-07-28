@@ -6,19 +6,41 @@ function harness(source = identicalSource) {
   const stdout: string[] = []
   const stderr: string[] = []
   const writes: Array<{ path: string; content: string }> = []
+  const opened: Array<string | undefined> = []
   const io: DraftMatterCliIo = {
     async readText() { return source },
     async writeText(path, content) {
       if (path === '-') stdout.push(content)
       else writes.push({ path, content })
     },
+    async openApplication(projectPath) { opened.push(projectPath) },
     stdout(content) { stdout.push(content) },
     stderr(content) { stderr.push(content) },
   }
-  return { io, stdout, stderr, writes }
+  return { io, stdout, stderr, writes, opened }
 }
 
 describe('DraftMatter CLI', () => {
+  it('opens like a regular application with no command or with one project folder', async () => {
+    const result = harness()
+    expect(await runDraftMatterCli([], result.io)).toBe(0)
+    expect(await runDraftMatterCli(['open', '/research/paper'], result.io)).toBe(0)
+    expect(result.opened).toEqual([undefined, '/research/paper'])
+    expect(result.stdout).toEqual([])
+    expect(result.stderr).toEqual([])
+  })
+
+  it('keeps the default help short and puts integration commands in advanced help', async () => {
+    const basic = harness()
+    expect(await runDraftMatterCli(['--help'], basic.io)).toBe(0)
+    expect(basic.stdout.join('')).toContain('draftmatter open [project-folder]')
+    expect(basic.stdout.join('')).not.toContain('draftmatter mcp')
+
+    const advanced = harness()
+    expect(await runDraftMatterCli(['help', 'advanced'], advanced.io)).toBe(0)
+    expect(advanced.stdout.join('')).toContain('draftmatter mcp --stdio')
+  })
+
   it('emits a clean Original projection to standard output', async () => {
     const result = harness()
     expect(await runDraftMatterCli(['render', 'paper.qmd', '--view', 'original'], result.io)).toBe(0)

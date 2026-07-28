@@ -8,8 +8,8 @@ Setup has two independent scopes:
 
 | Scope | Frequency | What it changes |
 | --- | --- | --- |
-| **Connect AI assistants** | Once per computer and client | Registers DraftMatter's bundled MCP server and canonical authoring skill with Codex, Claude Code, GitHub Copilot, or Mistral Vibe |
-| **Enable AI for this project** | Once per project | Adds managed instruction pointers and a schema-2 project enablement manifest; optionally adds a portable skill fallback |
+| **Connect an AI assistant** | Once per computer and client | Lets Codex, Claude Code, GitHub Copilot, or Mistral Vibe use DraftMatter's bundled authoring tools |
+| **Allow assistant access** | Once per project | Lets a connected assistant work with that project through DraftMatter |
 
 Neither operation contacts a model, runs manuscript code, grants project
 execution trust, enables Zotero/Crossref network access, or pre-approves future
@@ -27,10 +27,13 @@ This area works without an open project. For each supported client it reports:
   configuration;
 - the exact files and configuration entries an action would change.
 
-**Install**, **Update**, **Repair**, and **Remove** always show a preview first.
-DraftMatter merges only its named entry or marked files and preserves unrelated
-client configuration. The MCP executable and execution host are sidecars in the
-DraftMatter application bundle; there is no separate MCP installation.
+**Connect**, **Update connection**, and **Reconnect** apply in one action.
+**Disconnect** keeps a confirmation step. Implementation details stay collapsed
+unless the user opens them. DraftMatter changes only its named entry or managed
+files and preserves unrelated client configuration. The MCP executable and
+execution host are sidecars in the DraftMatter application bundle; there is no
+separate MCP installation. If the assistant was already running, the dialog asks
+the user to reopen it once so the new tool list is refreshed.
 
 Client registrations are user/device-wide:
 
@@ -64,12 +67,12 @@ explicit when a DraftMatter-owned path was edited outside DraftMatter.
 
 ## 2. Enable AI for one project
 
-Choose **Enable AI for this project** during project creation, from the
+Choose **Allow assistant access** during project creation, from the
 **Project** menu, or in the project's AI status dialog. DraftMatter also offers
 this action after opening a project when at least one assistant is connected
 but that project has not been enabled.
 
-Previewing project enablement shows only project-wide files:
+Project enablement changes only project-wide files:
 
 - a managed DraftMatter block merged into `AGENTS.md`;
 - a small `CLAUDE.md` forwarding block where useful;

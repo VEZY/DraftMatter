@@ -153,13 +153,15 @@ The synthetic article exercises:
 - one tracked suggestion and one comment thread;
 - clean HTML, PDF, DOCX, and Markdown projection.
 
-Opening the example never executes its code. Copy the fixture folder elsewhere and open it as a trusted desktop project when you want to run the cells.
+Opening the example never executes its code. The fixture is already prepared for a connected assistant; running cells and searching online sources still require separate approval.
 
 ## Clean export CLI
 
 The build produces a dependency-free Node.js command and minimal package in `dist-cli`. It uses the same review projector and inert native HTML renderer as the app and never executes manuscript code.
 
 ```sh
+draftmatter
+draftmatter open /path/to/research-project
 npm run build:cli
 node dist-cli/draftmatter.js render paper.qmd --view original -o original.qmd
 node dist-cli/draftmatter.js render paper.qmd --view final --select dm-change-id -o final.qmd
@@ -169,6 +171,8 @@ npm run pack:cli
 ```
 
 Final rendering exits with status `2` and writes no output when overlapping proposals still need a choice. The diagnostic lists every conflict and candidate; pass one `--select` ID from each conflict. Use `-` for standard input or output. Installing the generated `draftmatter-<version>.tgz` archive globally exposes the command as `draftmatter`.
+
+The installed Linux application and Windows setup also expose `draftmatter`: with no arguments it opens the app, and with CLI arguments it forwards to the bundled command. A macOS app can always be opened from Terminal with `open -a DraftMatter`; the platform-neutral CLI package provides the same `draftmatter` command when a shell command is preferred.
 
 ## Verification
 

@@ -13,6 +13,7 @@ import { projectPortableReviewSource } from './reviewProjector'
 export interface DraftMatterCliIo {
   readText(path: string): Promise<string>
   writeText(path: string, content: string): Promise<void>
+  openApplication(projectPath?: string): Promise<void>
   stdout(content: string): void
   stderr(content: string): void
 }
@@ -61,16 +62,32 @@ interface AssistantsCommand {
   apply: boolean
 }
 
-type ParsedCommand = RenderCommand | ReportCommand | AgentCommand | McpCommand | AiCommand | AssistantsCommand | { command: 'agent-schema' } | { command: 'help' } | { command: 'version' }
+interface OpenCommand {
+  command: 'open'
+  projectPath?: string
+}
+
+type ParsedCommand = RenderCommand | ReportCommand | AgentCommand | McpCommand | AiCommand | AssistantsCommand | OpenCommand | { command: 'agent-schema' } | { command: 'help' } | { command: 'advanced-help' } | { command: 'version' }
 
 const HELP = `DraftMatter ${packageMetadata.version}
 
-Create clean, inert projections from portable Markdown or Quarto manuscripts.
+Open DraftMatter:
+  draftmatter
+  draftmatter open [project-folder]
 
-Usage:
+Work with a manuscript:
   draftmatter render <input> [--view original|final] [--format markdown|html]
                      [--select <change-id>[,<change-id>...]] [--output <path>]
   draftmatter review-report <input> [--output <path>]
+
+More:
+  draftmatter help advanced
+  draftmatter --version
+`
+
+const ADVANCED_HELP = `DraftMatter ${packageMetadata.version} · advanced commands
+
+Usage:
   draftmatter agent --request <path|-> [--project-root <path>]
   draftmatter agent schema
   draftmatter mcp --stdio [--project-root <path>]
@@ -81,7 +98,6 @@ Usage:
   draftmatter ai doctor --json [--project-root <path>]
   draftmatter ai update [--project-root <path>] [--apply]
   draftmatter ai disable [--project-root <path>] [--apply]
-  draftmatter --help
 
 Use - as the input or output path for standard input or standard output. Final
 rendering fails closed until exactly one proposal is selected in every unresolved
@@ -312,10 +328,16 @@ function parseAssistants(arguments_: string[]): ParsedCommand | { error: string 
 }
 
 function parseCommand(arguments_: string[]): ParsedCommand | { error: string } {
-  if (!arguments_.length) return argumentError('Choose a command.')
+  if (!arguments_.length) return { command: 'open' }
   const [command, ...rest] = arguments_
-  if (command === '--help' || command === '-h' || command === 'help') return { command: 'help' }
+  if (command === '--help' || command === '-h') return { command: 'help' }
+  if (command === 'help') return rest[0] === 'advanced' ? { command: 'advanced-help' } : { command: 'help' }
   if (command === '--version' || command === '-v') return { command: 'version' }
+  if (command === 'open') {
+    if (rest.length > 1) return argumentError('The open command accepts one project folder.')
+    if (rest[0] === '--help' || rest[0] === '-h') return { command: 'help' }
+    return { command: 'open', ...(rest[0] ? { projectPath: rest[0] } : {}) }
+  }
   if (command === 'render') return parseRender(rest)
   if (command === 'review-report' || command === 'report') return parseReport(rest)
   if (command === 'agent') return parseAgent(rest)
@@ -372,9 +394,22 @@ export async function runDraftMatterCli(arguments_: string[], io: DraftMatterCli
     io.stdout(HELP)
     return 0
   }
+  if (parsed.command === 'advanced-help') {
+    io.stdout(ADVANCED_HELP)
+    return 0
+  }
   if (parsed.command === 'version') {
     io.stdout(`${packageMetadata.version}\n`)
     return 0
+  }
+  if (parsed.command === 'open') {
+    try {
+      await io.openApplication(parsed.projectPath)
+      return 0
+    } catch {
+      io.stderr('DraftMatter could not be opened. Make sure the DraftMatter desktop app is installed, then try again.\n')
+      return 1
+    }
   }
   if (parsed.command === 'agent-schema') {
     io.stdout(`${JSON.stringify(agentSchemaDocument())}\n`)

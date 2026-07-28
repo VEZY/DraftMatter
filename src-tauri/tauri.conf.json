@@ -39,6 +39,11 @@
     "category": "Productivity",
     "shortDescription": "A living manuscript for research",
     "longDescription": "Local-first scientific writing, citations, executable results, review, and explicit versioning.",
+    "windows": {
+      "nsis": {
+        "installerHooks": "./windows/installer-hooks.nsh"
+      }
+    },
     "macOS": {
       "signingIdentity": "-"
     }

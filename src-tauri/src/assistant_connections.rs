@@ -41,40 +41,12 @@ pub(crate) fn bundled_assistant_cli() -> Result<PathBuf, HostError> {
 }
 
 fn run_assistant_cli(arguments: &[String]) -> Result<Value, HostError> {
-    let executable = bundled_assistant_cli()?;
-    let javascript_bundle = executable.extension().is_some_and(|extension| extension == "js");
-    let mut command = if javascript_bundle {
-        let mut command = Command::new("node");
-        command.arg(&executable);
-        command
-    } else {
-        Command::new(&executable)
-    };
-    let output = command
-        .args(arguments)
-        .env(
-            "DRAFTMATTER_BUNDLED_MCP_COMMAND",
-            if javascript_bundle {
-                std::ffi::OsStr::new("node")
-            } else {
-                executable.as_os_str()
-            },
-        )
-        .env(
-            "DRAFTMATTER_BUNDLED_MCP_ARGS",
-            if javascript_bundle {
-                serde_json::to_string(&vec![executable.to_string_lossy().into_owned()])
-                    .map_err(|error| HostError::Integration(error.to_string()))?
-            } else {
-                "[]".to_string()
-            },
-        )
-        .output()
-        .map_err(|error| {
-            HostError::Integration(format!(
-                "Could not start the bundled DraftMatter assistant installer: {error}"
-            ))
-        })?;
+    let mut command = bundled_cli_command()?;
+    let output = command.args(arguments).output().map_err(|error| {
+        HostError::Integration(format!(
+            "Could not start the bundled DraftMatter assistant installer: {error}"
+        ))
+    })?;
     let stdout = String::from_utf8(output.stdout).map_err(|_| {
         HostError::Integration(
             "The bundled DraftMatter assistant installer returned non-UTF-8 output.".to_string(),
@@ -97,6 +69,51 @@ fn run_assistant_cli(arguments: &[String]) -> Result<Value, HostError> {
         }));
     }
     Ok(value)
+}
+
+fn bundled_cli_command() -> Result<Command, HostError> {
+    let executable = bundled_assistant_cli()?;
+    let javascript_bundle = executable
+        .extension()
+        .is_some_and(|extension| extension == "js");
+    let mut command = if javascript_bundle {
+        let mut command = Command::new("node");
+        command.arg(&executable);
+        command
+    } else {
+        Command::new(&executable)
+    };
+    command
+        .env(
+            "DRAFTMATTER_BUNDLED_MCP_COMMAND",
+            if javascript_bundle {
+                std::ffi::OsStr::new("node")
+            } else {
+                executable.as_os_str()
+            },
+        )
+        .env(
+            "DRAFTMATTER_BUNDLED_MCP_ARGS",
+            if javascript_bundle {
+                serde_json::to_string(&vec![executable.to_string_lossy().into_owned()])
+                    .map_err(|error| HostError::Integration(error.to_string()))?
+            } else {
+                "[]".to_string()
+            },
+        );
+    Ok(command)
+}
+
+pub(crate) fn run_bundled_cli(arguments: &[String]) -> Result<i32, HostError> {
+    let status = bundled_cli_command()?
+        .args(arguments)
+        .status()
+        .map_err(|error| {
+            HostError::Integration(format!(
+                "Could not start the bundled DraftMatter command: {error}"
+            ))
+        })?;
+    Ok(status.code().unwrap_or(1))
 }
 
 pub(crate) fn assistant_connections_status_impl() -> Result<Value, HostError> {
@@ -141,7 +158,9 @@ mod tests {
     #[test]
     fn development_bundle_resolves_without_a_project() {
         let path = bundled_assistant_cli().unwrap();
-        assert!(path.ends_with("draftmatter.js") || path.ends_with(executable_name("draftmatter-mcp")));
+        assert!(
+            path.ends_with("draftmatter.js") || path.ends_with(executable_name("draftmatter-mcp"))
+        );
     }
 
     #[test]

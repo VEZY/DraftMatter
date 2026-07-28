@@ -6,6 +6,11 @@ import { describe, expect, it } from 'vitest'
 
 const workflow = readFileSync('.github/workflows/desktop-release.yml', 'utf8')
 const portabilityWorkflow = readFileSync('.github/workflows/desktop-portability.yml', 'utf8')
+const desktopMain = readFileSync('src-tauri/src/main.rs', 'utf8')
+const windowsInstallerHooks = readFileSync('src-tauri/windows/installer-hooks.nsh', 'utf8')
+const tauriConfig = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8')) as {
+  bundle?: { windows?: { nsis?: { installerHooks?: string } } }
+}
 const version = JSON.parse(readFileSync('package.json', 'utf8')).version as string
 
 describe('DM-P5-08 production release pipeline', () => {
@@ -68,5 +73,13 @@ describe('DM-P5-08 production release pipeline', () => {
     expect(workflow).toContain('npm pack ./dist-cli --pack-destination release-cli')
     expect(workflow).toContain("-name 'draftmatter-*.tgz'")
     expect(workflow).toContain('needs: [build, cli]')
+  })
+
+  it('makes the installed application executable available from a terminal', () => {
+    expect(desktopMain).toContain('run_cli_if_requested')
+    expect(tauriConfig.bundle?.windows?.nsis?.installerHooks).toBe('./windows/installer-hooks.nsh')
+    expect(windowsInstallerHooks).toContain('WriteRegExpandStr HKCU "Environment" "Path"')
+    expect(windowsInstallerHooks).toContain('DeleteRegKey HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\draftmatter.exe"')
+    expect(workflow).toContain("installerHooks: './windows/installer-hooks.nsh'")
   })
 })
