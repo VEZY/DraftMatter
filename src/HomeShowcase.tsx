@@ -498,23 +498,15 @@ export function HomeHeroPreview() {
 
     let dismissed = false
     const dismissCue = () => {
-      if (dismissed) return
+      if (dismissed || preview.scrollTop <= 0) return
       dismissed = true
       setShowScrollCue(false)
     }
 
     preview.addEventListener('scroll', dismissCue, { passive: true })
-    preview.addEventListener('wheel', dismissCue, { passive: true })
-    preview.addEventListener('touchstart', dismissCue, { passive: true })
-    preview.addEventListener('pointerdown', dismissCue, { passive: true })
-    preview.addEventListener('keydown', dismissCue)
 
     return () => {
       preview.removeEventListener('scroll', dismissCue)
-      preview.removeEventListener('wheel', dismissCue)
-      preview.removeEventListener('touchstart', dismissCue)
-      preview.removeEventListener('pointerdown', dismissCue)
-      preview.removeEventListener('keydown', dismissCue)
     }
   }, [])
 

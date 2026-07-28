@@ -27,7 +27,10 @@ test.describe('signed-out Home landing experience', () => {
     await expect(paper).toHaveJSProperty('scrollTop', 0)
     await expect(cue).toBeVisible()
 
-    await paper.dispatchEvent('wheel')
+    await paper.click({ position: { x: 20, y: 20 } })
+    await expect(cue).toBeVisible()
+
+    await paper.evaluate((element) => { element.scrollTop = 40 })
     await expect(cue).toHaveCount(0)
   })
 
