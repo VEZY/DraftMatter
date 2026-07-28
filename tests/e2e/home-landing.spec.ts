@@ -42,16 +42,17 @@ test.describe('signed-out Home landing experience', () => {
     await expect(page.getByRole('heading', { level: 1 })).toHaveText('Your paper should be as reproducible as your research.')
     await expect(page.getByText('Research writing, with the missing pieces built in.', { exact: true })).toBeVisible()
     await expect(page.getByRole('heading', { level: 2, name: 'AI integration, on your terms' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Start a new paper' })).toBeVisible()
-    await expect(page.getByRole('button', { name: 'Explore the complete example' })).toBeVisible()
+    await expect(page.getByRole('link', { name: /Request alpha access|Follow alpha progress/ }).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'See how it works' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'View the source' })).toBeVisible()
 
     const assistantFeature = page.locator('.home-ai-connect')
     await expect(assistantFeature.getByRole('link', { name: 'Open the OpenAI Codex product page' })).toHaveAttribute('href', 'https://openai.com/codex/')
     await expect(assistantFeature.getByRole('link', { name: 'Open the Claude Code product page' })).toHaveAttribute('href', 'https://claude.com/product/claude-code')
     await expect(assistantFeature.getByRole('link', { name: 'Open the Mistral Vibe Code product page' })).toHaveAttribute('href', 'https://mistral.ai/products/vibe/code/')
-    const brandFills = await page.evaluate(async () => await Promise.all(
-      ['/ai-openai.svg', '/ai-claude-code.svg', '/ai-mistral.svg'].map(async (path) => {
-        const source = await (await fetch(path)).text()
+    const brandFills = await assistantFeature.locator('.home-ai-brands img').evaluateAll(async (images) => await Promise.all(
+      images.map(async (image) => {
+        const source = await (await fetch((image as HTMLImageElement).src)).text()
         return source.match(/fill="([^"]+)"/)?.[1]
       }),
     ))
@@ -94,18 +95,20 @@ test.describe('signed-out Home landing experience', () => {
         paragraphSize: Number.parseFloat(getComputedStyle(paragraph).fontSize),
         paragraphLineHeight: Number.parseFloat(getComputedStyle(paragraph).lineHeight),
         paperBorder: getComputedStyle(paper).borderTopStyle,
-        abstractBorder: getComputedStyle(abstract).borderTopStyle,
+        abstractBackground: getComputedStyle(abstract).backgroundColor,
       }
     })
     expect(paperVisual.horizontalInset).toBeGreaterThanOrEqual(40)
     expect(paperVisual.titleSize / paperVisual.paragraphSize).toBeGreaterThan(1.25)
     expect(paperVisual.paragraphLineHeight / paperVisual.paragraphSize).toBeGreaterThan(1.65)
     expect(paperVisual.paperBorder).toBe('solid')
-    expect(paperVisual.abstractBorder).toBe('solid')
+    expect(paperVisual.abstractBackground).toBe('rgb(255, 255, 255)')
 
     await page.getByRole('button', { name: 'See how it works' }).click()
-    const surface = page.locator('.home-welcome')
-    await expect.poll(() => surface.evaluate((element) => element.scrollTop)).toBeGreaterThan(0)
+    await expect.poll(() => page.evaluate(() => Math.max(
+      window.scrollY,
+      document.querySelector<HTMLElement>('.home-welcome')?.scrollTop ?? 0,
+    ))).toBeGreaterThan(0)
     await expect(page.locator('#home-showcase')).toBeInViewport()
 
     const demo = page.locator('.home-workspace-demo')

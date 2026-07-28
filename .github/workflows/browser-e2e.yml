@@ -29,7 +29,9 @@ jobs:
         run: npx playwright install --with-deps chromium
 
       - name: Run browser end-to-end and visual checks
-        run: npm run test:e2e
+        run: |
+          npm run test:e2e
+          npm run test:e2e:website
 
       - name: Upload failure evidence
         if: failure()
@@ -38,5 +40,6 @@ jobs:
           name: playwright-failure-evidence
           path: |
             test-results/playwright
+            test-results/playwright-website
             test-results/playwright-report
           if-no-files-found: ignore

@@ -2,10 +2,12 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests/e2e',
+  testIgnore: 'home-landing.spec.ts',
   outputDir: 'test-results/playwright',
   snapshotPathTemplate: '{testDir}/{testFilePath}-snapshots/{arg}{ext}',
   fullyParallel: true,
   forbidOnly: Boolean(process.env.CI),
+  workers: process.env.CI ? 2 : undefined,
   retries: process.env.CI ? 2 : 0,
   reporter: process.env.CI
     ? [['line'], ['html', { outputFolder: 'test-results/playwright-report', open: 'never' }]]
