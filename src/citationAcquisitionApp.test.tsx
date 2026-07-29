@@ -46,14 +46,6 @@ function buttonContaining(container: ParentNode, text: string) {
     .find((button) => button.textContent?.includes(text))!
 }
 
-async function settleUntil(predicate: () => boolean, timeoutMs = 12_000) {
-  const deadline = Date.now() + timeoutMs
-  while (!predicate()) {
-    if (Date.now() >= deadline) throw new Error(`Condition was not met within ${timeoutMs}ms`)
-    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 50)) })
-  }
-}
-
 describe('rendered portable citation acquisition', () => {
   let container: HTMLDivElement
   let appRoot: ReturnType<typeof createRoot>
@@ -201,15 +193,20 @@ describe('rendered portable citation acquisition', () => {
     const intake = container.querySelector('textarea[aria-label="Paste DOI, BibTeX, RIS/EndNote, or CSL JSON"]')!
     await paste(intake, '@article{sharedKey, title={Independent imported evidence}, author={Chen, Marcus}, year={2025}}')
     await act(async () => buttonContaining(container, 'Stage selected').click())
+    expect(container.textContent).toContain('Independent imported evidence')
 
-    const search = container.querySelector<HTMLInputElement>('input[aria-label="Search citation sources"]')!
-    await enter(search, 'independent')
-    const findZoteroResult = () => [...container.querySelectorAll<HTMLButtonElement>('.source-result')]
-      .find((button) => button.textContent?.includes('Independent Zotero evidence'))
-    await settleUntil(() => findZoteroResult()?.textContent?.includes('@sharedKey-2') ?? false)
-    const zoteroResult = findZoteroResult()!
-    expect(zoteroResult.textContent).toContain('@sharedKey-2')
-    await act(async () => zoteroResult.click())
+    vi.useFakeTimers()
+    try {
+      const search = container.querySelector<HTMLInputElement>('input[aria-label="Search citation sources"]')!
+      await enter(search, 'independent')
+      await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+      const zoteroResult = [...container.querySelectorAll<HTMLButtonElement>('.source-result')]
+        .find((button) => button.textContent?.includes('Independent Zotero evidence'))!
+      expect(zoteroResult.textContent).toContain('@sharedKey-2')
+      await act(async () => zoteroResult.click())
+    } finally {
+      vi.useRealTimers()
+    }
     await act(async () => {
       container.querySelector<HTMLButtonElement>('.confirm-citation')!.click()
       await new Promise((resolve) => window.setTimeout(resolve, 0))

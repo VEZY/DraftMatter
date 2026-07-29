@@ -34,6 +34,6 @@ test('migrates the second sample introduction paragraph into an editable block',
     selection.removeAllRanges()
     selection.addRange(range)
   }, continuation)
-  await page.keyboard.type(' Additional editable note.')
+  await page.keyboard.insertText(' Additional editable note.')
   await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toContain('Additional editable note.')
 })
