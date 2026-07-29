@@ -1,11 +1,17 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { setTimeout as delay } from 'node:timers/promises'
 import * as Y from 'yjs'
 import { CollaborationOperationsDashboard } from './operations'
 import type { CollaborationPersistence } from './persistence'
 
 const SAFE_ID = /^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/
+const TRANSIENT_RENAME_CODES = new Set(['EACCES', 'EBUSY', 'EPERM'])
+const MAX_RENAME_RETRIES = 7
+
+type RenameFile = (oldPath: string, newPath: string) => Promise<void>
+type RetryDelay = (milliseconds: number) => Promise<void>
 
 export interface CollaborationProjectScope {
   workspaceId: string
@@ -51,6 +57,8 @@ export interface FileCollaborationStoreOptions {
   compactAfterBytes?: number
   maxUpdateBytes?: number
   dashboard?: CollaborationOperationsDashboard
+  renameFile?: RenameFile
+  retryDelay?: RetryDelay
 }
 
 export interface SnapshotLifecyclePolicy {
@@ -98,6 +106,8 @@ export class FileCollaborationStore implements CollaborationPersistence {
   private readonly compactAfterUpdates: number
   private readonly compactAfterBytes: number
   private readonly maxUpdateBytes: number
+  private readonly renameFile: RenameFile
+  private readonly retryDelay: RetryDelay
   readonly dashboard: CollaborationOperationsDashboard
 
   constructor(options: FileCollaborationStoreOptions) {
@@ -107,6 +117,8 @@ export class FileCollaborationStore implements CollaborationPersistence {
     this.compactAfterUpdates = options.compactAfterUpdates ?? 128
     this.compactAfterBytes = options.compactAfterBytes ?? 2 * 1024 * 1024
     this.maxUpdateBytes = options.maxUpdateBytes ?? 4 * 1024 * 1024
+    this.renameFile = options.renameFile ?? rename
+    this.retryDelay = options.retryDelay ?? delay
     this.dashboard = options.dashboard ?? new CollaborationOperationsDashboard()
   }
 
@@ -132,7 +144,16 @@ export class FileCollaborationStore implements CollaborationPersistence {
     await mkdir(dirname(path), { recursive: true })
     const temporary = `${path}.tmp-${safeId(this.idFactory(), 'Temporary ID')}`
     await writeFile(temporary, bytes)
-    await rename(temporary, path)
+    for (let attempt = 0; ; attempt += 1) {
+      try {
+        await this.renameFile(temporary, path)
+        return
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code
+        if (attempt >= MAX_RENAME_RETRIES || !code || !TRANSIENT_RENAME_CODES.has(code)) throw error
+        await this.retryDelay(10 * 2 ** attempt)
+      }
+    }
   }
 
   private initialMetadata(scope: CollaborationProjectScope): StoredProjectMetadata {

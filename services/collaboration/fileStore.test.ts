@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rename, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, describe, expect, it } from 'vitest'
@@ -32,6 +32,29 @@ function updateFixture() {
 }
 
 describe('durable collaboration file store', () => {
+  it('retries transient Windows locks while atomically replacing metadata', async () => {
+    let attempts = 0
+    const delays: number[] = []
+    const persistence = await store({
+      renameFile: async (oldPath, newPath) => {
+        attempts += 1
+        if (attempts < 3) throw Object.assign(new Error('File is temporarily locked.'), { code: 'EPERM' })
+        await rename(oldPath, newPath)
+      },
+      retryDelay: async (milliseconds) => {
+        delays.push(milliseconds)
+      },
+    })
+    const fixture = updateFixture()
+
+    await persistence.appendUpdate(scope, fixture.first)
+
+    expect(attempts).toBe(4)
+    expect(delays).toEqual([10, 20])
+    await expect(persistence.load(scope)).resolves.toMatchObject({ updates: [expect.any(Uint8Array)] })
+    fixture.document.destroy()
+  })
+
   it('atomically persists and compacts incremental Yjs updates', async () => {
     const persistence = await store({ compactAfterUpdates: 2 })
     const fixture = updateFixture()
