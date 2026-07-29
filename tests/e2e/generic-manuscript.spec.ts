@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test'
+import { expect, test, type Page } from '@playwright/test'
 
 const source = `---
 title: "Portable field notes"
@@ -47,6 +47,19 @@ println("before")
 Keep this opaque block exactly.
 :::
 `
+
+async function reloadWithPortableSource(page: Page, portableSource: string) {
+  await page.evaluate((nextSource) => {
+    sessionStorage.setItem('draftmatter.e2e-next-source', nextSource)
+  }, portableSource)
+  await page.addInitScript(() => {
+    const nextSource = sessionStorage.getItem('draftmatter.e2e-next-source')
+    if (nextSource === null) return
+    localStorage.setItem('draftmatter.structured-source.v1', nextSource)
+    sessionStorage.removeItem('draftmatter.e2e-next-source')
+  })
+  await page.reload()
+}
 
 test.describe('DM-P1-03 generic portable manuscript', () => {
   test.beforeEach(async ({ page }) => {
@@ -309,8 +322,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
 
   test('edits ordinary link metadata while preserving direct text editing', async ({ page }) => {
     const linkSource = '# Field links\n\nRead the [field protocol](https://example.test/protocol "Original protocol") before sampling.\n'
-    await page.evaluate((portableSource) => localStorage.setItem('draftmatter.structured-source.v1', portableSource), linkSource)
-    await page.reload()
+    await reloadWithPortableSource(page, linkSource)
 
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
     const link = manuscript.getByRole('link', { name: 'field protocol' })
@@ -358,8 +370,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
 
   test('adds a link from the formatting toolbar without a native browser prompt', async ({ page }) => {
     const linkSource = '# Field links\n\nOpen the field protocol before sampling.\n'
-    await page.evaluate((portableSource) => localStorage.setItem('draftmatter.structured-source.v1', portableSource), linkSource)
-    await page.reload()
+    await reloadWithPortableSource(page, linkSource)
 
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
     await manuscript.getByText('Open the field protocol before sampling.', { exact: true }).evaluate((element) => {

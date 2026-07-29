@@ -143,9 +143,10 @@ test.describe('DM-P5-01/02 native publication exports', () => {
 
     const rendered = await context.newPage()
     await rendered.setContent(html, { waitUntil: 'load' })
-    await expect(rendered).toHaveScreenshot('native-html-publication.png', { fullPage: true })
+    await rendered.setViewportSize({ width: 1440, height: 1400 })
+    await expect(rendered).toHaveScreenshot('native-html-publication.png')
     await rendered.emulateMedia({ media: 'print' })
-    await expect(rendered).toHaveScreenshot('native-print-publication.png', { fullPage: true })
+    await expect(rendered).toHaveScreenshot('native-print-publication.png')
     const pdfPath = testInfo.outputPath('native-publication.pdf')
     const pdf = await rendered.pdf({
       path: pdfPath,
