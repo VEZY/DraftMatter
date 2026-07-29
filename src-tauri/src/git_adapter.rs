@@ -1387,7 +1387,9 @@ mod tests {
         })
         .unwrap();
         assert_eq!(
-            fs::read_to_string(project.path().join("paper.qmd")).unwrap(),
+            fs::read_to_string(project.path().join("paper.qmd"))
+                .unwrap()
+                .replace("\r\n", "\n"),
             "one\n"
         );
         assert_eq!(status.entries.len(), 1);
@@ -1603,7 +1605,9 @@ mod tests {
         .unwrap();
         assert_eq!(pulled.action, "pull");
         assert_eq!(
-            fs::read_to_string(project.path().join("paper.qmd")).unwrap(),
+            fs::read_to_string(project.path().join("paper.qmd"))
+                .unwrap()
+                .replace("\r\n", "\n"),
             "pulled\n"
         );
     }
