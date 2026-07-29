@@ -413,12 +413,15 @@ describe('shared Jupyter execution workspace', () => {
 
   it('keeps Python and R formatter packages outside the application bundle', async () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
-    const environments = [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
-      .find((button) => button.textContent?.includes('Environments'))!
+    const findEnvironments = () => [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
+      .find((button) => button.textContent?.includes('Environments'))
+    await settleUntil(() => Boolean(findEnvironments()))
+    const environments = findEnvironments()!
     await act(async () => environments.click())
-    await settle(140)
+    await settleUntil(() => Boolean(container.querySelector('[aria-labelledby="execution-environment-title"]')))
 
     let dialog = container.querySelector<HTMLElement>('[aria-labelledby="execution-environment-title"]')!
+    await settleUntil(() => dialog.querySelector('.formatter-package-callout')?.textContent?.includes('Ruff 0.12.0 is available') ?? false)
     expect(dialog.querySelector('.formatter-package-callout')?.textContent).toContain('Ruff 0.12.0 is available')
     expect(dialog.querySelector('.formatter-package-callout')?.textContent).toContain('Repair Ruff')
     await act(async () => dialog.querySelector<HTMLButtonElement>('.formatter-package-callout button')!.click())
@@ -432,14 +435,18 @@ describe('shared Jupyter execution workspace', () => {
     const rRuntime = [...dialog.querySelectorAll<HTMLButtonElement>('.execution-environment-list button')]
       .find((button) => button.querySelector('strong')?.textContent === 'R')!
     await act(async () => rRuntime.click())
-    await settle(140)
+    await settleUntil(() => dialog.querySelector('.formatter-package-callout')?.textContent?.includes('styler 1.10.3 is available') ?? false)
     expect(dialog.querySelector('.formatter-package-callout')?.textContent).toContain('styler 1.10.3 is available')
   })
 
   it('keeps terminal history and shared kernel status when the bottom panel closes', async () => {
     const open = container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel terminal"]')
     if (open) await act(async () => open.click())
-    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent?.includes('Python'))!.click())
+    const findPythonTab = () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+      .find((tab) => tab.textContent?.includes('Python'))
+    await settleUntil(() => Boolean(findPythonTab()))
+    await act(async () => findPythonTab()!.click())
+    await settleUntil(() => Boolean(container.querySelector('[aria-label="Python terminal input"]')))
     const input = container.querySelector<HTMLTextAreaElement>('[aria-label="Python terminal input"]')!
     const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!
     await act(async () => {

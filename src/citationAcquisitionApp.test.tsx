@@ -182,13 +182,15 @@ describe('rendered portable citation acquisition', () => {
 
   it('acquires distinct imported and Zotero records even when their requested keys collide', async () => {
     vi.mocked(desktopHost.zoteroStatus).mockResolvedValue({ available: true, apiVersion: '3', schemaVersion: '31' })
-    vi.mocked(desktopHost.searchZotero).mockResolvedValue({
-      libraryVersion: '903',
-      items: [{
-        itemKey: 'ZOTERO-COLLISION', version: 5, itemType: 'journalArticle', title: 'Independent Zotero evidence',
-        creators: [{ creatorType: 'author', firstName: 'Alice', lastName: 'Martin' }], date: '2026', citationKey: 'sharedKey',
-      }],
-    })
+    vi.mocked(desktopHost.searchZotero).mockImplementation(async (query) => query === 'independent'
+      ? {
+          libraryVersion: '903',
+          items: [{
+            itemKey: 'ZOTERO-COLLISION', version: 5, itemType: 'journalArticle', title: 'Independent Zotero evidence',
+            creators: [{ creatorType: 'author', firstName: 'Alice', lastName: 'Martin' }], date: '2026', citationKey: 'sharedKey',
+          }],
+        }
+      : { libraryVersion: '903', items: [] })
     await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, shiftKey: true, bubbles: true })))
     const intake = container.querySelector('textarea[aria-label="Paste DOI, BibTeX, RIS/EndNote, or CSL JSON"]')!
     await paste(intake, '@article{sharedKey, title={Independent imported evidence}, author={Chen, Marcus}, year={2025}}')
