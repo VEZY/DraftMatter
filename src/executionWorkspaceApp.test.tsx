@@ -209,11 +209,14 @@ describe('shared Jupyter execution workspace', () => {
 
   it('adds a reproducible table from the code panel', async () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
-    const addTable = [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
-      .find((button) => button.textContent?.includes('Add reproducible table'))!
+    const findAddTable = () => [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
+      .find((button) => button.textContent?.includes('Add reproducible table'))
+    await settleUntil(() => Boolean(findAddTable()))
+    const addTable = findAddTable()!
     expect(addTable).toBeTruthy()
     await act(async () => addTable.click())
 
+    await settleUntil(() => Boolean(container.querySelector('[aria-labelledby="insert-block-title"]')))
     const dialog = container.querySelector<HTMLElement>('[aria-labelledby="insert-block-title"]')!
     expect(dialog.textContent).toContain('Add reproducible table')
     const language = dialog.querySelector<HTMLSelectElement>('select')!
@@ -391,8 +394,10 @@ describe('shared Jupyter execution workspace', () => {
 
   it('clean-runs setup first, restarts every language kernel, and never materializes setup output', async () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
-    const cleanRun = [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
-      .find((button) => button.textContent?.includes('Clean run'))!
+    const findCleanRun = () => [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
+      .find((button) => button.textContent?.includes('Clean run'))
+    await settleUntil(() => Boolean(findCleanRun()))
+    const cleanRun = findCleanRun()!
     await act(async () => cleanRun.click())
     await settle(220)
 
@@ -404,9 +409,12 @@ describe('shared Jupyter execution workspace', () => {
 
   it('shows only language environments and shared kernels', async () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
-    const environments = [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
-      .find((button) => button.textContent?.includes('Environments'))!
+    const findEnvironments = () => [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
+      .find((button) => button.textContent?.includes('Environments'))
+    await settleUntil(() => Boolean(findEnvironments()))
+    const environments = findEnvironments()!
     await act(async () => environments.click())
+    await settleUntil(() => Boolean(container.querySelector('[aria-labelledby="execution-environment-title"]')))
     const dialog = container.querySelector<HTMLElement>('[aria-labelledby="execution-environment-title"]')!
     expect(dialog.textContent).toContain('shared Jupyter kernel, no notebook server')
   })
