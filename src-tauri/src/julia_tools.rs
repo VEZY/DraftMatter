@@ -463,7 +463,8 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let executable = root.join("fake-julia");
-        let mut file = fs::File::create(&executable).unwrap();
+        let staged = root.join(".fake-julia.tmp");
+        let mut file = fs::File::create(&staged).unwrap();
         file.write_all(
             r#"#!/bin/sh
 project=""
@@ -499,7 +500,8 @@ esac
         .unwrap();
         file.sync_all().unwrap();
         drop(file);
-        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).unwrap();
+        fs::rename(staged, &executable).unwrap();
         executable
     }
 

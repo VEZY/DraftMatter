@@ -4,6 +4,7 @@
 
 ${StrStr}
 ${StrRep}
+${UnStrRep}
 
 !macro NSIS_HOOK_POSTINSTALL
   ReadRegStr $0 HKCU "Environment" "Path"
@@ -22,8 +23,8 @@ ${StrRep}
 
 !macro NSIS_HOOK_POSTUNINSTALL
   ReadRegStr $0 HKCU "Environment" "Path"
-  ${StrRep} $1 "$0" "$INSTDIR;" ""
-  ${StrRep} $2 "$1" ";$INSTDIR" ""
+  ${UnStrRep} $1 "$0" "$INSTDIR;" ""
+  ${UnStrRep} $2 "$1" ";$INSTDIR" ""
   ${If} $2 == "$INSTDIR"
     StrCpy $2 ""
   ${EndIf}

@@ -656,15 +656,17 @@ export function HomeShowcase() {
                       </div>
                       <p>
                         Recovery remained strongest in irrigated plots, consistent with earlier observations{' '}
-                        <span className="home-demo-citation-wrap">
+                        <span
+                          className="home-demo-citation-wrap"
+                          onMouseEnter={() => setCitationDetailsOpen(true)}
+                          onMouseLeave={() => setCitationDetailsOpen(false)}
+                        >
                           <button
                             type="button"
                             className="home-demo-citation is-preview-active"
                             aria-label="Reference details for Meyer and Okafor, 2025"
                             aria-expanded={citationDetailsOpen}
                             aria-controls="home-demo-citation-details"
-                            onMouseEnter={() => setCitationDetailsOpen(true)}
-                            onMouseLeave={() => setCitationDetailsOpen(false)}
                             onFocus={() => setCitationDetailsOpen(true)}
                             onBlur={() => setCitationDetailsOpen(false)}
                             onClick={() => setCitationDetailsOpen(true)}

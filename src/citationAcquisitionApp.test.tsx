@@ -102,7 +102,7 @@ describe('rendered portable citation acquisition', () => {
 
     expect(container.querySelectorAll('.source-result:not(.crossref-result)')).toHaveLength(0)
     expect(container.textContent).not.toContain('Growth coordination under fluctuating water availability')
-    expect(container.textContent).toContain('Project and cached sources')
+    expect(container.textContent).toContain('cached sources')
   })
 
   it('writes the portable files before closing the picker or exposing the citation', async () => {

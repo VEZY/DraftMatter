@@ -394,20 +394,25 @@ pub fn format_code_impl(
 mod tests {
     use super::*;
     use std::fs;
+    use std::io::Write;
     use tempfile::tempdir;
 
     #[cfg(unix)]
     fn fake_formatter(root: &Path) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let executable = root.join("fake-runtime");
-        fs::write(
-            &executable,
-            "#!/bin/sh\ncase \"$*\" in\n  *--version*) printf 'ruff 0.12.0\\n' ;;\n  *ruff*format*) sed 's/x=1/x = 1/' ;;\n  *styler::style_text*) sed 's/x<-1/x <- 1/' ;;\n  *) printf '0.12.0\\n' ;;\nesac\n",
+        let staged = root.join(".fake-runtime.tmp");
+        let mut file = fs::File::create(&staged).unwrap();
+        file.write_all(
+            b"#!/bin/sh\ncase \"$*\" in\n  *--version*) printf 'ruff 0.12.0\\n' ;;\n  *ruff*format*) sed 's/x=1/x = 1/' ;;\n  *styler::style_text*) sed 's/x<-1/x <- 1/' ;;\n  *) printf '0.12.0\\n' ;;\nesac\n",
         )
         .unwrap();
-        let mut permissions = fs::metadata(&executable).unwrap().permissions();
+        file.sync_all().unwrap();
+        drop(file);
+        let mut permissions = fs::metadata(&staged).unwrap().permissions();
         permissions.set_mode(0o755);
-        fs::set_permissions(&executable, permissions).unwrap();
+        fs::set_permissions(&staged, permissions).unwrap();
+        fs::rename(staged, &executable).unwrap();
         executable
     }
 
