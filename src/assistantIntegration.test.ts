@@ -155,7 +155,8 @@ describe('device-wide assistant connections', () => {
     })
     expect(updated).toMatchObject({ ok: true, applied: true })
     expect(updated.statusAfter?.connected).toBe(true)
-    expect(await readFile(join(options.homeDir, '.vibe', 'config.toml'), 'utf8')).toContain(movedBundle)
+    expect(await readFile(join(options.homeDir, '.vibe', 'config.toml'), 'utf8'))
+      .toContain(`command = ${JSON.stringify(movedBundle)}`)
   })
 
   it('keeps a PATH-resolved development launcher while preserving its script argument', async () => {

@@ -463,8 +463,8 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
 
         let executable = root.join("fake-julia");
-        fs::write(
-            &executable,
+        let mut file = fs::File::create(&executable).unwrap();
+        file.write_all(
             r#"#!/bin/sh
 project=""
 for argument in "$@"; do
@@ -493,9 +493,12 @@ case "$*" in
     printf 'x = 1\n'
     ;;
 esac
-"#,
+"#
+            .as_bytes(),
         )
         .unwrap();
+        file.sync_all().unwrap();
+        drop(file);
         fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
         executable
     }

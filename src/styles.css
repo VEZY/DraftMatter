@@ -5293,7 +5293,7 @@ kbd {
 .structured-link-edit:focus-visible { opacity: 1; }
 .structured-link-edit:disabled { cursor: default; opacity: 0; pointer-events: none; }
 .structured-link-dialog-backdrop { align-items: center; background: rgba(30, 38, 34, .24); display: flex; inset: 0; justify-content: center; padding: 18px; position: fixed; z-index: 190; }
-.structured-link-editor { background: #f8faf9; border: 1px solid #dfe5e1; border-radius: 8px; box-shadow: 0 20px 58px rgba(28, 37, 33, .2); display: grid; font-family: Inter, ui-sans-serif, sans-serif; gap: 9px; padding: 12px; width: min(440px, calc(100vw - 36px)); }
+.structured-link-editor { background: #f8faf9; border: 1px solid #dfe5e1; border-radius: 8px; box-shadow: 0 20px 58px rgba(28, 37, 33, .2); display: grid; font-family: Inter, ui-sans-serif, sans-serif; gap: 9px; min-height: 236px; padding: 12px; width: min(440px, calc(100vw - 36px)); }
 .structured-link-dialog-head { border-bottom: 1px solid #e2e7e4; display: flex; flex-direction: column; gap: 2px; padding: 1px 1px 8px; }
 .structured-link-dialog-head strong { color: #435149; font-size: 11px; }
 .structured-link-dialog-head small { color: #89938e; font-size: 8px; }

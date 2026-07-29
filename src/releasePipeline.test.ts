@@ -4,8 +4,8 @@ import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
 import { describe, expect, it } from 'vitest'
 
-const workflow = readFileSync('.github/workflows/desktop-release.yml', 'utf8')
-const portabilityWorkflow = readFileSync('.github/workflows/desktop-portability.yml', 'utf8')
+const workflow = readFileSync('.github/workflows/desktop-release.yml', 'utf8').replace(/\r\n/g, '\n')
+const portabilityWorkflow = readFileSync('.github/workflows/desktop-portability.yml', 'utf8').replace(/\r\n/g, '\n')
 const desktopMain = readFileSync('src-tauri/src/main.rs', 'utf8')
 const windowsInstallerHooks = readFileSync('src-tauri/windows/installer-hooks.nsh', 'utf8')
 const tauriConfig = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8')) as {

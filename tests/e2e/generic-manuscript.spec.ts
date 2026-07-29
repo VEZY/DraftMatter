@@ -1,4 +1,5 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test } from '@playwright/test'
+import { reloadWithPortableSource } from './portable-source'
 
 const source = `---
 title: "Portable field notes"
@@ -47,19 +48,6 @@ println("before")
 Keep this opaque block exactly.
 :::
 `
-
-async function reloadWithPortableSource(page: Page, portableSource: string) {
-  await page.evaluate((nextSource) => {
-    sessionStorage.setItem('draftmatter.e2e-next-source', nextSource)
-  }, portableSource)
-  await page.addInitScript(() => {
-    const nextSource = sessionStorage.getItem('draftmatter.e2e-next-source')
-    if (nextSource === null) return
-    localStorage.setItem('draftmatter.structured-source.v1', nextSource)
-    sessionStorage.removeItem('draftmatter.e2e-next-source')
-  })
-  await page.reload()
-}
 
 test.describe('DM-P1-03 generic portable manuscript', () => {
   test.beforeEach(async ({ page }) => {

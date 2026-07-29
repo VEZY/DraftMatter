@@ -153,12 +153,13 @@ export function extractExecutableCells(source: string): ExecutableCellResult {
     if (startOffset === undefined || endOffset === undefined || excluded.some((range) => startOffset >= range.start && startOffset < range.end)) return []
     const info = parseInfo(node)
     if (!info.language || !info.executable) return []
+    const normalizedSource = node.value.replace(/\r\n?/g, '\n')
     if (info.explicitId && !safeExplicitId(info.explicitId)) diagnostics.push({
       code: `execution-cell-id-invalid-${node.position?.start.line ?? startOffset}`,
       level: 'error',
       message: `Executable cell at line ${node.position?.start.line ?? '?'} has an unsafe explicit id and received a generated id.`,
     })
-    const baseId = safeExplicitId(info.explicitId) ?? `cell-${info.language}-${sourceHash(`${info.language}\u0000${node.value}`).slice(-12)}`
+    const baseId = safeExplicitId(info.explicitId) ?? `cell-${info.language}-${sourceHash(`${info.language}\u0000${normalizedSource}`).slice(-12)}`
     const occurrence = (ids.get(baseId.toLowerCase()) ?? 0) + 1
     ids.set(baseId.toLowerCase(), occurrence)
     const id = occurrence === 1 ? baseId : `${baseId}-${occurrence}`
@@ -170,8 +171,8 @@ export function extractExecutableCells(source: string): ExecutableCellResult {
     return [{
       id,
       language: info.language,
-      source: node.value,
-      sourceHash: sourceHash(node.value),
+      source: normalizedSource,
+      sourceHash: sourceHash(normalizedSource),
       role: cellRole(info.attributes),
       attributes: info.attributes,
       classes: info.classes,

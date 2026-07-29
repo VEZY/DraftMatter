@@ -26,6 +26,17 @@ describe('AST-based executable-cell extraction', () => {
     expect(first.position.startLine).not.toBe(moved.position.startLine)
   })
 
+  it('keeps executable source and identities stable across document line endings', () => {
+    const unix = extractExecutableCells('```{python}\nprint("stable")\n```').cells[0]
+    const windows = extractExecutableCells('```{python}\r\nprint("stable")\r\n```').cells[0]
+
+    expect(windows).toMatchObject({
+      id: unix.id,
+      source: unix.source,
+      sourceHash: unix.sourceHash,
+    })
+  })
+
   it('supports Quarto and Pandoc attribute forms while respecting explicit opt-out', () => {
     const result = extractExecutableCells([
       '```{python #quarto-python}',

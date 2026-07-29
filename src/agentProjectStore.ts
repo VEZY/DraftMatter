@@ -242,7 +242,7 @@ export class NodeAgentProjectStore implements AgentProjectStore {
         const stage = join(stagedPath, ...target.normalized.split('/'))
         await mkdir(dirname(stage), { recursive: true })
         await writeFile(stage, target.write.content, 'utf8')
-        const handle = await open(stage, 'r')
+        const handle = await open(stage, 'r+')
         try {
           await handle.sync()
         } finally {

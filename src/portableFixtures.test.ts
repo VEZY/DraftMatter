@@ -23,7 +23,7 @@ const sourceByFilename = new Map(
 )
 
 const featureChecks: Record<PortableFixtureFeature, (source: string) => boolean> = {
-  yaml: (source) => source.startsWith('---\n') && source.includes('\n---\n'),
+  yaml: (source) => /^---\r?\n/.test(source) && /\r?\n---\r?\n/.test(source),
   headings: (source) => /^#{1,6}[ \t]+\S/m.test(source),
   lists: (source) => /^(?:\s*[-+*]|\s*\d+[.)])\s+\S/m.test(source) || /^:\s+\S/m.test(source),
   citations: (source) => /\[[^\]]*@[a-zA-Z0-9_:.+-]+[^\]]*\]/.test(source),

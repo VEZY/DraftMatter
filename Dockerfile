@@ -1,4 +1,4 @@
-FROM node:22.23.1-bookworm-slim AS build
+FROM node:24.10.0-bookworm-slim AS build
 
 WORKDIR /app
 COPY package.json package-lock.json ./
@@ -7,7 +7,7 @@ COPY . .
 RUN npm run build:collaboration
 RUN npm prune --omit=dev
 
-FROM node:22.23.1-bookworm-slim AS runtime
+FROM node:24.10.0-bookworm-slim AS runtime
 
 ENV NODE_ENV=production
 WORKDIR /app

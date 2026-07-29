@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { reloadWithPortableSource } from './portable-source'
 
 const continuation = 'Reproducible writing environments can shorten the path between an observation, its supporting analysis, and the claim that enters the literature. This manuscript keeps those elements close without exposing the mechanics during ordinary reading.'
 
@@ -14,7 +15,7 @@ test('migrates the second sample introduction paragraph into an editable block',
   }, continuation)
   expect(legacySource).toContain('title: "Drought acclimation reshapes canopy development"')
   expect(legacySource).toContain('Plant architecture mediates the exchange of light, water, and carbon')
-  await page.reload()
+  await reloadWithPortableSource(page, legacySource)
 
   const paragraphState = await page.evaluate((text) => {
     const element = [...document.querySelectorAll('.structured-editor-content p')].find((candidate) => candidate.textContent === text)
