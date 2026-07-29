@@ -21,7 +21,7 @@ jobs:
           - label: Linux x64
             platform: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
-            args: --debug
+            args: --debug --bundles deb
           - label: Windows x64
             platform: windows-latest
             target: x86_64-pc-windows-msvc
