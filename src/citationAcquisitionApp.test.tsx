@@ -192,8 +192,14 @@ describe('rendered portable citation acquisition', () => {
     await act(async () => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, shiftKey: true, bubbles: true })))
     const intake = container.querySelector('textarea[aria-label="Paste DOI, BibTeX, RIS/EndNote, or CSL JSON"]')!
     await paste(intake, '@article{sharedKey, title={Independent imported evidence}, author={Chen, Marcus}, year={2025}}')
-    await act(async () => buttonContaining(container, 'Stage selected').click())
-    expect(container.textContent).toContain('Independent imported evidence')
+    await act(async () => {
+      buttonContaining(container, 'Stage selected').click()
+      await new Promise((resolve) => window.setTimeout(resolve, 0))
+    })
+    expect(container.querySelector('[aria-label="Citation import preview"]')).toBeNull()
+    const importedResult = [...container.querySelectorAll<HTMLButtonElement>('.source-result')]
+      .find((button) => button.textContent?.includes('Independent imported evidence'))
+    expect(importedResult?.textContent).toContain('@sharedKey')
 
     vi.useFakeTimers()
     try {
