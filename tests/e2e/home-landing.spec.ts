@@ -53,6 +53,34 @@ test.describe('signed-out Home landing experience', () => {
     await expect(page.getByRole('heading', { name: 'AI integration, on your terms' })).toBeInViewport()
   })
 
+  test('settles on the latest requested step with motion enabled and tolerates small scroll reversals', async ({ page }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' })
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/')
+    const track = page.locator('.home-showcase-scroll-track')
+    const demo = page.locator('.home-workspace-demo')
+    await page.getByRole('tab', { name: /Results from code/ }).click()
+    await page.getByRole('tab', { name: /AI, on your terms/ }).click()
+    await expect(demo).toHaveAttribute('data-active-feature', 'ai')
+    await expect.poll(() => demo.evaluate((element) => getComputedStyle(element).opacity)).toBe('1')
+    await expect(demo.getByLabel('Optional local AI integration')).toBeVisible()
+
+    const scrollToOffset = async (offset: number) => {
+      await track.evaluate((element, offset) => {
+        window.scrollBy({ top: element.getBoundingClientRect().top - 84 + offset, behavior: 'instant' })
+      }, offset)
+    }
+    await scrollToOffset(450)
+    await expect(demo).toHaveAttribute('data-active-feature', 'results')
+    // Hover either side of the Results/AI midpoint without switching back and forth.
+    await scrollToOffset(680)
+    await scrollToOffset(670)
+    await page.waitForTimeout(500)
+    await expect(demo).toHaveAttribute('data-active-feature', 'results')
+    await scrollToOffset(720)
+    await expect(demo).toHaveAttribute('data-active-feature', 'ai')
+  })
+
   test('quietly teaches that the hero paper scrolls without moving it automatically', async ({ page }) => {
     await page.goto('/')
 

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
 import { Icon } from './Icon'
 
 export type HomeShowcaseFeatureId = 'writing' | 'results' | 'ai' | 'citations' | 'review' | 'checks'
@@ -536,12 +536,41 @@ export function HomeHeroPreview() {
 
 export function HomeShowcase() {
   const [activeFeature, setActiveFeature] = useState<HomeShowcaseFeatureId>('writing')
+  const [isChangingFeature, setIsChangingFeature] = useState(false)
   const [openSource, setOpenSource] = useState<HomeDemoSource | null>(null)
   const [citationDetailsOpen, setCitationDetailsOpen] = useState(false)
+  const displayedFeature = useRef<HomeShowcaseFeatureId>('writing')
+  const requestedFeature = useRef<HomeShowcaseFeatureId>('writing')
+  const transitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
   const scrollTrack = useRef<HTMLDivElement | null>(null)
   const selected = homeShowcaseFeatures.find((feature) => feature.id === activeFeature) ?? homeShowcaseFeatures[0]
   const outlineSection = homeDemoOutlineSections[activeFeature]
+
+  const requestFeature = useCallback((feature: HomeShowcaseFeatureId) => {
+    requestedFeature.current = feature
+    const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? true
+    if (reducedMotion || feature === displayedFeature.current) {
+      if (transitionTimer.current !== null) clearTimeout(transitionTimer.current)
+      transitionTimer.current = null
+      displayedFeature.current = feature
+      setActiveFeature(feature)
+      setIsChangingFeature(false)
+      return
+    }
+    if (transitionTimer.current !== null) return
+    setIsChangingFeature(true)
+    transitionTimer.current = setTimeout(() => {
+      transitionTimer.current = null
+      displayedFeature.current = requestedFeature.current
+      setActiveFeature(requestedFeature.current)
+      setIsChangingFeature(false)
+    }, 140)
+  }, [])
+
+  useEffect(() => () => {
+    if (transitionTimer.current !== null) clearTimeout(transitionTimer.current)
+  }, [])
 
   useEffect(() => {
     if (activeFeature !== 'results') setOpenSource(null)
@@ -562,7 +591,11 @@ export function HomeShowcase() {
       const progress = 84 - rect.top
       if (progress < 0 || progress > step * (homeShowcaseFeatures.length - 1) + track.offsetHeight) return
       const index = Math.max(0, Math.min(homeShowcaseFeatures.length - 1, Math.round(progress / step)))
-      setActiveFeature(homeShowcaseFeatures[index].id)
+      const currentIndex = homeShowcaseFeatures.findIndex((feature) => feature.id === requestedFeature.current)
+      // Leave a little room around each boundary so small trackpad reversals do not flicker.
+      if (index > currentIndex && progress < (currentIndex + 0.5) * step + 24) return
+      if (index < currentIndex && progress > (currentIndex - 0.5) * step - 24) return
+      requestFeature(homeShowcaseFeatures[index].id)
     }
     window.addEventListener('scroll', update, { passive: true })
     window.addEventListener('resize', update)
@@ -571,14 +604,12 @@ export function HomeShowcase() {
       window.removeEventListener('scroll', update)
       window.removeEventListener('resize', update)
     }
-  }, [])
+  }, [requestFeature])
 
   const selectTab = (index: number, focus = false) => {
     const next = homeShowcaseFeatures[index]
     if (!next) return
-    setActiveFeature(next.id)
-    if (next.id !== 'results') setOpenSource(null)
-    if (next.id !== 'citations') setCitationDetailsOpen(false)
+    requestFeature(next.id)
     if (focus) tabs.current[index]?.focus()
     const track = scrollTrack.current
     if (track && window.matchMedia?.('(min-height: 700px)').matches) {
@@ -607,7 +638,7 @@ export function HomeShowcase() {
       </div>
 
       <div className="home-showcase-scroll-track" ref={scrollTrack}>
-      <div className="home-showcase-layout">
+      <div className={`home-showcase-layout${isChangingFeature ? ' is-changing-feature' : ''}`}>
         <div className="home-showcase-guide">
           <p className="home-showcase-scroll-hint">Scroll to explore, or choose a step.</p>
           <div className="home-showcase-tabs" role="tablist" aria-label="DraftMatter workspace features">

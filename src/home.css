@@ -6999,6 +6999,26 @@
   line-height: 1.45;
 }
 
+@media (prefers-reduced-motion: no-preference) {
+  .home-showcase-layout .home-workspace-demo,
+  .home-showcase-layout .home-showcase-description {
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 320ms ease, transform 320ms cubic-bezier(.22, 1, .36, 1);
+  }
+
+  .home-showcase-layout.is-changing-feature .home-workspace-demo,
+  .home-showcase-layout.is-changing-feature .home-showcase-description {
+    opacity: 0;
+    transform: translateY(4px);
+    transition-duration: 140ms;
+  }
+
+  .home-showcase-layout .home-demo-paper-view {
+    animation: none;
+  }
+}
+
 @media (min-height: 700px) {
   .website .home-showcase-scroll-track::after {
     content: '';
