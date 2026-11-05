@@ -10,6 +10,49 @@ const features = [
 ] as const
 
 test.describe('signed-out Home landing experience', () => {
+  test('advances the guided preview with scrolling in both directions and allows direct selection', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await page.goto('/')
+    const track = page.locator('.home-showcase-scroll-track')
+    const demo = page.locator('.home-workspace-demo')
+    const moveToStep = async (index: number) => {
+      await track.evaluate((element, stepIndex) => {
+        const step = Math.min(window.innerHeight * .55, 450)
+        window.scrollBy({ top: element.getBoundingClientRect().top - 84 + stepIndex * step, behavior: 'instant' })
+      }, index)
+    }
+    await moveToStep(0)
+    await expect.poll(() => track.evaluate((element) => Math.round(element.getBoundingClientRect().top))).toBe(84)
+    await expect(demo).toHaveAttribute('data-active-feature', 'writing')
+    await page.mouse.move(250, 700)
+    await page.mouse.wheel(0, 450)
+    await expect(demo).toHaveAttribute('data-active-feature', 'results')
+    await moveToStep(2)
+    await expect(demo).toHaveAttribute('data-active-feature', 'ai')
+    await moveToStep(1)
+    await expect(demo).toHaveAttribute('data-active-feature', 'results')
+    await page.getByRole('tab', { name: /Checks and export/ }).click()
+    await expect(demo).toHaveAttribute('data-active-feature', 'checks')
+    await moveToStep(4)
+    await expect(demo).toHaveAttribute('data-active-feature', 'review')
+    await page.locator('#website-principles').scrollIntoViewIfNeeded()
+    await expect(page.getByRole('heading', { name: 'AI integration, on your terms' })).toBeInViewport()
+  })
+
+  test('keeps the guided steps accessible on a narrow screen', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/')
+    const track = page.locator('.home-showcase-scroll-track')
+    await track.evaluate((element) => {
+      window.scrollBy(0, element.getBoundingClientRect().top - 84 + Math.min(window.innerHeight * .55, 450))
+    })
+    await expect(page.locator('.home-workspace-demo')).toHaveAttribute('data-active-feature', 'results')
+    await page.getByRole('tab', { name: /AI, on your terms/ }).click()
+    await expect(page.locator('.home-workspace-demo')).toHaveAttribute('data-active-feature', 'ai')
+    await page.locator('#website-principles').scrollIntoViewIfNeeded()
+    await expect(page.getByRole('heading', { name: 'AI integration, on your terms' })).toBeInViewport()
+  })
+
   test('quietly teaches that the hero paper scrolls without moving it automatically', async ({ page }) => {
     await page.goto('/')
 

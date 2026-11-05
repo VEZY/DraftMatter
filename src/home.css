@@ -6992,6 +6992,46 @@
   gap: 8px;
 }
 
+.home-showcase-scroll-hint {
+  margin: 2px 8px 12px;
+  color: var(--home-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+@media (min-height: 700px) {
+  .website .home-showcase-scroll-track::after {
+    content: '';
+    display: block;
+    height: calc(5 * min(55vh, 450px));
+  }
+
+  .website .home-showcase-layout {
+    position: sticky;
+    top: 84px;
+  }
+}
+
+@media (min-width: 1181px) and (min-height: 700px) {
+  .website .home-showcase-guide {
+    position: static;
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+  }
+
+  .website .home-workspace-demo {
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+  }
+}
+
+@media (max-width: 1180px) and (min-height: 700px) {
+  .website .home-showcase-layout {
+    max-height: calc(100vh - 100px);
+    overflow-y: auto;
+  }
+}
+
 .home-app-heading-actions button {
   min-height: 42px;
   padding: 9px 13px;

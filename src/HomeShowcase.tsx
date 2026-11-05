@@ -539,8 +539,39 @@ export function HomeShowcase() {
   const [openSource, setOpenSource] = useState<HomeDemoSource | null>(null)
   const [citationDetailsOpen, setCitationDetailsOpen] = useState(false)
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
+  const scrollTrack = useRef<HTMLDivElement | null>(null)
   const selected = homeShowcaseFeatures.find((feature) => feature.id === activeFeature) ?? homeShowcaseFeatures[0]
   const outlineSection = homeDemoOutlineSections[activeFeature]
+
+  useEffect(() => {
+    if (activeFeature !== 'results') setOpenSource(null)
+    if (activeFeature !== 'citations') setCitationDetailsOpen(false)
+    scrollTrack.current?.querySelectorAll<HTMLElement>('.home-showcase-layout, .home-workspace-demo').forEach((element) => {
+      element.scrollTop = 0
+    })
+  }, [activeFeature])
+
+  useEffect(() => {
+    const track = scrollTrack.current
+    const media = window.matchMedia?.('(min-height: 700px)')
+    if (!track || !media) return
+    const update = () => {
+      if (!media.matches) return
+      const rect = track.getBoundingClientRect()
+      const step = Math.min(window.innerHeight * 0.55, 450)
+      const progress = 84 - rect.top
+      if (progress < 0 || progress > step * (homeShowcaseFeatures.length - 1) + track.offsetHeight) return
+      const index = Math.max(0, Math.min(homeShowcaseFeatures.length - 1, Math.round(progress / step)))
+      setActiveFeature(homeShowcaseFeatures[index].id)
+    }
+    window.addEventListener('scroll', update, { passive: true })
+    window.addEventListener('resize', update)
+    update()
+    return () => {
+      window.removeEventListener('scroll', update)
+      window.removeEventListener('resize', update)
+    }
+  }, [])
 
   const selectTab = (index: number, focus = false) => {
     const next = homeShowcaseFeatures[index]
@@ -549,6 +580,11 @@ export function HomeShowcase() {
     if (next.id !== 'results') setOpenSource(null)
     if (next.id !== 'citations') setCitationDetailsOpen(false)
     if (focus) tabs.current[index]?.focus()
+    const track = scrollTrack.current
+    if (track && window.matchMedia?.('(min-height: 700px)').matches) {
+      const step = Math.min(window.innerHeight * 0.55, 450)
+      window.scrollBy({ top: track.getBoundingClientRect().top - 84 + index * step, behavior: 'instant' })
+    }
   }
 
   const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -570,8 +606,10 @@ export function HomeShowcase() {
         <p>Write, compute, cite, and review—and optionally connect the AI assistant you choose—in one focused workspace.</p>
       </div>
 
+      <div className="home-showcase-scroll-track" ref={scrollTrack}>
       <div className="home-showcase-layout">
         <div className="home-showcase-guide">
+          <p className="home-showcase-scroll-hint">Scroll to explore, or choose a step.</p>
           <div className="home-showcase-tabs" role="tablist" aria-label="DraftMatter workspace features">
             {homeShowcaseFeatures.map((feature, index) => (
               <button
@@ -743,6 +781,7 @@ export function HomeShowcase() {
           {activeFeature === 'results' && <DemoCodePanel />}
           {activeFeature === 'ai' && <DemoAiPanel />}
         </div>
+      </div>
       </div>
     </section>
   )
