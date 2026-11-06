@@ -43,13 +43,76 @@ describe('DM-P5-08 production release pipeline', () => {
     expect(workflow).toContain('releaseDraft: true')
     expect(workflow).toContain('docs/installation.md')
     expect(workflow).toContain('Windows installers are unsigned')
-    expect(workflow).toContain('codesign --verify --deep --strict')
-    expect(workflow).toContain('Signature=adhoc')
+    expect(workflow).toContain("if: matrix.platform == 'macos-latest'\n        shell: bash\n        run: bash scripts/verify-release-dmg.sh")
+    expect(workflow).toContain("if: matrix.platform == 'windows-latest'\n        shell: pwsh\n        run: ./scripts/verify-release-windows.ps1")
     expect(workflow).not.toMatch(/signing-policy|notarize-release-dmg|signtool|notarytool/)
     expect(workflow).not.toMatch(/secrets\.(APPLE_|WINDOWS_CERTIFICATE)/)
     const config = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'))
     expect(config.bundle.macOS.signingIdentity).toBe('-')
     expect(config.bundle.windows.certificateThumbprint).toBeUndefined()
+  })
+
+  it.skipIf(process.platform === 'win32')('checks the app on the mounted DMG and detaches after success or failure', () => {
+    const root = mkdtempSync(join(tmpdir(), 'draftmatter-dmg-check-'))
+    try {
+      const tools = join(root, 'mac-tools.sh')
+      writeFileSync(tools, `stat() { if [[ -d "$3/DraftMatter.app" ]]; then echo 2; else echo 1; fi; }
+hdiutil() {
+  case "$1" in
+    attach)
+      [[ "$2 $3 $4" == '-readonly -nobrowse -mountpoint' && -f "$6" ]] || return 2
+      mkdir "$5/DraftMatter.app"
+      ;;
+    detach) rmdir "$2/DraftMatter.app" ;;
+    *) return 2 ;;
+  esac
+}
+codesign() {
+  if [[ "$1" == --verify ]]; then
+    [[ "$2 $3" == '--deep --strict' && -d "$4" && "$4" == "$TMPDIR"/draftmatter-dmg.*/DraftMatter.app && "$CASE" != damaged ]]
+  else
+    [[ "$1 $2" == '--display --verbose=4' && -d "$3" ]] || return 2
+    if [[ "$CASE" == signed ]]; then echo Authority=Developer-ID; else echo Signature=adhoc; fi
+  fi
+}
+`)
+      const check = (mode: string) => spawnSync('bash', ['scripts/verify-release-dmg.sh', root], {
+        env: { ...process.env, TMPDIR: root, BASH_ENV: tools, CASE: mode }, encoding: 'utf8',
+      })
+      expect(check('valid').stderr).toContain('Expected one release DMG')
+      writeFileSync(join(root, 'DraftMatter.dmg'), '')
+      const valid = check('valid')
+      expect(valid.status, valid.stderr).toBe(0)
+      for (const invalid of ['damaged', 'signed']) expect(check(invalid).status).toBe(1)
+      expect(readdirSync(root).sort()).toEqual(['DraftMatter.dmg', 'mac-tools.sh'])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it.skipIf(process.platform !== 'win32')('requires both unsigned Windows formats and rejects other signature statuses', () => {
+    const root = mkdtempSync(join(tmpdir(), 'draftmatter-windows-check-'))
+    try {
+      mkdirSync(join(root, 'nsis'))
+      mkdirSync(join(root, 'msi'))
+      writeFileSync(join(root, 'nsis', 'DraftMatter-setup.exe'), '')
+      const check = (msiStatus: string) => spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
+        function Get-AuthenticodeSignature([string]$LiteralPath) {
+          $status = if ($LiteralPath -like '*.msi') { $env:TEST_MSI_STATUS } else { 'NotSigned' }
+          [pscustomobject]@{ Status = $status }
+        }
+        & ./scripts/verify-release-windows.ps1 -BundleRoot $env:TEST_BUNDLE
+      `], { env: { ...process.env, TEST_BUNDLE: root, TEST_MSI_STATUS: msiStatus }, encoding: 'utf8' })
+      expect(check('NotSigned').stderr).toContain('Expected one *.msi installer')
+      writeFileSync(join(root, 'msi', 'DraftMatter.msi'), '')
+      const valid = check('NotSigned')
+      expect(valid.status, valid.stderr).toBe(0)
+      expect(valid.stdout).toContain('DraftMatter-setup.exe: NotSigned')
+      expect(valid.stdout).toContain('DraftMatter.msi: NotSigned')
+      for (const status of ['Valid', 'UnknownError']) expect(check(status).status).toBe(1)
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('builds production bundles for every supported desktop architecture', () => {

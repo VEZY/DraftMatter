@@ -63,9 +63,10 @@ The allowlist is an engineering gate, not legal advice. Adding an identifier req
 
 Desktop releases do not require paid publisher certificates or Apple notarization.
 Both development and release macOS bundles use a free ad hoc signature
-(`signingIdentity: "-"`); CI verifies bundle integrity with `codesign` on both
-architectures. This does not identify a verified publisher or satisfy Gatekeeper.
-Windows MSI and NSIS installers are unsigned. Linux packages do not require a
+(`signingIdentity: "-"`). CI mounts each architecture's final DMG read-only
+and verifies the application inside with `codesign`. This does not identify a
+verified publisher or satisfy Gatekeeper. CI requires the Windows MSI and NSIS
+installers to both report `NotSigned` via Authenticode. Linux packages do not require a
 publisher certificate. No Apple or Windows certificate secrets are needed.
 
 Manual workflow runs upload candidate artifacts. Pushing a matching

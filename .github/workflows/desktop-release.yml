@@ -189,13 +189,15 @@ jobs:
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: draftmatter-[platform]-[arch]-[bundle]
 
-      - name: Verify macOS ad hoc bundle integrity
+      - name: Verify the ad hoc app inside the release DMG
         if: matrix.platform == 'macos-latest'
         shell: bash
-        run: |
-          app="src-tauri/target/${{ matrix.target }}/release/bundle/macos/DraftMatter.app"
-          codesign --verify --deep --strict "$app"
-          codesign --display --verbose=4 "$app" 2>&1 | grep -F 'Signature=adhoc'
+        run: bash scripts/verify-release-dmg.sh "src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
+
+      - name: Verify the Windows installers are unsigned
+        if: matrix.platform == 'windows-latest'
+        shell: pwsh
+        run: ./scripts/verify-release-windows.ps1 -BundleRoot "src-tauri/target/${{ matrix.target }}/release/bundle"
 
       - name: Upload platform compliance inventory
         uses: actions/upload-artifact@v6
