@@ -31,5 +31,12 @@ if [[ ! -d "$app" || -L "$app" ]]; then
   echo "The DMG must contain DraftMatter.app at its root." >&2
   exit 1
 fi
+for name in draftmatter draftmatter-agent-host draftmatter-mcp; do
+  executable="$app/Contents/MacOS/$name"
+  if [[ ! -f "$executable" || -L "$executable" || ! -s "$executable" || ! -x "$executable" ]]; then
+    echo "Expected a nonempty executable at Contents/MacOS/$name inside the DMG." >&2
+    exit 1
+  fi
+done
 codesign --verify --deep --strict "$app"
 codesign --display --verbose=4 "$app" 2>&1 | grep -Fx 'Signature=adhoc'

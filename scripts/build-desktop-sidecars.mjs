@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process'
-import { copyFile, mkdir, rename } from 'node:fs/promises'
-import { dirname, join, resolve } from 'node:path'
+import { mkdir, rename } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
 
 const [target, bunTarget] = process.argv.slice(2)
 if (!target || !bunTarget) {
@@ -12,8 +12,6 @@ const windows = target.includes('windows')
 const suffix = windows ? '.exe' : ''
 const binaries = join(root, 'src-tauri', 'binaries')
 const mcpOutput = join(binaries, `draftmatter-mcp-${target}${suffix}`)
-const hostSource = join(root, 'src-tauri', 'target', target, 'release', `draftmatter-agent-host${suffix}`)
-const hostOutput = join(binaries, `draftmatter-agent-host-${target}${suffix}`)
 
 await mkdir(binaries, { recursive: true })
 
@@ -39,5 +37,4 @@ if (windows) {
   await rename(doubled, mcpOutput).catch(() => undefined)
 }
 
-await copyFile(hostSource, hostOutput)
-process.stdout.write(`Prepared bundled MCP and execution-host sidecars for ${target}.\n`)
+process.stdout.write(`Prepared bundled MCP sidecar for ${target}.\n`)

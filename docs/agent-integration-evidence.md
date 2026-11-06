@@ -69,7 +69,7 @@ enable Zotero/Crossref access, or approve future client tool calls.
 | Device scope works without a project | `src/assistantIntegration.test.ts`; `src-tauri/src/assistant_connections.rs`; `src/AssistantConnectionsDialog.tsx` |
 | Detect/current/preview/Install/Update/Repair/Remove | `src/assistantIntegration.ts`; device connection tests; advanced CLI `draftmatter assistants …` |
 | Preserve unrelated client config | Claude/Copilot/TOML merge tests, Codex marketplace preservation test, modified-file Repair gate |
-| Bundled MCP and execution host | `scripts/build-desktop-sidecars.mjs`; desktop release target matrix and `externalBin` configuration |
+| Bundled MCP and execution host | The release workflow supplies the Bun-built `draftmatter-mcp` through Tauri’s `externalBin`. Tauri discovers the Cargo binary `src-tauri/src/bin/draftmatter-agent-host.rs` and packages it under its own name. |
 | Codex plugin with safe fallback | plugin capability probe, generated local marketplace/plugin files, fallback status note, canonical plugin validator |
 | Project creation/menu/status/post-open surfaces | `src/NewLocalProjectDialog.tsx`; `src/ProjectNavigationMenu.tsx`; `src/AgentIntegrationDialog.tsx`; app post-open banner |
 | Schema-2 enable/update/disable | `src/agentIntegration.test.ts`; native project creation/migration/rollback tests |

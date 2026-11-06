@@ -61,9 +61,14 @@ hdiutil() {
   case "$1" in
     attach)
       [[ "$2 $3 $4" == '-readonly -nobrowse -mountpoint' && -f "$6" ]] || return 2
-      mkdir "$5/DraftMatter.app"
+      mkdir -p "$5/DraftMatter.app/Contents/MacOS"
+      for name in draftmatter draftmatter-agent-host draftmatter-mcp; do
+        if [[ "$CASE" == missing-host && "$name" == draftmatter-agent-host ]]; then continue; fi
+        printf payload > "$5/DraftMatter.app/Contents/MacOS/$name"
+        chmod +x "$5/DraftMatter.app/Contents/MacOS/$name"
+      done
       ;;
-    detach) rmdir "$2/DraftMatter.app" ;;
+    detach) rm -rf "$2/DraftMatter.app" ;;
     *) return 2 ;;
   esac
 }
@@ -84,13 +89,14 @@ codesign() {
       const valid = check('valid')
       expect(valid.status, valid.stderr).toBe(0)
       for (const invalid of ['damaged', 'signed']) expect(check(invalid).status).toBe(1)
+      expect(check('missing-host').stderr).toContain('Contents/MacOS/draftmatter-agent-host')
       expect(readdirSync(root).sort()).toEqual(['DraftMatter.dmg', 'mac-tools.sh'])
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
   })
 
-  it.skipIf(process.platform !== 'win32')('requires both unsigned Windows formats and rejects other signature statuses', () => {
+  it.skipIf(process.platform !== 'win32')('requires both unsigned Windows formats and one copy of each expected MSI executable', () => {
     const root = mkdtempSync(join(tmpdir(), 'draftmatter-windows-check-'))
     try {
       mkdirSync(join(root, 'nsis'))
@@ -104,16 +110,41 @@ codesign() {
         & ./scripts/verify-release-windows.ps1 -BundleRoot $env:TEST_BUNDLE
       `], { env: { ...process.env, TEST_BUNDLE: root, TEST_MSI_STATUS: msiStatus }, encoding: 'utf8' })
       expect(check('NotSigned').stderr).toContain('Expected one *.msi installer')
-      writeFileSync(join(root, 'msi', 'DraftMatter.msi'), '')
+      const msi = join(root, 'msi', 'DraftMatter.msi')
+      const fileRows = [
+        'App\tMain\tDRAFTM~1.EXE|draftmatter.exe\t128',
+        'Host\tHost\tDMHOST~1.EXE|draftmatter-agent-host.exe\t64',
+        'Mcp\tMcp\tDMMCP~1.EXE|draftmatter-mcp.exe\t96',
+      ]
+      const createMsi = (rows: string[]) => {
+        rmSync(msi, { force: true })
+        writeFileSync(join(root, 'File.idt'), [
+          'File\tComponent_\tFileName\tFileSize', 's72\ts72\tl255\ti4', 'File\tFile', ...rows, '',
+        ].join('\r\n'), 'ascii')
+        const created = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-Command', `
+          $ErrorActionPreference = 'Stop'
+          $engine = New-Object -ComObject WindowsInstaller.Installer
+          $db = $engine.OpenDatabase($env:TEST_MSI, 3)
+          $db.Import($env:TEST_BUNDLE, 'File.idt')
+          $db.Commit()
+        `], { env: { ...process.env, TEST_BUNDLE: root, TEST_MSI: msi }, encoding: 'utf8' })
+        expect(created.status, created.stderr).toBe(0)
+      }
+      createMsi(fileRows)
       const valid = check('NotSigned')
       expect(valid.status, valid.stderr).toBe(0)
       expect(valid.stdout).toContain('DraftMatter-setup.exe: NotSigned')
       expect(valid.stdout).toContain('DraftMatter.msi: NotSigned')
+      expect(valid.stdout).toContain('MSI component Host: draftmatter-agent-host.exe (64 bytes)')
       for (const status of ['Valid', 'UnknownError']) expect(check(status).status).toBe(1)
+      createMsi([...fileRows, 'Duplicate\tOtherHost\tDMHOST~2.EXE|draftmatter-agent-host.exe\t64'])
+      expect(check('NotSigned').stderr).toContain('found 2 entries')
+      createMsi(fileRows.filter((row) => !row.startsWith('Host\t')))
+      expect(check('NotSigned').stderr).toContain('found 0 entries')
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
-  })
+  }, 45_000)
 
   it('builds production bundles for every supported desktop architecture', () => {
     for (const target of targets) expect(workflow).toContain(target)

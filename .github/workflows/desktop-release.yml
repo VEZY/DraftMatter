@@ -96,7 +96,7 @@ jobs:
             platform: windows-latest
             target: x86_64-pc-windows-msvc
             bunTarget: bun-windows-x64
-            args: --target x86_64-pc-windows-msvc --bundles nsis,msi
+            args: --verbose --target x86_64-pc-windows-msvc --bundles nsis,msi
           - label: macOS Apple Silicon release
             platform: macos-latest
             target: aarch64-apple-darwin
@@ -149,14 +149,14 @@ jobs:
       - name: Build platform local-agent execution host
         run: cargo build --manifest-path src-tauri/Cargo.toml --locked --release --target ${{ matrix.target }} --bin draftmatter-agent-host
 
-      - name: Build bundled MCP and execution-host sidecars
+      - name: Build bundled MCP sidecar
         run: |
           npm run build:cli
           npm run build:desktop-sidecars -- ${{ matrix.target }} ${{ matrix.bunTarget }}
 
       - name: Prepare release configuration
         run: >-
-          node -e "require('node:fs').writeFileSync('src-tauri/tauri.release.conf.json', JSON.stringify({ bundle: { externalBin: ['binaries/draftmatter-mcp', 'binaries/draftmatter-agent-host'], windows: { nsis: { installerHooks: './windows/installer-hooks.nsh' } } } }, null, 2))"
+          node -e "require('node:fs').writeFileSync('src-tauri/tauri.release.conf.json', JSON.stringify({ bundle: { externalBin: ['binaries/draftmatter-mcp'], windows: { nsis: { installerHooks: './windows/installer-hooks.nsh' } } } }, null, 2))"
 
       - name: Build unsigned release candidate bundles
         if: github.event_name == 'workflow_dispatch'
@@ -194,10 +194,23 @@ jobs:
         shell: bash
         run: bash scripts/verify-release-dmg.sh "src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
 
-      - name: Verify the Windows installers are unsigned
+      - name: Verify Windows installer signatures and MSI executable inventory
         if: matrix.platform == 'windows-latest'
         shell: pwsh
         run: ./scripts/verify-release-windows.ps1 -BundleRoot "src-tauri/target/${{ matrix.target }}/release/bundle"
+
+      - name: Verify executables inside Debian and AppImage packages
+        if: matrix.platform == 'ubuntu-22.04'
+        shell: bash
+        run: bash scripts/verify-release-linux.sh "src-tauri/target/${{ matrix.target }}/release/bundle"
+
+      - name: Keep the generated WiX manifest after a Windows packaging failure
+        if: failure() && matrix.platform == 'windows-latest'
+        uses: actions/upload-artifact@v6
+        with:
+          name: draftmatter-wix-manifest-${{ matrix.target }}
+          path: src-tauri/target/${{ matrix.target }}/release/wix/x64/main.wxs
+          if-no-files-found: ignore
 
       - name: Upload platform compliance inventory
         uses: actions/upload-artifact@v6
