@@ -6992,25 +6992,153 @@
   gap: 8px;
 }
 
-.home-showcase-scroll-hint {
+.home-showcase-hint {
   margin: 2px 8px 12px;
   color: var(--home-muted);
   font-size: 12px;
   line-height: 1.45;
 }
 
-@media (prefers-reduced-motion: no-preference) {
-  .home-showcase-layout .home-workspace-demo,
-  .home-showcase-layout .home-showcase-description {
-    opacity: 1;
-    transform: translateY(0);
-    transition: opacity 320ms ease, transform 320ms cubic-bezier(.22, 1, .36, 1);
+.home-showcase-layout {
+  --home-slide-enter: 20px;
+  --home-slide-exit: -20px;
+}
+
+.home-showcase-layout[data-direction="previous"] {
+  --home-slide-enter: -20px;
+  --home-slide-exit: 20px;
+}
+
+.home-showcase-guide {
+  position: static;
+}
+
+.home-showcase-carousel {
+  min-width: 0;
+  overflow-x: clip;
+}
+
+.home-showcase-controls {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: stretch;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.home-showcase-controls button {
+  min-width: 0;
+  min-height: 68px;
+  padding: 12px 16px;
+  border: 1px solid var(--home-line);
+  background: #fff;
+  color: var(--home-ink);
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  text-align: left;
+}
+
+.home-showcase-controls button:hover {
+  border-color: var(--home-blue-pen);
+  background: var(--home-soft);
+}
+
+.home-showcase-controls button svg {
+  flex: 0 0 auto;
+}
+
+.home-showcase-controls .home-showcase-previous svg {
+  transform: rotate(180deg);
+}
+
+.home-showcase-controls .home-showcase-next {
+  justify-content: flex-end;
+  text-align: right;
+}
+
+.home-showcase-controls button small,
+.home-showcase-position small {
+  display: block;
+  color: var(--home-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
+
+.home-showcase-controls button strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.home-showcase-position {
+  align-self: center;
+  max-width: 140px;
+  text-align: center;
+}
+
+.home-showcase-position strong {
+  font-size: 14px;
+  font-variant-numeric: tabular-nums;
+}
+
+.home-showcase-carousel .home-workspace-demo {
+  touch-action: pan-y pinch-zoom;
+}
+
+@media (max-width: 760px) {
+  .home-showcase-tabs {
+    display: flex;
+    gap: 6px;
+    overflow-x: auto;
+    padding: 4px 2px 10px;
   }
 
-  .home-showcase-layout.is-changing-feature .home-workspace-demo,
+  .home-showcase-tabs button {
+    flex: 0 0 auto;
+    width: auto;
+    min-height: 44px;
+    grid-template-columns: 26px auto;
+  }
+
+  .home-showcase-tabs button svg {
+    display: none;
+  }
+
+  .home-showcase-controls {
+    gap: 8px;
+  }
+
+  .home-showcase-controls button {
+    gap: 8px;
+    padding: 10px;
+  }
+
+  .home-showcase-position small {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+  .home-showcase-slide {
+    animation: home-showcase-slide-enter 320ms cubic-bezier(.22, 1, .36, 1) both;
+    transition: opacity 140ms ease, transform 140ms ease;
+  }
+
+  .home-showcase-layout .home-showcase-description {
+    opacity: 1;
+    transition: opacity 320ms ease;
+  }
+
+  .home-showcase-layout.is-changing-feature .home-showcase-slide {
+    animation: none;
+    opacity: 0;
+    transform: translateX(var(--home-slide-exit));
+  }
+
   .home-showcase-layout.is-changing-feature .home-showcase-description {
     opacity: 0;
-    transform: translateY(4px);
     transition-duration: 140ms;
   }
 
@@ -7019,36 +7147,15 @@
   }
 }
 
-@media (min-height: 700px) {
-  .website .home-showcase-scroll-track::after {
-    content: '';
-    display: block;
-    height: calc(5 * min(55vh, 450px));
+@keyframes home-showcase-slide-enter {
+  from {
+    opacity: 0;
+    transform: translateX(var(--home-slide-enter));
   }
 
-  .website .home-showcase-layout {
-    position: sticky;
-    top: 84px;
-  }
-}
-
-@media (min-width: 1181px) and (min-height: 700px) {
-  .website .home-showcase-guide {
-    position: static;
-    max-height: calc(100vh - 100px);
-    overflow-y: auto;
-  }
-
-  .website .home-workspace-demo {
-    max-height: calc(100vh - 100px);
-    overflow-y: auto;
-  }
-}
-
-@media (max-width: 1180px) and (min-height: 700px) {
-  .website .home-showcase-layout {
-    max-height: calc(100vh - 100px);
-    overflow-y: auto;
+  to {
+    opacity: 1;
+    transform: translateX(0);
   }
 }
 

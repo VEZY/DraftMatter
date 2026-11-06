@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react'
 import { Icon } from './Icon'
 
 export type HomeShowcaseFeatureId = 'writing' | 'results' | 'ai' | 'citations' | 'review' | 'checks'
@@ -537,17 +537,24 @@ export function HomeHeroPreview() {
 export function HomeShowcase() {
   const [activeFeature, setActiveFeature] = useState<HomeShowcaseFeatureId>('writing')
   const [isChangingFeature, setIsChangingFeature] = useState(false)
+  const [direction, setDirection] = useState<'next' | 'previous'>('next')
   const [openSource, setOpenSource] = useState<HomeDemoSource | null>(null)
   const [citationDetailsOpen, setCitationDetailsOpen] = useState(false)
   const displayedFeature = useRef<HomeShowcaseFeatureId>('writing')
   const requestedFeature = useRef<HomeShowcaseFeatureId>('writing')
   const transitionTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const tabs = useRef<Array<HTMLButtonElement | null>>([])
-  const scrollTrack = useRef<HTMLDivElement | null>(null)
+  const swipe = useRef<{ x: number; y: number; pointerId: number } | null>(null)
   const selected = homeShowcaseFeatures.find((feature) => feature.id === activeFeature) ?? homeShowcaseFeatures[0]
+  const activeIndex = homeShowcaseFeatures.findIndex((feature) => feature.id === activeFeature)
+  const previous = homeShowcaseFeatures[(activeIndex - 1 + homeShowcaseFeatures.length) % homeShowcaseFeatures.length]
+  const next = homeShowcaseFeatures[(activeIndex + 1) % homeShowcaseFeatures.length]
   const outlineSection = homeDemoOutlineSections[activeFeature]
 
-  const requestFeature = useCallback((feature: HomeShowcaseFeatureId) => {
+  const requestFeature = useCallback((feature: HomeShowcaseFeatureId, travel?: 'next' | 'previous') => {
+    const from = homeShowcaseFeatures.findIndex((candidate) => candidate.id === requestedFeature.current)
+    const to = homeShowcaseFeatures.findIndex((candidate) => candidate.id === feature)
+    setDirection(travel ?? (to >= from ? 'next' : 'previous'))
     requestedFeature.current = feature
     const reducedMotion = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? true
     if (reducedMotion || feature === displayedFeature.current) {
@@ -575,47 +582,43 @@ export function HomeShowcase() {
   useEffect(() => {
     if (activeFeature !== 'results') setOpenSource(null)
     if (activeFeature !== 'citations') setCitationDetailsOpen(false)
-    scrollTrack.current?.querySelectorAll<HTMLElement>('.home-showcase-layout, .home-workspace-demo').forEach((element) => {
-      element.scrollTop = 0
-    })
-  }, [activeFeature])
+    const tab = tabs.current[activeIndex]
+    const list = tab?.parentElement
+    if (tab && list && list.scrollWidth > list.clientWidth) {
+      const tabBounds = tab.getBoundingClientRect()
+      const listBounds = list.getBoundingClientRect()
+      if (tabBounds.left < listBounds.left) list.scrollLeft -= listBounds.left - tabBounds.left
+      else if (tabBounds.right > listBounds.right) list.scrollLeft += tabBounds.right - listBounds.right
+    }
+  }, [activeFeature, activeIndex])
 
-  useEffect(() => {
-    const track = scrollTrack.current
-    const media = window.matchMedia?.('(min-height: 700px)')
-    if (!track || !media) return
-    const update = () => {
-      if (!media.matches) return
-      const rect = track.getBoundingClientRect()
-      const step = Math.min(window.innerHeight * 0.55, 450)
-      const progress = 84 - rect.top
-      if (progress < 0 || progress > step * (homeShowcaseFeatures.length - 1) + track.offsetHeight) return
-      const index = Math.max(0, Math.min(homeShowcaseFeatures.length - 1, Math.round(progress / step)))
-      const currentIndex = homeShowcaseFeatures.findIndex((feature) => feature.id === requestedFeature.current)
-      // Leave a little room around each boundary so small trackpad reversals do not flicker.
-      if (index > currentIndex && progress < (currentIndex + 0.5) * step + 24) return
-      if (index < currentIndex && progress > (currentIndex - 0.5) * step - 24) return
-      requestFeature(homeShowcaseFeatures[index].id)
-    }
-    window.addEventListener('scroll', update, { passive: true })
-    window.addEventListener('resize', update)
-    update()
-    return () => {
-      window.removeEventListener('scroll', update)
-      window.removeEventListener('resize', update)
-    }
-  }, [requestFeature])
+  const moveFeature = (offset: number) => {
+    const current = homeShowcaseFeatures.findIndex((feature) => feature.id === requestedFeature.current)
+    const target = (current + offset + homeShowcaseFeatures.length) % homeShowcaseFeatures.length
+    requestFeature(homeShowcaseFeatures[target].id, offset > 0 ? 'next' : 'previous')
+  }
+
+  const onSwipeStart = (event: PointerEvent<HTMLDivElement>) => {
+    swipe.current = null
+    if (event.pointerType !== 'touch' || event.isPrimary === false) return
+    if ((event.target as Element).closest('button, a, input, select, textarea, [contenteditable], code, pre')) return
+    swipe.current = { x: event.clientX, y: event.clientY, pointerId: event.pointerId }
+  }
+
+  const onSwipeEnd = (event: PointerEvent<HTMLDivElement>) => {
+    const start = swipe.current
+    swipe.current = null
+    if (!start || event.pointerId !== start.pointerId || window.getSelection()?.toString()) return
+    const dx = event.clientX - start.x
+    const dy = event.clientY - start.y
+    if (Math.abs(dx) >= 60 && Math.abs(dx) > Math.abs(dy) * 1.5) moveFeature(dx < 0 ? 1 : -1)
+  }
 
   const selectTab = (index: number, focus = false) => {
     const next = homeShowcaseFeatures[index]
     if (!next) return
     requestFeature(next.id)
     if (focus) tabs.current[index]?.focus()
-    const track = scrollTrack.current
-    if (track && window.matchMedia?.('(min-height: 700px)').matches) {
-      const step = Math.min(window.innerHeight * 0.55, 450)
-      window.scrollBy({ top: track.getBoundingClientRect().top - 84 + index * step, behavior: 'instant' })
-    }
   }
 
   const onTabKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -637,10 +640,9 @@ export function HomeShowcase() {
         <p>Write, compute, cite, and review—and optionally connect the AI assistant you choose—in one focused workspace.</p>
       </div>
 
-      <div className="home-showcase-scroll-track" ref={scrollTrack}>
-      <div className={`home-showcase-layout${isChangingFeature ? ' is-changing-feature' : ''}`}>
+      <div className={`home-showcase-layout${isChangingFeature ? ' is-changing-feature' : ''}`} data-direction={direction}>
         <div className="home-showcase-guide">
-          <p className="home-showcase-scroll-hint">Scroll to explore, or choose a step.</p>
+          <p className="home-showcase-hint">Explore the features using the arrows or choose one here.</p>
           <div className="home-showcase-tabs" role="tablist" aria-label="DraftMatter workspace features">
             {homeShowcaseFeatures.map((feature, index) => (
               <button
@@ -689,11 +691,30 @@ export function HomeShowcase() {
           </div>
         </div>
 
+        <div className="home-showcase-carousel" role="region" aria-roledescription="carousel" aria-label="DraftMatter feature carousel">
+          <div className="home-showcase-controls" aria-label="Feature navigation">
+            <button type="button" className="home-showcase-previous" aria-label="Previous feature" aria-controls="home-showcase-slide" onClick={() => moveFeature(-1)}>
+              <Icon name="arrowRight" size={18} />
+              <span><small>Previous</small><strong>{previous.label}</strong></span>
+            </button>
+            <span className="home-showcase-position" role="status" aria-live="polite" aria-atomic="true">
+              <strong>{activeIndex + 1} / {homeShowcaseFeatures.length}</strong>
+              <small>{selected.label}</small>
+            </span>
+            <button type="button" className="home-showcase-next" aria-label="Next feature" aria-controls="home-showcase-slide" onClick={() => moveFeature(1)}>
+              <span><small>Next</small><strong>{next.label}</strong></span>
+              <Icon name="arrowRight" size={18} />
+            </button>
+          </div>
         <div
           className="home-workspace-demo"
           data-active-feature={activeFeature}
           aria-label="DraftMatter workspace product demonstration"
+          onPointerDown={onSwipeStart}
+          onPointerUp={onSwipeEnd}
+          onPointerCancel={() => { swipe.current = null }}
         >
+          <div key={activeFeature} id="home-showcase-slide" className="home-showcase-slide" role="group" aria-roledescription="slide" aria-label={`${activeIndex + 1} of ${homeShowcaseFeatures.length}: ${selected.label}`}>
           <div className="home-demo-label">
             <Icon name="eye" size={13} />
             Guided preview
@@ -703,7 +724,7 @@ export function HomeShowcase() {
           <div className="home-demo-body">
             <DemoOutline current={outlineSection} />
 
-            <article className="home-demo-paper" aria-label="Fictional manuscript preview" aria-live="polite">
+            <article className="home-demo-paper" aria-label="Fictional manuscript preview">
               <div key={activeFeature} className="home-demo-paper-view" data-document-view={activeFeature}>
                 {activeFeature === 'writing' && <DemoArticleOpening />}
 
@@ -811,6 +832,7 @@ export function HomeShowcase() {
           </div>
           {activeFeature === 'results' && <DemoCodePanel />}
           {activeFeature === 'ai' && <DemoAiPanel />}
+          </div>
         </div>
       </div>
       </div>

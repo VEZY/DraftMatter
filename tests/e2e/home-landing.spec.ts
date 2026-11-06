@@ -10,75 +10,113 @@ const features = [
 ] as const
 
 test.describe('signed-out Home landing experience', () => {
-  test('advances the guided preview with scrolling in both directions and allows direct selection', async ({ page }) => {
+  test('navigates the feature carousel manually with direct selection and circular controls', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/')
-    const track = page.locator('.home-showcase-scroll-track')
+    const carousel = page.getByRole('region', { name: 'DraftMatter feature carousel' })
     const demo = page.locator('.home-workspace-demo')
-    const moveToStep = async (index: number) => {
-      await track.evaluate((element, stepIndex) => {
-        const step = Math.min(window.innerHeight * .55, 450)
-        window.scrollBy({ top: element.getBoundingClientRect().top - 84 + stepIndex * step, behavior: 'instant' })
-      }, index)
-    }
-    await moveToStep(0)
-    await expect.poll(() => track.evaluate((element) => Math.round(element.getBoundingClientRect().top))).toBe(84)
+    const next = page.getByRole('button', { name: 'Next feature' })
+    const previous = page.getByRole('button', { name: 'Previous feature' })
     await expect(demo).toHaveAttribute('data-active-feature', 'writing')
-    await page.mouse.move(250, 700)
-    await page.mouse.wheel(0, 450)
+    await expect(carousel).toContainText(/1\s*\/\s*6/)
+    await next.click()
     await expect(demo).toHaveAttribute('data-active-feature', 'results')
-    await moveToStep(2)
+    await expect(carousel).toContainText(/2\s*\/\s*6/)
+    await next.click()
     await expect(demo).toHaveAttribute('data-active-feature', 'ai')
-    await moveToStep(1)
+    await previous.click()
     await expect(demo).toHaveAttribute('data-active-feature', 'results')
     await page.getByRole('tab', { name: /Checks and export/ }).click()
     await expect(demo).toHaveAttribute('data-active-feature', 'checks')
-    await moveToStep(4)
-    await expect(demo).toHaveAttribute('data-active-feature', 'review')
-    await page.locator('#website-principles').scrollIntoViewIfNeeded()
-    await expect(page.getByRole('heading', { name: 'AI integration, on your terms' })).toBeInViewport()
+    await expect(carousel).toContainText(/6\s*\/\s*6/)
+    await next.click()
+    await expect(demo).toHaveAttribute('data-active-feature', 'writing')
+    await previous.click()
+    await expect(demo).toHaveAttribute('data-active-feature', 'checks')
   })
 
-  test('keeps the guided steps accessible on a narrow screen', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 })
+  test('lets the page scroll freely without changing the selected feature or adding a tour spacer', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/')
-    const track = page.locator('.home-showcase-scroll-track')
-    await track.evaluate((element) => {
-      window.scrollBy(0, element.getBoundingClientRect().top - 84 + Math.min(window.innerHeight * .55, 450))
-    })
-    await expect(page.locator('.home-workspace-demo')).toHaveAttribute('data-active-feature', 'results')
+    const showcase = page.locator('#home-showcase')
+    const demo = page.locator('.home-workspace-demo')
     await page.getByRole('tab', { name: /AI, on your terms/ }).click()
-    await expect(page.locator('.home-workspace-demo')).toHaveAttribute('data-active-feature', 'ai')
+    await expect(demo).toHaveAttribute('data-active-feature', 'ai')
+    await expect(page.locator('.home-showcase-scroll-track')).toHaveCount(0)
+    const extraHeight = await showcase.evaluate((element) => {
+      const intro = element.querySelector('.home-showcase-intro')!.getBoundingClientRect().height
+      const layout = element.querySelector('.home-showcase-layout')!.getBoundingClientRect().height
+      return element.getBoundingClientRect().height - intro - layout
+    })
+    expect(extraHeight).toBeLessThan(400)
+    await page.mouse.move(800, 500)
+    await page.mouse.wheel(0, 500)
+    await page.waitForTimeout(200)
+    await expect(demo).toHaveAttribute('data-active-feature', 'ai')
     await page.locator('#website-principles').scrollIntoViewIfNeeded()
     await expect(page.getByRole('heading', { name: 'AI integration, on your terms' })).toBeInViewport()
+    await expect(demo).toHaveAttribute('data-active-feature', 'ai')
   })
 
-  test('settles on the latest requested step with motion enabled and tolerates small scroll reversals', async ({ page }) => {
+  test('settles on the latest manual selection when motion is enabled and controls are used rapidly', async ({ page }) => {
     await page.emulateMedia({ reducedMotion: 'no-preference' })
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/')
-    const track = page.locator('.home-showcase-scroll-track')
     const demo = page.locator('.home-workspace-demo')
+    await page.getByRole('button', { name: 'Next feature' }).evaluate((element) => {
+      const button = element as HTMLButtonElement
+      button.click()
+      button.click()
+      button.click()
+    })
+    await expect(demo).toHaveAttribute('data-active-feature', 'citations')
+    await expect(page.getByRole('tab', { name: /Citations/ })).toHaveAttribute('aria-selected', 'true')
+    await expect.poll(() => demo.evaluate((element) => getComputedStyle(element).opacity)).toBe('1')
+    await expect(demo.getByRole('heading', { name: 'References' })).toBeVisible()
     await page.getByRole('tab', { name: /Results from code/ }).click()
     await page.getByRole('tab', { name: /AI, on your terms/ }).click()
     await expect(demo).toHaveAttribute('data-active-feature', 'ai')
     await expect.poll(() => demo.evaluate((element) => getComputedStyle(element).opacity)).toBe('1')
     await expect(demo.getByLabel('Optional local AI integration')).toBeVisible()
 
-    const scrollToOffset = async (offset: number) => {
-      await track.evaluate((element, offset) => {
-        window.scrollBy({ top: element.getBoundingClientRect().top - 84 + offset, behavior: 'instant' })
-      }, offset)
+    await page.setViewportSize({ width: 390, height: 844 })
+    const next = page.getByRole('button', { name: 'Next feature' })
+    await next.scrollIntoViewIfNeeded()
+    const animationBounds = await next.evaluate(async (element) => {
+      const widths: number[] = []
+      ;(element as HTMLButtonElement).click()
+      for (let frame = 0; frame < 35; frame += 1) {
+        await new Promise(requestAnimationFrame)
+        widths.push(document.documentElement.scrollWidth)
+      }
+      return { widest: Math.max(...widths), viewport: window.innerWidth }
+    })
+    expect(animationBounds.widest).toBeLessThanOrEqual(animationBounds.viewport)
+    await expect(demo).toHaveAttribute('data-active-feature', 'citations')
+  })
+
+  test('supports mobile horizontal swipes while leaving vertical scrolling and preview controls available', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await page.goto('/')
+    const demo = page.locator('.home-workspace-demo')
+    const swipe = async (target: typeof demo, deltaX: number, deltaY: number) => {
+      await target.dispatchEvent('pointerdown', { pointerType: 'touch', pointerId: 1, isPrimary: true, clientX: 250, clientY: 350 })
+      await target.dispatchEvent('pointermove', { pointerType: 'touch', pointerId: 1, isPrimary: true, clientX: 250 + deltaX, clientY: 350 + deltaY })
+      await target.dispatchEvent('pointerup', { pointerType: 'touch', pointerId: 1, isPrimary: true, clientX: 250 + deltaX, clientY: 350 + deltaY })
     }
-    await scrollToOffset(450)
+    await swipe(demo, -140, 8)
     await expect(demo).toHaveAttribute('data-active-feature', 'results')
-    // Hover either side of the Results/AI midpoint without switching back and forth.
-    await scrollToOffset(680)
-    await scrollToOffset(670)
-    await page.waitForTimeout(500)
+    await swipe(demo, 8, -140)
     await expect(demo).toHaveAttribute('data-active-feature', 'results')
-    await scrollToOffset(720)
-    await expect(demo).toHaveAttribute('data-active-feature', 'ai')
+    const source = demo.getByRole('button', { name: 'View source for Figure 1' })
+    await swipe(source, -140, 8)
+    await expect(demo).toHaveAttribute('data-active-feature', 'results')
+    await source.click()
+    await expect(demo.getByRole('list', { name: 'Python source for Figure 1' })).toBeVisible()
+    await swipe(demo, 140, 8)
+    await expect(demo).toHaveAttribute('data-active-feature', 'writing')
+    await page.locator('#website-principles').scrollIntoViewIfNeeded()
+    await expect(page.getByRole('heading', { name: 'AI integration, on your terms' })).toBeInViewport()
   })
 
   test('quietly teaches that the hero paper scrolls without moving it automatically', async ({ page }) => {
