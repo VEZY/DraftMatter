@@ -52,26 +52,26 @@ jobs:
   signing-policy:
     runs-on: ubuntu-22.04
     env:
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      APPLE_ID: ${{ secrets.APPLE_ID }}
-      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
-      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
-      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-      WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
+      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE != '' }}
+      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD != '' }}
+      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY != '' }}
+      APPLE_ID: ${{ secrets.APPLE_ID != '' }}
+      APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD != '' }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID != '' }}
+      WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+      WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD != '' }}
+      WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT != '' }}
     steps:
       - name: Require signing and notarization credentials for version tags
         shell: bash
         run: |
-          if [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+          if [[ "$GITHUB_EVENT_NAME" != push || "$GITHUB_REF" != refs/tags/v* ]]; then
             echo "Manual build: unsigned release-candidate policy applies."
             exit 0
           fi
           missing=0
           for name in APPLE_CERTIFICATE APPLE_CERTIFICATE_PASSWORD APPLE_SIGNING_IDENTITY APPLE_ID APPLE_PASSWORD APPLE_TEAM_ID WINDOWS_CERTIFICATE WINDOWS_CERTIFICATE_PASSWORD WINDOWS_CERTIFICATE_THUMBPRINT; do
-            if [[ -z "${!name}" ]]; then
+            if [[ "${!name}" != true ]]; then
               echo "::error::Required protected release secret $name is not configured."
               missing=1
             fi
@@ -188,7 +188,7 @@ jobs:
           node -e "require('node:fs').writeFileSync('src-tauri/tauri.release.conf.json', JSON.stringify({ bundle: { externalBin: ['binaries/draftmatter-mcp', 'binaries/draftmatter-agent-host'], windows: { nsis: { installerHooks: './windows/installer-hooks.nsh' } } } }, null, 2))"
 
       - name: Import Windows Authenticode certificate
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'windows-latest'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'windows-latest'
         shell: pwsh
         env:
           WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
@@ -196,10 +196,18 @@ jobs:
           WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
         run: |
           $certificatePath = Join-Path $env:RUNNER_TEMP 'draftmatter-release.pfx'
-          [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
-          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
-          Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
-          $config = @{ bundle = @{ externalBin = @('binaries/draftmatter-mcp', 'binaries/draftmatter-agent-host'); windows = @{ certificateThumbprint = $env:WINDOWS_CERTIFICATE_THUMBPRINT; digestAlgorithm = 'sha256'; timestampUrl = 'http://timestamp.digicert.com'; nsis = @{ installerHooks = './windows/installer-hooks.nsh' } } } }
+          $thumbprint = ($env:WINDOWS_CERTIFICATE_THUMBPRINT -replace '\s', '').ToUpperInvariant()
+          if ($thumbprint -notmatch '^[A-F0-9]{40}$') { throw 'Expected the SHA-1 certificate thumbprint (40 hex characters).' }
+          try {
+            [IO.File]::WriteAllBytes($certificatePath, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+            $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+            Import-PfxCertificate -FilePath $certificatePath -CertStoreLocation Cert:\CurrentUser\My -Password $password | Out-Null
+          } finally {
+            if (Test-Path $certificatePath) { Remove-Item -LiteralPath $certificatePath -Force }
+          }
+          $certificate = Get-Item -LiteralPath "Cert:\CurrentUser\My\$thumbprint"
+          if (-not $certificate.HasPrivateKey) { throw 'The selected signing certificate must contain its private key.' }
+          $config = @{ bundle = @{ externalBin = @('binaries/draftmatter-mcp', 'binaries/draftmatter-agent-host'); windows = @{ certificateThumbprint = $thumbprint; digestAlgorithm = 'sha256'; timestampUrl = 'http://timestamp.digicert.com'; tsp = $true; nsis = @{ installerHooks = './windows/installer-hooks.nsh' } } } }
           $config | ConvertTo-Json -Depth 5 | Set-Content -Encoding utf8 'src-tauri/tauri.release.conf.json'
 
       - name: Build unsigned release candidate bundles
@@ -213,7 +221,7 @@ jobs:
           workflowArtifactNamePattern: draftmatter-candidate-[platform]-[arch]-[bundle]
 
       - name: Build signed release bundles into a draft release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -235,24 +243,47 @@ jobs:
           workflowArtifactNamePattern: draftmatter-[platform]-[arch]-[bundle]
 
       - name: Verify macOS Developer ID signature and notarization
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'macos-latest'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'macos-latest'
         shell: bash
-        run: |
-          bundle_root="src-tauri/target/${{ matrix.target }}/release/bundle"
-          app="$(find "$bundle_root" -type d -name '*.app' -print -quit)"
-          dmg="$(find "$bundle_root" -type f -name '*.dmg' -print -quit)"
-          test -n "$app" && test -n "$dmg"
-          codesign --verify --deep --strict --verbose=2 "$app"
-          spctl --assess --type execute --verbose=2 "$app"
-          xcrun stapler validate "$dmg"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: bash scripts/notarize-release-dmg.sh "${{ matrix.target }}" "src-tauri/target/${{ matrix.target }}/release/bundle"
+
+      - name: Replace the workflow DMG with its stapled copy
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'macos-latest'
+        uses: actions/upload-artifact@v6
+        with:
+          name: draftmatter-darwin-${{ matrix.target == 'aarch64-apple-darwin' && 'aarch64' || 'x64' }}-dmg
+          path: src-tauri/target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+          overwrite: true
+          if-no-files-found: error
 
       - name: Verify Windows Authenticode signatures
-        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'windows-latest'
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'windows-latest'
         shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_THUMBPRINT: ${{ secrets.WINDOWS_CERTIFICATE_THUMBPRINT }}
         run: |
-          $bundles = Get-ChildItem "src-tauri/target/${{ matrix.target }}/release/bundle" -Recurse -File | Where-Object { $_.Extension -in '.exe', '.msi' }
-          if (-not $bundles) { throw 'No Windows installer bundles were produced.' }
-          foreach ($bundle in $bundles) { & signtool verify /pa /all /v $bundle.FullName; if ($LASTEXITCODE -ne 0) { throw "Signature verification failed for $($bundle.FullName)" } }
+          $bundleRoot = "src-tauri/target/${{ matrix.target }}/release/bundle"
+          $sdk = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows Kits\Installed Roots').KitsRoot10
+          $signTool = Get-ChildItem -Path (Join-Path $sdk 'bin\10.*\x64\signtool.exe') -File |
+            Sort-Object { [version]$_.Directory.Parent.Name } -Descending | Select-Object -First 1
+          if (-not $signTool) { throw 'SignTool was not found in the Windows 10/11 SDK.' }
+          $thumbprint = ($env:WINDOWS_CERTIFICATE_THUMBPRINT -replace '\s', '').ToUpperInvariant()
+          foreach ($pattern in 'nsis/*.exe', 'msi/*.msi') {
+            $bundles = @(Get-ChildItem -Path (Join-Path $bundleRoot $pattern) -File)
+            if ($bundles.Count -eq 0) { throw "Missing required installer: $pattern" }
+            foreach ($bundle in $bundles) {
+              & $signTool.FullName verify /pa /all /tw /v $bundle.FullName
+              if ($LASTEXITCODE -ne 0) { throw "Signature verification failed for $($bundle.Name)" }
+              $signature = Get-AuthenticodeSignature -LiteralPath $bundle.FullName
+              if ($signature.SignerCertificate.Thumbprint -ne $thumbprint) { throw "Unexpected signer for $($bundle.Name)" }
+            }
+          }
 
       - name: Upload platform compliance inventory
         uses: actions/upload-artifact@v6
@@ -273,7 +304,7 @@ jobs:
           if-no-files-found: error
 
   release-metadata:
-    if: startsWith(github.ref, 'refs/tags/v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [build, cli]
     runs-on: ubuntu-22.04
     env:

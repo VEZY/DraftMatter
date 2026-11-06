@@ -61,16 +61,20 @@ The allowlist is an engineering gate, not legal advice. Adding an identifier req
 
 ## Signing and notarization gate
 
-Development macOS bundles are ad-hoc signed (`signingIdentity: "-"`) so local builds are testable. They are not public-release artifacts. Manual release-workflow runs are similarly labelled unsigned release candidates and never create a GitHub release. A `v<package-version>` tag creates only a draft release and requires:
+Use the [signing setup guide](./signing-setup.md) to prepare the certificates and GitHub Actions secrets. Development macOS bundles use an ad hoc signature (`signingIdentity: "-"`). Manual workflow runs produce unsigned release candidates. Pushing a `v<package-version>` tag creates a draft release and requires:
 
-1. protected `APPLE_CERTIFICATE`, `APPLE_CERTIFICATE_PASSWORD`, `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID` secrets for Developer ID signing and notarization;
-2. protected `WINDOWS_CERTIFICATE`, `WINDOWS_CERTIFICATE_PASSWORD`, and `WINDOWS_CERTIFICATE_THUMBPRINT` secrets for Authenticode signing;
+1. a Developer ID Application identity and notarization credentials for macOS;
+2. a Windows code-signing certificate with a private key and a matching SHA-1 certificate thumbprint;
 3. successful `codesign --verify --deep --strict`, Gatekeeper assessment, and notarization-ticket validation on both macOS architectures;
-4. successful `signtool verify /pa /all` for every Windows MSI/NSIS bundle;
+4. successful Authenticode verification, including the expected signer and a timestamp, for both the Windows MSI and NSIS installers;
 5. generated SHA-256 checksums, target-specific CycloneDX SBOMs, and third-party notices attached to the draft release;
 6. manual review of the draft before publication, retaining the exact source revision and locked dependency files used by the build.
 
-The metadata job retrieves the signed installers from the draft to hash them
+Tauri notarizes and staples the macOS app during the build. The macOS job
+then submits the signed DMG to Apple, staples its accepted ticket, replaces
+the DMG in the draft release, and checks the downloaded bytes against the
+stapled file. Windows uses SHA-256 for both the file signature and the RFC
+3161 timestamp. The metadata job retrieves the signed installers from the draft to hash them
 under their GitHub download names. Each of the four targets supplies its own
 notices, SBOM, and execution host. Download the release assets to one directory
 and run `sha256sum -c SHA256SUMS` there to verify them.
