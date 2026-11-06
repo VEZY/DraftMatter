@@ -153,6 +153,7 @@ function executionObjectPresentation(cell: ExecutableCell) {
 }
 
 type SetupActivityStatus = 'running' | 'succeeded' | 'failed'
+type SetupOrigin = 'user' | 'project-open'
 
 interface SetupActivity {
   id: string
@@ -850,12 +851,12 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const kernelCellFailureSequenceRef = useRef(0)
   const crossrefSessionRef = useRef<CrossrefSearchSession | null>(null)
 
-  const startSetupActivity = (title: string, message: string, language?: ExecutionLanguage) => {
+  const startSetupActivity = (title: string, message: string, language?: ExecutionLanguage, origin: SetupOrigin = 'user') => {
     const id = globalThis.crypto?.randomUUID?.() ?? `setup-${Date.now()}-${Math.random().toString(16).slice(2)}`
     setupActivityIdRef.current = id
     const command = language === 'julia' ? '$ julia --project=.\n' : ''
     setSetupActivity({ id, title, status: 'running', output: `${command}${message.trim()}\n`, language })
-    setExecutionWorkspaceOpen(false)
+    if (origin === 'user') setExecutionWorkspaceOpen(false)
     return id
   }
 
@@ -2462,16 +2463,17 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     }
   }
 
-  const setupKernelIntegrationTrusted = async (language: ExecutionLanguage, inventoryOverride = runtimeInventory) => {
+  const setupKernelIntegrationTrusted = async (language: ExecutionLanguage, inventoryOverride = runtimeInventory, origin: SetupOrigin = 'user') => {
     const session = desktopSessionRef.current
     if (!session || kernelSetupBusy) return
-    setEnvironmentOpen(false)
+    if (origin === 'user') setEnvironmentOpen(false)
     setKernelSetupBusy(true)
     setExecutionProblem('')
     const taskId = startSetupActivity(
       `Setting up ${runtimeName(language)}`,
       `DraftMatter is preparing ${runtimeName(language)} for this project. The application remains usable while setup runs.`,
       language,
+      origin,
     )
     try {
       const environment = runtimeExecutableForKernelSetup(
@@ -2572,6 +2574,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
             'Checking the Julia project',
             'Inspecting Project.toml, Manifest.toml, and the active Julia environment…',
             'julia',
+            'project-open',
           )
           try {
             const environment = await desktopHost.listJuliaPackages(session.root, taskId)
@@ -2601,7 +2604,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
           return
         }
         setSelectedEnvironmentLanguage(language)
-        const updated = await setupKernelIntegrationTrusted(language, inventory)
+        const updated = await setupKernelIntegrationTrusted(language, inventory, 'project-open')
         if (!updated) {
           setEnvironmentOpen(true)
           return

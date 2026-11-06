@@ -56,6 +56,12 @@ async function settleUntil(predicate: () => boolean, timeoutMs = 3_000) {
   }
 }
 
+function pendingStep() {
+  let finish!: () => void
+  const promise = new Promise<void>((resolve) => { finish = resolve })
+  return { promise, finish }
+}
+
 describe('shared Jupyter execution workspace', () => {
   let container: HTMLDivElement
   let appRoot: ReturnType<typeof createRoot>
@@ -141,6 +147,52 @@ describe('shared Jupyter execution workspace', () => {
     container.remove()
   })
 
+  async function openCodeWorkspace() {
+    const open = container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!
+    await act(async () => open.click())
+    await settleUntil(() => Boolean(container.querySelector('.code-workspace-toolbar')))
+  }
+
+  it('keeps the chosen code workspace open while automatic project setup starts and finishes', async () => {
+    await settleUntil(() => container.querySelector('.rail-terminal-button')?.getAttribute('data-label') === 'Terminal · Ready')
+    await act(async () => appRoot.unmount())
+
+    const discoverKernels = vi.mocked(desktopHost.discoverJupyterKernels)
+    const inventory = await discoverKernels()
+    const discovery = pendingStep()
+    discoverKernels.mockClear().mockImplementationOnce(async () => {
+      await discovery.promise
+      return inventory
+    })
+    const listPackages = vi.mocked(desktopHost.listJuliaPackages)
+    const check = pendingStep()
+    listPackages.mockClear().mockImplementationOnce(async () => {
+      await check.promise
+      return { projectFile: true, manifestFile: true, packages: [] }
+    })
+    const repairKernel = vi.mocked(desktopHost.setupKernelIntegration)
+    const repair = pendingStep()
+    repairKernel.mockImplementationOnce(async () => {
+      await repair.promise
+      return { language: 'julia', kernelName: 'julia-fixture', inventory }
+    })
+    appRoot = createRoot(container)
+    await act(async () => appRoot.render(<App desktopProjectLaunch={project} />))
+    await settleUntil(() => discoverKernels.mock.calls.length > 0)
+    await openCodeWorkspace()
+    const workspace = container.querySelector('.code-workspace-toolbar')!
+    await act(async () => discovery.finish())
+    await settleUntil(() => listPackages.mock.calls.length > 0)
+    expect(workspace.isConnected).toBe(true)
+    await act(async () => check.finish())
+    await settleUntil(() => repairKernel.mock.calls.length > 0)
+    expect(workspace.isConnected).toBe(true)
+    await act(async () => repair.finish())
+    await settleUntil(() => container.querySelector('.rail-terminal-button')?.getAttribute('data-label') === 'Terminal · Ready')
+    expect(workspace.isConnected).toBe(true)
+    expect(workspace.textContent).toContain('Environments')
+  })
+
   it('keeps Code and computation visible as a primary workspace with concise state', () => {
     const codeWorkspace = container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!
     expect(codeWorkspace).not.toBeNull()
@@ -184,7 +236,7 @@ describe('shared Jupyter execution workspace', () => {
     const published = container.querySelector<HTMLElement>('[data-dm-node="published-value"][data-name="a"]')!
     expect(published.dataset.status).toBe('missing')
 
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    await openCodeWorkspace()
     const juliaCell = container.querySelector<HTMLElement>('.execution-cell-row[data-cell-id="jl-report"]')!
     expect(container.querySelector('.structured-code-cell[data-dm-id="jl-report"]')).toBeNull()
     await act(async () => juliaCell.querySelector<HTMLButtonElement>('.run-button')!.click())
@@ -198,7 +250,7 @@ describe('shared Jupyter execution workspace', () => {
   })
 
   it('edits setup source in the code panel without exposing it in the manuscript', async () => {
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    await openCodeWorkspace()
     const setupSelector = '.execution-cell-row[data-cell-id="py-setup"]'
     await settleUntil(() => Boolean(container.querySelector(`${setupSelector} .cm-editor`)))
     const setupRow = container.querySelector<HTMLElement>(setupSelector)!
@@ -210,7 +262,7 @@ describe('shared Jupyter execution workspace', () => {
   })
 
   it('adds a reproducible table from the code panel', async () => {
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    await openCodeWorkspace()
     const findAddTable = () => [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
       .find((button) => button.textContent?.includes('Add reproducible table'))
     await settleUntil(() => Boolean(findAddTable()))
@@ -304,7 +356,7 @@ describe('shared Jupyter execution workspace', () => {
 
   it('keeps Julia package work in the background until the terminal is opened', async () => {
     await settle(420)
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    await openCodeWorkspace()
     let resolveAdd: (environment: JuliaEnvironment) => void = () => undefined
     vi.mocked(desktopHost.addJuliaPackage).mockImplementationOnce(() => new Promise((resolve) => { resolveAdd = resolve }))
     const packages = [...container.querySelectorAll<HTMLButtonElement>('button')]
@@ -373,10 +425,10 @@ describe('shared Jupyter execution workspace', () => {
     }))
     const openTerminal = container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel terminal"]')
     if (!openTerminal) await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close kernel terminal"]')!.click())
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    await openCodeWorkspace()
     const juliaCell = container.querySelector<HTMLElement>('.execution-cell-row[data-cell-id="jl-report"]')!
     await act(async () => juliaCell.querySelector<HTMLButtonElement>('.run-button')!.click())
-    await settle()
+    await settleUntil(() => container.querySelector('[aria-label="Shared kernel terminal"]')?.textContent?.includes('jl-report failed') ?? false)
 
     const terminal = container.querySelector<HTMLElement>('[aria-label="Shared kernel terminal"]')!
     expect(terminal).toBeTruthy()
@@ -395,7 +447,7 @@ describe('shared Jupyter execution workspace', () => {
   })
 
   it('clean-runs setup first, restarts every language kernel, and never materializes setup output', async () => {
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    await openCodeWorkspace()
     const findCleanRun = () => [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
       .find((button) => button.textContent?.includes('Clean run'))
     await settleUntil(() => Boolean(findCleanRun()))
@@ -410,7 +462,7 @@ describe('shared Jupyter execution workspace', () => {
   })
 
   it('shows only language environments and shared kernels', async () => {
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    await openCodeWorkspace()
     const findEnvironments = () => [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
       .find((button) => button.textContent?.includes('Environments'))
     await settleUntil(() => Boolean(findEnvironments()))
@@ -422,7 +474,7 @@ describe('shared Jupyter execution workspace', () => {
   })
 
   it('keeps Python and R formatter packages outside the application bundle', async () => {
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    await openCodeWorkspace()
     const findEnvironments = () => [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
       .find((button) => button.textContent?.includes('Environments'))
     await settleUntil(() => Boolean(findEnvironments()))
