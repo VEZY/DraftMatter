@@ -455,64 +455,24 @@ pub fn format_julia_code_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
+    #[cfg(unix)]
     use tempfile::tempdir;
 
     #[cfg(unix)]
-    fn fake_julia(root: &Path) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-
-        let executable = root.join("fake-julia");
-        let staged = root.join(".fake-julia.tmp");
-        let mut file = fs::File::create(&staged).unwrap();
-        file.write_all(
-            r#"#!/bin/sh
-project=""
-for argument in "$@"; do
-  case "$argument" in --project=*) project="${argument#--project=}" ;; esac
-done
-[ "$project" = "." ] || { printf 'ERROR: Julia was not started with --project=.\n' >&2; exit 23; }
-project_environment=$(cd "$JULIA_PROJECT" && pwd -P)
-working_project=$(pwd -P)
-[ "$project_environment" = "$working_project" ] || { printf 'ERROR: JULIA_PROJECT did not point to the working project.\n' >&2; exit 24; }
-case "$*" in
-  *dependency.is_stdlib*) printf 'ERROR: package inventory used the removed PackageInfo.is_stdlib field.\n' >&2; exit 25 ;;
-esac
-case "$*" in
-  *DRAFTMATTER_ADD_PACKAGE*)
-    touch "$project/Project.toml" "$project/Manifest.toml"
-    printf 'DRAFTMATTER_PACKAGE\tDataFrames\t1.7.0\tpackage\nDRAFTMATTER_PACKAGE\tJuliaFormatter\t2.2.0\tpackage\n'
-    ;;
-  *DRAFTMATTER_REMOVE_PACKAGE*)
-    printf 'DRAFTMATTER_PACKAGE\tDataFrames\t1.7.0\tpackage\n'
-    ;;
-  *DRAFTMATTER_LIST_PACKAGES*)
-    touch "$project/Project.toml" "$project/Manifest.toml"
-    printf 'DRAFTMATTER_PACKAGE\tStatistics\t1.11.0\tstdlib\nDRAFTMATTER_PACKAGE\tDataFrames\t1.7.0\tpackage\n'
-    ;;
-  *DRAFTMATTER_FORMAT_JULIA*)
-    printf 'x = 1\n'
-    ;;
-esac
-"#
-            .as_bytes(),
-        )
-        .unwrap();
-        file.sync_all().unwrap();
-        drop(file);
-        fs::set_permissions(&staged, fs::Permissions::from_mode(0o755)).unwrap();
-        fs::rename(staged, &executable).unwrap();
-        executable
+    fn fake_julia() -> &'static Path {
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/julia-packages.sh"
+        ))
     }
 
     #[cfg(unix)]
     #[test]
     fn listing_instantiates_and_reports_project_files() {
         let temporary = tempdir().unwrap();
-        let executable = fake_julia(temporary.path());
         let environment = julia_environment_with_executable(
             temporary.path(),
-            &executable,
+            fake_julia(),
             PackageAction::List,
             None,
         )
@@ -534,10 +494,9 @@ esac
     #[test]
     fn adding_a_package_can_create_a_project_and_manifest() {
         let temporary = tempdir().unwrap();
-        let executable = fake_julia(temporary.path());
         let environment = julia_environment_with_executable(
             temporary.path(),
-            &executable,
+            fake_julia(),
             PackageAction::Add("JuliaFormatter"),
             None,
         )
@@ -552,9 +511,8 @@ esac
     #[test]
     fn formats_code_through_the_project_scoped_julia_process() {
         let temporary = tempdir().unwrap();
-        let executable = fake_julia(temporary.path());
         let formatted =
-            format_julia_code_with_executable(temporary.path(), &executable, "x=1".to_string())
+            format_julia_code_with_executable(temporary.path(), fake_julia(), "x=1".to_string())
                 .unwrap();
 
         assert!(formatted.changed);

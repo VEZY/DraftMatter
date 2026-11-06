@@ -131,7 +131,7 @@ describe('shared Jupyter execution workspace', () => {
     document.body.append(container)
     appRoot = createRoot(container)
     await act(async () => { appRoot.render(<App />) })
-    await settle(30)
+    await settleUntil(() => Boolean(container.querySelector('.structured-panel-code-placeholder[data-dm-id="py-setup"]')))
   })
 
   afterEach(async () => {
@@ -199,7 +199,9 @@ describe('shared Jupyter execution workspace', () => {
 
   it('edits setup source in the code panel without exposing it in the manuscript', async () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
-    const setupRow = container.querySelector<HTMLElement>('.execution-cell-row[data-cell-id="py-setup"]')!
+    const setupSelector = '.execution-cell-row[data-cell-id="py-setup"]'
+    await settleUntil(() => Boolean(container.querySelector(`${setupSelector} .cm-editor`)))
+    const setupRow = container.querySelector<HTMLElement>(setupSelector)!
     const codeView = CodeMirrorView.findFromDOM(setupRow.querySelector<HTMLElement>('.cm-editor')!)!
     await act(async () => codeView.dispatch({ changes: { from: codeView.state.doc.length, insert: '\nthreshold = 2' } }))
     expect(setupRow.textContent).toContain('Unsaved source changes')

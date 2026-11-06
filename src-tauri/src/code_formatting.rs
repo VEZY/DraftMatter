@@ -393,37 +393,24 @@ pub fn format_code_impl(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    use std::io::Write;
+    #[cfg(unix)]
     use tempfile::tempdir;
 
     #[cfg(unix)]
-    fn fake_formatter(root: &Path) -> PathBuf {
-        use std::os::unix::fs::PermissionsExt;
-        let executable = root.join("fake-runtime");
-        let staged = root.join(".fake-runtime.tmp");
-        let mut file = fs::File::create(&staged).unwrap();
-        file.write_all(
-            b"#!/bin/sh\ncase \"$*\" in\n  *--version*) printf 'ruff 0.12.0\\n' ;;\n  *ruff*format*) sed 's/x=1/x = 1/' ;;\n  *styler::style_text*) sed 's/x<-1/x <- 1/' ;;\n  *) printf '0.12.0\\n' ;;\nesac\n",
-        )
-        .unwrap();
-        file.sync_all().unwrap();
-        drop(file);
-        let mut permissions = fs::metadata(&staged).unwrap().permissions();
-        permissions.set_mode(0o755);
-        fs::set_permissions(&staged, permissions).unwrap();
-        fs::rename(staged, &executable).unwrap();
-        executable
+    fn fake_formatter() -> &'static Path {
+        Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/fixtures/formatter.sh"
+        ))
     }
 
     #[cfg(unix)]
     #[test]
     fn formats_python_through_ruff_without_bundling_it() {
         let temporary = tempdir().unwrap();
-        let executable = fake_formatter(temporary.path());
         let result = format_with_executable(
             temporary.path(),
-            &executable,
+            fake_formatter(),
             RuntimeLanguage::Python,
             "x=1\n".to_string(),
         )
@@ -436,9 +423,9 @@ mod tests {
     #[test]
     fn detects_the_external_ruff_package_version() {
         let temporary = tempdir().unwrap();
-        let executable = fake_formatter(temporary.path());
         let status =
-            probe_with_executable(temporary.path(), &executable, RuntimeLanguage::Python).unwrap();
+            probe_with_executable(temporary.path(), fake_formatter(), RuntimeLanguage::Python)
+                .unwrap();
         assert_eq!(status.package, "Ruff");
         assert_eq!(status.version.as_deref(), Some("0.12.0"));
     }
@@ -447,10 +434,9 @@ mod tests {
     #[test]
     fn formats_r_through_styler_without_bundling_it() {
         let temporary = tempdir().unwrap();
-        let executable = fake_formatter(temporary.path());
         let result = format_with_executable(
             temporary.path(),
-            &executable,
+            fake_formatter(),
             RuntimeLanguage::R,
             "x<-1\n".to_string(),
         )
