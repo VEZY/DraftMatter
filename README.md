@@ -5,7 +5,7 @@
 DraftMatter is a local-first research writing application that brings the manuscript, citations, executable results, review, collaboration, and version history into one calm workspace. Underneath the rendered writing experience, the manuscript remains a portable Markdown or Quarto text file that can live beside its code, data, and bibliography in an ordinary Git repository.
 
 > [!IMPORTANT]
-> DraftMatter has a certified local MVP and a repository-owned collaboration beta foundation. It is still an alpha product: signed public desktop releases and an operated hosted collaboration service have not completed their external deployment, security, privacy, and support gates. See the [product register](./draftmatter-app-design.md) and [implementation evidence](./docs/implementation-evidence.md).
+> DraftMatter has a certified local MVP and a repository-owned collaboration beta foundation. It is still an alpha product: public desktop releases still require platform installation checks; an operated hosted collaboration service still requires external deployment, security, privacy, and support gates. See the [product register](./draftmatter-app-design.md) and [implementation evidence](./docs/implementation-evidence.md).
 
 ## Why DraftMatter?
 
@@ -187,6 +187,10 @@ Final rendering exits with status `2` and writes no output when overlapping prop
 
 The installed Linux application and Windows setup also expose `draftmatter`: with no arguments it opens the app, and with CLI arguments it forwards to the bundled command. A macOS app can always be opened from Terminal with `open -a DraftMatter`; the platform-neutral CLI package provides the same `draftmatter` command when a shell command is preferred.
 
+## Install DraftMatter
+
+Download desktop installers from [GitHub Releases](https://github.com/VEZY/DraftMatter/releases). Follow the [macOS, Windows and Linux installation guide](./docs/installation.md), including checksum verification and first-launch prompts.
+
 ## Verification
 
 ```sh
@@ -199,7 +203,7 @@ npm run compliance:check
 npm run release:verify
 ```
 
-Production desktop installers are built from version tags as signed/notarized draft releases for Windows x64, Linux x64, and both macOS architectures. Manual workflow runs produce unsigned release candidates only; see the [release gate](./docs/release-compliance.md).
+Production desktop installers are built from version tags as draft GitHub releases for Windows x64, Linux x64, and both macOS architectures, without paid publisher signing or Apple notarization. Manual workflow runs upload candidate artifacts. See the [installation instructions](./docs/installation.md) for downloads and OS prompts, and the [release gate](./docs/release-compliance.md) for publication checks.
 
 ## Project documentation
 

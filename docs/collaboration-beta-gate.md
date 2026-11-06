@@ -32,4 +32,4 @@ The most recent native-host and deployment certification additionally completed:
 - `docker compose config --quiet`: the portable local service topology validated;
 - `npm run desktop:build -- --debug --bundles app`: the native macOS application compiled, bundled, and passed strict code-signature verification.
 
-The CI collaboration workflow independently builds the service image on Linux. Platform distribution signing/notarization, production OIDC/TLS configuration, external security review, and operated load/restore drills remain deployment gates rather than repository implementation gaps.
+The CI collaboration workflow independently builds the service image on Linux. Platform installation checks for downloads without publisher signing, production OIDC/TLS configuration, external security review, and operated load/restore drills remain deployment gates rather than repository implementation gaps.

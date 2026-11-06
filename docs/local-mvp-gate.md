@@ -60,4 +60,4 @@ cargo test --manifest-path src-tauri/Cargo.toml --locked
 npm run compliance:check
 ```
 
-Manual release QA still includes opening the built application on each target, inspecting the representative HTML/print/DOCX output, and completing the signing/notarization checklist in `release-compliance.md`.
+Manual release QA still includes opening the built application on each target, inspecting the representative HTML/print/DOCX output, and completing the GitHub distribution checklist in `release-compliance.md`.

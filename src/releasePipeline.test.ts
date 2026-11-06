@@ -2,7 +2,7 @@
 
 import { spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -36,69 +36,20 @@ describe('DM-P5-08 production release pipeline', () => {
     expect(mismatched.stderr).toContain(`expected v${version}`)
   })
 
-  it('separates unsigned candidates from signed draft releases and verifies every signature class', () => {
+  it('builds candidates and draft releases without paid publisher credentials', () => {
     expect(workflow).toContain("tags:\n      - 'v*.*.*'")
-    expect(workflow).toContain('Manual build: unsigned release-candidate policy applies.')
     expect(workflow).toContain('Build unsigned release candidate bundles')
-    expect(workflow).toContain('Build signed release bundles into a draft release')
+    expect(workflow).toContain('Build release bundles without publisher signing into a draft release')
     expect(workflow).toContain('releaseDraft: true')
-    expect(workflow).toContain('bash scripts/notarize-release-dmg.sh')
-    expect(workflow).toContain('verify /pa /all /tw /v')
-    expect(workflow).toContain('GH_REPO: ${{ github.repository }}')
-    for (const secret of [
-      'APPLE_CERTIFICATE',
-      'APPLE_SIGNING_IDENTITY',
-      'APPLE_ID',
-      'APPLE_TEAM_ID',
-      'WINDOWS_CERTIFICATE',
-      'WINDOWS_CERTIFICATE_THUMBPRINT',
-    ]) expect(workflow).toContain(`secrets.${secret}`)
-  })
-
-  it.skipIf(process.platform === 'win32')('publishes only an accepted, stapled DMG and verifies its downloaded bytes', () => {
-    const root = mkdtempSync(join(tmpdir(), 'draftmatter-notary-'))
-    const bin = join(root, 'bin')
-    const remote = join(root, 'remote')
-    const asset = `DraftMatter_${version}_darwin_x64_dmg.dmg`
-    const localDmg = join(root, 'dmg', `DraftMatter_${version}_x64.dmg`)
-    const verify = (env: Record<string, string> = {}) => {
-      writeFileSync(localDmg, 'signed')
-      return spawnSync('bash', ['scripts/notarize-release-dmg.sh', 'x86_64-apple-darwin', root], {
-        env: { PATH: `${bin}:${process.env.PATH}`, RUNNER_TEMP: root, GITHUB_REF_NAME: `v${version}`,
-          APPLE_ID: 'test', APPLE_TEAM_ID: 'test', APPLE_PASSWORD: 'test', FAKE_REMOTE: remote, ...env },
-        encoding: 'utf8',
-      })
-    }
-    const mock = (name: string, body: string) => writeFileSync(join(bin, name), `#!/bin/bash\nset -eu\n${body}\n`, { mode: 0o755 })
-    try {
-      for (const dir of [bin, remote, dirname(localDmg), join(root, 'macos/DraftMatter.app')]) mkdirSync(dir, { recursive: true })
-      mock('codesign', 'test -e "${!#}"')
-      mock('spctl', 'test -d "${!#}"')
-      mock('xcrun', `case "$1 $2" in
-  'notarytool submit') printf '{"id":"test","status":"%s"}' "\${NOTARY_STATUS:-Accepted}" ;;
-  'stapler staple') printf '+ticket' >> "$3" ;;
-  'stapler validate') [[ "$3" == *.app ]] || grep -q '+ticket' "$3" ;;
-  *) exit 1 ;;
-esac`)
-      mock('gh', `case "$2" in
-  view) echo "\${DRAFT:-true}" ;;
-  upload) cp "$4" "$FAKE_REMOTE/" ;;
-  download) mkdir "$7"; cp "$FAKE_REMOTE/$5" "$7/$5"; if [[ -n "\${CORRUPT:-}" ]]; then echo corrupt >> "$7/$5"; fi ;;
-  *) exit 1 ;;
-esac`)
-      const rejectedEnvironments: Record<string, string>[] = [{ NOTARY_STATUS: 'Invalid' }, { DRAFT: 'false' }]
-      for (const env of rejectedEnvironments) {
-        const result = verify(env)
-        expect(result.status).not.toBe(0)
-        expect(existsSync(join(remote, asset))).toBe(false)
-      }
-      const accepted = verify()
-      expect(accepted.status, accepted.stderr).toBe(0)
-      expect(readFileSync(join(remote, asset), 'utf8')).toBe('signed+ticket')
-      expect(verify({ CORRUPT: 'true' }).status).not.toBe(0)
-    } finally {
-      rmSync(root, { recursive: true, force: true })
-    }
+    expect(workflow).toContain('docs/installation.md')
+    expect(workflow).toContain('Windows installers are unsigned')
+    expect(workflow).toContain('codesign --verify --deep --strict')
+    expect(workflow).toContain('Signature=adhoc')
+    expect(workflow).not.toMatch(/signing-policy|notarize-release-dmg|signtool|notarytool/)
+    expect(workflow).not.toMatch(/secrets\.(APPLE_|WINDOWS_CERTIFICATE)/)
+    const config = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'))
+    expect(config.bundle.macOS.signingIdentity).toBe('-')
+    expect(config.bundle.windows.certificateThumbprint).toBeUndefined()
   })
 
   it('builds production bundles for every supported desktop architecture', () => {

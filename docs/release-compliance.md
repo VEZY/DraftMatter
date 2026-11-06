@@ -59,29 +59,33 @@ workflow runs `npm audit --audit-level=high` against the registry before packagi
 
 The allowlist is an engineering gate, not legal advice. Adding an identifier requires an explicit reviewed change. Package-specific notice and attribution files must be retained when their licence requires it.
 
-## Signing and notarization gate
+## GitHub distribution gate
 
-Use the [signing setup guide](./signing-setup.md) to prepare the certificates and GitHub Actions secrets. Development macOS bundles use an ad hoc signature (`signingIdentity: "-"`). Manual workflow runs produce unsigned release candidates. Pushing a `v<package-version>` tag creates a draft release and requires:
+Desktop releases do not require paid publisher certificates or Apple notarization.
+Both development and release macOS bundles use a free ad hoc signature
+(`signingIdentity: "-"`); CI verifies bundle integrity with `codesign` on both
+architectures. This does not identify a verified publisher or satisfy Gatekeeper.
+Windows MSI and NSIS installers are unsigned. Linux packages do not require a
+publisher certificate. No Apple or Windows certificate secrets are needed.
 
-1. a Developer ID Application identity and notarization credentials for macOS;
-2. a Windows code-signing certificate with a private key and a matching SHA-1 certificate thumbprint;
-3. successful `codesign --verify --deep --strict`, Gatekeeper assessment, and notarization-ticket validation on both macOS architectures;
-4. successful Authenticode verification, including the expected signer and a timestamp, for both the Windows MSI and NSIS installers;
-5. generated SHA-256 checksums, target-specific CycloneDX SBOMs, and third-party notices attached to the draft release;
-6. manual review of the draft before publication, retaining the exact source revision and locked dependency files used by the build.
+Manual workflow runs upload candidate artifacts. Pushing a matching
+`v<package-version>` tag builds all four targets into a **draft** GitHub release.
+The release notes disclose the signing policy and link to the versioned
+[installation instructions](installation.md) for macOS, Windows, and Linux.
 
-Tauri notarizes and staples the macOS app during the build. The macOS job
-then submits the signed DMG to Apple, staples its accepted ticket, replaces
-the DMG in the draft release, and checks the downloaded bytes against the
-stapled file. Windows uses SHA-256 for both the file signature and the RFC
-3161 timestamp. The metadata job retrieves the signed installers from the draft to hash them
-under their GitHub download names. Each of the four targets supplies its own
-notices, SBOM, and execution host. Download the release assets to one directory
-and run `sha256sum -c SHA256SUMS` there to verify them.
+Before publishing the draft:
 
-`npm run release:verify` prevents a tag from drifting from `package.json`, `package-lock.json`, `Cargo.toml`, or `tauri.conf.json`. Missing signing secrets fail before platform builds begin. A failed signature, notarization, test, compliance, or checksum job leaves at most an unpublished draft and cannot silently publish an unsigned installer.
+1. Require successful tests, locked-dependency audit, platform builds and compliance jobs.
+2. Check that the metadata job attached `SHA256SUMS`, per-target CycloneDX SBOMs, third-party notices, execution hosts and the standalone CLI.
+3. Verify downloaded installers against `SHA256SUMS` and smoke-test installation and launch on each supported target, including the OS prompts described in the installation guide.
+4. Review the draft assets and notes manually, retaining the exact source revision and locked dependencies used by the build.
 
-Unsigned or unnotarized desktop artifacts must be labelled development builds and must not be promoted as a release. Signing credentials never belong in the repository or application logs.
+`npm run release:verify` prevents a tag from drifting from `package.json`,
+`package-lock.json`, `Cargo.toml`, or `tauri.conf.json`. The metadata job downloads
+the actual installers from the draft and hashes their final download bytes and
+filenames. Checksums detect corruption; they do not authenticate the publisher.
+A failed job leaves at most an incomplete unpublished draft. Publish only after
+all jobs succeed and manual review is complete; CI never publishes automatically.
 
 ## Runtime diagnostics
 

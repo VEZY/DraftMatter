@@ -30,7 +30,7 @@ The implementation tree was last audited on 2026-07-16 from a clean
 | `npm run desktop:build -- --debug --bundles app` | Passed: macOS application bundle built and ad-hoc signed. |
 | `codesign --verify --deep --strict --verbose=2 DraftMatter.app` | Passed for the locally built macOS application. |
 | `.github/workflows/desktop-portability.yml` | Defines locked Windows, macOS, and Linux type, compliance, frontend, CLI, Rust, and application-build gates. |
-| `.github/workflows/desktop-release.yml` | Defines release verification, platform packaging, CLI packaging, checksums, SBOM/notices, and tag-only signing/notarization policy. |
+| `.github/workflows/desktop-release.yml` | Defines release verification, platform packaging, CLI packaging, checksums, SBOM/notices, and GitHub draft releases without paid publisher signing. |
 
 ### Shared Jupyter-kernel audit
 
@@ -230,8 +230,7 @@ are complete in the canonical register.
 ## External launch gates
 
 The repository implements and tests the release and collaboration mechanisms,
-but a public paid launch still requires environment-owned inputs: production
-signing/notarization credentials, operated OIDC/billing/TLS and secret
+but a public paid launch still requires environment-owned inputs: operated OIDC/billing/TLS and secret
 management, provider-level database/object backups, alert routing,
 privacy/data-processing and external security review, and production load/soak
 tests. These are deployment gates documented in

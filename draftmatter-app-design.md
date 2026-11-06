@@ -20,7 +20,7 @@ The recommended working name is **DraftMatter**: “draft” describes the autho
 
 The working licence decision is **MIT for the desktop application, reusable document/review libraries, CLI/export tooling, and public collaboration code**. The initial delivery assumption was a macOS-first local MVP, with Git and local track changes in the open-source product and a paid managed collaboration service as a later milestone. Cloud execution and lossless Word round-tripping remain outside the planned scope.
 
-As of 2026-07-18, the repository implements and certifies the local MVP in DM-P0 through DM-P5, the repository-owned collaboration beta foundation in DM-P6, and the alpha authoring workflow in DM-P7. Windows, macOS, and Linux packaging paths are defined and tested in CI. The product is now ready for **installed-app alpha field trials**, not another initial feature spike. A public desktop release and operated paid service still depend on external signing, production infrastructure, security, privacy, support, and deployment gates that cannot be completed by repository code alone.
+As of 2026-07-18, the repository implements and certifies the local MVP in DM-P0 through DM-P5, the repository-owned collaboration beta foundation in DM-P6, and the alpha authoring workflow in DM-P7. Windows, macOS, and Linux packaging paths are defined and tested in CI. The product is now ready for **installed-app alpha field trials**, not another initial feature spike. A public desktop release and operated paid service still depend on platform installation checks, production infrastructure, security, privacy, support, and deployment gates that cannot be completed by repository code alone.
 
 ## Agent-executable implementation contract
 
@@ -128,7 +128,7 @@ Before a release candidate, also run the repository's Playwright/end-to-end suit
 - [x] **DM-P5-05 — Explicit checkpoints.** Stage selected files and create named local commits without automatic commits or destructive history operations. **Check:** integration tests inspect the resulting tree and commit while preserving unrelated changes.
 - [x] **DM-P5-06 — Guarded branches and remotes.** Create/switch branches safely and fetch, pull, or push only after explicit user actions; surface conflicts without discarding work. **Check:** local bare-remote fixtures cover success, divergence, authentication failure, and merge conflict.
 - [x] **DM-P5-07 — Performance and resilience.** Keep a 50–100 page manuscript responsive, recover from crashes, and handle destructive edge cases without data loss. **Check:** recorded performance budgets, stress tests, and crash-recovery scenarios meet documented thresholds.
-- [x] **DM-P5-08 — Release compliance.** Generate third-party notices and an SBOM, enforce the licence allowlist, package supported platforms, and document runtime diagnostics. **Check:** CI fails on unknown/disallowed licences and validates signed/notarized artifacts where applicable.
+- [x] **DM-P5-08 — Release compliance.** Generate third-party notices and an SBOM, enforce the licence allowlist, package supported platforms, and document runtime diagnostics. **Check:** CI fails on unknown/disallowed licences and verifies macOS ad hoc bundle integrity and release checksums without paid publisher certificates.
 - [x] **DM-P5-GATE — Local MVP release gate.** Dogfood an article-sized project end to end, export clean HTML/PDF/DOCX/Markdown, reopen it intact, and create an explicit Git checkpoint. All local acceptance criteria are checked. **Depends:** DM-P5-01 through DM-P5-08 and every earlier phase gate.
 
 ### DM-P6 — Paid online collaboration beta
@@ -1155,7 +1155,7 @@ Exit test: suggestions from two authors survive restart and moderate external ed
 - accessibility and keyboard pass.
 - performance on a 50–100 page manuscript.
 - crash recovery and destructive-edge-case tests.
-- signed macOS alpha; Windows/Linux packaging assessment.
+- macOS alpha with an ad hoc signature and documented first-launch approval; Windows/Linux packaging assessment.
 
 Exit test: complete a real article-sized dogfood project, send a clean DOCX/PDF, and reopen the project with its citations, outputs, and review history intact.
 
