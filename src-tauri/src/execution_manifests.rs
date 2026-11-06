@@ -1,4 +1,7 @@
-use crate::{canonical_root, modified_ms, source_hash, write_atomic, DocumentSnapshot, HostError};
+use crate::{
+    canonical_root, checked_path, contained_path, modified_ms, source_hash, write_atomic,
+    DocumentSnapshot, HostError,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
@@ -51,10 +54,13 @@ fn manifest_path(root: &Path, cell_id: &str) -> Result<PathBuf, HostError> {
                 .to_string(),
         ));
     }
-    Ok(root
-        .join(".draftmatter/outputs")
-        .join(manifest_directory_name(cell_id))
-        .join("manifest.json"))
+    contained_path(
+        root,
+        &format!(
+            ".draftmatter/outputs/{}/manifest.json",
+            manifest_directory_name(cell_id)
+        ),
+    )
 }
 
 fn sha256_value(value: Option<&serde_json::Value>) -> bool {
@@ -223,7 +229,7 @@ pub fn save_execution_manifest_impl(
 
 pub fn read_execution_manifests_impl(raw_root: &str) -> Result<Vec<DocumentSnapshot>, HostError> {
     let root = canonical_root(raw_root)?;
-    let directory = root.join(".draftmatter/outputs");
+    let directory = contained_path(&root, ".draftmatter/outputs")?;
     if !directory.exists() {
         return Ok(Vec::new());
     }
@@ -239,7 +245,14 @@ pub fn read_execution_manifests_impl(raw_root: &str) -> Result<Vec<DocumentSnaps
                 "A project may contain at most {MAX_MANIFESTS} execution manifests."
             )));
         }
-        let path = entry.path().join("manifest.json");
+        if !entry.file_type()?.is_dir() {
+            continue;
+        }
+        let path = checked_path(
+            &directory,
+            &Path::new(&entry.file_name()).join("manifest.json"),
+            false,
+        )?;
         if !path.is_file() {
             continue;
         }

@@ -1,7 +1,10 @@
 /// <reference types="node" />
 
-import { readFileSync } from 'node:fs'
 import { spawnSync } from 'node:child_process'
+import { createHash } from 'node:crypto'
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const workflow = readFileSync('.github/workflows/desktop-release.yml', 'utf8').replace(/\r\n/g, '\n')
@@ -12,6 +15,7 @@ const tauriConfig = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8')
   bundle?: { windows?: { nsis?: { installerHooks?: string } } }
 }
 const version = JSON.parse(readFileSync('package.json', 'utf8')).version as string
+const targets = ['x86_64-unknown-linux-gnu', 'x86_64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-apple-darwin']
 
 describe('DM-P5-08 production release pipeline', () => {
   it('keeps npm, Cargo, Tauri, and a matching release tag on one version', () => {
@@ -42,7 +46,7 @@ describe('DM-P5-08 production release pipeline', () => {
     expect(workflow).toContain('spctl --assess --type execute')
     expect(workflow).toContain('xcrun stapler validate')
     expect(workflow).toContain('signtool verify /pa /all /v')
-    expect(workflow).toContain('release-metadata/SHA256SUMS')
+    expect(workflow).toContain('GH_REPO: ${{ github.repository }}')
     for (const secret of [
       'APPLE_CERTIFICATE',
       'APPLE_SIGNING_IDENTITY',
@@ -54,12 +58,7 @@ describe('DM-P5-08 production release pipeline', () => {
   })
 
   it('builds production bundles for every supported desktop architecture', () => {
-    for (const target of [
-      'x86_64-unknown-linux-gnu',
-      'x86_64-pc-windows-msvc',
-      'aarch64-apple-darwin',
-      'x86_64-apple-darwin',
-    ]) expect(workflow).toContain(target)
+    for (const target of targets) expect(workflow).toContain(target)
     expect(workflow).toContain('--bundles deb,appimage')
     expect(workflow).toContain('--bundles nsis,msi')
     expect(workflow).toContain('--bundles app,dmg')
@@ -71,8 +70,80 @@ describe('DM-P5-08 production release pipeline', () => {
     expect(portabilityWorkflow).toContain('npm run test:cli')
     expect(workflow).toContain('Package platform-neutral CLI')
     expect(workflow).toContain('npm pack ./dist-cli --pack-destination release-cli')
-    expect(workflow).toContain("-name 'draftmatter-*.tgz'")
     expect(workflow).toContain('needs: [build, cli]')
+  })
+
+  it('retains all platform files and checksums the bytes using final download names', () => {
+    const root = mkdtempSync(join(tmpdir(), 'draftmatter-release-assets-'))
+    const artifacts = join(root, 'artifacts')
+    const installers = join(root, 'installers')
+    const output = join(root, 'output')
+    const expected = new Map<string, string>()
+    const addArtifact = (directory: string, filename: string, releaseName: string) => {
+      mkdirSync(directory, { recursive: true })
+      const bytes = `fixture ${releaseName}\n`
+      writeFileSync(join(directory, filename), bytes)
+      expected.set(releaseName, bytes)
+    }
+    const prepare = () => spawnSync(process.execPath, ['scripts/prepare-release-metadata.mjs', artifacts, installers, output], { encoding: 'utf8' })
+    try {
+      for (const target of targets) {
+        const inventory = `draftmatter-${target}-compliance`
+        for (const filename of ['THIRD_PARTY_NOTICES.md', 'sbom.cdx.json']) {
+          addArtifact(join(artifacts, inventory), filename, `${inventory}-${filename}`)
+        }
+        const host = `draftmatter-${target}-agent-host`
+        const name = target.includes('windows') ? 'draftmatter-agent-host.exe' : 'draftmatter-agent-host'
+        addArtifact(join(artifacts, host), name, `${host}-${name}`)
+      }
+      const cli = `draftmatter-${version}.tgz`
+      addArtifact(join(artifacts, 'draftmatter-cli'), cli, cli)
+      const installerNames = [
+        'darwin_x64_dmg.dmg', 'darwin_aarch64_dmg.dmg', 'windows_x64_nsis.exe', 'windows_x64_msi.msi',
+        'linux_amd64_deb.deb', 'linux_amd64_appimage.AppImage', 'darwin_aarch64_app.app.tar.gz',
+      ].map((suffix) => `DraftMatter_${version}_${suffix}`)
+      for (const name of installerNames.slice(1)) addArtifact(installers, name, name)
+      expect(prepare().stderr).toContain(`Missing installer in the draft release: ${installerNames[0]}`)
+      addArtifact(installers, installerNames[0], installerNames[0])
+      const result = prepare()
+      expect(result.status, result.stderr).toBe(0)
+      const checksums = readFileSync(join(output, 'SHA256SUMS'), 'utf8').trimEnd().split('\n')
+      expect(checksums).toHaveLength(expected.size)
+      for (const [releaseName, bytes] of expected) {
+        expect(checksums).toContain(`${createHash('sha256').update(bytes).digest('hex')}  ${releaseName}`)
+        const dir = installerNames.includes(releaseName) ? installers : output
+        expect(readFileSync(join(dir, releaseName), 'utf8')).toBe(bytes)
+      }
+      expect(readdirSync(output)).toHaveLength(14) // twelve platform assets, the CLI, and SHA256SUMS
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('rejects an expired exception even when its severity, package and scope still match', () => {
+    const root = mkdtempSync(join(tmpdir(), 'draftmatter-release-policy-'))
+    try {
+      for (const name of ['scripts/verify-release.mjs', 'package.json', 'package-lock.json',
+        'src-tauri/tauri.conf.json', 'src-tauri/Cargo.toml', 'src-tauri/windows/installer-hooks.nsh',
+        'integrations/plugins/draftmatter/.codex-plugin/plugin.json']) {
+        mkdirSync(dirname(join(root, name)), { recursive: true })
+        copyFileSync(name, join(root, name))
+      }
+      const lock = JSON.parse(readFileSync('package-lock.json', 'utf8'))
+      const entry = {
+        advisory: 'GHSA-xxxx-xxxx-xxxx', package: '@modelcontextprotocol/sdk',
+        affectedInstalledVersion: lock.packages['node_modules/@modelcontextprotocol/sdk'].version,
+        severity: 'moderate', scope: 'unused HTTP adapter', transportExposed: false,
+        reviewedOn: '2000-01-01', reviewBy: '2000-01-02',
+      }
+      mkdirSync(join(root, 'compliance'))
+      writeFileSync(join(root, 'compliance/security-exceptions.json'), JSON.stringify({ schemaVersion: 1, exceptions: [entry] }))
+      const result = spawnSync(process.execPath, [join(root, 'scripts/verify-release.mjs')], { encoding: 'utf8' })
+      expect(result.status).toBe(1)
+      expect(result.stderr).toContain('expired review period')
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 
   it('makes the installed application executable available from a terminal', () => {

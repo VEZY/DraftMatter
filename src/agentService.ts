@@ -1,4 +1,5 @@
 import packageMetadata from '../package.json'
+import { assertDraftMatterAiProjectEnabled } from './agentProjectEnablement'
 import { Fragment, Slice, type Mark, type Node as ProseMirrorNode } from 'prosemirror-model'
 import {
   AGENT_CAPABILITY_BOUNDARIES,
@@ -563,6 +564,11 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
   const setupSignatures = new Map<ExecutableCell['language'], string>()
   let mutationQueue: Promise<void> = Promise.resolve()
 
+  async function commitProjectWrites(writes: AgentProjectWrite[]) {
+    await assertDraftMatterAiProjectEnabled(store)
+    return store.commit(writes)
+  }
+
   function executionReference() {
     return opaqueAgentReference('operation', crypto.randomUUID())
   }
@@ -923,6 +929,8 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
       }))
       const auditContent = `${auditLines.slice(-MAX_AUDIT_RECORDS).join('\n')}\n`
       try {
+        // Record the receipt for the mutation that already committed, even if
+        // project access changes between the manuscript write and this receipt.
         await store.commit([
           {
             path: AGENT_IDEMPOTENCY_PATH,
@@ -1117,7 +1125,7 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
       inputRevision,
       affectedReferences,
     })
-    const commit = await store.commit([{ path: snapshot.mainDocument, content: source, expectedRevision: request.expectedRevision }])
+    const commit = await commitProjectWrites([{ path: snapshot.mainDocument, content: source, expectedRevision: request.expectedRevision }])
     const outputRevision = commit.revisions[snapshot.mainDocument]
     if (!outputRevision) throw new Error('The manuscript write did not produce a document revision.')
     return success(request, { ...result, persisted: true, transactionId: commit.transactionId }, {
@@ -1577,7 +1585,7 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
           }] : []),
           ...manifestWrites,
         ]
-        const commit = await store.commit(writes)
+        const commit = await commitProjectWrites(writes)
         const outputRevision = commit.revisions[snapshot.mainDocument] ?? snapshot.documentRevision
         const transactionId = commit.transactionId
         return success(lifecycle, {
@@ -1975,7 +1983,7 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
           affectedReferences: [request.candidate],
         })
       }
-      const commit = writes.length ? await store.commit(writes) : undefined
+      const commit = writes.length ? await commitProjectWrites(writes) : undefined
       const outputRevision = commit?.revisions[snapshot.mainDocument] ?? snapshot.documentRevision
       return success(request, {
         persisted: true,
@@ -2096,6 +2104,7 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
         ? request as MutationRequest
         : undefined
       const runRequest = async () => {
+        await assertDraftMatterAiProjectEnabled(store)
         const payload = mutation ? canonicalJson(request) : undefined
         const requestHash = payload ? await sha256(payload) : undefined
         if (mutation && payload && requestHash) {

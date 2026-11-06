@@ -486,6 +486,9 @@ export class AuthenticatedWorkspaceService implements ProjectAuthorizationServic
       throw new WorkspaceAccessError('invitation-unavailable', 'This invitation is invalid, expired, revoked, or already used.')
     }
     if (!this.workspaces.has(invitation.workspaceId)) throw new WorkspaceAccessError('invitation-unavailable', 'This invitation is invalid, expired, revoked, or already used.')
+    if (this.memberships.get(`${invitation.workspaceId}:${claims.sub}`)?.role === 'owner') {
+      throw new WorkspaceAccessError('forbidden', 'You already own this workspace.')
+    }
     const membership: WorkspaceMembership = {
       workspaceId: invitation.workspaceId,
       userId: claims.sub,

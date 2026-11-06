@@ -67,9 +67,13 @@ jobs:
         run: npm run check
 
       - name: Enforce dependency licence allowlist
+        env:
+          DRAFTMATTER_COMPLIANCE_TARGET: ${{ matrix.target }}
         run: npm run compliance:check
 
       - name: Generate platform notices and CycloneDX SBOM
+        env:
+          DRAFTMATTER_COMPLIANCE_TARGET: ${{ matrix.target }}
         run: npm run compliance:generate
 
       - name: Test frontend and host adapter

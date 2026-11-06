@@ -127,6 +127,9 @@ Publication body.
     expect(html).toContain('&lt;script&gt;alert(1)&lt;/script&gt;')
     expect(html).not.toContain('<script>')
     expect(html).not.toContain('src="javascript:')
+    const links = renderNativeHtmlExport('[unsafe](java\tscript:window.__probe=1) and [notes](notes.md)\n')
+    expect(links).toContain('unsafe and <a href="notes.md">notes</a>')
+    expect(links).not.toContain('__probe')
   })
 
   it('preserves an unclosed display equation as escaped visible source', () => {

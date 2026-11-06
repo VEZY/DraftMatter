@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
+import { copyFile, mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
@@ -171,6 +171,7 @@ describe('headless DraftMatter agent service', () => {
   beforeEach(async () => {
     root = await mkdtemp(join(tmpdir(), 'draftmatter agent service '))
     await mkdir(join(root, '.draftmatter'), { recursive: true })
+    await copyFile(new URL('./fixtures/projects/alpha-article/.draftmatter/ai-integration.json', import.meta.url), join(root, '.draftmatter/ai-integration.json'))
     await writeFile(join(root, '.draftmatter', 'project.json'), JSON.stringify({
       schemaVersion: 1,
       name: 'Agent service fixture',

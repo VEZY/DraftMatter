@@ -641,7 +641,54 @@ fn canonical_root(raw: &str) -> Result<PathBuf, HostError> {
 }
 
 fn contained_path(root: &Path, relative: &str) -> Result<PathBuf, HostError> {
-    Ok(root.join(safe_relative(relative)?))
+    let relative = safe_relative(relative)?;
+    checked_path(root, &relative, !relative.starts_with(".draftmatter"))
+}
+
+// Check every existing component, including dangling links and ancestors of new
+// files. Recovery metadata must never alias another directory, even inside root.
+fn checked_path(
+    root: &Path,
+    relative: &Path,
+    allow_internal_links: bool,
+) -> Result<PathBuf, HostError> {
+    let mut path = root.to_path_buf();
+    for component in relative.components() {
+        let Component::Normal(name) = component else {
+            return Err(HostError::InvalidPath(format!(
+                "Expected a project-relative path: {}",
+                relative.display()
+            )));
+        };
+        path.push(name);
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if is_link(&metadata)
+            && (!allow_internal_links
+                || !fs::canonicalize(&path).is_ok_and(|resolved| resolved.starts_with(root)))
+        {
+            return Err(HostError::InvalidPath(format!(
+                "Unsafe project link: {}",
+                path.display()
+            )));
+        }
+    }
+    Ok(path)
+}
+
+fn is_link(metadata: &fs::Metadata) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::MetadataExt;
+        metadata.file_attributes() & 0x400 != 0 // FILE_ATTRIBUTE_REPARSE_POINT (includes junctions)
+    }
+    #[cfg(not(windows))]
+    {
+        metadata.file_type().is_symlink()
+    }
 }
 
 fn slash_path(path: &Path) -> String {
@@ -714,10 +761,19 @@ fn discover_entries(
         let entry = entry?;
         let path = entry.path();
         let name = entry.file_name();
+        if is_link(&fs::symlink_metadata(&path)?)
+            && !fs::canonicalize(&path)
+                .is_ok_and(|target| target.starts_with(root) && target.is_file())
+        {
+            continue;
+        }
         if path.is_dir() {
             if !ignored_discovery_directory(&name) {
                 discover_entries(root, &path, depth + 1, documents, bibliographies)?;
             }
+            continue;
+        }
+        if !path.is_file() {
             continue;
         }
         let extension = path
@@ -757,12 +813,8 @@ fn default_config(root: &Path, documents: &[ProjectEntry]) -> ProjectConfig {
     }
 }
 
-fn config_path(root: &Path) -> PathBuf {
-    root.join(".draftmatter").join("project.json")
-}
-
 fn load_config(root: &Path, documents: &[ProjectEntry]) -> Result<ProjectConfig, HostError> {
-    let path = config_path(root);
+    let path = contained_path(root, ".draftmatter/project.json")?;
     if !path.exists() {
         return Ok(default_config(root, documents));
     }
@@ -786,7 +838,7 @@ fn load_config(root: &Path, documents: &[ProjectEntry]) -> Result<ProjectConfig,
 }
 
 fn persist_config(root: &Path, config: &ProjectConfig) -> Result<(), HostError> {
-    let path = config_path(root);
+    let path = contained_path(root, ".draftmatter/project.json")?;
     let content = serde_json::to_vec_pretty(config)
         .map_err(|error| HostError::InvalidProject(error.to_string()))?;
     write_atomic(&path, &content, false)
@@ -1012,7 +1064,7 @@ fn seed_project_files_impl(
                 "Project copy files exceed the 96 MB limit.".to_string(),
             ));
         }
-        let destination = root.join(&safe);
+        let destination = checked_path(&root, &safe, true)?;
         if destination.exists() {
             return Err(HostError::InvalidProject(format!(
                 "A project copy file already exists: {}",
@@ -1026,14 +1078,6 @@ fn seed_project_files_impl(
         written.push(slash_path(&safe));
     }
     Ok(written)
-}
-
-fn citation_lock_path(root: &Path) -> PathBuf {
-    root.join(".draftmatter").join("citations.lock.json")
-}
-
-fn citation_cache_path(root: &Path) -> PathBuf {
-    root.join(".draftmatter").join("cited-records.json")
 }
 
 fn validate_citation_cache(content: &str) -> Result<(), HostError> {
@@ -1063,7 +1107,7 @@ fn validate_citation_cache(content: &str) -> Result<(), HostError> {
 
 fn read_citation_cache_impl(raw_root: &str) -> Result<Option<DocumentSnapshot>, HostError> {
     let root = canonical_root(raw_root)?;
-    let path = citation_cache_path(&root);
+    let path = contained_path(&root, ".draftmatter/cited-records.json")?;
     if !path.exists() {
         return Ok(None);
     }
@@ -1118,7 +1162,7 @@ fn validate_citation_lock(content: &str) -> Result<(), HostError> {
 
 fn read_citation_lock_impl(raw_root: &str) -> Result<Option<DocumentSnapshot>, HostError> {
     let root = canonical_root(raw_root)?;
-    let path = citation_lock_path(&root);
+    let path = contained_path(&root, ".draftmatter/citations.lock.json")?;
     if !path.exists() {
         return Ok(None);
     }
@@ -1144,7 +1188,7 @@ fn save_citation_lock_impl(
 ) -> Result<DocumentSnapshot, HostError> {
     validate_citation_lock(&request.content)?;
     let root = canonical_root(&request.root)?;
-    let path = citation_lock_path(&root);
+    let path = contained_path(&root, ".draftmatter/citations.lock.json")?;
     let previous = if path.exists() {
         fs::read(&path)?
     } else {
@@ -1338,13 +1382,13 @@ fn acquire_citations_impl_with_fault(
         request.expected_bibliography_hash.as_deref(),
         &request.bibliography_path,
     )?;
-    let lock_path = citation_lock_path(&root);
+    let lock_path = contained_path(&root, ".draftmatter/citations.lock.json")?;
     expected_file_bytes(
         &lock_path,
         request.expected_lock_hash.as_deref(),
         ".draftmatter/citations.lock.json",
     )?;
-    let cache_path = citation_cache_path(&root);
+    let cache_path = contained_path(&root, ".draftmatter/cited-records.json")?;
     expected_file_bytes(
         &cache_path,
         request.expected_cache_hash.as_deref(),
@@ -1529,10 +1573,48 @@ fn rollback_citation_transaction(
     directory: &Path,
     manifest: &CitationTransactionManifest,
 ) -> Result<(), HostError> {
-    for file in manifest.files.iter().rev() {
-        let target = contained_path(root, &file.target)?;
-        if let Some(backup) = file.backup.as_deref() {
-            let bytes = fs::read(directory.join(safe_relative(backup)?))?;
+    // A journal is project-supplied input. Validate the entire rollback before
+    // touching the first target, including backups and entries marked for removal.
+    let mut replacements = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    for (index, file) in manifest.files.iter().enumerate() {
+        let relative = safe_relative(&file.target)?;
+        let target = checked_path(root, &relative, false)?;
+        let is_metadata = matches!(
+            file.target.as_str(),
+            ".draftmatter/citations.lock.json"
+                | ".draftmatter/cited-records.json"
+                | ".draftmatter/project.json"
+        );
+        let is_user_file = !relative.components().any(|part| {
+            let name = part.as_os_str().to_string_lossy();
+            name.eq_ignore_ascii_case(".draftmatter") || name.eq_ignore_ascii_case(".git")
+        }) && (manuscript_extension(&relative)
+            || relative.extension() == Some(OsStr::new("json")));
+        if (!is_metadata && !is_user_file) || !seen.insert(target.clone()) {
+            return Err(HostError::InvalidProject(format!(
+                "Invalid citation recovery target: {}",
+                file.target
+            )));
+        }
+        let bytes = if let Some(backup) = &file.backup {
+            if backup != &format!("backup-{index}.bin") {
+                return Err(HostError::InvalidProject(
+                    "Invalid citation recovery backup name.".into(),
+                ));
+            }
+            Some(fs::read(checked_path(
+                directory,
+                Path::new(backup),
+                false,
+            )?)?)
+        } else {
+            None
+        };
+        replacements.push((target, bytes));
+    }
+    for (target, bytes) in replacements.into_iter().rev() {
+        if let Some(bytes) = bytes {
             write_atomic(&target, &bytes, false)?;
         } else if target.exists() {
             fs::remove_file(&target)?;
@@ -1545,16 +1627,16 @@ fn rollback_citation_transaction(
 }
 
 fn recover_citation_transactions(root: &Path) -> Result<(), HostError> {
-    let transactions = root.join(".draftmatter").join("transactions");
+    let transactions = contained_path(root, ".draftmatter/transactions")?;
     if !transactions.exists() {
         return Ok(());
     }
     for entry in fs::read_dir(&transactions)? {
-        let directory = entry?.path();
+        let directory = checked_path(&transactions, Path::new(&entry?.file_name()), false)?;
         if !directory.is_dir() {
             continue;
         }
-        let manifest_path = directory.join("manifest.json");
+        let manifest_path = checked_path(&directory, Path::new("manifest.json"), false)?;
         if !manifest_path.exists() {
             fs::remove_dir_all(&directory)?;
             continue;
@@ -1572,10 +1654,14 @@ fn recover_citation_transactions(root: &Path) -> Result<(), HostError> {
                     manifest_path.display()
                 ))
             })?;
-        if manifest.state == "committed" {
-            fs::remove_dir_all(&directory)?;
-        } else {
-            rollback_citation_transaction(root, &directory, &manifest)?;
+        match manifest.state.as_str() {
+            "committed" => fs::remove_dir_all(&directory)?,
+            "prepared" => rollback_citation_transaction(root, &directory, &manifest)?,
+            _ => {
+                return Err(HostError::InvalidProject(
+                    "Unknown citation recovery state.".into(),
+                ))
+            }
         }
     }
     Ok(())
@@ -1595,18 +1681,16 @@ fn apply_citation_file_transaction(
             "A citation acquisition transaction contains duplicate target files.".to_string(),
         ));
     }
-    let directory = root.join(".draftmatter").join("transactions").join(format!(
-        "citation-{}-{}",
-        now_millis(),
-        std::process::id()
-    ));
-    fs::create_dir_all(&directory)?;
+    let transactions = contained_path(root, ".draftmatter/transactions")?;
+    fs::create_dir_all(&transactions)?;
+    let directory = transactions.join(format!("citation-{}", Uuid::new_v4()));
+    fs::create_dir(&directory)?;
     let mut manifest = CitationTransactionManifest {
         state: "prepared".to_string(),
         files: Vec::new(),
     };
     for (index, (target, _)) in changes.iter().enumerate() {
-        let path = contained_path(root, target)?;
+        let path = checked_path(root, &safe_relative(target)?, false)?;
         let backup = if path.exists() {
             let name = format!("backup-{index}.bin");
             write_atomic(&directory.join(&name), &fs::read(&path)?, false)?;
@@ -1669,7 +1753,7 @@ fn recovery_filename(relative: &str, hash: &str) -> String {
 }
 
 fn create_recovery(root: &Path, relative: &str, previous: &[u8]) -> Result<String, HostError> {
-    let directory = root.join(".draftmatter").join("recovery");
+    let directory = contained_path(root, ".draftmatter/recovery")?;
     fs::create_dir_all(&directory)?;
     let filename = recovery_filename(relative, &source_hash(previous));
     let path = directory.join(filename);
@@ -3874,6 +3958,126 @@ mod tests {
             fs::read_to_string(root.join("paper.qmd")).unwrap(),
             "---\ntitle: Test\n---\n\nNo citation.\n"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn opening_a_project_rejects_escaping_recovery_paths_before_any_rollback() {
+        use std::os::unix::fs::symlink;
+        for attack in ["target", "backup", "transactions", "journal", "manifest"] {
+            let project = tempdir().unwrap();
+            let outside = tempdir().unwrap();
+            let transactions = project.path().join(".draftmatter/transactions");
+            let journal = transactions.join("citation-interrupted");
+            fs::create_dir_all(project.path().join(".draftmatter")).unwrap();
+            match attack {
+                "transactions" => symlink(outside.path(), &transactions).unwrap(),
+                "journal" => {
+                    fs::create_dir(&transactions).unwrap();
+                    symlink(outside.path(), &journal).unwrap();
+                }
+                _ => (),
+            }
+            fs::create_dir_all(&journal).unwrap();
+            fs::write(outside.path().join("private.qmd"), "outside").unwrap();
+            fs::write(project.path().join("paper.qmd"), "current").unwrap();
+            let target = if attack == "target" {
+                symlink(outside.path(), project.path().join("linked")).unwrap();
+                "linked/private.qmd"
+            } else {
+                "references.json"
+            };
+            if attack == "backup" {
+                symlink(
+                    outside.path().join("private.qmd"),
+                    journal.join("backup-0.bin"),
+                )
+                .unwrap();
+            } else {
+                fs::write(journal.join("backup-0.bin"), "replacement").unwrap();
+            }
+            if attack == "manifest" {
+                symlink(
+                    outside.path().join("journal.json"),
+                    journal.join("manifest.json"),
+                )
+                .unwrap();
+            }
+            fs::write(journal.join("manifest.json"), serde_json::json!({
+                "state": "prepared",
+                "files": [{"target": target, "backup": "backup-0.bin"}, {"target": "paper.qmd", "backup": null}]
+            }).to_string()).unwrap();
+
+            assert!(
+                matches!(
+                    open_project_impl(project.path().to_str().unwrap()),
+                    Err(HostError::InvalidPath(_))
+                ),
+                "{attack}"
+            );
+            assert_eq!(
+                fs::read_to_string(outside.path().join("private.qmd")).unwrap(),
+                "outside"
+            );
+            assert_eq!(
+                fs::read_to_string(project.path().join("paper.qmd")).unwrap(),
+                "current"
+            );
+            assert!(journal.join("manifest.json").exists());
+        }
+    }
+
+    #[test]
+    fn opening_a_project_recovers_a_prepared_citation_journal() {
+        let project = tempdir().unwrap();
+        let journal = project.path().join(".draftmatter/transactions/interrupted");
+        fs::create_dir_all(&journal).unwrap();
+        fs::write(project.path().join("paper.qmd"), "partial").unwrap();
+        fs::write(journal.join("backup-0.bin"), "original").unwrap();
+        fs::write(
+            journal.join("manifest.json"),
+            r#"{"state":"prepared","files":[{"target":"paper.qmd","backup":"backup-0.bin"}]}"#,
+        )
+        .unwrap();
+        open_project_impl(project.path().to_str().unwrap()).unwrap();
+        assert_eq!(
+            fs::read_to_string(project.path().join("paper.qmd")).unwrap(),
+            "original"
+        );
+        assert!(!journal.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn auxiliary_files_loaded_with_a_project_cannot_follow_external_links() {
+        use std::os::unix::fs::symlink;
+        let project = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let root = project.path();
+        fs::create_dir(root.join(".draftmatter")).unwrap();
+        fs::write(root.join("paper.qmd"), "inside").unwrap();
+        symlink(root.join("paper.qmd"), root.join("alias.qmd")).unwrap();
+        symlink(outside.path(), root.join("linked")).unwrap();
+        symlink(outside.path(), root.join(".agents")).unwrap();
+        symlink(outside.path(), root.join(".draftmatter/outputs")).unwrap();
+        let raw = root.to_str().unwrap();
+        assert_eq!(
+            read_document_impl(raw, "alias.qmd").unwrap().content,
+            "inside"
+        );
+        assert!(matches!(
+            read_document_impl(raw, "linked/missing.qmd"),
+            Err(HostError::InvalidPath(_))
+        ));
+        assert!(matches!(
+            read_execution_manifests_impl(raw),
+            Err(HostError::InvalidPath(_))
+        ));
+        assert!(matches!(
+            initialize_ai_integration_impl(raw),
+            Err(HostError::InvalidPath(_))
+        ));
+        assert_eq!(fs::read_dir(outside.path()).unwrap().count(), 0);
     }
 
     #[test]

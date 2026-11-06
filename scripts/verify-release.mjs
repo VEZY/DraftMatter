@@ -32,13 +32,37 @@ if (!existsSync(resolve(root, 'src-tauri/windows/installer-hooks.nsh'))) {
   failures.push(['Windows terminal launcher', 'installer hook file is missing'])
 }
 if (plugin.version !== expected) failures.push(['Codex plugin manifest', plugin.version])
-if (sdkVersion !== '1.29.0') failures.push(['MCP SDK pin', `${sdkVersion ?? 'missing'} (expected 1.29.0)`])
-if (!Array.isArray(securityExceptions.exceptions)
-  || !securityExceptions.exceptions.some((entry) =>
-    entry.advisory === 'GHSA-frvp-7c67-39w9'
-    && entry.package === '@hono/node-server'
-    && entry.transportExposed === false)) {
-  failures.push(['MCP dependency security exception', 'missing scoped GHSA-frvp-7c67-39w9 record'])
+const lockedSdk = packageLock.packages?.['node_modules/@modelcontextprotocol/sdk']?.version
+if (!/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(sdkVersion) || lockedSdk !== sdkVersion) {
+  failures.push(['MCP SDK pin', `package.json must pin the exact locked version (${lockedSdk ?? 'missing'})`])
+}
+
+function validDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const date = new Date(`${value}T00:00:00Z`)
+  return Number.isFinite(date.getTime()) && date.toISOString().startsWith(value)
+}
+
+const today = new Date().toISOString().slice(0, 10)
+if (securityExceptions.schemaVersion !== 1 || !Array.isArray(securityExceptions.exceptions)) {
+  failures.push(['Dependency security exceptions', 'invalid registry'])
+} else {
+  for (const entry of securityExceptions.exceptions) {
+    const label = `Security exception ${entry?.advisory ?? '(missing advisory)'}`
+    if (!entry?.advisory || !entry.package || !entry.scope?.trim() || entry.transportExposed !== false ||
+        !['low', 'moderate'].includes(entry.severity)) {
+      failures.push([label, 'must identify a scoped, unexposed, low or moderate advisory'])
+      continue
+    }
+    const packagePath = `node_modules/${entry.package}`
+    const affectedVersionInstalled = Object.entries(packageLock.packages).some(([path, pkg]) =>
+      (path === packagePath || path.endsWith(`/${packagePath}`)) && pkg.version === entry.affectedInstalledVersion)
+    if (!affectedVersionInstalled) failures.push([label, 'affected version is absent from the lockfile'])
+    if (!validDate(entry.reviewedOn) || !validDate(entry.reviewBy) ||
+        entry.reviewedOn > today || entry.reviewBy < entry.reviewedOn || today > entry.reviewBy) {
+      failures.push([label, `invalid or expired review period (${entry.reviewedOn} to ${entry.reviewBy})`])
+    }
+  }
 }
 
 if (failures.length) {

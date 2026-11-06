@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, parseBibliographyFile, searchCitations } from './bibliography'
@@ -563,7 +563,10 @@ function PublicationBylineView({ byline }: { byline: PublicationByline }) {
   )
 }
 
+export type EditorSaveGuard = RefObject<(() => Promise<boolean>) | null>
+
 export interface AppProps {
+  saveBeforeLeaveRef?: EditorSaveGuard
   collaborationLaunch?: CollaborationProjectLaunch
   desktopProjectLaunch?: ProjectSnapshot
   onNavigateHome?: () => void
@@ -592,7 +595,7 @@ format:
 Start writing here.
 `
 
-function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initialExperience, startExampleTour = false, startCollaborationOnMount = false, browserDocumentLaunch, onOpenLearn, onOpenAiLearn, onOpenLanguages }: AppProps = {}) {
+function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, onNavigateHome, initialExperience, startExampleTour = false, startCollaborationOnMount = false, browserDocumentLaunch, onOpenLearn, onOpenAiLearn, onOpenLanguages }: AppProps = {}) {
   const collaborationSession = useOptionalCollaborationSession()
   const collaborativeProject = collaborationLaunch?.projects.find((project) => project.id === collaborationLaunch.projectId)
   const collaborativeInitialSource = collaborationLaunch
@@ -1124,21 +1127,19 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
     setManuscriptSource(next)
   }
 
-  const resetDraftRevision = () => {
-    draftRevisionRef.current = 0
-    setDraftRevision(0)
+  const setCurrentRevision = (revision: number) => {
+    draftRevisionRef.current = revision
+    setDraftRevision(revision)
   }
+
+  const resetDraftRevision = () => setCurrentRevision(0)
 
   const markDraftChanged = () => {
     if (!desktopSaveBlockedRef.current && !collaborationSessionActiveRef.current) {
       setSaveState('saving')
       setSaveProblem('')
     }
-    setDraftRevision((current) => {
-      const next = current + 1
-      draftRevisionRef.current = next
-      return next
-    })
+    setCurrentRevision(draftRevisionRef.current + 1)
   }
 
   const updateDraft = (patch: Partial<DraftState>) => {
@@ -1318,54 +1319,112 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
     keepActiveOutlineItemVisible(outlineTreeRef.current)
   }, [activeOutlineId, leftPanelOpen, outlineMaxDepth, outlineQuery])
 
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      const next = { ...draft, lastSavedAt: new Date().toISOString() }
-      try {
-        localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify(next))
-        localStorage.setItem(STRUCTURED_SOURCE_KEY, manuscriptSourceRef.current)
-        localStorage.setItem(STRUCTURED_MODE_KEY, String(structuredMode))
-        if (!desktopSession) setSaveState('saved')
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error)
-        setSaveProblem(`Local autosave unavailable: ${message}`)
-        if (!desktopSession) setSaveState('error')
+  const saveBrowserCopy = () => {
+    try {
+      localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify({ ...draftRef.current, lastSavedAt: new Date().toISOString() }))
+      localStorage.setItem(STRUCTURED_SOURCE_KEY, manuscriptSourceRef.current)
+      localStorage.setItem(STRUCTURED_MODE_KEY, String(structuredMode))
+      if (!desktopSessionRef.current) setSaveState('saved')
+      return true
+    } catch (error) {
+      const message = `Local autosave unavailable: ${readableError(error)}`
+      setSaveProblem(message)
+      if (!desktopSessionRef.current) {
+        setSaveState('error')
+        setToast(message)
       }
-    }, 380)
+      return false
+    }
+  }
+
+  const saveDesktopRevision = () => {
+    const session = desktopSessionRef.current
+    const operation = desktopSaveQueueRef.current.then(async () => {
+      const current = desktopSessionRef.current
+      if (!current || current.root !== session?.root || current.path !== session.path
+        || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current || collaborationSessionActiveRef.current) return false
+      const revision = draftRevisionRef.current
+      if (current.savedRevision === revision) return true
+      setSaveState('saving')
+      try {
+        const result = await desktopHost.saveDocument({ root: current.root, path: current.path, content: manuscriptSourceRef.current, expectedHash: current.hash })
+        replaceDesktopSession({ ...current, hash: result.hash, savedRevision: revision })
+        if (draftRevisionRef.current === revision) setSaveState('saved')
+        return true
+      } catch (error) {
+        const failure = normaliseHostFailure(error)
+        if (failure.kind === 'conflict') preserveDesktopConflict(failure.message)
+        else {
+          writeRecoverySnapshot(draftRef.current, filename, manuscriptSourceRef.current)
+          setSaveProblem(failure.message)
+          setSaveState('error')
+        }
+        return false
+      }
+    })
+    desktopSaveQueueRef.current = operation.then(() => undefined)
+    return operation
+  }
+
+  const flushDraftBeforeLeave = async () => {
+    if (sourceEditing && sourceBuffer !== manuscriptSourceRef.current) {
+      setToast('Apply or cancel your source edits before leaving the manuscript.')
+      return false
+    }
+    if (citationAcquisitionRunningRef.current) {
+      setToast('Wait for the citation to finish saving before leaving the manuscript.')
+      return false
+    }
+    const session = desktopSessionRef.current
+    if (!session || collaborationSessionActiveRef.current) {
+      const saved = saveBrowserCopy()
+      if (draftRevisionRef.current !== 0) writeRecoverySnapshot(draftRef.current, filename, manuscriptSourceRef.current)
+      return saved
+    }
+    while (desktopSessionRef.current?.savedRevision !== draftRevisionRef.current) {
+      if (!await saveDesktopRevision()) return false
+    }
+    return true
+  }
+
+  useImperativeHandle(saveBeforeLeaveRef, () => flushDraftBeforeLeave)
+
+  const leaveEditor = async (navigate?: () => void) => {
+    if (navigate && await flushDraftBeforeLeave()) navigate()
+  }
+
+  useEffect(() => {
+    const timeout = window.setTimeout(saveBrowserCopy, 380)
     return () => window.clearTimeout(timeout)
   }, [draft, desktopSession, structuredMode])
 
   useEffect(() => {
     if (!desktopSession || draftRevision === 0 || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current
       || collaborationSessionActiveRef.current) return
-    const revision = draftRevision
-    const content = manuscriptSource
-    const root = desktopSession.root
-    const path = desktopSession.path
-    const timeout = window.setTimeout(() => {
-      setSaveState('saving')
-      desktopSaveQueueRef.current = desktopSaveQueueRef.current.then(async () => {
-        const current = desktopSessionRef.current
-        if (!current || current.root !== root || current.path !== path || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current
-          || collaborationSessionActiveRef.current) return
-        try {
-          const result = await desktopHost.saveDocument({ root, path, content, expectedHash: current.hash })
-          const next = { ...current, hash: result.hash, savedRevision: revision }
-          replaceDesktopSession(next)
-          if (draftRevisionRef.current === revision) setSaveState('saved')
-        } catch (error) {
-          const failure = normaliseHostFailure(error)
-          if (failure.kind === 'conflict') {
-            preserveDesktopConflict(failure.message)
-          } else {
-            setSaveProblem(failure.message)
-            setSaveState('error')
-          }
-        }
-      })
-    }, 900)
+    const timeout = window.setTimeout(() => void saveDesktopRevision(), 900)
     return () => window.clearTimeout(timeout)
   }, [draftRevision, desktopSession?.path, desktopSession?.root, manuscriptSource])
+
+  useEffect(() => {
+    // Browsers cannot await the desktop host or delay a reload to finish a pending timer.
+    const beforeUnload = (event: BeforeUnloadEvent) => {
+      const session = desktopSessionRef.current
+      let mustStay = sourceEditing && sourceBuffer !== manuscriptSourceRef.current
+      if (!session || draftRevisionRef.current !== 0) {
+        const saved = saveBrowserCopy()
+        if (session && !collaborationSessionActiveRef.current && session.savedRevision !== draftRevisionRef.current) {
+          writeRecoverySnapshot(draftRef.current, filename, manuscriptSourceRef.current)
+          mustStay = true
+        } else if (!session && !saved) mustStay = true
+      }
+      if (mustStay) {
+        event.preventDefault()
+        event.returnValue = ''
+      }
+    }
+    window.addEventListener('beforeunload', beforeUnload)
+    return () => window.removeEventListener('beforeunload', beforeUnload)
+  }, [filename, sourceEditing, sourceBuffer, structuredMode])
 
   useEffect(() => {
     if (!desktopSession) return
@@ -3743,7 +3802,13 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
     const nextName = file.name.replace(/\.(qmd|md)$/i, '')
     const cacheResult = readCitationCache(localStorage, `browser:${file.name}`)
     const executionTracker = await ExecutionFreshnessTracker.create(parsed.executableCells)
+    if (!await flushDraftBeforeLeave()) return
+    const previousRevision = draftRevisionRef.current
     await resetKernelSessions()
+    if (draftRevisionRef.current !== previousRevision) {
+      setToast('The manuscript changed while opening the file. Open it again after finishing your edit.')
+      return
+    }
     replaceDesktopSession(null)
     executionAbortRef.current?.abort()
     executionAbortRef.current = null
@@ -3833,7 +3898,9 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialExperience])
 
-  const applyDesktopProject = async (project: ProjectSnapshot, announce = true, selectedPath?: string, remember = true) => {
+  const applyDesktopProject = async (project: ProjectSnapshot, announce = true, selectedPath?: string, remember = true, reloadDisk = false) => {
+    if (!reloadDisk && (sourceEditing || draftRevisionRef.current !== 0) && !await flushDraftBeforeLeave()) return false
+    const previousRevision = draftRevisionRef.current
     automaticSetupSignatureRef.current = ''
     pendingSetupLanguagesRef.current = []
     const mainPath = resolveMainDocument(project, selectedPath)
@@ -3892,6 +3959,10 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
     const projectLock = buildCitationLock(projectCitations.filter((record) => record.source !== 'sample'), lockResult.lock)
     const displayName = mainPath.split('/').at(-1) ?? mainPath
     await resetKernelSessions()
+    if (!reloadDisk && draftRevisionRef.current !== previousRevision) {
+      setToast('The manuscript changed while opening the project. Open it again after finishing your edit.')
+      return false
+    }
     setSelectedKernelNames(executionKernelNamesFromProject(project.config.execution))
     setSelectedEnvironmentPaths(Object.fromEntries((['python', 'r', 'julia'] as const).flatMap((language) => {
       const environment = project.config.execution?.[language]?.environment
@@ -3967,6 +4038,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
       const sourceCount = projectBibliography.records.length
       setToast(`Opened ${project.config.name} · ${mainPath}${sourceCount ? ` · ${sourceCount} project source${sourceCount === 1 ? '' : 's'}` : ''}`)
     }
+    return true
   }
 
   useEffect(() => {
@@ -4015,13 +4087,13 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
     }
   }
 
-  const openDesktopProject = async (knownRoot?: string, announce = true) => {
+  const openDesktopProject = async (knownRoot?: string, announce = true, reloadDisk = false) => {
     if (!desktopHost.available || projectBusy) return
     setProjectBusy(true)
     try {
       const root = knownRoot ?? await desktopHost.pickProjectFolder()
       if (!root) return
-      await applyDesktopProject(await desktopHost.openProject(root), announce)
+      await applyDesktopProject(await desktopHost.openProject(root), announce, undefined, true, reloadDisk)
     } catch (error) {
       const failure = normaliseHostFailure(error)
       if (knownRoot) localStorage.removeItem(LAST_PROJECT_ROOT_KEY)
@@ -4072,7 +4144,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
       const project = newProjectAiEnabled
         ? await desktopHost.createProject(newProjectParent, name, firstAuthor, true)
         : await desktopHost.createProject(newProjectParent, name, firstAuthor)
-      await applyDesktopProject(project)
+      if (!await applyDesktopProject(project)) return
       setCreateProjectOpen(false)
       setNewProjectProblem('')
       if (newProjectAiEnabled) {
@@ -4240,7 +4312,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
         })()
       if (!project) return
       const populated = await populateLocalExecutionCopy(project)
-      await applyDesktopProject(populated, false, undefined, !temporary)
+      if (!await applyDesktopProject(populated, false, undefined, !temporary)) return
       setLocalExecutionCopyOpen(false)
       setToast(temporary
         ? 'Opened a temporary local copy · trust the project when you are ready to run code'
@@ -4267,18 +4339,14 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
 
   const reloadDesktopProject = async () => {
     if (!desktopSession) return
-    await openDesktopProject(desktopSession.root)
+    await openDesktopProject(desktopSession.root, true, true)
   }
 
   const retryDesktopSave = () => {
     if (!desktopSession || saveState === 'conflict') return
     setSaveProblem('')
     setSaveState('saving')
-    setDraftRevision((current) => {
-      const next = current + 1
-      draftRevisionRef.current = next
-      return next
-    })
+    setCurrentRevision(draftRevisionRef.current + 1)
   }
 
   const onFileSelected = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -4299,11 +4367,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
     setStructuredMode(true)
     commitDraftHistory(snapshot.draft)
     if (desktopSession) {
-      setDraftRevision((current) => {
-        const next = current + 1
-        draftRevisionRef.current = next
-        return next
-      })
+      setCurrentRevision(draftRevisionRef.current + 1)
       if (!desktopSaveBlockedRef.current) setSaveState('saving')
     } else {
       setFilename(snapshot.filename)
@@ -4999,10 +5063,10 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
           <button className="icon-button panel-toggle" aria-label={leftPanelOpen ? 'Hide manuscript outline' : 'Show manuscript outline'} aria-pressed={leftPanelOpen} onClick={() => setLeftPanelOpen((open) => !open)}>
             <Icon name="panelLeft" />
           </button>
-          <div className={`wordmark ${onNavigateHome ? 'wordmark-action' : ''}`} aria-label="DraftMatter home" role={onNavigateHome ? 'button' : undefined} tabIndex={onNavigateHome ? 0 : undefined} onClick={onNavigateHome} onKeyDown={onNavigateHome ? (event) => {
+          <div className={`wordmark ${onNavigateHome ? 'wordmark-action' : ''}`} aria-label="DraftMatter home" role={onNavigateHome ? 'button' : undefined} tabIndex={onNavigateHome ? 0 : undefined} onClick={() => void leaveEditor(onNavigateHome)} onKeyDown={onNavigateHome ? (event) => {
             if (event.key === 'Enter' || event.key === ' ') {
               event.preventDefault()
-              onNavigateHome()
+              void leaveEditor(onNavigateHome)
             }
           } : undefined}>
             <span className="brand-mark" aria-hidden="true"><img src="/draftmatter-pencil-mark.svg" alt="" /></span>
@@ -5090,7 +5154,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
               <span className="shortcut">{commandUsesMetaKey ? <><Icon name="command" size={12} />P</> : 'Ctrl+P'}</span>
             </button>
             <button className="icon-button focus-mode-toggle" onClick={() => setFocusMode(true)} aria-label="Enter focus mode" title="Focus mode"><Icon name="focus" size={17} /></button>
-            {onOpenLearn && <button className="icon-button" onClick={onOpenLearn} aria-label="Learn DraftMatter" title="Learn DraftMatter"><Icon name="info" size={17} /></button>}
+            {onOpenLearn && <button className="icon-button" onClick={() => void leaveEditor(onOpenLearn)} aria-label="Learn DraftMatter" title="Learn DraftMatter"><Icon name="info" size={17} /></button>}
           </div>
           <div className="topbar-completion-actions">
             <button className={`review-toggle ${activeNav === 'review' ? 'active' : ''}`} onClick={showReviewPanel} aria-label={`Review, ${totalOpenReviewCount} open item${totalOpenReviewCount === 1 ? '' : 's'}`}>
@@ -6001,7 +6065,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
               .catch(() => undefined)
           }
         }}
-        onOpenLearn={onOpenAiLearn ?? onOpenLearn}
+        onOpenLearn={onOpenAiLearn || onOpenLearn ? () => void leaveEditor(onOpenAiLearn ?? onOpenLearn) : undefined}
       />
 
       {publicationAuthorsOpen && (
@@ -6189,7 +6253,7 @@ function App({ collaborationLaunch, desktopProjectLaunch, onNavigateHome, initia
             {executionProblem && <div className="execution-environment-help" role="alert">{executionProblem}</div>}
             <div className="execution-dialog-actions environment-actions">
               {desktopSession && <button onClick={() => void forgetCurrentProjectTrust()} disabled={kernelSetupBusy || formatterSetupBusy}>Forget project trust</button>}
-              {onOpenLanguages && <button onClick={() => { setEnvironmentOpen(false); onOpenLanguages() }}>How languages work</button>}
+              {onOpenLanguages && <button onClick={() => { setEnvironmentOpen(false); void leaveEditor(onOpenLanguages) }}>How languages work</button>}
               {(selectedEnvironmentSetupExecutable || selectedEnvironmentLanguage === 'python') && <button onClick={() => void requestKernelIntegrationSetup(selectedEnvironmentLanguage)} disabled={kernelSetupBusy || formatterSetupBusy || runtimeDiscoveryState === 'discovering'}>{kernelSetupBusy && kernelSetupLanguage === selectedEnvironmentLanguage ? 'Setting up…' : selectedEnvironmentKernel ? 'Repair integration' : `Set up ${runtimeName(selectedEnvironmentLanguage)}`}</button>}
               <button onClick={() => void restartExecution(selectedEnvironmentLanguage)} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}>Restart {runtimeName(selectedEnvironmentLanguage)}</button>
               <button onClick={() => void terminateExecution(selectedEnvironmentLanguage)} disabled={!desktopSession}>Terminate {runtimeName(selectedEnvironmentLanguage)}</button>

@@ -1086,6 +1086,15 @@ Compare @fig-first with @fig-second.
     expect(reference.querySelector('a')?.getAttribute('aria-invalid')).toBe('true')
   })
 
+  it('keeps imported script links inert in the read-only manuscript', async () => {
+    const source = '# Links\n\n[Evidence](javascript:window.__reviewXss=42) and [notes](notes/methods.md).\n'
+    await act(async () => root.render(<StructuredManuscriptEditor source={source} onChange={vi.fn()} readOnly />))
+    const [untrusted, portable] = container.querySelectorAll<HTMLAnchorElement>('.structured-link-content')
+    expect(untrusted.textContent).toBe('Evidence')
+    expect(untrusted.hasAttribute('href')).toBe(false)
+    expect(portable.getAttribute('href')).toBe('notes/methods.md')
+  })
+
   it('edits rendered link metadata while preserving linked text', async () => {
     const changed: string[] = []
     const linkSource = '# Links\n\nRead the [field protocol](https://example.test/protocol "Original protocol") before sampling.\n'

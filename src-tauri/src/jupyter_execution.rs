@@ -523,6 +523,46 @@ fn cleanup_failed_launch(child: &mut Child, connection_path: &Path) {
     let _ = fs::remove_file(connection_path);
 }
 
+fn transient_iopub_handshake_error(error: &zeromq::ZmqError) -> bool {
+    use std::error::Error;
+    use std::io::ErrorKind;
+
+    // ZMTP frames wrap socket errors in a codec error. Protocol errors are permanent.
+    let mut source = error.source();
+    while let Some(cause) = source {
+        if let Some(io) = cause.downcast_ref::<std::io::Error>() {
+            return matches!(
+                io.kind(),
+                ErrorKind::ConnectionReset | ErrorKind::ConnectionAborted | ErrorKind::BrokenPipe
+            );
+        }
+        source = cause.source();
+    }
+    false
+}
+
+async fn connect_iopub_socket(
+    socket: &mut zeromq::SubSocket,
+    endpoint: &str,
+    timeout: Duration,
+) -> zeromq::ZmqResult<()> {
+    // SUB reconnects automatically only after the first handshake has succeeded.
+    tokio::time::timeout(timeout, async {
+        let mut retries_left = 2;
+        loop {
+            match socket.connect(endpoint).await {
+                Err(error) if retries_left > 0 && transient_iopub_handshake_error(&error) => {
+                    retries_left -= 1;
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                result => return result,
+            }
+        }
+    })
+    .await
+    .unwrap_or(Err(zeromq::ZmqError::ConnectTimeout(timeout)))
+}
+
 async fn open_iopub_channel(
     connection_info: &ConnectionInfo,
     topic: &str,
@@ -533,14 +573,15 @@ async fn open_iopub_channel(
 ) -> Result<ClientIoPubConnection, String> {
     let endpoint = connection_info.iopub_url();
     let mut options = zeromq::SocketOptions::default();
-    options.connect_timeout(channel_connect_timeout(language));
+    options.no_connect_timeout();
     let mut socket = zeromq::SubSocket::with_options(options);
     socket
         .subscribe(topic)
         .await
         .map_err(|error| error.to_string())?;
     {
-        let connection = socket.connect(&endpoint);
+        let connection =
+            connect_iopub_socket(&mut socket, &endpoint, channel_connect_timeout(language));
         tokio::pin!(connection);
 
         loop {
@@ -1584,6 +1625,40 @@ mod tests {
 
         assert_eq!(output.bytes.len(), MAX_KERNEL_PROCESS_OUTPUT_BYTES);
         assert!(output.bytes.ends_with(b"ERROR: final startup failure"));
+    }
+
+    #[tokio::test]
+    async fn iopub_reconnects_after_an_initial_tcp_handshake_reset() {
+        tokio::time::timeout(Duration::from_secs(6), async {
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let endpoint = format!("tcp://{}", listener.local_addr().unwrap());
+            let mut publisher = zeromq::PubSocket::new();
+            let publisher_endpoint = publisher.bind("tcp://127.0.0.1:0").await.unwrap();
+            let publisher_addr = publisher_endpoint.to_string();
+            let mut subscriber = zeromq::SubSocket::new();
+
+            let relay = async {
+                let (first, _) = listener.accept().await.unwrap();
+                first.readable().await.unwrap(); // The subscriber has sent its ZMTP greeting.
+                first.set_zero_linger().unwrap();
+                drop(first);
+
+                let (mut second, _) = listener.accept().await.unwrap();
+                let mut upstream =
+                    tokio::net::TcpStream::connect(publisher_addr.strip_prefix("tcp://").unwrap())
+                        .await
+                        .unwrap();
+                tokio::io::copy_bidirectional(&mut second, &mut upstream).await
+            };
+            tokio::select! {
+                result = connect_iopub_socket(&mut subscriber, &endpoint, Duration::from_secs(5)) => {
+                    result.expect("the subscriber should reconnect to the ready publisher")
+                }
+                result = relay => panic!("the TCP relay closed before the ZMTP handshake: {result:?}"),
+            }
+        })
+        .await
+        .expect("the TCP reset and retry should finish within the test deadline");
     }
 
     #[test]

@@ -894,10 +894,13 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
       if (current.email && current.email !== identity.email?.toLowerCase()) {
         throw new WorkspaceAccessError('invitation-unavailable', 'This invitation is invalid, expired, revoked, or already used.')
       }
-      const existing = await client.query<{ revoked_at: Date | string | null }>(
-        'SELECT revoked_at FROM draftmatter_memberships WHERE workspace_id = $1 AND user_id = $2 FOR UPDATE',
+      const existing = await client.query<{ role: WorkspaceRole; revoked_at: Date | string | null }>(
+        'SELECT role, revoked_at FROM draftmatter_memberships WHERE workspace_id = $1 AND user_id = $2 FOR UPDATE',
         [current.workspace_id, identity.userId],
       )
+      if (existing.rows[0]?.role === 'owner' && !existing.rows[0].revoked_at) {
+        throw new WorkspaceAccessError('forbidden', 'You already own this workspace.')
+      }
       if (!existing.rows[0] || existing.rows[0].revoked_at) await this.entitlements.assertSeatAvailable(current.workspace_id, client)
       const joinedAt = iso(this.clock())
       await client.query(

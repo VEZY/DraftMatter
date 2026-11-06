@@ -7,6 +7,7 @@ import { isPipeTableSeparator, parseTableCaptionLine, pipeTableAlignments, pipeT
 import { projectComputationsForPublication } from './publicationComputation'
 import { isExplicitlyUnnumbered, numberedManuscriptObjects } from './numberedObjects'
 import { parseStructuredManuscript } from './structuredManuscript'
+import { isSafePortableLinkDestination } from './portableLink'
 
 export interface NativeHtmlExportOptions {
   title?: string
@@ -116,7 +117,7 @@ function renderInline(value: string, options: NativeHtmlExportOptions, footnotes
     .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
     .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>')
     .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, url: string) => {
-      const safe = safeAssetUrl(url)
+      const safe = isSafePortableLinkDestination(url) ? safeAssetUrl(url) : ''
       return safe ? `<a href="${safe}">${label}</a>` : label
     })
 }

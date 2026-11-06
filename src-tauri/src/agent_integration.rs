@@ -1,8 +1,8 @@
-use crate::{canonical_root, write_atomic, HostError};
+use crate::{canonical_root, contained_path, write_atomic, HostError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 const SCHEMA_VERSION: u8 = 2;
 const PROTOCOL_VERSION: &str = "1.0";
@@ -142,12 +142,6 @@ struct PlannedWrite {
     content: Option<Vec<u8>>,
 }
 
-fn project_path(root: &Path, relative: &str) -> PathBuf {
-    relative
-        .split('/')
-        .fold(root.to_path_buf(), |path, component| path.join(component))
-}
-
 fn existing_bytes(path: &Path) -> Result<Option<Vec<u8>>, HostError> {
     match fs::read(path) {
         Ok(content) => Ok(Some(content)),
@@ -228,7 +222,7 @@ fn remove_legacy_json_adapter(
     relative: &str,
     copilot: bool,
 ) -> Result<Option<PlannedWrite>, HostError> {
-    let path = project_path(root, relative);
+    let path = contained_path(root, relative)?;
     let Some(source) = existing_text(&path)? else {
         return Ok(None);
     };
@@ -336,7 +330,7 @@ fn plan_project_changes(
     enable: bool,
     portable_fallback: bool,
 ) -> Result<Vec<PlannedWrite>, HostError> {
-    let legacy_manifest = existing_text(&project_path(root, MANIFEST_PATH))?
+    let legacy_manifest = existing_text(&contained_path(root, MANIFEST_PATH)?)?
         .and_then(|content| serde_json::from_str::<Value>(&content).ok())
         .is_some_and(|value| {
             value.get("schemaVersion").and_then(Value::as_u64) == Some(1)
@@ -344,7 +338,7 @@ fn plan_project_changes(
         });
     let mut writes = Vec::new();
     for (path, block) in [("AGENTS.md", AGENTS_BLOCK), ("CLAUDE.md", CLAUDE_BLOCK)] {
-        let existing = existing_text(&project_path(root, path))?;
+        let existing = existing_text(&contained_path(root, path)?)?;
         let content = transform_block(
             existing.as_deref(),
             block,
@@ -363,7 +357,7 @@ fn plan_project_changes(
 
     for (relative, source) in SKILL_FILES {
         let path = skill_path(&format!(".agents/skills/{SKILL_NAME}"), relative);
-        let existing = existing_bytes(&project_path(root, &path))?;
+        let existing = existing_bytes(&contained_path(root, &path)?)?;
         let expected = normalize_ending(source).into_bytes();
         if enable && portable_fallback {
             if existing.as_deref().is_some_and(|content| content != expected) {
@@ -392,7 +386,7 @@ fn plan_project_changes(
             (".codex/config.toml", LEGACY_CODEX_BLOCK),
             (".vibe/config.toml", LEGACY_VIBE_BLOCK),
         ] {
-            let existing = existing_text(&project_path(root, path))?;
+            let existing = existing_text(&contained_path(root, path)?)?;
             let content = transform_block(
                 existing.as_deref(),
                 block,
@@ -420,7 +414,7 @@ fn plan_project_changes(
         ] {
             for (relative, source) in SKILL_FILES {
                 let path = skill_path(&base, relative);
-                let Some(existing) = existing_bytes(&project_path(root, &path))? else {
+                let Some(existing) = existing_bytes(&contained_path(root, &path)?)? else {
                     continue;
                 };
                 if existing != normalize_ending(source).into_bytes() {
@@ -433,7 +427,7 @@ fn plan_project_changes(
         }
     }
 
-    let existing_manifest = existing_bytes(&project_path(root, MANIFEST_PATH))?;
+    let existing_manifest = existing_bytes(&contained_path(root, MANIFEST_PATH)?)?;
     let manifest = if enable {
         let paths = writes
             .iter()
@@ -460,6 +454,18 @@ fn plan_project_changes(
     Ok(writes)
 }
 
+fn write_or_remove(root: &Path, relative: &str, content: Option<&[u8]>) -> Result<(), HostError> {
+    let path = contained_path(root, relative)?;
+    if let Some(bytes) = content {
+        return write_atomic(&path, bytes, false);
+    }
+    match fs::remove_file(&path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error.into()),
+    }
+}
+
 fn apply_transaction(
     root: &Path,
     writes: &[PlannedWrite],
@@ -470,23 +476,13 @@ fn apply_transaction(
         .map(|write| {
             Ok((
                 write.path.clone(),
-                existing_bytes(&project_path(root, &write.path))?,
+                existing_bytes(&contained_path(root, &write.path)?)?,
             ))
         })
         .collect::<Result<Vec<_>, HostError>>()?;
     let mut written = Vec::new();
     for write in writes {
-        let path = project_path(root, &write.path);
-        let result = if let Some(content) = &write.content {
-            write_atomic(&path, content, false)
-        } else {
-            match fs::remove_file(&path) {
-                Ok(()) => Ok(()),
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-                Err(error) => Err(error.into()),
-            }
-        }
-        .and_then(|_| {
+        let result = write_or_remove(root, &write.path, write.content.as_deref()).and_then(|_| {
             if fail_after_writes == Some(written.len() + 1) {
                 Err(HostError::Io(format!(
                     "Injected AI integration interruption after {} write(s).",
@@ -500,25 +496,11 @@ fn apply_transaction(
         if let Err(error) = result {
             let mut rollback_failures = Vec::new();
             for rollback_path in written.iter().rev() {
-                let absolute = project_path(root, rollback_path);
                 let original = originals
                     .iter()
                     .find(|(path, _)| path == rollback_path)
                     .and_then(|(_, content)| content.as_deref());
-                let rollback = if let Some(content) = original {
-                    write_atomic(&absolute, content, false)
-                } else {
-                    match fs::remove_file(&absolute) {
-                        Ok(()) => Ok(()),
-                        Err(remove_error)
-                            if remove_error.kind() == std::io::ErrorKind::NotFound =>
-                        {
-                            Ok(())
-                        }
-                        Err(remove_error) => Err(remove_error.into()),
-                    }
-                };
-                if let Err(rollback_error) = rollback {
+                if let Err(rollback_error) = write_or_remove(root, rollback_path, original) {
                     rollback_failures.push(format!("{rollback_path}: {rollback_error}"));
                 }
             }
@@ -540,11 +522,11 @@ pub(crate) fn agent_integration_status_impl(
     raw_root: &str,
 ) -> Result<AgentIntegrationStatus, HostError> {
     let root = canonical_root(raw_root)?;
-    let agents = existing_text(&project_path(&root, "AGENTS.md"))?;
+    let agents = existing_text(&contained_path(&root, "AGENTS.md")?)?;
     let instructions_ready = agents
         .as_deref()
         .is_some_and(|content| content.contains(AGENTS_BLOCK));
-    let manifest = existing_text(&project_path(&root, MANIFEST_PATH))?
+    let manifest = existing_text(&contained_path(&root, MANIFEST_PATH)?)?
         .and_then(|content| serde_json::from_str::<Manifest>(&content).ok());
     let manifest_ready = manifest.as_ref().is_some_and(|value| {
         value.schema_version == Some(SCHEMA_VERSION)
@@ -560,7 +542,7 @@ pub(crate) fn agent_integration_status_impl(
         .and_then(|skill| skill.portable_fallback)
         .unwrap_or(true);
     let portable_skill_ready = !portable_skill_fallback
-        || project_path(&root, ".agents/skills/draftmatter-authoring/SKILL.md").is_file();
+        || contained_path(&root, ".agents/skills/draftmatter-authoring/SKILL.md")?.is_file();
     let installed_skill_version = manifest
         .as_ref()
         .and_then(|value| value.skill.as_ref())

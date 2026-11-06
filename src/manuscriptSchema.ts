@@ -2,6 +2,7 @@ import { Schema, type MarkSpec, type NodeSpec } from 'prosemirror-model'
 import { bulletList, listItem, orderedList } from 'prosemirror-schema-list'
 import { tableNodes } from 'prosemirror-tables'
 import { publishedValueUnavailableHint } from './publishedValueHints'
+import { isSafePortableLinkDestination } from './portableLink'
 
 const identified = { id: { default: null } }
 
@@ -300,7 +301,7 @@ const marks: Record<string, MarkSpec> = {
     attrs: { href: {}, title: { default: null } },
     inclusive: false,
     parseDOM: [{ tag: 'a[href]:not([data-dm-node])', getAttrs: (node) => ({ href: (node as HTMLElement).getAttribute('href'), title: (node as HTMLElement).getAttribute('title') }) }],
-    toDOM: (mark) => ['a', { href: mark.attrs.href, title: mark.attrs.title }, 0],
+    toDOM: (mark) => ['a', { href: isSafePortableLinkDestination(mark.attrs.href) ? mark.attrs.href : null, title: mark.attrs.title }, 0],
   },
   code: {
     code: true,

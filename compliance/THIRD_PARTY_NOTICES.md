@@ -11,6 +11,8 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | cargo | alloc-no-stdlib | 2.0.4 | BSD-3-Clause | required |
 | cargo | alloc-stdlib | 0.2.4 | BSD-3-Clause | required |
 | cargo | anyhow | 1.0.103 | MIT OR Apache-2.0 | required |
+| cargo | async-trait | 0.1.89 | MIT OR Apache-2.0 | required |
+| cargo | asynchronous-codec | 0.7.0 | MIT | required |
 | cargo | autocfg | 1.5.1 | Apache-2.0 OR MIT | required |
 | cargo | base64 | 0.21.7 | MIT OR Apache-2.0 | required |
 | cargo | base64 | 0.22.1 | MIT OR Apache-2.0 | required |
@@ -41,6 +43,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | cargo | cpufeatures | 0.2.17 | MIT OR Apache-2.0 | required |
 | cargo | crc32fast | 1.5.0 | MIT OR Apache-2.0 | required |
 | cargo | crossbeam-channel | 0.5.16 | MIT OR Apache-2.0 | required |
+| cargo | crossbeam-queue | 0.3.13 | MIT OR Apache-2.0 | required |
 | cargo | crossbeam-utils | 0.8.22 | MIT OR Apache-2.0 | required |
 | cargo | crypto-common | 0.1.7 | MIT OR Apache-2.0 | required |
 | cargo | cssparser | 0.36.0 | MPL-2.0 | required |
@@ -50,6 +53,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | cargo | darling | 0.23.0 | MIT | required |
 | cargo | darling_core | 0.23.0 | MIT | required |
 | cargo | darling_macro | 0.23.0 | MIT | required |
+| cargo | data-encoding | 2.11.0 | MIT | required |
 | cargo | deranged | 0.5.8 | MIT OR Apache-2.0 | required |
 | cargo | derive_more | 2.1.1 | MIT | required |
 | cargo | derive_more-impl | 2.1.1 | MIT | required |
@@ -81,6 +85,15 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | cargo | foreign-types-macros | 0.2.3 | MIT/Apache-2.0 | required |
 | cargo | foreign-types-shared | 0.3.1 | MIT/Apache-2.0 | required |
 | cargo | form_urlencoded | 1.2.2 | MIT OR Apache-2.0 | required |
+| cargo | futures | 0.3.32 | MIT OR Apache-2.0 | required |
+| cargo | futures-channel | 0.3.32 | MIT OR Apache-2.0 | required |
+| cargo | futures-core | 0.3.32 | MIT OR Apache-2.0 | required |
+| cargo | futures-executor | 0.3.32 | MIT OR Apache-2.0 | required |
+| cargo | futures-io | 0.3.32 | MIT OR Apache-2.0 | required |
+| cargo | futures-macro | 0.3.32 | MIT OR Apache-2.0 | required |
+| cargo | futures-sink | 0.3.32 | MIT OR Apache-2.0 | required |
+| cargo | futures-task | 0.3.32 | MIT OR Apache-2.0 | required |
+| cargo | futures-util | 0.3.32 | MIT OR Apache-2.0 | required |
 | cargo | generic-array | 0.14.7 | MIT | required |
 | cargo | getrandom | 0.2.17 | MIT OR Apache-2.0 | required |
 | cargo | getrandom | 0.3.4 | MIT OR Apache-2.0 | required |
@@ -110,6 +123,8 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | cargo | itoa | 1.0.18 | MIT OR Apache-2.0 | required |
 | cargo | json-patch | 3.0.1 | MIT/Apache-2.0 | required |
 | cargo | jsonptr | 0.6.3 | MIT OR Apache-2.0 | required |
+| cargo | jupyter-protocol | 2.0.2 | BSD-3-Clause | required |
+| cargo | jupyter-zmq-client | 1.0.1 | BSD-3-Clause | required |
 | cargo | keyboard-types | 0.7.0 | MIT OR Apache-2.0 | required |
 | cargo | libc | 0.2.186 | MIT OR Apache-2.0 | required |
 | cargo | litemap | 0.8.2 | Unicode-3.0 | required |
@@ -150,10 +165,14 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | cargo | png | 0.18.1 | MIT OR Apache-2.0 | required |
 | cargo | potential_utf | 0.1.5 | Unicode-3.0 | required |
 | cargo | powerfmt | 0.2.0 | MIT OR Apache-2.0 | required |
+| cargo | ppv-lite86 | 0.2.21 | MIT OR Apache-2.0 | required |
 | cargo | precomputed-hash | 0.1.1 | MIT | required |
 | cargo | proc-macro2 | 1.0.106 | MIT OR Apache-2.0 | required |
 | cargo | quick-xml | 0.41.0 | MIT | required |
 | cargo | quote | 1.0.46 | MIT OR Apache-2.0 | required |
+| cargo | rand | 0.9.5 | MIT OR Apache-2.0 | required |
+| cargo | rand_chacha | 0.9.0 | MIT OR Apache-2.0 | required |
+| cargo | rand_core | 0.9.5 | MIT OR Apache-2.0 | required |
 | cargo | raw-window-handle | 0.6.2 | MIT OR Apache-2.0 OR Zlib | required |
 | cargo | ref-cast | 1.0.25 | MIT OR Apache-2.0 | required |
 | cargo | ref-cast-impl | 1.0.25 | MIT OR Apache-2.0 | required |
@@ -168,12 +187,15 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | cargo | rustls | 0.23.42 | Apache-2.0 OR ISC OR MIT | required |
 | cargo | rustls-pki-types | 1.15.0 | MIT OR Apache-2.0 | required |
 | cargo | rustls-webpki | 0.103.13 | ISC | required |
+| cargo | saa | 5.6.0 | Apache-2.0 | required |
 | cargo | same-file | 1.0.6 | Unlicense/MIT | required |
+| cargo | scc | 3.8.5 | Apache-2.0 | required |
 | cargo | schemars | 0.8.22 | MIT | required |
 | cargo | schemars | 0.9.0 | MIT | required |
 | cargo | schemars | 1.2.1 | MIT | required |
 | cargo | schemars_derive | 0.8.22 | MIT | required |
 | cargo | scopeguard | 1.2.0 | MIT OR Apache-2.0 | required |
+| cargo | sdd | 4.8.8 | Apache-2.0 | required |
 | cargo | selectors | 0.36.1 | MPL-2.0 | required |
 | cargo | semver | 1.0.28 | MIT OR Apache-2.0 | required |
 | cargo | serde | 1.0.228 | MIT OR Apache-2.0 | required |
@@ -189,10 +211,13 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | cargo | serialize-to-javascript | 0.1.2 | MIT OR Apache-2.0 | required |
 | cargo | serialize-to-javascript-impl | 0.1.2 | MIT OR Apache-2.0 | required |
 | cargo | servo_arc | 0.4.3 | MIT OR Apache-2.0 | required |
+| cargo | sha1_smol | 1.0.1 | BSD-3-Clause | required |
 | cargo | sha2 | 0.10.9 | MIT OR Apache-2.0 | required |
 | cargo | shlex | 2.0.1 | MIT OR Apache-2.0 | required |
+| cargo | signal-hook-registry | 1.4.8 | MIT OR Apache-2.0 | required |
 | cargo | simd-adler32 | 0.3.10 | MIT | required |
 | cargo | siphasher | 1.0.3 | MIT/Apache-2.0 | required |
+| cargo | slab | 0.4.12 | MIT | required |
 | cargo | smallvec | 1.15.2 | MIT OR Apache-2.0 | required |
 | cargo | socket2 | 0.6.5 | MIT OR Apache-2.0 | required |
 | cargo | stable_deref_trait | 1.2.1 | MIT OR Apache-2.0 | required |
@@ -209,6 +234,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | cargo | tauri-codegen | 2.6.3 | Apache-2.0 OR MIT | required |
 | cargo | tauri-macros | 2.6.3 | Apache-2.0 OR MIT | required |
 | cargo | tauri-plugin | 2.6.3 | Apache-2.0 OR MIT | required |
+| cargo | tauri-plugin-deep-link | 2.4.9 | Apache-2.0 OR MIT | required |
 | cargo | tauri-plugin-dialog | 2.7.1 | Apache-2.0 OR MIT | required |
 | cargo | tauri-plugin-fs | 2.5.1 | Apache-2.0 OR MIT | required |
 | cargo | tauri-plugin-opener | 2.5.4 | Apache-2.0 OR MIT | required |
@@ -229,12 +255,17 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | cargo | tinyvec | 1.12.0 | Zlib OR Apache-2.0 OR MIT | required |
 | cargo | tinyvec_macros | 0.1.1 | MIT OR Apache-2.0 OR Zlib | required |
 | cargo | tokio | 1.52.3 | MIT | required |
+| cargo | tokio-macros | 2.7.1 | MIT | required |
+| cargo | tokio-util | 0.7.18 | MIT | required |
 | cargo | toml | 0.9.12+spec-1.1.0 | MIT OR Apache-2.0 | required |
 | cargo | toml | 1.1.3+spec-1.1.0 | MIT OR Apache-2.0 | required |
 | cargo | toml_datetime | 0.7.5+spec-1.1.0 | MIT OR Apache-2.0 | required |
 | cargo | toml_datetime | 1.1.1+spec-1.1.0 | MIT OR Apache-2.0 | required |
 | cargo | toml_parser | 1.1.2+spec-1.1.0 | MIT OR Apache-2.0 | required |
 | cargo | toml_writer | 1.1.2+spec-1.1.0 | MIT OR Apache-2.0 | required |
+| cargo | tracing | 0.1.44 | MIT | required |
+| cargo | tracing-attributes | 0.1.31 | MIT | required |
+| cargo | tracing-core | 0.1.36 | MIT | required |
 | cargo | tray-icon | 0.24.1 | MIT OR Apache-2.0 | required |
 | cargo | typeid | 1.0.3 | MIT OR Apache-2.0 | required |
 | cargo | typenum | 1.20.1 | MIT OR Apache-2.0 | required |
@@ -263,9 +294,11 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | cargo | wry | 0.55.1 | Apache-2.0 OR MIT | required |
 | cargo | yoke | 0.8.3 | Unicode-3.0 | required |
 | cargo | yoke-derive | 0.8.2 | Unicode-3.0 | required |
+| cargo | zerocopy | 0.8.54 | BSD-2-Clause OR Apache-2.0 OR MIT | required |
 | cargo | zerofrom | 0.1.8 | Unicode-3.0 | required |
 | cargo | zerofrom-derive | 0.1.7 | Unicode-3.0 | required |
 | cargo | zeroize | 1.9.0 | Apache-2.0 OR MIT | required |
+| cargo | zeromq | 0.6.0 | MIT | required |
 | cargo | zerotrie | 0.2.4 | Unicode-3.0 | required |
 | cargo | zerovec | 0.11.6 | Unicode-3.0 | required |
 | cargo | zerovec-derive | 0.11.3 | Unicode-3.0 | required |
@@ -305,37 +338,35 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | @csstools/css-parser-algorithms | 4.0.0 | MIT | development |
 | npm | @csstools/css-syntax-patches-for-csstree | 1.1.6 | MIT-0 | development |
 | npm | @csstools/css-tokenizer | 4.0.0 | MIT | development |
-| npm | @emnapi/core | 1.11.1 | MIT | required |
-| npm | @emnapi/runtime | 1.11.1 | MIT | required |
-| npm | @emnapi/wasi-threads | 1.2.2 | MIT | required |
 | npm | @exodus/bytes | 1.15.1 | MIT | development |
 | npm | @hocuspocus/common | 4.4.0 | MIT | required |
 | npm | @hocuspocus/provider | 4.4.0 | MIT | required |
 | npm | @hocuspocus/server | 4.4.0 | MIT | required |
-| npm | @jridgewell/sourcemap-codec | 1.5.5 | MIT | development |
+| npm | @hono/node-server | 2.1.6 | MIT | required |
+| npm | @jridgewell/sourcemap-codec | 1.6.0 | MIT | development |
 | npm | @lezer/common | 1.5.2 | MIT | required |
 | npm | @lezer/highlight | 1.2.3 | MIT | required |
 | npm | @lezer/lr | 1.4.10 | MIT | required |
 | npm | @lifeomic/attempt | 3.1.0 | MIT | required |
 | npm | @marijn/find-cluster-break | 1.0.3 | MIT | required |
-| npm | @napi-rs/wasm-runtime | 1.1.6 | MIT | required |
-| npm | @oxc-project/types | 0.139.0 | MIT | required |
+| npm | @modelcontextprotocol/sdk | 1.32.2 | MIT | required |
+| npm | @oxc-project/types | 0.156.0 | MIT | required |
 | npm | @playwright/test | 1.61.1 | Apache-2.0 | development |
-| npm | @rolldown/binding-android-arm64 | 1.1.5 | MIT | required |
-| npm | @rolldown/binding-darwin-arm64 | 1.1.5 | MIT | required |
-| npm | @rolldown/binding-darwin-x64 | 1.1.5 | MIT | required |
-| npm | @rolldown/binding-freebsd-x64 | 1.1.5 | MIT | required |
-| npm | @rolldown/binding-linux-arm-gnueabihf | 1.1.5 | MIT | required |
-| npm | @rolldown/binding-linux-arm64-gnu | 1.1.5 | MIT | required |
-| npm | @rolldown/binding-linux-arm64-musl | 1.1.5 | MIT | required |
-| npm | @rolldown/binding-linux-ppc64-gnu | 1.1.5 | MIT | required |
-| npm | @rolldown/binding-linux-s390x-gnu | 1.1.5 | MIT | required |
-| npm | @rolldown/binding-linux-x64-gnu | 1.1.5 | MIT | required |
-| npm | @rolldown/binding-linux-x64-musl | 1.1.5 | MIT | required |
-| npm | @rolldown/binding-openharmony-arm64 | 1.1.5 | MIT | required |
-| npm | @rolldown/binding-wasm32-wasi | 1.1.5 | MIT | required |
-| npm | @rolldown/binding-win32-arm64-msvc | 1.1.5 | MIT | required |
-| npm | @rolldown/binding-win32-x64-msvc | 1.1.5 | MIT | required |
+| npm | @rolldown/binding-android-arm-eabi | 1.2.16 | MIT | required |
+| npm | @rolldown/binding-android-arm64 | 1.2.16 | MIT | required |
+| npm | @rolldown/binding-darwin-arm64 | 1.2.16 | MIT | required |
+| npm | @rolldown/binding-darwin-x64 | 1.2.16 | MIT | required |
+| npm | @rolldown/binding-freebsd-x64 | 1.2.16 | MIT | required |
+| npm | @rolldown/binding-linux-arm-gnueabihf | 1.2.16 | MIT | required |
+| npm | @rolldown/binding-linux-arm64-gnu | 1.2.16 | MIT | required |
+| npm | @rolldown/binding-linux-arm64-musl | 1.2.16 | MIT | required |
+| npm | @rolldown/binding-linux-ppc64-gnu | 1.2.16 | MIT | required |
+| npm | @rolldown/binding-linux-s390x-gnu | 1.2.16 | MIT | required |
+| npm | @rolldown/binding-linux-x64-gnu | 1.2.16 | MIT | required |
+| npm | @rolldown/binding-linux-x64-musl | 1.2.16 | MIT | required |
+| npm | @rolldown/binding-openharmony-arm64 | 1.2.16 | MIT | required |
+| npm | @rolldown/binding-win32-arm64-msvc | 1.2.16 | MIT | required |
+| npm | @rolldown/binding-win32-x64-msvc | 1.2.16 | MIT | required |
 | npm | @rolldown/pluginutils | 1.0.1 | MIT | required |
 | npm | @smithy/core | 3.29.4 | Apache-2.0 | required |
 | npm | @smithy/credential-provider-imds | 4.4.9 | Apache-2.0 | required |
@@ -357,12 +388,12 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | @tauri-apps/cli-win32-arm64-msvc | 2.11.4 | Apache-2.0 OR MIT | development |
 | npm | @tauri-apps/cli-win32-ia32-msvc | 2.11.4 | Apache-2.0 OR MIT | development |
 | npm | @tauri-apps/cli-win32-x64-msvc | 2.11.4 | Apache-2.0 OR MIT | development |
+| npm | @tauri-apps/plugin-deep-link | 2.4.9 | MIT OR Apache-2.0 | required |
 | npm | @tauri-apps/plugin-dialog | 2.7.1 | MIT OR Apache-2.0 | required |
-| npm | @tybys/wasm-util | 0.10.3 | MIT | required |
 | npm | @types/chai | 5.2.3 | MIT | development |
 | npm | @types/debug | 4.1.13 | MIT | required |
 | npm | @types/deep-eql | 4.0.2 | MIT | development |
-| npm | @types/estree | 1.0.9 | MIT | development |
+| npm | @types/estree | 1.0.10 | MIT | development |
 | npm | @types/mdast | 4.0.4 | MIT | required |
 | npm | @types/ms | 2.1.0 | MIT | required |
 | npm | @types/node | 26.1.1 | MIT | required |
@@ -391,28 +422,41 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | @typescript/typescript-win32-arm64 | 7.0.2 | Apache-2.0 | required |
 | npm | @typescript/typescript-win32-x64 | 7.0.2 | Apache-2.0 | required |
 | npm | @vitejs/plugin-react | 6.0.3 | MIT | required |
-| npm | @vitest/expect | 4.1.10 | MIT | development |
-| npm | @vitest/mocker | 4.1.10 | MIT | development |
-| npm | @vitest/pretty-format | 4.1.10 | MIT | development |
-| npm | @vitest/runner | 4.1.10 | MIT | development |
-| npm | @vitest/snapshot | 4.1.10 | MIT | development |
-| npm | @vitest/spy | 4.1.10 | MIT | development |
-| npm | @vitest/utils | 4.1.10 | MIT | development |
+| npm | @vitest/expect | 4.1.12 | MIT | development |
+| npm | @vitest/mocker | 4.1.12 | MIT | development |
+| npm | @vitest/pretty-format | 4.1.12 | MIT | development |
+| npm | @vitest/runner | 4.1.12 | MIT | development |
+| npm | @vitest/snapshot | 4.1.12 | MIT | development |
+| npm | @vitest/spy | 4.1.12 | MIT | development |
+| npm | @vitest/utils | 4.1.12 | MIT | development |
+| npm | accepts | 2.0.0 | MIT | required |
+| npm | ajv | 8.20.0 | MIT | required |
+| npm | ajv-formats | 3.0.1 | MIT | required |
 | npm | assertion-error | 2.0.1 | MIT | development |
 | npm | async-mutex | 0.5.0 | MIT | required |
 | npm | axe-core | 4.12.1 | MPL-2.0 | development |
 | npm | bail | 2.0.2 | MIT | required |
 | npm | bidi-js | 1.0.3 | MIT | development |
+| npm | body-parser | 2.4.0 | MIT | required |
 | npm | bowser | 2.14.1 | MIT | required |
+| npm | bytes | 3.1.2 | MIT | required |
 | npm | call-bind | 1.0.9 | MIT | development |
-| npm | call-bind-apply-helpers | 1.0.2 | MIT | development |
-| npm | call-bound | 1.0.4 | MIT | development |
-| npm | chai | 6.2.2 | MIT | development |
+| npm | call-bind-apply-helpers | 1.0.2 | MIT | required |
+| npm | call-bound | 1.0.4 | MIT | required |
+| npm | chai | 6.3.0 | MIT | development |
 | npm | character-entities | 2.0.2 | MIT | required |
+| npm | commander | 15.0.0 | MIT | required |
 | npm | commander | 2.20.3 | MIT | development |
-| npm | commander | 8.3.0 | MIT | required |
+| npm | content-disposition | 1.1.0 | MIT | required |
+| npm | content-type | 1.0.5 | MIT | required |
+| npm | content-type | 2.0.0 | MIT | required |
+| npm | content-type | 2.1.0 | MIT | required |
 | npm | convert-source-map | 2.0.0 | MIT | development |
+| npm | cookie | 0.7.2 | MIT | required |
+| npm | cookie-signature | 1.2.2 | MIT | required |
+| npm | cors | 2.8.6 | MIT | required |
 | npm | crelt | 1.0.7 | MIT | required |
+| npm | cross-spawn | 7.0.6 | MIT | required |
 | npm | crossws | 0.4.10 | MIT | required |
 | npm | css-tree | 3.2.1 | MIT | development |
 | npm | csstype | 3.2.3 | MIT | development |
@@ -421,62 +465,88 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | decimal.js | 10.6.0 | MIT | development |
 | npm | decode-named-character-reference | 1.3.0 | MIT | required |
 | npm | define-data-property | 1.1.4 | MIT | development |
+| npm | depd | 2.0.0 | MIT | required |
 | npm | dequal | 2.0.3 | MIT | required |
 | npm | detect-libc | 2.1.2 | Apache-2.0 | required |
 | npm | devlop | 1.1.0 | MIT | required |
 | npm | discontinuous-range | 1.0.0 | MIT | development |
-| npm | dunder-proto | 1.0.1 | MIT | development |
+| npm | dunder-proto | 1.0.1 | MIT | required |
+| npm | ee-first | 1.1.1 | MIT | required |
+| npm | encodeurl | 2.0.0 | MIT | required |
 | npm | entities | 8.0.0 | BSD-2-Clause | development |
-| npm | es-define-property | 1.0.1 | MIT | development |
-| npm | es-errors | 1.3.0 | MIT | development |
+| npm | es-define-property | 1.0.1 | MIT | required |
+| npm | es-errors | 1.3.0 | MIT | required |
 | npm | es-module-lexer | 2.3.1 | MIT | development |
-| npm | es-object-atoms | 1.1.2 | MIT | development |
+| npm | es-object-atoms | 1.1.2 | MIT | required |
+| npm | escape-html | 1.0.3 | MIT | required |
 | npm | estree-walker | 3.0.3 | MIT | development |
+| npm | etag | 1.8.1 | MIT | required |
+| npm | eventsource | 3.0.7 | MIT | required |
+| npm | eventsource-parser | 3.1.0 | MIT | required |
 | npm | expect-type | 1.4.0 | Apache-2.0 | development |
+| npm | express | 5.2.1 | MIT | required |
+| npm | express-rate-limit | 8.6.0 | MIT | required |
 | npm | extend | 3.0.2 | MIT | required |
+| npm | fast-deep-equal | 3.1.3 | MIT | required |
+| npm | fast-uri | 3.1.9 | BSD-3-Clause | required |
 | npm | fdir | 6.5.0 | MIT | required |
+| npm | finalhandler | 2.1.1 | MIT | required |
+| npm | forwarded | 0.2.0 | MIT | required |
+| npm | fresh | 2.0.0 | MIT | required |
 | npm | fsevents | 2.3.2 | MIT | development |
 | npm | fsevents | 2.3.3 | MIT | required |
-| npm | function-bind | 1.1.2 | MIT | development |
+| npm | function-bind | 1.1.2 | MIT | required |
 | npm | functional-red-black-tree | 1.0.1 | MIT | development |
-| npm | get-intrinsic | 1.3.0 | MIT | development |
-| npm | get-proto | 1.0.1 | MIT | development |
-| npm | gopd | 1.2.0 | MIT | development |
+| npm | get-intrinsic | 1.3.0 | MIT | required |
+| npm | get-proto | 1.0.1 | MIT | required |
+| npm | gopd | 1.2.0 | MIT | required |
 | npm | has-property-descriptors | 1.0.2 | MIT | development |
-| npm | has-symbols | 1.1.0 | MIT | development |
-| npm | hasown | 2.0.4 | MIT | development |
+| npm | has-symbols | 1.1.0 | MIT | required |
+| npm | hasown | 2.0.4 | MIT | required |
+| npm | hono | 4.13.16 | MIT | required |
 | npm | html-encoding-sniffer | 6.0.0 | MIT | development |
+| npm | http-errors | 2.0.1 | MIT | required |
+| npm | iconv-lite | 0.7.3 | MIT | required |
 | npm | immutable | 4.3.9 | MIT | development |
+| npm | inherits | 2.0.4 | ISC | required |
+| npm | ip-address | 10.7.6 | MIT | required |
+| npm | ipaddr.js | 1.9.1 | MIT | required |
 | npm | is-plain-obj | 4.1.0 | MIT | required |
 | npm | is-potential-custom-element-name | 1.0.1 | MIT | development |
+| npm | is-promise | 4.0.0 | MIT | required |
 | npm | isarray | 2.0.5 | MIT | development |
+| npm | isexe | 2.0.0 | ISC | required |
 | npm | isomorphic.js | 0.2.5 | MIT | required |
 | npm | jose | 6.2.3 | MIT | required |
 | npm | jsdom | 29.1.1 | MIT | development |
+| npm | json-schema-traverse | 1.0.0 | MIT | required |
+| npm | json-schema-typed | 8.0.2 | BSD-2-Clause | required |
 | npm | json-stable-stringify | 1.3.0 | MIT | development |
 | npm | jsonify | 0.0.1 | Public Domain | development |
-| npm | katex | 0.17.0 | MIT | required |
+| npm | katex | 0.19.1 | MIT | required |
 | npm | kleur | 4.1.5 | MIT | required |
 | npm | lib0 | 0.2.117 | MIT | required |
-| npm | lightningcss | 1.32.0 | MPL-2.0 | required |
-| npm | lightningcss-android-arm64 | 1.32.0 | MPL-2.0 | required |
-| npm | lightningcss-darwin-arm64 | 1.32.0 | MPL-2.0 | required |
-| npm | lightningcss-darwin-x64 | 1.32.0 | MPL-2.0 | required |
-| npm | lightningcss-freebsd-x64 | 1.32.0 | MPL-2.0 | required |
-| npm | lightningcss-linux-arm-gnueabihf | 1.32.0 | MPL-2.0 | required |
-| npm | lightningcss-linux-arm64-gnu | 1.32.0 | MPL-2.0 | required |
-| npm | lightningcss-linux-arm64-musl | 1.32.0 | MPL-2.0 | required |
-| npm | lightningcss-linux-x64-gnu | 1.32.0 | MPL-2.0 | required |
-| npm | lightningcss-linux-x64-musl | 1.32.0 | MPL-2.0 | required |
-| npm | lightningcss-win32-arm64-msvc | 1.32.0 | MPL-2.0 | required |
-| npm | lightningcss-win32-x64-msvc | 1.32.0 | MPL-2.0 | required |
+| npm | lightningcss | 1.33.0 | MPL-2.0 | required |
+| npm | lightningcss-android-arm64 | 1.33.0 | MPL-2.0 | required |
+| npm | lightningcss-darwin-arm64 | 1.33.0 | MPL-2.0 | required |
+| npm | lightningcss-darwin-x64 | 1.33.0 | MPL-2.0 | required |
+| npm | lightningcss-freebsd-x64 | 1.33.0 | MPL-2.0 | required |
+| npm | lightningcss-linux-arm-gnueabihf | 1.33.0 | MPL-2.0 | required |
+| npm | lightningcss-linux-arm64-gnu | 1.33.0 | MPL-2.0 | required |
+| npm | lightningcss-linux-arm64-musl | 1.33.0 | MPL-2.0 | required |
+| npm | lightningcss-linux-x64-gnu | 1.33.0 | MPL-2.0 | required |
+| npm | lightningcss-linux-x64-musl | 1.33.0 | MPL-2.0 | required |
+| npm | lightningcss-win32-arm64-msvc | 1.33.0 | MPL-2.0 | required |
+| npm | lightningcss-win32-x64-msvc | 1.33.0 | MPL-2.0 | required |
 | npm | lru-cache | 11.5.2 | BlueOak-1.0.0 | development |
 | npm | lru-cache | 6.0.0 | ISC | development |
 | npm | magic-string | 0.30.21 | MIT | development |
-| npm | math-intrinsics | 1.1.0 | MIT | development |
+| npm | math-intrinsics | 1.1.0 | MIT | required |
 | npm | mdast-util-from-markdown | 2.0.3 | MIT | required |
 | npm | mdast-util-to-string | 4.0.0 | MIT | required |
 | npm | mdn-data | 2.27.1 | CC0-1.0 | development |
+| npm | media-typer | 1.1.1 | MIT | required |
+| npm | merge-descriptors | 2.0.0 | MIT | required |
 | npm | micromark | 4.0.2 | MIT | required |
 | npm | micromark-core-commonmark | 2.0.3 | MIT | required |
 | npm | micromark-factory-destination | 2.0.1 | MIT | required |
@@ -498,16 +568,26 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | micromark-util-subtokenize | 2.1.0 | MIT | required |
 | npm | micromark-util-symbol | 2.0.1 | MIT | required |
 | npm | micromark-util-types | 2.0.2 | MIT | required |
-| npm | moment | 2.30.1 | MIT | development |
+| npm | mime-db | 1.54.0 | MIT | required |
+| npm | mime-types | 3.0.2 | MIT | required |
+| npm | moment | 2.31.0 | MIT | development |
 | npm | moo | 0.5.3 | BSD-3-Clause | development |
 | npm | ms | 2.1.3 | MIT | required |
-| npm | nanoid | 3.3.16 | MIT | required |
+| npm | nanoid | 3.3.20 | MIT | required |
 | npm | nearley | 2.20.1 | MIT | development |
+| npm | negotiator | 1.0.0 | MIT | required |
+| npm | object-assign | 4.1.1 | MIT | required |
 | npm | object-hash | 2.2.0 | MIT | development |
+| npm | object-inspect | 1.13.4 | MIT | required |
 | npm | object-keys | 1.1.1 | MIT | development |
 | npm | obug | 2.1.3 | MIT | development |
+| npm | on-finished | 2.4.1 | MIT | required |
+| npm | once | 1.4.0 | ISC | required |
 | npm | orderedmap | 2.1.1 | MIT | required |
 | npm | parse5 | 8.0.1 | MIT | development |
+| npm | parseurl | 1.3.3 | MIT | required |
+| npm | path-key | 3.1.1 | MIT | required |
+| npm | path-to-regexp | 8.4.2 | MIT | required |
 | npm | pathe | 2.0.3 | MIT | development |
 | npm | pg | 8.22.0 | MIT | required |
 | npm | pg-cloudflare | 1.4.0 | MIT | required |
@@ -520,10 +600,11 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | pgpass | 1.0.5 | MIT | required |
 | npm | pgsql-ast-parser | 12.0.2 | MIT | development |
 | npm | picocolors | 1.1.1 | ISC | required |
-| npm | picomatch | 4.0.5 | MIT | required |
+| npm | picomatch | 4.0.7 | MIT | required |
+| npm | pkce-challenge | 5.0.1 | MIT | required |
 | npm | playwright | 1.61.1 | Apache-2.0 | development |
 | npm | playwright-core | 1.61.1 | Apache-2.0 | development |
-| npm | postcss | 8.5.19 | MIT | required |
+| npm | postcss | 8.5.32 | MIT | required |
 | npm | postgres-array | 2.0.0 | MIT | required |
 | npm | postgres-bytea | 1.0.1 | MIT | required |
 | npm | postgres-date | 1.0.7 | MIT | required |
@@ -531,57 +612,79 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | prosemirror-commands | 1.7.1 | MIT | required |
 | npm | prosemirror-history | 1.5.0 | MIT | required |
 | npm | prosemirror-keymap | 1.2.3 | MIT | required |
-| npm | prosemirror-model | 1.25.11 | MIT | required |
+| npm | prosemirror-model | 1.25.12 | MIT | required |
 | npm | prosemirror-schema-list | 1.5.1 | MIT | required |
 | npm | prosemirror-state | 1.4.4 | MIT | required |
 | npm | prosemirror-tables | 1.8.5 | MIT | required |
 | npm | prosemirror-transform | 1.12.0 | MIT | required |
-| npm | prosemirror-view | 1.42.1 | MIT | required |
+| npm | prosemirror-view | 1.42.9 | MIT | required |
+| npm | proxy-addr | 2.0.8 | MIT | required |
 | npm | punycode | 2.3.1 | MIT | development |
+| npm | qs | 6.17.1 | BSD-3-Clause | required |
 | npm | railroad-diagrams | 1.0.0 | CC0-1.0 | development |
 | npm | randexp | 0.4.6 | MIT | development |
+| npm | range-parser | 1.3.0 | MIT | required |
+| npm | raw-body | 3.0.2 | MIT | required |
 | npm | react | 19.2.7 | MIT | required |
 | npm | react-dom | 19.2.7 | MIT | required |
 | npm | remark-parse | 11.0.0 | MIT | required |
-| npm | require-from-string | 2.0.2 | MIT | development |
+| npm | require-from-string | 2.0.2 | MIT | required |
 | npm | ret | 0.1.15 | MIT | development |
-| npm | rolldown | 1.1.5 | MIT | required |
+| npm | rolldown | 1.2.16 | MIT | required |
 | npm | rope-sequence | 1.3.4 | MIT | required |
+| npm | router | 2.2.0 | MIT | required |
+| npm | safer-buffer | 2.1.2 | MIT | required |
 | npm | saxes | 6.0.0 | ISC | development |
 | npm | scheduler | 0.27.0 | MIT | required |
+| npm | send | 1.2.1 | MIT | required |
+| npm | serve-static | 2.2.1 | MIT | required |
 | npm | set-function-length | 1.2.2 | MIT | development |
+| npm | setprototypeof | 1.2.0 | ISC | required |
+| npm | shebang-command | 2.0.0 | MIT | required |
+| npm | shebang-regex | 3.0.0 | MIT | required |
+| npm | side-channel | 1.1.1 | MIT | required |
+| npm | side-channel-list | 1.0.1 | MIT | required |
+| npm | side-channel-map | 1.0.1 | MIT | required |
+| npm | side-channel-weakmap | 1.0.2 | MIT | required |
 | npm | siginfo | 2.0.0 | ISC | development |
-| npm | source-map-js | 1.2.1 | BSD-3-Clause | required |
+| npm | source-map-js | 1.2.2 | BSD-3-Clause | required |
 | npm | split2 | 4.2.0 | ISC | required |
 | npm | stackback | 0.0.2 | MIT | development |
+| npm | statuses | 2.0.2 | MIT | required |
 | npm | std-env | 4.2.0 | MIT | development |
 | npm | style-mod | 4.1.3 | MIT | required |
 | npm | symbol-tree | 3.2.4 | MIT | development |
 | npm | tinybench | 2.9.0 | MIT | development |
 | npm | tinyexec | 1.2.4 | MIT | development |
 | npm | tinyglobby | 0.2.17 | MIT | required |
-| npm | tinyrainbow | 3.1.0 | MIT | development |
+| npm | tinyrainbow | 3.2.0 | MIT | development |
 | npm | tldts | 7.4.8 | MIT | development |
 | npm | tldts-core | 7.4.8 | MIT | development |
+| npm | toidentifier | 1.0.1 | MIT | required |
 | npm | tough-cookie | 6.0.2 | BSD-3-Clause | development |
 | npm | tr46 | 6.0.0 | MIT | development |
 | npm | trough | 2.2.0 | MIT | required |
 | npm | tslib | 2.8.1 | 0BSD | required |
+| npm | type-is | 2.1.0 | MIT | required |
 | npm | typescript | 7.0.2 | Apache-2.0 | required |
-| npm | undici | 7.28.0 | MIT | development |
+| npm | undici | 7.30.2 | MIT | development |
 | npm | undici-types | 8.3.0 | MIT | required |
 | npm | unified | 11.0.5 | MIT | required |
 | npm | unist-util-stringify-position | 4.0.0 | MIT | required |
+| npm | unpipe | 1.0.0 | MIT | required |
+| npm | vary | 1.1.2 | MIT | required |
 | npm | vfile | 6.0.3 | MIT | required |
 | npm | vfile-message | 4.0.3 | MIT | required |
-| npm | vite | 8.1.4 | MIT | required |
-| npm | vitest | 4.1.10 | MIT | development |
+| npm | vite | 8.3.6 | MIT | required |
+| npm | vitest | 4.1.12 | MIT | development |
 | npm | w3c-keyname | 2.2.8 | MIT | required |
 | npm | w3c-xmlserializer | 5.0.0 | MIT | development |
 | npm | webidl-conversions | 8.0.1 | BSD-2-Clause | development |
 | npm | whatwg-mimetype | 5.0.0 | MIT | development |
 | npm | whatwg-url | 16.0.1 | MIT | development |
+| npm | which | 2.0.2 | ISC | required |
 | npm | why-is-node-running | 2.3.0 | MIT | development |
+| npm | wrappy | 1.0.2 | ISC | required |
 | npm | xml-name-validator | 5.0.0 | Apache-2.0 | development |
 | npm | xmlchars | 2.2.0 | MIT | development |
 | npm | xtend | 4.0.2 | MIT | required |
@@ -589,3 +692,5 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | y-protocols | 1.0.7 | MIT | required |
 | npm | yallist | 4.0.0 | ISC | development |
 | npm | yjs | 13.6.31 | MIT | required |
+| npm | zod | 4.6.7 | MIT | required |
+| npm | zod-to-json-schema | 3.25.2 | ISC | required |

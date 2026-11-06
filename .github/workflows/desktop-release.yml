@@ -40,6 +40,9 @@ jobs:
       - name: Verify release version identity
         run: npm run release:verify
 
+      - name: Check locked dependencies for high and critical advisories
+        run: npm audit --audit-level=high
+
       - name: Run browser, service, build, and compliance gates
         run: npm run test:release
 
@@ -168,6 +171,8 @@ jobs:
         run: npm run release:verify
 
       - name: Generate platform compliance inventory
+        env:
+          DRAFTMATTER_COMPLIANCE_TARGET: ${{ matrix.target }}
         run: npm run compliance:generate
 
       - name: Build platform local-agent execution host
@@ -225,7 +230,7 @@ jobs:
           releaseDraft: true
           prerelease: ${{ contains(github.ref_name, '-') }}
           generateReleaseNotes: true
-          releaseAssetNamePattern: DraftMatter_[version]_[platform]_[arch]_[bundle].[ext]
+          releaseAssetNamePattern: DraftMatter_[version]_[platform]_[arch]_[bundle][ext]
           uploadWorkflowArtifacts: true
           workflowArtifactNamePattern: draftmatter-[platform]-[arch]-[bundle]
 
@@ -256,6 +261,7 @@ jobs:
           path: |
             compliance/THIRD_PARTY_NOTICES.md
             compliance/sbom.cdx.json
+          if-no-files-found: error
 
       - name: Upload platform local-agent execution host
         uses: actions/upload-artifact@v6
@@ -270,29 +276,25 @@ jobs:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build, cli]
     runs-on: ubuntu-22.04
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: '.node-version'
+
       - uses: actions/download-artifact@v7
         with:
+          pattern: 'draftmatter-{cli,*-compliance,*-agent-host}'
           path: release-assets
 
-      - name: Prepare checksums and uniquely named compliance assets
-        shell: bash
+      - name: Prepare checksums over the actual installer and metadata filenames
         run: |
-          mkdir release-metadata
-          while IFS= read -r file; do
-            artifact="$(basename "$(dirname "$(dirname "$file")")")"
-            cp "$file" "release-metadata/${artifact}-$(basename "$file")"
-          done < <(find release-assets -type f \( -name 'THIRD_PARTY_NOTICES.md' -o -name 'sbom.cdx.json' \) | sort)
-          cli="$(find release-assets -type f -name 'draftmatter-*.tgz' -print -quit)"
-          test -n "$cli"
-          cp "$cli" release-metadata/
-          while IFS= read -r host; do
-            artifact="$(basename "$(dirname "$host")")"
-            cp "$host" "release-metadata/${artifact}-$(basename "$host")"
-          done < <(find release-assets -type f \( -name 'draftmatter-agent-host' -o -name 'draftmatter-agent-host.exe' \) | sort)
-          (cd release-assets && find . -type f -print0 | sort -z | xargs -0 sha256sum) > release-metadata/SHA256SUMS
+          gh release download "$GITHUB_REF_NAME" --pattern 'DraftMatter_*' --dir release-installers
+          node scripts/prepare-release-metadata.mjs release-assets release-installers release-metadata
 
       - name: Attach verified release metadata
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: gh release upload "$GITHUB_REF_NAME" release-metadata/* --clobber

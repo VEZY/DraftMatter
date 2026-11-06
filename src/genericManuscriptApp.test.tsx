@@ -121,6 +121,28 @@ describe('generic portable manuscript app workflow', () => {
     expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('Keep this opaque block exactly.')
   })
 
+  it('persists browser edits before leaving for Learn while the autosave timer is pending', async () => {
+    const next = '# Browser paper\n\nKeep this edit.\n'
+    const leave = vi.fn(() => root.render(<div>Learn</div>))
+    await act(async () => root.render(<App initialExperience="browser-new" onOpenLearn={leave} />))
+    const click = async (label: string) => act(async () => {
+      const button = [...container.querySelectorAll('button')].find((candidate) => candidate.textContent?.includes(label))
+      button!.click()
+    })
+    await click('View source')
+    await click('Edit source')
+    const editor = container.querySelector<HTMLTextAreaElement>('[aria-label="Reviewed portable source"]')!
+    await act(async () => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(editor, next)
+      editor.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await click('Apply source')
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Learn DraftMatter"]')!.click())
+    expect(leave).toHaveBeenCalledOnce()
+    expect(localStorage.getItem('draftmatter.structured-source.v1')).toBe(next)
+    expect(readRecoverySnapshots(localStorage)[0].source).toBe(next)
+  })
+
   it('starts a fresh browser paper independently from a previously opened example', async () => {
     localStorage.setItem('draftmatter.structured-source.v1', source)
     localStorage.setItem('draftmatter.built-in-project.v1', 'complete-example')

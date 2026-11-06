@@ -223,17 +223,32 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
     return { pendingUpdates: result.pendingUpdates, pendingBytes: result.pendingBytes }
   }
 
-  async createSnapshot(scope: CollaborationProjectScope, snapshotId: string, stateUpdate: Uint8Array) {
+  async createSnapshot(scope: CollaborationProjectScope, snapshotId: string, stateUpdate?: Uint8Array) {
+    return this.writeSnapshot(scope, snapshotId, { additionalState: stateUpdate })
+  }
+
+  private async writeSnapshot(scope: CollaborationProjectScope, snapshotId: string, source: { additionalState?: Uint8Array } | { restoredState: Uint8Array }) {
     safeId(snapshotId, 'Snapshot ID')
     const at = iso(this.clock())
     const objectKey = this.objectKey(scope, snapshotId)
-    const sha256 = hash(stateUpdate)
     let objectWritten = false
     try {
       const metadata = await transaction(this.pool, async (client) => {
         const nextSequence = await this.lockProject(client, scope)
         const duplicate = await client.query('SELECT 1 FROM draftmatter_collaboration_snapshots WHERE workspace_id = $1 AND project_id = $2 AND id = $3', [scope.workspaceId, scope.projectId, snapshotId])
         if (duplicate.rowCount) throw new CollaborationStoreError('already-exists', 'Snapshot identifiers are immutable and cannot be overwritten.')
+        let stateUpdate: Uint8Array
+        if ('restoredState' in source) {
+          stateUpdate = source.restoredState
+        } else {
+          // The supplied live state may predate another writer. Include every
+          // durable update covered by this snapshot while holding the project lock.
+          const loaded = await this.readState(client, scope)
+          const parts = loaded.snapshot ? [loaded.snapshot, ...loaded.updates] : loaded.updates
+          if (source.additionalState) parts.push(source.additionalState)
+          stateUpdate = Y.mergeUpdates(parts)
+        }
+        const sha256 = hash(stateUpdate)
         const reclaimed = await client.query<{ bytes: string | number }>(
           `SELECT COALESCE(SUM(payload_bytes), 0) AS bytes FROM draftmatter_collaboration_updates
            WHERE workspace_id = $1 AND project_id = $2 AND sequence < $3`,
@@ -246,7 +261,9 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
           metadata: { sha256, workspace: scope.workspaceId, project: scope.projectId, snapshot: snapshotId },
         })
         objectWritten = true
-        const throughSequence = Math.max(0, nextSequence - 1)
+        // Reserve a sequence for snapshots too, so publication order remains
+        // unambiguous across processes even when their clocks coincide.
+        const throughSequence = nextSequence
         await client.query(
           `INSERT INTO draftmatter_collaboration_snapshots
            (workspace_id, project_id, id, created_at, through_sequence, object_key, bytes, sha256, state)
@@ -258,12 +275,12 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
           [scope.workspaceId, scope.projectId, throughSequence],
         )
         await client.query(
-          'UPDATE draftmatter_collaboration_projects SET last_activity_at = $3 WHERE workspace_id = $1 AND project_id = $2',
-          [scope.workspaceId, scope.projectId, at],
+          'UPDATE draftmatter_collaboration_projects SET last_activity_at = $3, next_sequence = $4 WHERE workspace_id = $1 AND project_id = $2',
+          [scope.workspaceId, scope.projectId, at, nextSequence + 1],
         )
         return { id: snapshotId, createdAt: at, bytes: stateUpdate.byteLength, sha256 }
       })
-      this.dashboard.recordSnapshot(this.key(scope), stateUpdate.byteLength, at)
+      this.dashboard.recordSnapshot(this.key(scope), metadata.bytes, at)
       return metadata
     } catch (error) {
       if (objectWritten) await this.objects.delete(objectKey).catch(() => undefined)
@@ -273,16 +290,20 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
 
   async load(scope: CollaborationProjectScope): Promise<LoadedCollaborationState> {
     this.key(scope)
-    const project = await this.pool.query<{ last_activity_at: Date | string }>(
-      'SELECT last_activity_at FROM draftmatter_collaboration_projects WHERE workspace_id = $1 AND project_id = $2',
+    return transaction(this.pool, (client) => this.readState(client, scope))
+  }
+
+  private async readState(client: PoolClient, scope: CollaborationProjectScope): Promise<LoadedCollaborationState> {
+    const project = await client.query<{ last_activity_at: Date | string }>(
+      'SELECT last_activity_at FROM draftmatter_collaboration_projects WHERE workspace_id = $1 AND project_id = $2 FOR SHARE',
       [scope.workspaceId, scope.projectId],
     )
     if (!project.rowCount) throw new CollaborationStoreError('not-found', 'The collaboration project was not found.')
-    const snapshots = await this.pool.query<SnapshotRow>(
+    const snapshots = await client.query<SnapshotRow>(
       `SELECT id, created_at, through_sequence, object_key, bytes, sha256
        FROM draftmatter_collaboration_snapshots
        WHERE workspace_id = $1 AND project_id = $2 AND state = 'ready'
-       ORDER BY created_at DESC, id DESC LIMIT 1`,
+       ORDER BY through_sequence DESC, created_at DESC, id DESC LIMIT 1`,
       [scope.workspaceId, scope.projectId],
     )
     const latest = snapshots.rows[0]
@@ -293,7 +314,7 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
         throw new CollaborationStoreError('backup-invalid', 'The managed collaboration snapshot failed its integrity check.')
       }
     }
-    const updates = await this.pool.query<UpdateRow>(
+    const updates = await client.query<UpdateRow>(
       `SELECT sequence, payload, payload_bytes FROM draftmatter_collaboration_updates
        WHERE workspace_id = $1 AND project_id = $2 AND sequence > $3 ORDER BY sequence`,
       [scope.workspaceId, scope.projectId, latest ? Number(latest.through_sequence) : 0],
@@ -321,17 +342,8 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
   }
 
   async createRecoveryCheckpoint(scope: CollaborationProjectScope, request: { name: string; createdBy: string }) {
-    const loaded = await this.load(scope)
-    const updates = [...(loaded.snapshot ? [loaded.snapshot] : []), ...loaded.updates]
-    let state: Uint8Array
-    if (updates.length) state = Y.mergeUpdates(updates)
-    else {
-      const empty = new Y.Doc()
-      state = Y.encodeStateAsUpdate(empty)
-      empty.destroy()
-    }
     const snapshotId = safeId(`recovery-state-${this.idFactory()}`, 'Recovery snapshot ID')
-    await this.createSnapshot(scope, snapshotId, state)
+    await this.createSnapshot(scope, snapshotId)
     return this.createNamedRecoveryCheckpoint(scope, snapshotId, request)
   }
 
@@ -452,7 +464,7 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
   async restoreBackup(scope: CollaborationProjectScope, backupId: string, target: CollaborationProjectScope = scope, snapshotId = `restore-${backupId}`) {
     const verified = await this.readVerifiedBackup(scope, backupId)
     try {
-      const snapshot = await this.createSnapshot(target, snapshotId, verified.state)
+      const snapshot = await this.writeSnapshot(target, snapshotId, { restoredState: verified.state })
       const restoredAt = iso(this.clock())
       await this.pool.query(
         `UPDATE draftmatter_collaboration_backups SET last_restored_at = $4
@@ -472,7 +484,7 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
     const result = await this.pool.query<SnapshotRow>(
       `SELECT id, created_at, through_sequence, object_key, bytes, sha256
        FROM draftmatter_collaboration_snapshots WHERE workspace_id = $1 AND project_id = $2 AND state = 'ready'
-       ORDER BY created_at DESC, id DESC`,
+       ORDER BY through_sequence DESC, created_at DESC, id DESC`,
       [scope.workspaceId, scope.projectId],
     )
     const now = policy.now ?? this.clock()

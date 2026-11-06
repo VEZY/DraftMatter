@@ -44,6 +44,7 @@ describe('authenticated collaboration workspace service', () => {
     for (const role of ['editor', 'commenter', 'viewer'] as const) {
       const guest = await session(service, role)
       const invitation = await service.createInvitation(owner, 'forest', { role })
+      await expect(service.acceptInvitation(owner, invitation.token)).rejects.toMatchObject({ code: 'forbidden' })
       await service.acceptInvitation(guest, invitation.token)
       await expect(service.authorizeProject(guest, 'forest', 'paper', 'read')).resolves.toMatchObject({ userId: role, role })
       if (role === 'editor') await expect(service.authorizeProject(guest, 'forest', 'paper', 'edit')).resolves.toMatchObject({ role })

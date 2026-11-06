@@ -48,12 +48,12 @@ npm run compliance:generate
 
 `compliance:check` resolves the locked npm and target-filtered Cargo graphs and rejects every SPDX token outside `compliance/license-allowlist.json`. `compliance:generate` emits target-specific third-party notices and a CycloneDX 1.5 SBOM. The portability workflow attaches both files beside each platform build.
 
-`npm run release:verify` also locks the MCP SDK version, verifies the Codex
-plugin/application version match, and requires a scoped record for the current
-unused Hono HTTP-adapter advisory in
-`compliance/security-exceptions.json`. DraftMatter exposes MCP only over stdio;
-the exception must be re-reviewed by its deadline and cannot cover a reachable,
-high, or critical advisory.
+`npm run release:verify` checks that the MCP SDK pin matches the lockfile and
+that the Codex plugin and application versions match. It validates every entry
+in `compliance/security-exceptions.json` against its locked package version,
+severity, scope, and review dates. A recorded exception must cover an unexposed
+low or moderate advisory and requires review by its deadline. The release
+workflow runs `npm audit --audit-level=high` against the registry before packaging.
 
 `test:e2e` starts the browser-safe application on loopback, exercises the rendered manuscript/review workflow in pinned Chromium, checks keyboard access, and compares the result with the committed visual baseline. The dedicated browser workflow installs the Playwright-pinned browser before running this gate.
 
@@ -69,6 +69,11 @@ Development macOS bundles are ad-hoc signed (`signingIdentity: "-"`) so local bu
 4. successful `signtool verify /pa /all` for every Windows MSI/NSIS bundle;
 5. generated SHA-256 checksums, target-specific CycloneDX SBOMs, and third-party notices attached to the draft release;
 6. manual review of the draft before publication, retaining the exact source revision and locked dependency files used by the build.
+
+The metadata job retrieves the signed installers from the draft to hash them
+under their GitHub download names. Each of the four targets supplies its own
+notices, SBOM, and execution host. Download the release assets to one directory
+and run `sha256sum -c SHA256SUMS` there to verify them.
 
 `npm run release:verify` prevents a tag from drifting from `package.json`, `package-lock.json`, `Cargo.toml`, or `tauri.conf.json`. Missing signing secrets fail before platform builds begin. A failed signature, notarization, test, compliance, or checksum job leaves at most an unpublished draft and cannot silently publish an unsigned installer.
 
@@ -95,8 +100,9 @@ Unsigned or unnotarized desktop artifacts must be labelled development builds an
 ## Privilege and data boundaries
 
 - Tauri exposes fixed typed commands; there is no arbitrary shell command bridge.
-- Project paths reject absolute paths, traversal, and platform prefixes.
+- Project paths reject absolute paths, traversal, and platform prefixes. Opening a project validates citation recovery targets and their backups before restoring any files. Recovery directories and journals reject symbolic links and Windows junctions. A manuscript linked to another file inside the project can still be opened.
 - Git uses fixed argument lists, bounded/redacted diagnostics, disabled repository hooks and filesystem monitors, no force/rewrite/discard operation, fast-forward-only pull, and explicit push.
+- DraftMatter refuses Git operations when the repository or worktree configuration, including its included files, defines a `clean`, `smudge`, or `process` filter command. User and system Git filters remain available. Status and diffs show changes to a submodule's recorded commit. Inspect edits to files inside the submodule by opening it as a separate repository. History and checkpoint diffs display commit contents without invoking a signature verifier.
 - External renderers accept only a clean projection. Quarto uses `quarto pandoc`, not `quarto render`; DraftMatter execution classes are removed before process launch.
 - Native HTML escapes raw HTML, rejects active asset schemes, contains no scripts, and is governed by the desktop CSP while inside DraftMatter.
 - Native DOCX contains resolved clean content and does not claim Word tracked-change round-trip. Relative figure paths produce a visible diagnostic.

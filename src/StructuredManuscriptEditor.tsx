@@ -1230,7 +1230,8 @@ function linkMarkView(initialMark: ProseMirrorMark, view: EditorView, isEditable
   const updateDom = () => {
     const href = String(mark.attrs.href)
     const linkTitle = mark.attrs.title ? String(mark.attrs.title) : ''
-    link.setAttribute('href', href)
+    if (isSafePortableLinkDestination(mark.attrs.href)) link.setAttribute('href', href)
+    else link.removeAttribute('href')
     if (linkTitle) link.setAttribute('title', linkTitle)
     else link.removeAttribute('title')
     edit.disabled = !isEditable()
@@ -3683,7 +3684,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     toggleItalic: () => run(toggleMark(manuscriptSchema.marks.emphasis)),
     setLink: (href, title) => {
       const view = viewRef.current
-      if (!view || view.state.selection.empty) return false
+      if (!view || view.state.selection.empty || !isSafePortableLinkDestination(href)) return false
       return run(toggleMark(manuscriptSchema.marks.link, { href, title: title ?? null }))
     },
     setParagraph: () => run(setBlockType(manuscriptSchema.nodes.paragraph)),

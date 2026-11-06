@@ -1,21 +1,4 @@
 {
   "schemaVersion": 1,
-  "exceptions": [
-    {
-      "advisory": "GHSA-frvp-7c67-39w9",
-      "package": "@hono/node-server",
-      "affectedInstalledVersion": "1.19.15",
-      "severity": "moderate",
-      "introducedBy": "@modelcontextprotocol/sdk@1.29.0",
-      "transportExposed": false,
-      "scope": "The vulnerable Hono static-file HTTP adapter is not imported or instantiated. DraftMatter MCP is stdio-only and opens no listening port.",
-      "mitigations": [
-        "Import only SDK stdio, in-memory, client, server, and schema entry points.",
-        "Reject release if the advisory becomes high or critical, reaches the stdio import path, or a compatible fixed SDK is available.",
-        "Re-run npm audit and the MCP protocol/end-to-end suites for every release."
-      ],
-      "reviewedOn": "2026-07-25",
-      "reviewBy": "2026-08-25"
-    }
-  ]
+  "exceptions": []
 }

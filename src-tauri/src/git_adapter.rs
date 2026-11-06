@@ -221,11 +221,16 @@ fn git_command(current_dir: &Path) -> Command {
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "Never")
         .env("GIT_LITERAL_PATHSPECS", "1")
-        .env("GIT_CONFIG_COUNT", "2")
+        .env("GIT_OPTIONAL_LOCKS", "0")
+        .env("GIT_CONFIG_COUNT", "4")
         .env("GIT_CONFIG_KEY_0", "core.hooksPath")
         .env("GIT_CONFIG_VALUE_0", disabled_hooks)
         .env("GIT_CONFIG_KEY_1", "core.fsmonitor")
         .env("GIT_CONFIG_VALUE_1", "false")
+        .env("GIT_CONFIG_KEY_2", "submodule.recurse")
+        .env("GIT_CONFIG_VALUE_2", "false")
+        .env("GIT_CONFIG_KEY_3", "diff.ignoreSubmodules")
+        .env("GIT_CONFIG_VALUE_3", "dirty")
         .env("LC_ALL", "C");
     command
 }
@@ -302,6 +307,43 @@ fn git_version(root: &Path) -> Result<Option<String>, HostError> {
     }
 }
 
+fn check_repository_filters(repository_root: &Path) -> Result<(), HostError> {
+    // Worktree comparisons can start a clean/process filter even with
+    // --no-ext-diff and --no-textconv. Keep user/system filters (e.g. LFS),
+    // but refuse repository-supplied commands rather than bypassing a filter
+    // and staging or restoring an incorrect file representation.
+    let output = run_git(
+        repository_root,
+        &[
+            "config",
+            "--includes",
+            "--show-scope",
+            "--name-only",
+            "--null",
+            "--get-regexp",
+            r"^filter\..*\.(clean|smudge|process)$",
+        ],
+    )?;
+    if output.status.code() == Some(1) && output.stdout.is_empty() && output.stderr.is_empty() {
+        return Ok(()); // No matching keys.
+    }
+    let output = require_success(output, "inspect Git filter settings")?;
+    let mut fields = output.stdout.split(|byte| *byte == 0);
+    while let Some(scope) = fields.next().filter(|scope| !scope.is_empty()) {
+        if fields.next().filter(|key| !key.is_empty()).is_none() {
+            return Err(HostError::Integration(
+                "Git returned incomplete filter settings.".into(),
+            ));
+        }
+        if !matches!(scope, b"global" | b"system" | b"command") {
+            return Err(HostError::Integration(
+                "This repository defines a Git filter command. DraftMatter cannot run repository-defined filters. Use your Git client, or configure a trusted filter in your user Git settings.".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn repository_context(raw_root: &str) -> Result<Option<RepositoryContext>, HostError> {
     let project_root = canonical_root(raw_root)?;
     let output = run_git(&project_root, &["rev-parse", "--show-toplevel"])?;
@@ -320,6 +362,7 @@ fn repository_context(raw_root: &str) -> Result<Option<RepositoryContext>, HostE
             )
         })?
         .to_path_buf();
+    check_repository_filters(&repository_root)?;
     Ok(Some(RepositoryContext {
         project_root,
         repository_root,
@@ -461,7 +504,14 @@ fn diff_reports_binary(
     repository_path: &str,
     staged: bool,
 ) -> Result<bool, HostError> {
-    let mut arguments = vec!["diff", "--numstat"];
+    let mut arguments = vec![
+        "diff",
+        "--numstat",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--ignore-submodules=dirty",
+        "--submodule=short",
+    ];
     if staged {
         arguments.push("--cached");
     }
@@ -501,6 +551,7 @@ fn status_entries(context: &RepositoryContext) -> Result<Vec<GitStatusEntry>, Ho
                 "--porcelain=v1",
                 "-z",
                 "--untracked-files=all",
+                "--ignore-submodules=dirty",
                 "--",
                 &pathspec,
             ],
@@ -614,7 +665,15 @@ pub fn git_initialize_impl(raw_root: &str) -> Result<GitInitializeResult, HostEr
 pub fn git_diff_impl(request: GitDiffRequest) -> Result<GitDiffResult, HostError> {
     let context = require_repository(&request.root)?;
     let repository_path = repository_path(&context, &request.path)?;
-    let mut arguments = vec!["diff", "--no-ext-diff", "--no-color", "--unified=3"];
+    let mut arguments = vec![
+        "diff",
+        "--no-ext-diff",
+        "--no-textconv",
+        "--ignore-submodules=dirty",
+        "--submodule=short",
+        "--no-color",
+        "--unified=3",
+    ];
     if request.staged {
         arguments.push("--cached");
     }
@@ -670,6 +729,7 @@ pub fn git_history_impl(raw_root: &str) -> Result<Vec<GitHistoryEntry>, HostErro
             &context.repository_root,
             &[
                 "log",
+                "--no-show-signature",
                 "-z",
                 &limit,
                 "--date=iso-strict",
@@ -737,8 +797,12 @@ pub fn git_checkpoint_diff_impl(
             &context.repository_root,
             &[
                 "show",
+                "--no-show-signature",
                 "--format=",
                 "--no-ext-diff",
+                "--no-textconv",
+                "--submodule=short",
+                "--ignore-submodules=dirty",
                 "--no-color",
                 "--unified=3",
                 "--find-renames",
@@ -1713,6 +1777,221 @@ mod tests {
             message: "Empty".to_string(),
         });
         assert!(matches!(empty, Err(HostError::Conflict(_))));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn viewing_diffs_never_invokes_a_repository_text_converter() {
+        let project = tempdir().unwrap();
+        let path = project.path();
+        initialise(path);
+        fs::write(path.join(".gitattributes"), "*.qmd diff=fixture\n").unwrap();
+        fs::write(path.join("paper.qmd"), "first\n").unwrap();
+        commit_all(path, "First version");
+        git(
+            path,
+            [
+                "config",
+                "diff.fixture.textconv",
+                "sh -c 'touch converter-ran; cat \"$0\"'",
+            ],
+        );
+        fs::write(path.join("paper.qmd"), "second\n").unwrap();
+        git(path, ["add", "paper.qmd"]);
+        fs::write(path.join("paper.qmd"), "third\n").unwrap();
+        let root = path.to_string_lossy().into_owned();
+        for (staged, added) in [(true, "+second"), (false, "+third")] {
+            let diff = git_diff_impl(GitDiffRequest {
+                root: root.clone(),
+                path: "paper.qmd".into(),
+                staged,
+            })
+            .unwrap();
+            assert!(diff.text.contains(added));
+        }
+        let hash = git_history_impl(&root).unwrap()[0].hash.clone();
+        let diff = git_checkpoint_diff_impl(GitCheckpointDiffRequest { root, hash }).unwrap();
+        assert!(diff.text.contains("+first"));
+        assert!(!path.join("converter-ran").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn history_and_checkpoint_diff_do_not_start_a_repository_signature_verifier() {
+        let project = tempdir().unwrap();
+        let path = project.path();
+        initialise(path);
+        fs::write(path.join("paper.qmd"), "base\n").unwrap();
+        git(path, ["add", "paper.qmd"]);
+        let tree = git(path, ["write-tree"]);
+        let tree = String::from_utf8(tree.stdout).unwrap();
+        let commit = format!(
+            "tree {}\nauthor Test <test@example.invalid> 1720000000 +0000\ncommitter Test <test@example.invalid> 1720000000 +0000\ngpgsig -----BEGIN PGP SIGNATURE-----\n \n abcdefg\n -----END PGP SIGNATURE-----\n\nTest\n",
+            tree.trim()
+        );
+        fs::write(path.join(".git/fixture-commit"), commit).unwrap();
+        let hash = git(
+            path,
+            ["hash-object", "-w", "-t", "commit", ".git/fixture-commit"],
+        );
+        let hash = String::from_utf8(hash.stdout).unwrap().trim().to_string();
+        git(path, ["update-ref", "HEAD", &hash]);
+        let verifier = path.join("verify-signature");
+        fs::write(&verifier, "#!/bin/sh\ntouch verifier-ran\nexit 1\n").unwrap();
+        fs::set_permissions(&verifier, fs::Permissions::from_mode(0o755)).unwrap();
+        git(path, ["config", "gpg.program", &verifier.to_string_lossy()]);
+        git(path, ["config", "log.showSignature", "true"]);
+        git(path, ["log", "-1", "--format=%H"]);
+        let marker = path.join("verifier-ran");
+        assert!(
+            marker.exists(),
+            "unrestricted Git should try to verify the signature"
+        );
+        fs::remove_file(&marker).unwrap();
+        let root = path.to_string_lossy().into_owned();
+        assert_eq!(git_history_impl(&root).unwrap()[0].hash, hash);
+        let diff = git_checkpoint_diff_impl(GitCheckpointDiffRequest { root, hash }).unwrap();
+        assert!(diff.text.contains("+base"));
+        assert!(!marker.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_filter_commands_are_refused_without_changing_the_worktree_or_index() {
+        let project = tempdir().unwrap();
+        let path = project.path();
+        initialise(path);
+        fs::write(path.join(".gitattributes"), "*.qmd filter=probe\n").unwrap();
+        fs::write(path.join("paper.qmd"), "first\n").unwrap();
+        commit_all(path, "Initial version");
+        fs::write(path.join("paper.qmd"), "second version\n").unwrap();
+        git(path, ["config", "include.path", "filter.conf"]);
+        let index_before = fs::read(path.join(".git/index")).unwrap();
+        let root = path.to_string_lossy().into_owned();
+        let marker = path.join("filter-ran");
+
+        for (key, command) in [
+            ("clean", "tee filter-ran"),
+            ("process", "echo ran > filter-ran; exit 1"),
+            ("smudge", "tee filter-ran"),
+        ] {
+            fs::write(
+                path.join(".git/filter.conf"),
+                format!("[filter \"probe\"]\n\t{key} = \"{command}\"\n\trequired = true\n"),
+            )
+            .unwrap();
+            if key == "clean" {
+                git(
+                    path,
+                    [
+                        "diff",
+                        "--numstat",
+                        "--no-ext-diff",
+                        "--no-textconv",
+                        "--",
+                        "paper.qmd",
+                    ],
+                );
+                assert!(
+                    marker.exists(),
+                    "the Git numstat control must run this filter"
+                );
+                fs::remove_file(&marker).unwrap();
+            }
+            let status = git_status_impl(&root).unwrap_err();
+            let diff = git_diff_impl(GitDiffRequest {
+                root: root.clone(),
+                path: "paper.qmd".into(),
+                staged: false,
+            })
+            .unwrap_err();
+            let stage = git_stage_impl(GitStageRequest {
+                root: root.clone(),
+                paths: vec!["paper.qmd".into()],
+            })
+            .unwrap_err();
+            for error in [status, diff, stage] {
+                assert!(
+                    matches!(error, HostError::Integration(message) if message.contains("repository defines a Git filter command"))
+                );
+            }
+            assert!(!marker.exists());
+            assert_eq!(
+                fs::read_to_string(path.join("paper.qmd")).unwrap(),
+                "second version\n"
+            );
+            assert_eq!(fs::read(path.join(".git/index")).unwrap(), index_before);
+        }
+
+        fs::write(
+            path.join(".git/filter.conf"),
+            "[filter \"probe\"]\n\trequired = false\n",
+        )
+        .unwrap();
+        assert!(
+            git_status_impl(&root).is_ok(),
+            "a repository filter policy alone defines no command"
+        );
+        git(path, ["config", "extensions.worktreeConfig", "true"]);
+        git(
+            path,
+            [
+                "config",
+                "--worktree",
+                "filter.probe.clean",
+                "tee filter-ran",
+            ],
+        );
+        assert!(
+            matches!(git_status_impl(&root), Err(HostError::Integration(message)) if message.contains("repository defines a Git filter command"))
+        );
+        assert!(!marker.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_status_and_diff_report_changed_gitlinks_without_running_submodule_filters() {
+        let project = tempdir().unwrap();
+        let path = project.path();
+        initialise(path);
+        let sub = path.join("sub");
+        fs::create_dir(&sub).unwrap();
+        initialise(&sub);
+        fs::write(sub.join("paper.qmd"), "base\n").unwrap();
+        fs::write(sub.join(".gitattributes"), "*.qmd filter=probe\n").unwrap();
+        commit_all(&sub, "Initial submodule version");
+        fs::write(
+            path.join(".gitmodules"),
+            "[submodule \"sub\"]\n\tpath = sub\n\turl = ./sub\n",
+        )
+        .unwrap();
+        commit_all(path, "Initial gitlink");
+        git(
+            &sub,
+            ["commit", "--allow-empty", "-m", "New submodule revision"],
+        );
+        git(
+            &sub,
+            ["config", "filter.probe.clean", "tee submodule-filter-ran"],
+        );
+        fs::write(sub.join("paper.qmd"), "dirty worktree\n").unwrap();
+        git(path, ["config", "diff.submodule", "diff"]);
+        git(path, ["config", "submodule.sub.ignore", "none"]);
+
+        let root = path.to_string_lossy().into_owned();
+        let status = git_status_impl(&root).unwrap();
+        assert!(status
+            .entries
+            .iter()
+            .any(|entry| entry.path == "sub" && entry.unstaged));
+        let diff = git_diff_impl(GitDiffRequest {
+            root,
+            path: "sub".into(),
+            staged: false,
+        })
+        .unwrap();
+        assert!(diff.text.contains("Subproject commit"));
+        assert!(!sub.join("submodule-filter-ran").exists());
     }
 
     #[cfg(unix)]

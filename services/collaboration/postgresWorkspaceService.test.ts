@@ -85,6 +85,8 @@ describe('PostgreSQL workspace authorization', () => {
     await expect(service.authorizeProject('editor', 'forest', 'paper', 'edit')).resolves.toMatchObject({ role: 'editor' })
 
     const commenterInvite = await service.createInvitation('owner', 'forest', { role: 'commenter' })
+    await expect(service.acceptInvitation('owner', commenterInvite.token)).rejects.toMatchObject({ code: 'forbidden' })
+    await expect(service.authorizeProject('owner', 'forest', 'paper', 'checkpoint')).resolves.toMatchObject({ role: 'owner' })
     await service.acceptInvitation('commenter', commenterInvite.token)
     await expect(service.authorizeProject('commenter', 'forest', 'paper', 'comment')).resolves.toMatchObject({ role: 'commenter' })
     await expect(service.authorizeProject('commenter', 'forest', 'paper', 'edit')).rejects.toMatchObject({ code: 'forbidden' })

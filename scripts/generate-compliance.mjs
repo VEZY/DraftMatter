@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url'
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..')
 const verifyOnly = process.argv.includes('--verify')
+const { version } = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'))
 const allowlist = new Set(JSON.parse(readFileSync(join(root, 'compliance/license-allowlist.json'), 'utf8')))
 const licenseAliases = new Map([
   ['Public Domain', 'LicenseRef-Public-Domain'],
@@ -140,7 +141,7 @@ function cyclonedx(components, target) {
     specVersion: '1.5',
     version: 1,
     metadata: {
-      component: { type: 'application', name: 'DraftMatter', version: '0.1.0', licenses: [{ expression: 'MIT' }] },
+      component: { type: 'application', name: 'DraftMatter', version, licenses: [{ expression: 'MIT' }] },
       properties: [
         { name: 'draftmatter:target', value: target },
         { name: 'draftmatter:dependency-fingerprint', value: `sha256:${fingerprint}` },
@@ -150,7 +151,7 @@ function cyclonedx(components, target) {
   }, null, 2)}\n`
 }
 
-const target = rustHost()
+const target = process.env.DRAFTMATTER_COMPLIANCE_TARGET || rustHost()
 const components = [...npmComponents(), ...cargoComponents(target)]
   .sort((left, right) => left.ecosystem.localeCompare(right.ecosystem) || left.name.localeCompare(right.name) || left.version.localeCompare(right.version))
 verifyLicenses(components)

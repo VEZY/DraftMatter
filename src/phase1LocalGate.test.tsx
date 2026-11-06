@@ -169,6 +169,54 @@ describe('DM-P1-GATE local project workflow', () => {
     container.remove()
   })
 
+  async function editSource(updatedSource: string) {
+    if (!container.querySelector('.source-drawer')) await act(async () => buttonWithText(container, 'View source').click())
+    await act(async () => buttonWithText(container, 'Edit source').click())
+    const sourceEditor = container.querySelector<HTMLTextAreaElement>('[aria-label="Reviewed portable source"]')!
+    const textareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
+    await act(async () => {
+      textareaSetter?.call(sourceEditor, updatedSource)
+      sourceEditor.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+    await act(async () => buttonWithText(container, 'Apply source').click())
+  }
+
+  it('waits for the final desktop revision before navigating Home, even if another edit arrives during the write', async () => {
+    const leave = vi.fn()
+    let finishFirstWrite!: () => void
+    const delayed = new Promise<void>((resolve) => { finishFirstWrite = resolve })
+    vi.mocked(desktopHost.saveDocument).mockImplementationOnce(async (request) => {
+      await delayed
+      persistedSource = request.content
+      persistedHash = 'intermediate'
+      return { path: request.path, hash: persistedHash, bytes: persistedSource.length, recoveryPath: null }
+    })
+    await act(async () => appRoot.render(<App desktopProjectLaunch={project} onNavigateHome={leave} />))
+    await flush()
+    await editSource(editedSource)
+    await act(async () => container.querySelector<HTMLElement>('[aria-label="DraftMatter home"]')!.click())
+    expect(leave).not.toHaveBeenCalled()
+    const finalSource = editedSource + '\nOne last observation.\n'
+    await editSource(finalSource)
+    await act(async () => { finishFirstWrite() })
+    expect(persistedSource).toBe(finalSource)
+    expect(desktopHost.saveDocument).toHaveBeenLastCalledWith(expect.objectContaining({ expectedHash: 'intermediate' }))
+    expect(leave).toHaveBeenCalledOnce()
+  })
+
+  it('keeps the editor and recoverable text when saving before Home fails', async () => {
+    const leave = vi.fn()
+    vi.mocked(desktopHost.saveDocument).mockRejectedValueOnce({ kind: 'conflict', message: 'The external copy changed.' })
+    await act(async () => appRoot.render(<App desktopProjectLaunch={project} onNavigateHome={leave} />))
+    await flush()
+    await editSource(editedSource)
+    await act(async () => container.querySelector<HTMLElement>('[aria-label="DraftMatter home"]')!.click())
+    expect(leave).not.toHaveBeenCalled()
+    expect(persistedSource).toBe(originalSource)
+    expect(readRecoverySnapshots(localStorage)[0].source).toBe(editedSource)
+    expect(container.textContent).toContain('The external copy changed.')
+  })
+
   it('creates, edits, autosaves, reopens identical source, and exposes recovery', async () => {
     await act(async () => appRoot.render(<App />))
 
@@ -196,15 +244,7 @@ describe('DM-P1-GATE local project workflow', () => {
     expect(container.querySelector('.structured-manuscript-editor h1')?.textContent).toBe('Phase 1 article')
     expect(localStorage.getItem('draftmatter.last-project-root.v1')).toBe(projectRoot)
 
-    await act(async () => buttonWithText(container, 'View source').click())
-    await act(async () => buttonWithText(container, 'Edit source').click())
-    const sourceEditor = container.querySelector<HTMLTextAreaElement>('[aria-label="Reviewed portable source"]')!
-    const textareaSetter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set
-    await act(async () => {
-      textareaSetter?.call(sourceEditor, editedSource)
-      sourceEditor.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    await act(async () => buttonWithText(container, 'Apply source').click())
+    await editSource(editedSource)
     await flush(1_000)
 
     expect(desktopHost.saveDocument).toHaveBeenCalledWith(expect.objectContaining({

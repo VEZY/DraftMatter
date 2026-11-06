@@ -1,6 +1,6 @@
 import { isTauri } from '@tauri-apps/api/core'
 import { useEffect, useRef, useState } from 'react'
-import App from './App'
+import App, { type EditorSaveGuard } from './App'
 import { desktopLaunchTarget } from './desktopLaunch'
 import { Home } from './Home'
 import { InvitationEntry } from './InvitationEntry'
@@ -25,7 +25,7 @@ import {
 } from './localProjectCatalogue'
 import './home.css'
 
-function ApplicationRouter() {
+function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorSaveGuard }) {
   const session = useCollaborationSession()
   const [route, setRoute] = useState<ApplicationRoute>(() => parseApplicationRoute(window.location))
   const [launch, setLaunch] = useState<CollaborationProjectLaunch | null>(null)
@@ -39,15 +39,28 @@ function ApplicationRouter() {
   const [assistantConnectionsOpen, setAssistantConnectionsOpen] = useState(false)
 
   useEffect(() => {
-    const onPopState = () => {
+    let active = true
+    let latestNavigation = 0
+    const onPopState = async () => {
+      const navigation = ++latestNavigation
+      const destination = parseApplicationRoute(window.location)
+      const canLeave = await saveBeforeLeaveRef.current?.()
+      if (!active || navigation !== latestNavigation) return
+      if (canLeave === false) {
+        window.history.pushState({}, '', applicationRoutePath(route))
+        return
+      }
       setLaunch(null)
       setLocalLaunch(null)
       setStartCollaborationRoot('')
-      setRoute(parseApplicationRoute(window.location))
+      setRoute(destination)
     }
     window.addEventListener('popstate', onPopState)
-    return () => window.removeEventListener('popstate', onPopState)
-  }, [])
+    return () => {
+      active = false
+      window.removeEventListener('popstate', onPopState)
+    }
+  }, [route, saveBeforeLeaveRef])
 
   const navigate = (next: ApplicationRoute, replace = false) => {
     const path = applicationRoutePath(next)
@@ -145,7 +158,7 @@ function ApplicationRouter() {
 
   if (route.destination === 'collaborative-editor') {
     if (launch) {
-      return <App collaborationLaunch={launch} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLaunch(null); navigate({ destination: 'home', workspaceId: launch.workspaceId }) }} />
+      return <App saveBeforeLeaveRef={saveBeforeLeaveRef} collaborationLaunch={launch} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLaunch(null); navigate({ destination: 'home', workspaceId: launch.workspaceId }) }} />
     }
     if (!session.profile) {
       return home()
@@ -156,10 +169,10 @@ function ApplicationRouter() {
 
   if (route.destination === 'local-editor') {
     if (!localLaunch) return <main className="home-route-status"><section><h1>Open the local project from Home</h1><p>DraftMatter needs permission to read a project folder on this computer.</p><button onClick={() => navigate({ destination: 'home' })}>Return to Home</button></section></main>
-    return <App desktopProjectLaunch={localLaunch} startCollaborationOnMount={startCollaborationRoot === localLaunch.root} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLocalProjects(readLocalProjectRecents(localStorage)); setStartCollaborationRoot(''); setLocalLaunch(null); navigate({ destination: 'home' }) }} />
+    return <App saveBeforeLeaveRef={saveBeforeLeaveRef} desktopProjectLaunch={localLaunch} startCollaborationOnMount={startCollaborationRoot === localLaunch.root} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLocalProjects(readLocalProjectRecents(localStorage)); setStartCollaborationRoot(''); setLocalLaunch(null); navigate({ destination: 'home' }) }} />
   }
 
-  if (route.destination === 'example') return <App initialExperience="complete-example" onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />
+  if (route.destination === 'example') return <App saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience="complete-example" onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />
   if (route.destination === 'learn') return <Learn onBack={() => navigate({ destination: 'home' })} onStartTour={() => navigate({ destination: 'tutorial' })} />
   if (route.destination === 'learn-ai') return (
     <>
@@ -168,8 +181,8 @@ function ApplicationRouter() {
     </>
   )
   if (route.destination === 'languages') return <ProgrammingLanguages onBack={() => navigate({ destination: 'home' })} />
-  if (route.destination === 'tutorial') return <App initialExperience="complete-example" startExampleTour onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />
-  if (route.destination === 'browser-editor') return <App initialExperience={browserDraftIsNew ? 'browser-new' : undefined} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setBrowserDraftIsNew(false); navigate({ destination: 'home' }) }} />
+  if (route.destination === 'tutorial') return <App saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience="complete-example" startExampleTour onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />
+  if (route.destination === 'browser-editor') return <App saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience={browserDraftIsNew ? 'browser-new' : undefined} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setBrowserDraftIsNew(false); navigate({ destination: 'home' }) }} />
 
   return home(route.workspaceId)
 }
@@ -183,20 +196,40 @@ export function DraftMatterApplication({ collaboration }: DraftMatterApplication
   const [desktopLaunchReady, setDesktopLaunchReady] = useState(!desktop)
   const [sessionGeneration, setSessionGeneration] = useState(0)
   const lastDesktopTargetRef = useRef('')
+  const saveBeforeLeaveRef = useRef<(() => Promise<boolean>) | null>(null)
+
+  useEffect(() => {
+    if (!desktop) return
+    let disposed = false
+    let unlisten: (() => void) | undefined
+    void import('@tauri-apps/api/window').then(async ({ getCurrentWindow }) => {
+      if (disposed) return
+      const stop = await getCurrentWindow().onCloseRequested(async (event) => {
+        if (await saveBeforeLeaveRef.current?.() === false) event.preventDefault()
+      })
+      if (disposed) stop()
+      else unlisten = stop
+    }).catch((error) => console.error('Could not register the manuscript close handler.', error))
+    return () => {
+      disposed = true
+      unlisten?.()
+    }
+  }, [desktop])
 
   useEffect(() => {
     if (!desktop) return
     let active = true
     let unlisten: (() => void) | undefined
-    const open = (urls: string[] | null) => {
+    const open = async (urls: string[] | null) => {
       const target = urls?.map(desktopLaunchTarget).find((candidate): candidate is string => Boolean(candidate))
       if (!target || target === lastDesktopTargetRef.current) return
+      if (await saveBeforeLeaveRef.current?.() === false || !active) return
       lastDesktopTargetRef.current = target
       window.history.replaceState({}, '', target)
       setSessionGeneration((current) => current + 1)
     }
     void import('@tauri-apps/plugin-deep-link').then(async ({ getCurrent, onOpenUrl }) => {
-      open(await getCurrent())
+      await open(await getCurrent())
       if (!active) return
       unlisten = await onOpenUrl(open)
     }).finally(() => {
@@ -209,5 +242,5 @@ export function DraftMatterApplication({ collaboration }: DraftMatterApplication
   }, [desktop])
 
   if (!desktopLaunchReady) return <div className="home-route-status" role="status">Opening DraftMatter…</div>
-  return <CollaborationSessionProvider key={sessionGeneration} {...collaboration}><ApplicationRouter /></CollaborationSessionProvider>
+  return <CollaborationSessionProvider key={sessionGeneration} {...collaboration}><ApplicationRouter saveBeforeLeaveRef={saveBeforeLeaveRef} /></CollaborationSessionProvider>
 }

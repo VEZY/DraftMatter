@@ -1,4 +1,5 @@
-export function isSafePortableLinkDestination(value: string) {
+export function isSafePortableLinkDestination(value: unknown): value is string {
+  if (typeof value !== 'string') return false
   const destination = value.trim()
   return Boolean(destination)
     && !/[\u0000-\u001f\u007f\s]/.test(destination)

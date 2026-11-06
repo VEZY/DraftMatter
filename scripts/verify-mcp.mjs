@@ -59,6 +59,7 @@ async function connect() {
 }
 
 try {
+  let suggestion
   const first = await connect()
   try {
     assert.match(first.client.getInstructions() ?? '', /Inspect the project revision/)
@@ -104,7 +105,7 @@ try {
     assert.equal(bounded.structuredContent.result.truncated, true)
     assert.ok(bounded.structuredContent.result.source.length <= 64_000)
 
-    const suggested = await first.client.callTool({
+    suggestion = {
       name: 'draftmatter_review',
       arguments: {
         action: 'suggest',
@@ -115,7 +116,8 @@ try {
         selector: { kind: 'quote', quote: 'Original sentence.' },
         proposal: 'A more precise sentence.',
       },
-    })
+    }
+    const suggested = await first.client.callTool(suggestion)
     assert.equal(suggested.isError, false)
     assert.match(suggested.structuredContent.result.suggestion.reference, /^review:/)
 
@@ -155,13 +157,38 @@ try {
       arguments: { action: 'inspect' },
     })
     assert.equal(reviews.structuredContent.result.changes.length, 1)
+    const paperBeforeDisable = await readFile(join(project, 'paper.qmd'), 'utf8')
+    await run(process.execPath, [cli, 'ai', 'disable', '--project-root', project, '--apply'])
+    const denied = await second.client.callTool({
+      name: 'draftmatter_review',
+      arguments: { action: 'inspect' },
+    })
+    assert.equal(denied.isError, true)
+    assert.equal(denied.structuredContent.error.code, 'project-invalid')
+    const resource = await second.client.readResource({ uri: 'draftmatter://manuscript/outline' })
+    assert.equal(JSON.parse(resource.contents[0].text).error.code, 'project-invalid')
+    const replay = await second.client.callTool(suggestion)
+    assert.equal(replay.isError, true)
+    assert.equal(replay.structuredContent.error.code, 'project-invalid')
+    const newSuggestion = await second.client.callTool({
+      ...suggestion,
+      arguments: {
+        ...suggestion.arguments,
+        expectedRevision: reviews.structuredContent.revision,
+        idempotencyKey: 'mcp-verification-suggestion-002',
+        proposal: 'Another proposal after disabling AI.',
+      },
+    })
+    assert.equal(newSuggestion.isError, true)
+    assert.equal(newSuggestion.structuredContent.error.code, 'project-invalid')
+    assert.equal(await readFile(join(project, 'paper.qmd'), 'utf8'), paperBeforeDisable)
     assert.equal(second.stderr(), '')
   } finally {
     await second.client.close()
   }
 
   assert.match(await readFile(join(project, 'paper.qmd'), 'utf8'), /Generic MCP verifier/)
-  process.stdout.write('DraftMatter MCP verified: initialization, instructions, six strict tools, resources, bounded output, mutation, invalid input, shutdown, and reconnect.\n')
+  process.stdout.write('DraftMatter MCP verified: initialization, instructions, six strict tools, resources, bounded output, mutation, invalid input, shutdown, reconnect, and project access revocation.\n')
 } finally {
   await rm(temporary, { recursive: true, force: true })
 }

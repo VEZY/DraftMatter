@@ -1,7 +1,30 @@
 // @vitest-environment jsdom
 
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { EditorState } from 'prosemirror-state'
+import { EditorView } from 'prosemirror-view'
 import { copyPlainText } from './clipboard'
+import { manuscriptSchema } from './manuscriptSchema'
+
+it('rejects forged node attributes in HTML clipboard context while accepting valid context', () => {
+  const parsed: string[] = []
+  const view = new EditorView(null, {
+    state: EditorState.create({ schema: manuscriptSchema }),
+    handlePaste: (_view, _event, slice) => {
+      parsed.push(slice.content.firstChild!.type.name)
+      return true
+    },
+  })
+  try {
+    for (const level of [2, ['img', { src: 'x', onerror: 'unexpected()' }]]) {
+      const context = JSON.stringify(['heading', { level }])
+      view.pasteHTML(`<p data-pm-slice='0 0 ${context}'>Pasted text</p>`, new Event('paste') as ClipboardEvent)
+    }
+    expect(parsed).toEqual(['heading', 'paragraph'])
+  } finally {
+    view.destroy()
+  }
+})
 
 describe('portable clipboard writes', () => {
   afterEach(() => {

@@ -1,5 +1,5 @@
 import { DataType, newDb } from 'pg-mem'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
 import { PostgresEntitlementService } from './entitlements'
 import { runCollaborationMigrations } from './migrations'
@@ -115,6 +115,46 @@ describe('managed PostgreSQL and object-storage persistence', () => {
     ])
     fixture.document.destroy()
     reopened.destroy()
+    await pool.end()
+  })
+
+  it('keeps edits committed by another writer around a recovery checkpoint and stale live snapshot', async () => {
+    const { pool } = await database()
+    const options = { pool, objects: new MemoryObjectStorage(), compactAfterUpdates: 2, clock: () => 1_750_000_000_000 }
+    const owner = new PostgresCollaborationStore(options)
+    const writer = new PostgresCollaborationStore(options)
+    const scope = { workspaceId: 'forest', projectId: 'paper' }
+    const { document, first, second } = documentFixture()
+    await writer.appendUpdate(scope, first)
+    const writeSnapshot = owner.createSnapshot.bind(owner)
+    // Complete an independent edit immediately before the checkpoint transaction.
+    vi.spyOn(owner, 'createSnapshot').mockImplementationOnce(async (...args) => {
+      await writer.appendUpdate(scope, second)
+      return writeSnapshot(...args)
+    })
+    await owner.createRecoveryCheckpoint(scope, { name: 'During editing', createdBy: 'owner' })
+    const reopened = new Y.Doc()
+    const checkpoint = await writer.load(scope)
+    Y.applyUpdate(reopened, checkpoint.snapshot!)
+    expect(reopened.getText('draftmatter:document').toString()).toBe('Canopy response under drought')
+    expect(checkpoint.updates).toEqual([])
+
+    const beforeEdit = Y.encodeStateVector(document)
+    const text = document.getText('draftmatter:document')
+    text.insert(text.length, ' in June')
+    const update = Y.encodeStateAsUpdate(document, beforeEdit)
+    await writer.appendUpdate(scope, update)
+    await writer.appendUpdate(scope, update)
+    await owner.createSnapshot(scope, 'a-stale-live-snapshot', first)
+    const live = await writer.load(scope)
+    const fromDisk = new Y.Doc()
+    Y.applyUpdate(fromDisk, live.snapshot!)
+    expect(live.snapshotMetadata?.id).toBe('a-stale-live-snapshot')
+    expect(fromDisk.getText('draftmatter:document').toString()).toBe('Canopy response under drought in June')
+    expect(live.updates).toEqual([])
+    document.destroy()
+    reopened.destroy()
+    fromDisk.destroy()
     await pool.end()
   })
 
