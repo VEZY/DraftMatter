@@ -1,6 +1,6 @@
 import { isTauri } from '@tauri-apps/api/core'
-import { useEffect, useRef, useState } from 'react'
-import App, { type EditorSaveGuard } from './App'
+import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import type { EditorSaveGuard } from './App'
 import { desktopLaunchTarget } from './desktopLaunch'
 import { Home } from './Home'
 import { InvitationEntry } from './InvitationEntry'
@@ -24,6 +24,9 @@ import {
   type LocalProjectRecent,
 } from './localProjectCatalogue'
 import './home.css'
+
+// The home/account routes do not need the editor, export engines or language modes.
+const App = lazy(() => import('./App'))
 
 function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorSaveGuard }) {
   const session = useCollaborationSession()
@@ -242,5 +245,5 @@ export function DraftMatterApplication({ collaboration }: DraftMatterApplication
   }, [desktop])
 
   if (!desktopLaunchReady) return <div className="home-route-status" role="status">Opening DraftMatter…</div>
-  return <CollaborationSessionProvider key={sessionGeneration} {...collaboration}><ApplicationRouter saveBeforeLeaveRef={saveBeforeLeaveRef} /></CollaborationSessionProvider>
+  return <CollaborationSessionProvider key={sessionGeneration} {...collaboration}><Suspense fallback={<div className="home-route-status" role="status">Opening manuscript…</div>}><ApplicationRouter saveBeforeLeaveRef={saveBeforeLeaveRef} /></Suspense></CollaborationSessionProvider>
 }

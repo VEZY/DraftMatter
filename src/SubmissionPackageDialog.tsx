@@ -11,6 +11,7 @@ import {
   type SubmissionReviewModel,
 } from './submissionPackage'
 import type { CitationRecord } from './types'
+import { preparePublicationAssetsForDocx } from './publicationAssets'
 
 export function SubmissionPackageDialog({
   source,
@@ -64,7 +65,7 @@ export function SubmissionPackageDialog({
       if (projectAssetPaths.length && !loadProjectAssets) {
         throw new Error('This manuscript references project figure files. Open it as a desktop project so DraftMatter can add them to the package.')
       }
-      const assets = projectAssetPaths.length ? await loadProjectAssets!(projectAssetPaths) : []
+      const assets = await preparePublicationAssetsForDocx(projectAssetPaths.length ? await loadProjectAssets!(projectAssetPaths) : [], source)
       const result = buildSubmissionPackage({
         source,
         baseName,

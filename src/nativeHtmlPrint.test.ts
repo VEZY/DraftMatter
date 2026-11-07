@@ -47,6 +47,8 @@ describe('native PDF print handoff', () => {
   })
 
   it('hands the same semantic object projection to the PDF print bridge', async () => {
+    vi.spyOn(HTMLImageElement.prototype, 'complete', 'get').mockReturnValue(true)
+    vi.spyOn(HTMLImageElement.prototype, 'naturalWidth', 'get').mockReturnValue(640)
     document.body.innerHTML = '<main id="application">Editor</main>'
     const requestPrint = vi.fn()
     const html = renderNativeHtmlExport(`## Results

@@ -1,3 +1,5 @@
+import type { ProjectResources } from './sharedEditor/projectResources'
+import { signInDesktop, usesDesktopIdentity } from './collaboration/oidcDesktop'
 import { useEffect, useRef, useState } from 'react'
 import { CollaborationAccessPanel } from './CollaborationAccessPanel'
 import { CollaborationReviewPanel } from './CollaborationReviewPanel'
@@ -37,6 +39,11 @@ export interface CollaborationDialogProps {
   onCheckpointStateChange?: (uncheckpointed: boolean) => void
   checkpointMode: 'working-tree' | 'download'
   checkpointTarget: string
+  loadResources?: (preferLocal?: boolean) => Promise<ProjectResources>
+  resourceRevision?: unknown
+  onResources?: (resources: ProjectResources) => void
+  onSaveGuardChange?: (guard: (() => Promise<boolean>) | null) => void
+  prepareCheckpointSource?: (source: string) => string
   canUseBrowserSignIn?: boolean
   onRequestOpen?: () => void
   navigateToIdentity?: (url: string) => void
@@ -64,6 +71,10 @@ export function CollaborationDialog({
   onCheckpointStateChange,
   checkpointMode,
   checkpointTarget,
+  loadResources,
+  onResources,
+  onSaveGuardChange,
+  prepareCheckpointSource,
   canUseBrowserSignIn = true,
   onRequestOpen,
   navigateToIdentity,
@@ -84,6 +95,8 @@ export function CollaborationDialog({
   const [collaborators, setCollaborators] = useState<ActiveCollaborator[]>([])
   const [uncheckpointed, setUncheckpointed] = useState(false)
   const [checkpointing, setCheckpointing] = useState(false)
+  const [sharingResources, setSharingResources] = useState(false)
+  const [recoveryWarning, setRecoveryWarning] = useState('')
   const [serviceClient, setServiceClient] = useState<CollaborationServiceClient | null>(null)
   const [serviceState, setServiceState] = useState<'idle' | 'loading' | 'ready'>('idle')
   const [profile, setProfile] = useState<CollaborationSessionProfile | null>(null)
@@ -102,6 +115,8 @@ export function CollaborationDialog({
   const oidcCallbackStartedRef = useRef(false)
   const launchStartedRef = useRef('')
   const checkpointedSourceRef = useRef(source)
+  const connectionPendingRef = useRef(false)
+  const mountedRef = useRef(true)
 
   useEffect(() => {
     if (!launch) return
@@ -178,6 +193,12 @@ export function CollaborationDialog({
     setServiceState('loading')
     setDetail('')
     try {
+      if (usesDesktopIdentity()) {
+        const result = await signInDesktop(url)
+        accessTokenRef.current = result.token
+        await hydrateServiceClient(new CollaborationServiceClient(result.serviceUrl, result.token), '')
+        return
+      }
       const request = await prepareOidcAuthorization(url, window.location.href, sessionStorage)
       if (invitationToken.trim()) {
         storePendingCollaborationInvitation(sessionStorage, { token: invitationToken.trim(), serviceUrl: request.serviceUrl })
@@ -274,12 +295,17 @@ export function CollaborationDialog({
     updateCheckpointState(canonicalSource !== checkpointedSourceRef.current)
   }, [source])
 
-  useEffect(() => () => {
-    onEditorBindingChange?.(null)
-    clientRef.current?.destroy()
-    onSessionStateChange?.(false)
-    onRoleChange?.(null)
-    onCheckpointStateChange?.(false)
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+      onSaveGuardChange?.(null)
+      onEditorBindingChange?.(null)
+      clientRef.current?.destroy()
+      onSessionStateChange?.(false)
+      onRoleChange?.(null)
+      onCheckpointStateChange?.(false)
+    }
   }, [])
 
   useEffect(() => {
@@ -305,8 +331,14 @@ export function CollaborationDialog({
   }, [])
 
   const connect = async () => {
-    if (clientRef.current || status === 'connecting') return
+    if (clientRef.current || connectionPendingRef.current) return
+    connectionPendingRef.current = true
+    onSaveGuardChange?.(async () => {
+      setDetail('Wait for collaboration to finish connecting before leaving this manuscript.')
+      return false
+    })
     onSessionStateChange?.(true)
+    onRoleChange?.(null)
     updateStatus('connecting')
     try {
       const accessToken = accessTokenRef.current
@@ -323,15 +355,18 @@ export function CollaborationDialog({
       }
       if (!role) throw new Error('The collaboration service did not return an effective role for this manuscript.')
       setActiveRole(role)
-      onRoleChange?.(role)
+      const canBootstrap = openRemoteWithoutBootstrap ? false : launch ? launch.canBootstrap === true : role === 'owner'
       let connectionEstablished = false
       const client = await HocuspocusCollaborationClient.connect({
         url: urls.websocketUrl,
         workspaceId,
         projectId,
         token: accessToken,
+        resourceProvider: canBootstrap && loadResources ? () => loadResources(true) : undefined,
+        onResources,
+        onRecoveryWarning: setRecoveryWarning,
         bootstrapSource: launch?.bootstrapSource ?? source,
-        canBootstrap: openRemoteWithoutBootstrap ? false : launch ? launch.canBootstrap === true : role === 'owner',
+        canBootstrap,
         requireEmptyForBootstrap: openRemoteWithoutBootstrap ? false : launch?.requireEmptyForBootstrap,
         presence: { userId, name, color: '#617f73' },
         onStatus: (next, message) => {
@@ -355,8 +390,11 @@ export function CollaborationDialog({
         },
         onCollaborators: setCollaborators,
       })
+      if (!mountedRef.current) { client.destroy(); return }
       connectionEstablished = true
       clientRef.current = client
+      onSaveGuardChange?.(() => client.flushRecovery())
+      onRoleChange?.(role)
       onEditorBindingChange?.(client.editorBinding)
       if (!serviceClient) setServiceClient(apiClient)
       setToken('')
@@ -364,6 +402,8 @@ export function CollaborationDialog({
       updateStatus('connected')
       onConnected?.()
     } catch (error) {
+      if (!mountedRef.current) return
+      onSaveGuardChange?.(null)
       onEditorBindingChange?.(null)
       setActiveRole(null)
       onRoleChange?.(null)
@@ -371,6 +411,8 @@ export function CollaborationDialog({
       const message = error instanceof Error ? error.message : String(error)
       setBootstrapCollision(Boolean(launch?.requireEmptyForBootstrap && message.includes('did not overwrite')))
       updateStatus('error', message)
+    } finally {
+      connectionPendingRef.current = false
     }
   }
 
@@ -392,8 +434,10 @@ export function CollaborationDialog({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openRemoteWithoutBootstrap, status])
 
-  const disconnect = () => {
+  const disconnect = async () => {
+    if (clientRef.current?.flushRecovery && !await clientRef.current.flushRecovery()) return
     if (uncheckpointed && !window.confirm('Leave this live session without checkpointing its latest changes?')) return
+    onSaveGuardChange?.(null)
     onEditorBindingChange?.(null)
     clientRef.current?.destroy()
     clientRef.current = null
@@ -406,12 +450,35 @@ export function CollaborationDialog({
     updateStatus('disconnected')
   }
 
+  const shareUpdatedResources = async () => {
+    const client = clientRef.current
+    if (!client || !loadResources || sharingResources || (activeRole !== 'owner' && activeRole !== 'editor')) return
+    setSharingResources(true)
+    setDetail('')
+    try {
+      const resources = await loadResources(true)
+      if (clientRef.current !== client) throw new Error('The collaboration session changed before resources could be shared.')
+      client.publishResources(resources)
+      if (client.flushRecovery) await client.flushRecovery()
+      setDetail('Updated figures and references shared with this manuscript.')
+    } catch (error) { setDetail(error instanceof Error ? error.message : String(error)) }
+    finally { setSharingResources(false) }
+  }
+
   const checkpoint = async () => {
     const client = clientRef.current
     if (!client || checkpointing || activeRole !== 'owner') return
     setCheckpointing(true)
     setDetail('')
     try {
+      if (prepareCheckpointSource) {
+        const current = client.createCheckpoint()
+        const prepared = prepareCheckpointSource(current.source)
+        if (prepared !== current.source) {
+          const canonical = client.publishPortableSource(prepared)
+          onRemoteSource(canonical)
+        }
+      }
       const next = client.createCheckpoint()
       await onCheckpoint(next)
       checkpointedSourceRef.current = next.source
@@ -450,6 +517,7 @@ export function CollaborationDialog({
               </div>
             </section>
             <div className="collaboration-note"><Icon name="check" size={16} /><span>Offline edits reconnect through Yjs. Incompatible review decisions pause checkpointing until they are explicitly resolved.</span></div>
+            {loadResources && (activeRole === 'owner' || activeRole === 'editor') && <div className="collaboration-checkpoint"><span><strong>Figures and references</strong><small>Share an updated local snapshot explicitly. Joining and typing keep the existing shared resources.</small></span><button onClick={() => void shareUpdatedResources()} disabled={sharingResources}>{sharingResources ? 'Sharing…' : 'Share updated figures & references'}</button></div>}
             {serviceClient && activeProjectWorkspace && profile && <CollaborationReviewPanel client={serviceClient} workspace={activeProjectWorkspace} projectId={projectId} currentUserId={profile.userId} />}
             {serviceClient && activeWorkspace?.role === 'owner' && profile && <CollaborationAccessPanel client={serviceClient} workspace={activeWorkspace} projectId={projectId} currentUserId={profile.userId} projects={projects} />}
             <div className={`collaboration-checkpoint ${uncheckpointed ? 'pending' : ''}`}>
@@ -457,7 +525,8 @@ export function CollaborationDialog({
               <button onClick={() => void checkpoint()} disabled={!canCheckpoint || !uncheckpointed || checkpointing}>{checkpointing ? 'Checkpointing…' : !canCheckpoint ? 'Owner checkpoint only' : uncheckpointed ? (checkpointMode === 'working-tree' ? 'Checkpoint to project' : 'Download checkpoint') : 'Checkpoint current'}</button>
             </div>
             {detail && <div className="collaboration-error" role="alert">{detail}</div>}
-            <footer><button className="secondary" onClick={disconnect}>Leave session</button><button onClick={onClose}>{activeRole === 'viewer' ? 'Continue reading' : activeRole === 'commenter' ? 'Continue reviewing' : 'Continue writing'}</button></footer>
+            {recoveryWarning && <div className="collaboration-error" role="alert">{recoveryWarning}</div>}
+            <footer><button className="secondary" onClick={() => void disconnect()}>Leave session</button><button onClick={onClose}>{activeRole === 'viewer' ? 'Continue reading' : activeRole === 'commenter' ? 'Continue reviewing' : 'Continue writing'}</button></footer>
           </div>
         ) : (
           <form onSubmit={(event) => { event.preventDefault(); void connect() }}>

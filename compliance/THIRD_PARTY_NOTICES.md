@@ -238,6 +238,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | cargo | tauri-plugin-dialog | 2.7.1 | Apache-2.0 OR MIT | required |
 | cargo | tauri-plugin-fs | 2.5.1 | Apache-2.0 OR MIT | required |
 | cargo | tauri-plugin-opener | 2.5.4 | Apache-2.0 OR MIT | required |
+| cargo | tauri-plugin-single-instance | 2.4.3 | Apache-2.0 OR MIT | required |
 | cargo | tauri-runtime | 2.11.3 | Apache-2.0 OR MIT | required |
 | cargo | tauri-runtime-wry | 2.11.4 | Apache-2.0 OR MIT | required |
 | cargo | tauri-utils | 2.9.3 | Apache-2.0 OR MIT | required |

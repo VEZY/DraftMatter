@@ -1,4 +1,4 @@
-use crate::{canonical_root, safe_relative, slash_path, write_atomic, HostError};
+use crate::{canonical_root, contained_path, safe_relative, slash_path, write_atomic, HostError};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -199,9 +199,7 @@ fn unique_work_directory(root: &Path) -> Result<PathBuf, HostError> {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_nanos();
-    let path = root
-        .join(".draftmatter/export-work")
-        .join(format!("{}-{nonce}", std::process::id()));
+    let path = contained_path(root, &format!(".draftmatter/export-work/{}-{nonce}", std::process::id()))?;
     fs::create_dir_all(&path)?;
     Ok(path)
 }
@@ -234,7 +232,7 @@ pub fn render_external_export_impl(
     let source = prepare_external_source(&request.source)?;
     let (target, extension) = format_name(request.format);
     let output_name = safe_output_name(&request.output_name, extension)?;
-    let export_directory = root.join(".draftmatter/exports");
+    let export_directory = contained_path(&root, ".draftmatter/exports")?;
     fs::create_dir_all(&export_directory)?;
     let output_path = export_directory.join(&output_name);
     if output_path.exists() {

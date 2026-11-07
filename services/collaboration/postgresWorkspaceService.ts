@@ -551,7 +551,8 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
   async reauthorizeProject(identity: { userId: string; sessionId: string }, workspaceId: string, projectId: string, capability: ProjectCapability) {
     safeId(identity.userId, 'User ID')
     safeId(identity.sessionId, 'Session ID')
-    await this.consumeRateLimit(identity, capability === 'read' ? 'read' : 'write')
+    // Live frames have a bounded realtime limiter at the transport. Reusing the
+    // low-volume HTTP budget here disconnects ordinary typing and presence.
     const access = await this.requireProjectAccess(this.pool, workspaceId, projectId, identity.userId, capability)
     if (capability !== 'read') await this.entitlements.assertWorkspaceWritable(workspaceId)
     return { userId: identity.userId, sessionId: identity.sessionId, role: access.membership.role, capability }

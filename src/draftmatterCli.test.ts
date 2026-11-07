@@ -21,6 +21,21 @@ function harness(source = identicalSource) {
 }
 
 describe('DraftMatter CLI', () => {
+  it('embeds confined image files into standalone HTML and fails closed when they cannot be read', async () => {
+    const result = harness('# Paper\n\n![Response](figures/response.svg)\n')
+    const reads: Array<{ input: string; paths: string[] }> = []
+    result.io.readPublicationAssets = async (input, paths) => {
+      reads.push({ input, paths })
+      return [{ path: 'figures/response.svg', bytes: new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"/>') }]
+    }
+    expect(await runDraftMatterCli(['render', 'paper.qmd', '--format=html'], result.io)).toBe(0)
+    expect(reads).toEqual([{ input: 'paper.qmd', paths: ['figures/response.svg'] }])
+    expect(result.stdout.join('')).toContain('src="data:image/svg+xml;base64,')
+    const unavailable = harness('# Paper\n\n![Response](figures/missing.png)\n')
+    expect(await runDraftMatterCli(['render', '-', '--format=html'], unavailable.io)).toBe(2)
+    expect(unavailable.stdout).toEqual([])
+    expect(unavailable.stderr.join('')).toContain('figure files are unavailable')
+  })
   it('opens like a regular application with no command or with one project folder', async () => {
     const result = harness()
     expect(await runDraftMatterCli([], result.io)).toBe(0)

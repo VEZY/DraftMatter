@@ -294,7 +294,7 @@ fn load_kernelspec(kernel: &JupyterKernelProbe) -> Result<JupyterKernelspec, Hos
 }
 
 fn runtime_directory(root: &Path) -> Result<PathBuf, String> {
-    let directory = root.join(".draftmatter").join("runtime");
+    let directory = crate::contained_path(root, ".draftmatter/runtime").map_err(|error| error.to_string())?;
     fs::create_dir_all(&directory).map_err(|error| {
         format!("Could not create DraftMatter's kernel runtime directory: {error}")
     })?;
@@ -1335,13 +1335,18 @@ pub fn execute_kernel_impl(
     let root = canonical_root(&request.root)?;
     require_execution_trust(&root, trust)?;
     let kernel = validate_kernel(&request.kernel_name, request.language)?;
-    verify_inputs(&root, &request.inputs)?;
-    let artifacts = declared_artifacts(&root, &request.attributes)?;
-    let run_directory = create_run_directory(&root, &request.cell_id)?;
-    let backups = prepare_artifact_backups(&artifacts, &run_directory.0)?;
+    let (artifacts, _run_directory, backups) = {
+        let _project_guard = crate::project_guard(&root)?;
+        verify_inputs(&root, &request.inputs)?;
+        let artifacts = declared_artifacts(&root, &request.attributes)?;
+        let run_directory = create_run_directory(&root, &request.cell_id)?;
+        let backups = prepare_artifact_backups(&artifacts, &run_directory.0)?;
+        (artifacts, run_directory, backups)
+    };
     let session = match session_for(&root, request.language, &kernel, registry) {
         Ok(session) => session,
         Err(error) => {
+            let _project_guard = crate::project_guard(&root)?;
             restore_artifacts(&backups)?;
             return Err(error);
         }
@@ -1355,6 +1360,7 @@ pub fn execute_kernel_impl(
         }) {
             Ok(response) => response,
             Err(error) => {
+                let _project_guard = crate::project_guard(&root)?;
                 restore_artifacts(&backups)?;
                 if !matches!(error, HostError::Conflict(_)) {
                     if let Some(removed) = remove_session(request.language, registry)? {
@@ -1365,6 +1371,7 @@ pub fn execute_kernel_impl(
             }
         };
     *session.environment.lock().map_err(|_| registry_error())? = response.environment.clone();
+    let _project_guard = crate::project_guard(&root)?;
     let mut produced = Vec::new();
     if response.status == KernelExecutionStatus::Ok {
         match collect_artifacts(&artifacts) {

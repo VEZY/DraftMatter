@@ -14,14 +14,17 @@ use tauri_plugin_opener::OpenerExt;
 use uuid::Uuid;
 
 mod code_formatting;
+mod collaboration_checkpoint;
 mod agent_host;
 mod agent_integration;
 mod assistant_connections;
 mod execution_artifacts;
 mod execution_manifests;
+mod project_transactions;
 mod execution_trust;
 mod export_adapter;
 mod git_adapter;
+mod oidc_desktop;
 mod julia_tools;
 mod jupyter_execution;
 mod jupyter_publishing;
@@ -838,15 +841,23 @@ fn load_config(root: &Path, documents: &[ProjectEntry]) -> Result<ProjectConfig,
 }
 
 fn persist_config(root: &Path, config: &ProjectConfig) -> Result<(), HostError> {
+    let _project_guard = project_guard(root)?;
     let path = contained_path(root, ".draftmatter/project.json")?;
     let content = serde_json::to_vec_pretty(config)
         .map_err(|error| HostError::InvalidProject(error.to_string()))?;
     write_atomic(&path, &content, false)
 }
 
+pub(crate) fn project_guard(root: &Path) -> Result<project_transactions::ProjectLock, HostError> {
+    let guard = project_transactions::ProjectLock::acquire(root)?;
+    project_transactions::recover(root)?;
+    recover_citation_transactions(root)?;
+    Ok(guard)
+}
+
 fn open_project_impl(raw_root: &str) -> Result<ProjectSnapshot, HostError> {
     let root = canonical_root(raw_root)?;
-    recover_citation_transactions(&root)?;
+    let _project_guard = project_guard(&root)?;
     let mut documents = Vec::new();
     let mut bibliographies = Vec::new();
     discover_entries(&root, &root, 0, &mut documents, &mut bibliographies)?;
@@ -885,6 +896,7 @@ fn bibliography_extension(path: &Path) -> bool {
 
 fn read_document_impl(raw_root: &str, relative: &str) -> Result<DocumentSnapshot, HostError> {
     let root = canonical_root(raw_root)?;
+    let _project_guard = project_guard(&root)?;
     let path = contained_path(&root, relative)?;
     if !manuscript_extension(&path) {
         return Err(HostError::UnsupportedFile(format!(
@@ -904,6 +916,7 @@ fn read_document_impl(raw_root: &str, relative: &str) -> Result<DocumentSnapshot
 
 fn read_bibliography_impl(raw_root: &str, relative: &str) -> Result<DocumentSnapshot, HostError> {
     let root = canonical_root(raw_root)?;
+    let _project_guard = project_guard(&root)?;
     let path = contained_path(&root, relative)?;
     if !bibliography_extension(&path) {
         return Err(HostError::UnsupportedFile(format!(
@@ -945,6 +958,7 @@ fn project_asset_media_type(path: &Path) -> Option<&'static str> {
         "pdf" => Some("application/pdf"),
         "eps" => Some("application/postscript"),
         "webp" => Some("image/webp"),
+        "gif" => Some("image/gif"),
         _ => None,
     }
 }
@@ -959,6 +973,7 @@ fn read_project_assets_impl(
         ));
     }
     let root = canonical_root(raw_root)?;
+    let _project_guard = project_guard(&root)?;
     let mut total_bytes = 0_u64;
     let mut assets = Vec::with_capacity(paths.len());
     for relative in paths {
@@ -974,7 +989,7 @@ fn read_project_assets_impl(
         }
         let media_type = project_asset_media_type(&canonical).ok_or_else(|| {
             HostError::UnsupportedFile(format!(
-                "Submission assets must be PNG, JPEG, TIFF, SVG, PDF, EPS, or WebP files: {relative}"
+                "Submission assets must be PNG, JPEG, GIF, TIFF, SVG, PDF, EPS, or WebP files: {relative}"
             ))
         })?;
         let metadata = fs::metadata(&canonical)?;
@@ -1013,6 +1028,7 @@ fn seed_project_files_impl(
         ));
     }
     let root = canonical_root(raw_root)?;
+    let _project_guard = project_guard(&root)?;
     let mut total_bytes = 0_u64;
     let mut written = Vec::with_capacity(files.len());
     for file in files {
@@ -1039,6 +1055,7 @@ fn seed_project_files_impl(
                 | "png"
                 | "jpg"
                 | "jpeg"
+                | "gif"
                 | "tif"
                 | "tiff"
                 | "svg"
@@ -1107,6 +1124,7 @@ fn validate_citation_cache(content: &str) -> Result<(), HostError> {
 
 fn read_citation_cache_impl(raw_root: &str) -> Result<Option<DocumentSnapshot>, HostError> {
     let root = canonical_root(raw_root)?;
+    let _project_guard = project_guard(&root)?;
     let path = contained_path(&root, ".draftmatter/cited-records.json")?;
     if !path.exists() {
         return Ok(None);
@@ -1162,6 +1180,7 @@ fn validate_citation_lock(content: &str) -> Result<(), HostError> {
 
 fn read_citation_lock_impl(raw_root: &str) -> Result<Option<DocumentSnapshot>, HostError> {
     let root = canonical_root(raw_root)?;
+    let _project_guard = project_guard(&root)?;
     let path = contained_path(&root, ".draftmatter/citations.lock.json")?;
     if !path.exists() {
         return Ok(None);
@@ -1188,6 +1207,7 @@ fn save_citation_lock_impl(
 ) -> Result<DocumentSnapshot, HostError> {
     validate_citation_lock(&request.content)?;
     let root = canonical_root(&request.root)?;
+    let _project_guard = project_guard(&root)?;
     let path = contained_path(&root, ".draftmatter/citations.lock.json")?;
     let previous = if path.exists() {
         fs::read(&path)?
@@ -1357,7 +1377,7 @@ fn acquire_citations_impl_with_fault(
     validate_citation_lock(&request.lock_content)?;
     validate_citation_cache(&request.cache_content)?;
     let root = canonical_root(&request.root)?;
-    recover_citation_transactions(&root)?;
+    let _project_guard = project_guard(&root)?;
     let document_path = contained_path(&root, &request.document_path)?;
     if !manuscript_extension(&document_path) {
         return Err(HostError::UnsupportedFile(
@@ -1464,21 +1484,17 @@ fn replace_file(temp: &Path, destination: &Path) -> Result<(), HostError> {
     }
     #[cfg(target_os = "windows")]
     {
-        let fallback = destination.with_extension("draftmatter-old");
-        if destination.exists() {
-            if fallback.exists() {
-                fs::remove_file(&fallback)?;
-            }
-            fs::rename(destination, &fallback)?;
+        use std::os::windows::ffi::OsStrExt;
+        #[link(name = "kernel32")]
+        extern "system" {
+            fn MoveFileExW(existing: *const u16, replacement: *const u16, flags: u32) -> i32;
         }
-        if let Err(error) = fs::rename(temp, destination) {
-            if fallback.exists() {
-                let _ = fs::rename(&fallback, destination);
-            }
-            return Err(error.into());
-        }
-        if fallback.exists() {
-            fs::remove_file(fallback)?;
+        let existing = temp.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+        let replacement = destination.as_os_str().encode_wide().chain(Some(0)).collect::<Vec<_>>();
+        // One atomic replacement is also required by the cross-process lock:
+        // removing its old claim before publishing its new ticket is unsafe.
+        if unsafe { MoveFileExW(existing.as_ptr(), replacement.as_ptr(), 0x1 | 0x8) } == 0 {
+            return Err(std::io::Error::last_os_error().into());
         }
     }
     Ok(())
@@ -1575,6 +1591,8 @@ fn rollback_citation_transaction(
 ) -> Result<(), HostError> {
     // A journal is project-supplied input. Validate the entire rollback before
     // touching the first target, including backups and entries marked for removal.
+    if manifest.files.len() > 512 { return Err(HostError::UnsupportedFile("Legacy citation recovery exceeds 512 files.".into())); }
+    let mut total_backup_bytes = 0_u64;
     let mut replacements = Vec::new();
     let mut seen = std::collections::HashSet::new();
     for (index, file) in manifest.files.iter().enumerate() {
@@ -1603,11 +1621,11 @@ fn rollback_citation_transaction(
                     "Invalid citation recovery backup name.".into(),
                 ));
             }
-            Some(fs::read(checked_path(
-                directory,
-                Path::new(backup),
-                false,
-            )?)?)
+            let backup = checked_path(directory, Path::new(backup), false)?;
+            let bytes = project_transactions::recovery_bytes(&backup, 128 * 1024 * 1024 - total_backup_bytes)?
+                .ok_or_else(|| HostError::NotFound("A legacy citation recovery backup is missing.".into()))?;
+            total_backup_bytes += bytes.len() as u64;
+            Some(bytes)
         } else {
             None
         };
@@ -1638,22 +1656,16 @@ fn recover_citation_transactions(root: &Path) -> Result<(), HostError> {
         }
         let manifest_path = checked_path(&directory, Path::new("manifest.json"), false)?;
         if !manifest_path.exists() {
-            fs::remove_dir_all(&directory)?;
             continue;
         }
-        let manifest: CitationTransactionManifest =
-            serde_json::from_slice(&fs::read(&manifest_path).map_err(|error| {
-                HostError::InvalidProject(format!(
-                    "Citation acquisition recovery cannot read {}: {error}",
-                    manifest_path.display()
-                ))
-            })?)
-            .map_err(|error| {
-                HostError::InvalidProject(format!(
-                    "Citation acquisition recovery cannot parse {}: {error}",
-                    manifest_path.display()
-                ))
-            })?;
+        let raw = project_transactions::recovery_bytes(&manifest_path, 1024 * 1024)?.ok_or_else(|| HostError::NotFound("The legacy recovery manifest disappeared.".into()))?;
+        let value: serde_json::Value = serde_json::from_slice(&raw)
+            .map_err(|error| HostError::InvalidProject(format!("Invalid legacy citation journal: {error}")))?;
+        if value.get("schemaVersion").is_some() || value.get("engine").is_some() {
+            continue; // Another engine owns this journal.
+        }
+        let manifest: CitationTransactionManifest = serde_json::from_value(value)
+            .map_err(|error| HostError::InvalidProject(format!("Invalid legacy citation recovery: {error}")))?;
         match manifest.state.as_str() {
             "committed" => fs::remove_dir_all(&directory)?,
             "prepared" => rollback_citation_transaction(root, &directory, &manifest)?,
@@ -1672,74 +1684,12 @@ fn apply_citation_file_transaction(
     changes: Vec<(String, Vec<u8>)>,
     fail_after_replace: Option<usize>,
 ) -> Result<(), HostError> {
-    let mut seen = std::collections::HashSet::new();
-    if changes
-        .iter()
-        .any(|(target, _)| !seen.insert(target.clone()))
-    {
-        return Err(HostError::InvalidProject(
-            "A citation acquisition transaction contains duplicate target files.".to_string(),
-        ));
-    }
-    let transactions = contained_path(root, ".draftmatter/transactions")?;
-    fs::create_dir_all(&transactions)?;
-    let directory = transactions.join(format!("citation-{}", Uuid::new_v4()));
-    fs::create_dir(&directory)?;
-    let mut manifest = CitationTransactionManifest {
-        state: "prepared".to_string(),
-        files: Vec::new(),
-    };
-    for (index, (target, _)) in changes.iter().enumerate() {
-        let path = checked_path(root, &safe_relative(target)?, false)?;
-        let backup = if path.exists() {
-            let name = format!("backup-{index}.bin");
-            write_atomic(&directory.join(&name), &fs::read(&path)?, false)?;
-            Some(name)
-        } else {
-            None
-        };
-        manifest.files.push(CitationTransactionFile {
-            target: target.clone(),
-            backup,
-        });
-    }
-    let manifest_path = directory.join("manifest.json");
-    write_atomic(
-        &manifest_path,
-        &serde_json::to_vec_pretty(&manifest)
-            .map_err(|error| HostError::InvalidProject(error.to_string()))?,
-        false,
-    )?;
-
-    let result = (|| {
-        for (index, (target, content)) in changes.iter().enumerate() {
-            write_atomic(&contained_path(root, target)?, content, false)?;
-            if fail_after_replace == Some(index + 1) {
-                return Err(HostError::Io(format!(
-                    "Injected citation acquisition failure after {} replacement(s).",
-                    index + 1
-                )));
-            }
+    project_transactions::apply(root, changes.into_iter().map(|(path, bytes)| (path, Some(bytes))).collect(), |count| {
+        if fail_after_replace == Some(count) {
+            return Err(HostError::Io(format!("Injected citation acquisition failure after {count} replacement(s).")));
         }
-        manifest.state = "committed".to_string();
-        write_atomic(
-            &manifest_path,
-            &serde_json::to_vec_pretty(&manifest)
-                .map_err(|error| HostError::InvalidProject(error.to_string()))?,
-            false,
-        )?;
-        fs::remove_dir_all(&directory)?;
         Ok(())
-    })();
-    if let Err(error) = result {
-        rollback_citation_transaction(root, &directory, &manifest).map_err(|rollback| {
-            HostError::Io(format!(
-                "{error} Citation acquisition rollback also failed: {rollback}"
-            ))
-        })?;
-        return Err(error);
-    }
-    Ok(())
+    })
 }
 
 fn recovery_filename(relative: &str, hash: &str) -> String {
@@ -1788,6 +1738,7 @@ fn save_document_impl_with_fault(
     fail_before_replace: bool,
 ) -> Result<SaveDocumentResult, HostError> {
     let root = canonical_root(&request.root)?;
+    let _project_guard = project_guard(&root)?;
     let path = contained_path(&root, &request.path)?;
     if !manuscript_extension(&path) {
         return Err(HostError::UnsupportedFile(format!(
@@ -1831,6 +1782,7 @@ fn document_status_impl(
     expected_hash: &str,
 ) -> Result<DocumentStatus, HostError> {
     let root = canonical_root(raw_root)?;
+    let _project_guard = project_guard(&root)?;
     let path = contained_path(&root, relative)?;
     if path.exists() {
         let document = read_document_impl(raw_root, relative)?;
@@ -1865,6 +1817,7 @@ fn document_status_impl(
 
 fn set_main_document_impl(raw_root: &str, relative: &str) -> Result<ProjectSnapshot, HostError> {
     let root = canonical_root(raw_root)?;
+    let _project_guard = project_guard(&root)?;
     let path = contained_path(&root, relative)?;
     if !path.is_file() || !manuscript_extension(&path) {
         return Err(HostError::NotFound(format!(
@@ -1884,10 +1837,11 @@ fn set_citation_preferences_impl(
     locale: &str,
 ) -> Result<ProjectSnapshot, HostError> {
     validate_citation_preferences(style, locale)?;
+    let root = canonical_root(raw_root)?;
+    let _project_guard = project_guard(&root)?;
     let mut snapshot = open_project_impl(raw_root)?;
     snapshot.config.citation_style = style.to_string();
     snapshot.config.citation_locale = locale.to_string();
-    let root = canonical_root(raw_root)?;
     persist_config(&root, &snapshot.config)?;
     open_project_impl(raw_root)
 }
@@ -1897,9 +1851,10 @@ fn set_execution_preferences_impl(
     preferences: ProjectExecutionPreferences,
 ) -> Result<ProjectSnapshot, HostError> {
     validate_execution_preferences(&preferences)?;
+    let root = canonical_root(raw_root)?;
+    let _project_guard = project_guard(&root)?;
     let mut snapshot = open_project_impl(raw_root)?;
     snapshot.config.execution = preferences;
-    let root = canonical_root(raw_root)?;
     persist_config(&root, &snapshot.config)?;
     open_project_impl(raw_root)
 }
@@ -1911,9 +1866,10 @@ fn set_collaboration_link_impl(
     if let Some(value) = &link {
         validate_collaboration_link(value)?;
     }
+    let root = canonical_root(raw_root)?;
+    let _project_guard = project_guard(&root)?;
     let mut snapshot = open_project_impl(raw_root)?;
     snapshot.config.collaboration = link;
-    let root = canonical_root(raw_root)?;
     persist_config(&root, &snapshot.config)?;
     open_project_impl(raw_root)
 }
@@ -2836,6 +2792,7 @@ fn initialize_project_root(
 ) -> Result<ProjectSnapshot, HostError> {
     let name = normalized_project_name(raw_name)?;
     let canonical = fs::canonicalize(root_path)?;
+    let _project_guard = project_guard(&canonical)?;
     let main_document = "paper.qmd".to_string();
     let config = ProjectConfig {
         schema_version: PROJECT_SCHEMA,
@@ -3533,6 +3490,9 @@ async fn render_external_export_to_file(
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            if let Some(window) = app.get_webview_window("main") { let _ = window.set_focus(); }
+        }))
         .plugin(tauri_plugin_deep_link::init())
         .setup(|_app| {
             #[cfg(any(target_os = "linux", all(debug_assertions, windows)))]
@@ -3547,6 +3507,8 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
+            oidc_desktop::open_identity_authorization,
+            collaboration_checkpoint::save_collaboration_checkpoint,
             open_project,
             create_project,
             initialize_ai_integration,
@@ -3944,7 +3906,7 @@ mod tests {
     }
 
     #[test]
-    fn project_open_discards_an_unprepared_acquisition_directory_safely() {
+    fn project_open_preserves_an_unrecognized_transaction_directory() {
         let temporary = tempdir().unwrap();
         let root = temporary.path();
         prepare_acquisition_project(root);
@@ -3953,7 +3915,7 @@ mod tests {
         fs::write(orphan.join("backup-0.bin"), b"unused").unwrap();
 
         assert!(open_project_impl(root.to_str().unwrap()).is_ok());
-        assert!(!orphan.exists());
+        assert!(orphan.exists());
         assert_eq!(
             fs::read_to_string(root.join("paper.qmd")).unwrap(),
             "---\ntitle: Test\n---\n\nNo citation.\n"

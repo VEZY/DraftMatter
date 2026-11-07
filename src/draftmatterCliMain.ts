@@ -5,6 +5,7 @@ import { readFile, rename, unlink, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { desktopProjectLaunchUrl } from './desktopLaunch'
 import { runDraftMatterCli, type DraftMatterCliIo } from './draftmatterCli'
+import { readCliPublicationAssets } from './publicationAssetReader'
 
 function launchDesktopUrl(url: string) {
   const command = process.platform === 'darwin'
@@ -26,6 +27,7 @@ function launchDesktopUrl(url: string) {
 }
 
 const io: DraftMatterCliIo = {
+  readPublicationAssets: readCliPublicationAssets,
   async readText(path) {
     return path === '-' ? readFileSync(0, 'utf8') : readFile(path, 'utf8')
   },

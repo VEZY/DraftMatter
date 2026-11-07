@@ -76,7 +76,9 @@ function yamlValue(value: string) {
   return trimmed.replace(/^['"]|['"]$/g, '')
 }
 
-function bibliographyValues(lines: string[], index: number) {
+/** Supported portable YAML bibliography forms; strict mode refuses ambiguous structures. */
+export function bibliographyValues(lines: string[], index: number, strict = false) {
+  if (strict) return strictBibliographyValues(lines, index)
   const inline = lines[index].replace(/^bibliography\s*:\s*/, '').trim()
   if (inline.startsWith('[') && inline.endsWith(']')) {
     return { values: inline.slice(1, -1).split(',').map(yamlValue).filter(Boolean), end: index + 1 }
@@ -89,6 +91,83 @@ function bibliographyValues(lines: string[], index: number) {
     if (!match) break
     values.push(yamlValue(match[1]))
     end += 1
+  }
+  return { values, end }
+}
+
+function bibliographyYamlProblem(): never {
+  throw new Error('This bibliography uses YAML syntax that cannot be safely rewritten. Use a path or a simple list of quoted paths in the source inspector, then retry the checkpoint.')
+}
+
+function yamlWithoutComment(value: string) {
+  let quote = ''
+  for (let index = 0; index < value.length; index += 1) {
+    const character = value[index]
+    if (quote === '"' && character === '\\') { index += 1; continue }
+    if (quote === "'" && character === "'" && value[index + 1] === "'") { index += 1; continue }
+    if (character === quote) quote = ''
+    else if (!quote && (character === '"' || character === "'")) quote = character
+    else if (!quote && character === '#' && (index === 0 || /\s/.test(value[index - 1]))) return value.slice(0, index).trim()
+  }
+  if (quote) bibliographyYamlProblem()
+  return value.trim()
+}
+
+function strictBibliographyScalar(value: string) {
+  const scalar = yamlWithoutComment(value)
+  if (!scalar) bibliographyYamlProblem()
+  if (scalar.startsWith('"')) {
+    try {
+      const parsed: unknown = JSON.parse(scalar)
+      if (typeof parsed !== 'string' || !parsed || /[\r\n\0]/.test(parsed)) bibliographyYamlProblem()
+      return parsed
+    } catch { bibliographyYamlProblem() }
+  }
+  if (scalar.startsWith("'")) {
+    if (!/^'(?:[^']|'')*'$/.test(scalar)) bibliographyYamlProblem()
+    return scalar.slice(1, -1).replaceAll("''", "'")
+  }
+  if (/^[\[\]{}|>&*!%?@`]|:\s|[\r\n\0]/.test(scalar) || /^(?:null|true|false|~)$/i.test(scalar)) bibliographyYamlProblem()
+  return scalar
+}
+
+function strictBibliographyValues(lines: string[], index: number) {
+  const inline = yamlWithoutComment(lines[index].replace(/^bibliography[ \t]*:[ \t]*/, ''))
+  if (inline.startsWith('[')) {
+    if (!inline.endsWith(']')) bibliographyYamlProblem()
+    const body = inline.slice(1, -1)
+    const values: string[] = []
+    let quote = ''
+    let start = 0
+    for (let cursor = 0; cursor <= body.length; cursor += 1) {
+      const character = body[cursor]
+      if (quote === '"' && character === '\\') { cursor += 1; continue }
+      if (quote === "'" && character === "'" && body[cursor + 1] === "'") { cursor += 1; continue }
+      if (character === quote) quote = ''
+      else if (!quote && (character === '"' || character === "'")) quote = character
+      else if (!quote && (character === ',' || cursor === body.length)) {
+        const value = body.slice(start, cursor).trim()
+        if (value) values.push(strictBibliographyScalar(value))
+        else if (cursor !== body.length || start !== 0 && body.slice(0, start).trimEnd().at(-1) !== ',') bibliographyYamlProblem()
+        start = cursor + 1
+      }
+    }
+    if (quote) bibliographyYamlProblem()
+    return { values, end: index + 1 }
+  }
+  if (inline) return { values: [strictBibliographyScalar(inline)], end: index + 1 }
+  const values: string[] = []
+  let end = index + 1
+  for (let cursor = index + 1; cursor < lines.length; cursor += 1) {
+    const line = lines[cursor]
+    if (!line.trim() || /^\s*#/.test(line)) continue
+    const item = line.match(/^[ \t]*-[ \t]+(.+)$/)
+    if (!item) {
+      if (!/^[A-Za-z_][\w-]*[ \t]*:/.test(line)) bibliographyYamlProblem()
+      break
+    }
+    values.push(strictBibliographyScalar(item[1]))
+    end = cursor + 1
   }
   return { values, end }
 }

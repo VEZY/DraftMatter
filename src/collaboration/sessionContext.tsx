@@ -23,6 +23,8 @@ import type {
   WorkspaceRole,
 } from './workspaceService'
 
+import { signInDesktop, usesDesktopIdentity } from './oidcDesktop'
+
 const DEVELOPMENT_SERVICE_KEY = 'draftmatter.collaboration.development-service.v1'
 
 export type CollaborationAccountState = 'signed-out' | 'signing-in' | 'loading' | 'ready' | 'error'
@@ -233,6 +235,11 @@ export function CollaborationSessionProvider({
     setState('signing-in')
     setError('')
     try {
+      if (usesDesktopIdentity()) {
+        const result = await signInDesktop(serviceUrl)
+        await activate(result.serviceUrl, result.token)
+        return
+      }
       const request = await prepareOidcAuthorization(serviceUrl, window.location.href, sessionStorage)
       if (pendingInvitation) {
         storePendingCollaborationInvitation(sessionStorage, pendingInvitation)

@@ -86,6 +86,56 @@ function replaceFirstText(document: ReturnType<typeof parseStructuredManuscript>
 }
 
 describe('generic structured manuscript bridge', () => {
+  it('keeps literal backslashes stable through repeated edits and reopen cycles', () => {
+    let source = '# Paper\n\nRead C:\\data\\results and \\*literal\\* text.\n'
+    for (let index = 0; index < 4; index += 1) {
+      const parsed = parseStructuredManuscript(source)
+      expect(parsed.document.textContent).toContain('Read C:\\data\\results and *literal* text.')
+      const edited = replaceFirstText(parsed.document, index ? `Paper ${index - 1}` : 'Paper', `Paper ${index}`)
+      source = serializeStructuredManuscript(edited, parsed.metadata)
+    }
+    expect(source).toContain('Read C:\\data\\results and \\*literal\\* text.')
+    // Editing the paragraph itself must also decode/re-encode escapes exactly once.
+    const parsed = parseStructuredManuscript(source)
+    const edited = replaceFirstText(parsed.document, 'Read', 'Open')
+    const saved = serializeStructuredManuscript(edited, parsed.metadata)
+    const reopened = parseStructuredManuscript(saved)
+    expect(reopened.document.textContent).toContain('Open C:\\data\\results and *literal* text.')
+    expect(serializeStructuredManuscript(replaceFirstText(reopened.document, 'Open', 'Read'), reopened.metadata)).toBe(saved.replace('Open', 'Read'))
+  })
+
+  it('preserves nested lists, continuation paragraphs, and hard breaks after real edits', () => {
+    const source = '# Paper\r\n\r\n- Parent\r\n  - Child\r\n    1. Grandchild\r\n\r\n  Second paragraph.\r\n\r\n- Sibling\r\n\r\nLine one  \r\nline two.\r\n'
+    const parsed = parseStructuredManuscript(source)
+    const list = parsed.document.child(1)
+    expect(list.childCount).toBe(2)
+    expect(list.firstChild?.child(1).type.name).toBe('bullet_list')
+    expect(list.firstChild?.child(1).firstChild?.child(1).type.name).toBe('ordered_list')
+    expect(list.firstChild?.lastChild?.textContent).toBe('Second paragraph.')
+    expect(nodeTypes(parsed.document)).toContain('hard_break')
+    const saved = serializeStructuredManuscript(replaceFirstText(parsed.document, 'Child', 'Revised child'), parsed.metadata)
+    const reopened = parseStructuredManuscript(saved)
+    expect(reopened.document.child(1).firstChild?.child(1).firstChild?.textContent).toContain('Revised child')
+    expect(reopened.document.child(1).childCount).toBe(2)
+    expect(saved).toContain('Line one  \r\nline two.')
+    expect(saved.replaceAll('\r\n', '')).not.toContain('\n')
+    const editedParagraph = serializeStructuredManuscript(replaceFirstText(reopened.document, 'Line one', 'Line revised'), reopened.metadata)
+    expect(editedParagraph).toContain('Line revised  \r\nline two.')
+    expect(nodeTypes(parseStructuredManuscript(editedParagraph).document)).toContain('hard_break')
+  })
+
+  it('retains every unchanged portable block after editing another part of each fixture', () => {
+    for (const [path, source] of Object.entries(portableFixtures)) {
+      const parsed = parseStructuredManuscript(source)
+      const appended = parsed.document.copy(parsed.document.content.addToEnd(manuscriptSchema.nodes.paragraph.createChecked({ id: 'audit-added' }, manuscriptSchema.text('An unrelated edit.'))))
+      const saved = serializeStructuredManuscript(appended, parsed.metadata)
+      for (const block of parsed.metadata.originalBlocks ?? []) {
+        expect(saved, `${path} changed an untouched block`).toContain(block.source.trimEnd())
+      }
+      expect(() => parseStructuredManuscript(saved).document.check()).not.toThrow()
+    }
+  })
+
   it('creates a separate heading and paragraph block for every starter section', () => {
     const starter = `---
 title: "New study"

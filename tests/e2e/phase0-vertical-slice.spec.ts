@@ -86,6 +86,7 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
 
   test('keeps the primary writing and review controls keyboard reachable', async ({ page }) => {
     await page.goto('/draft')
+    await expect(page.getByRole('textbox', { name: 'Rendered manuscript editor' })).toBeVisible()
 
     await page.keyboard.press('Control+p')
     const palette = page.getByRole('dialog', { name: 'Command menu' })

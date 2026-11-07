@@ -1,3 +1,5 @@
+import { collaborationJournalKey, createCollaborationJournal, retainCollaborativeDocument, type CollaborationJournal } from './collaborationJournal'
+import { publishProjectResources, readProjectResources, type ProjectResources } from './projectResources'
 import { HocuspocusProvider, type WebSocketStatus } from '@hocuspocus/provider'
 import {
   CollaborativeDocument,
@@ -29,6 +31,12 @@ export interface CollaborationClientOptions {
   timeoutMs?: number
   onStatus?: (status: CollaborationClientStatus, detail?: string) => void
   onPortableSource?: (source: string) => void
+  resources?: ProjectResources
+  /** Read local files only after an empty room has been confirmed and bootstrap authorized. */
+  resourceProvider?: () => Promise<ProjectResources>
+  onResources?: (resources: ProjectResources) => void
+  onRecoveryWarning?: (message: string) => void
+  journal?: CollaborationJournal
   onCollaborators?: (collaborators: ActiveCollaborator[]) => void
 }
 
@@ -66,6 +74,30 @@ export function bootstrapCollaborationSource(collaboration: CollaborativeDocumen
   return true
 }
 
+export async function initializeCollaborationSource(collaboration: CollaborativeDocument, options: {
+  source: string
+  canBootstrap: boolean
+  requireEmpty?: boolean
+  resources?: ProjectResources
+  resourceProvider?: () => Promise<ProjectResources>
+}) {
+  const initialized = Boolean(collaboration.source || collaboration.snapshot().authors.length)
+  if (initialized || !options.canBootstrap) return bootstrapCollaborationSource(collaboration, options.source, options.canBootstrap, options.requireEmpty)
+  const resources = await options.resourceProvider?.() ?? options.resources
+  // Validate before mutating the room: a failed resource import must leave it empty.
+  if (resources) {
+    const staging = new CollaborativeDocument()
+    try { publishProjectResources(staging.doc, resources) } finally { staging.destroy() }
+  }
+  let bootstrapped = false
+  collaboration.doc.transact(() => {
+    // A peer may have initialized the room while the filesystem read was pending.
+    bootstrapped = bootstrapCollaborationSource(collaboration, options.source, options.canBootstrap, options.requireEmpty)
+    if (bootstrapped && resources) publishProjectResources(collaboration.doc, resources)
+  }, 'collaboration-bootstrap')
+  return bootstrapped
+}
+
 export class HocuspocusCollaborationClient {
   readonly collaboration: CollaborativeDocument
   readonly editorBinding: CollaborativeEditorBinding
@@ -73,9 +105,14 @@ export class HocuspocusCollaborationClient {
   private readonly stopUpdate: () => void
   private readonly awarenessHandler: () => void
   private lastPortableSource = ''
+  private resourceHandler?: () => void
+  private beforeUnload?: (event: BeforeUnloadEvent) => void
+  private recovery?: Awaited<ReturnType<typeof retainCollaborativeDocument>>
+  private readonly onRecoveryWarning?: (message: string) => void
 
   private constructor(collaboration: CollaborativeDocument, provider: HocuspocusProvider, options: CollaborationClientOptions) {
     this.collaboration = collaboration
+    this.onRecoveryWarning = options.onRecoveryWarning
     this.editorBinding = {
       document: collaboration.doc,
       awareness: collaboration.awareness,
@@ -103,6 +140,17 @@ export class HocuspocusCollaborationClient {
     const name = documentName(options.workspaceId, options.projectId)
     if (typeof options.token === 'string' && (!options.token.trim() || options.token.length > 16_384)) throw new Error('A valid short-lived collaboration token is required.')
     const collaboration = new CollaborativeDocument()
+    const journal = options.journal ?? createCollaborationJournal(collaborationJournalKey(url, options.workspaceId, options.projectId, options.presence.userId))
+    let recovery: Awaited<ReturnType<typeof retainCollaborativeDocument>>
+    try {
+      recovery = await retainCollaborativeDocument(collaboration.doc, journal, (message) => {
+        if (options.onRecoveryWarning) options.onRecoveryWarning(message)
+        else options.onStatus?.('error', message)
+      })
+    } catch (error) {
+      collaboration.destroy()
+      throw error
+    }
     collaboration.setLocalPresence(options.presence)
     setCollaborativeEditorPresence(collaboration.awareness, {
       id: options.presence.userId,
@@ -125,7 +173,11 @@ export class HocuspocusCollaborationClient {
       awareness: collaboration.awareness,
       flushDelay: 120,
       onSynced: ({ state }: { state: boolean }) => { if (state) resolveSync() },
-      onAuthenticationFailed: ({ reason }: { reason: string }) => rejectSync(new Error(reason || 'Collaboration authentication failed.')),
+      onAuthenticationFailed: ({ reason }: { reason: string }) => {
+        const message = reason || 'Collaboration authentication failed.'
+        options.onStatus?.('error', message)
+        rejectSync(new Error(message))
+      },
       onStatus: ({ status }: { status: WebSocketStatus }) => {
         if (status === 'connected') options.onStatus?.('connected')
         else if (status === 'disconnected') options.onStatus?.('disconnected')
@@ -134,11 +186,29 @@ export class HocuspocusCollaborationClient {
     } as ConstructorParameters<typeof HocuspocusProvider>[0]
     const provider = new HocuspocusProvider(providerOptions)
     const client = new HocuspocusCollaborationClient(collaboration, provider, options)
+    client.recovery = recovery
+    client.beforeUnload = (event) => {
+      if (recovery.unsafeToClose || provider.hasUnsyncedChanges) { event.preventDefault(); event.returnValue = '' }
+    }
+    window.addEventListener('beforeunload', client.beforeUnload)
+    client.resourceHandler = () => {
+      try { options.onResources?.(readProjectResources(collaboration.doc)) } catch (error) { options.onStatus?.('error', error instanceof Error ? error.message : String(error)) }
+    }
+    collaboration.doc.getMap('draftmatter:resources').observe(client.resourceHandler)
     const timeout = window.setTimeout(() => rejectSync(new Error('The collaboration service did not synchronize in time.')), options.timeoutMs ?? 10_000)
     try {
       await synced
       window.clearTimeout(timeout)
-      bootstrapCollaborationSource(collaboration, options.bootstrapSource, options.canBootstrap !== false, options.requireEmptyForBootstrap === true)
+      await initializeCollaborationSource(collaboration, {
+        source: options.bootstrapSource,
+        canBootstrap: options.canBootstrap === true,
+        requireEmpty: !recovery.recovered && options.requireEmptyForBootstrap === true,
+        resources: options.resources,
+        resourceProvider: options.resourceProvider,
+      })
+      client.resourceHandler()
+      await recovery.flush()
+      options.onRecoveryWarning?.(recovery.unsafeToClose ? 'Offline recovery could not be saved. Keep this window open until your changes synchronize.' : '')
       const source = projectCollaborationPortableSource(collaboration)
       client.lastPortableSource = source
       options.onPortableSource?.(source)
@@ -160,6 +230,15 @@ export class HocuspocusCollaborationClient {
     return this.lastPortableSource
   }
 
+  publishResources(resources: ProjectResources) { publishProjectResources(this.collaboration.doc, resources) }
+
+  async flushRecovery() {
+    await this.recovery?.flush()
+    const safe = !this.recovery?.unsafeToClose
+    this.onRecoveryWarning?.(safe ? '' : 'Offline recovery could not be saved. Keep this window open until your changes synchronize.')
+    return safe
+  }
+
   createCheckpoint(): CollaborationCheckpoint {
     const checkpoint = createCollaborationCheckpoint(this.collaboration)
     this.lastPortableSource = checkpoint.source
@@ -172,6 +251,9 @@ export class HocuspocusCollaborationClient {
 
   destroy() {
     this.stopUpdate()
+    if (this.beforeUnload) window.removeEventListener('beforeunload', this.beforeUnload)
+    if (this.resourceHandler) this.collaboration.doc.getMap('draftmatter:resources').unobserve(this.resourceHandler)
+    this.recovery?.close()
     this.collaboration.awareness.off('change', this.awarenessHandler)
     this.provider.destroy()
     this.collaboration.destroy()

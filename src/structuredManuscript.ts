@@ -23,6 +23,7 @@ export interface StructuredManuscriptMetadata {
   lineEnding: '\n' | '\r\n' | '\r'
   originalSource: string
   originalDocumentJson: unknown
+  originalBlocks?: Array<{ id: string | null; source: string; documentJson: unknown }>
 }
 
 export interface StructuredManuscript {
@@ -58,11 +59,13 @@ function marked(nodes: ProseMirrorNode[], mark: Mark) {
 interface InlineCandidate {
   index: number
   raw: string
-  kind: 'anchor' | 'published-value' | 'citation' | 'link' | 'strong' | 'emphasis' | 'code' | 'math' | 'cross-reference' | 'footnote'
+  kind: 'escape' | 'hard-break' | 'anchor' | 'published-value' | 'citation' | 'link' | 'strong' | 'emphasis' | 'code' | 'math' | 'cross-reference' | 'footnote'
   match: RegExpMatchArray
 }
 
 const inlinePatterns: Array<[InlineCandidate['kind'], RegExp]> = [
+  ['escape', /\\[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]/],
+  ['hard-break', / {2,}\r?\n|\\\r?\n/],
   ['anchor', /\[\]\{[^}\r\n]*\.dm-anchor[^}\r\n]*\}/],
   ['published-value', /\{\{([A-Za-z][A-Za-z0-9_.:-]{0,127})\}\}/],
   ['citation', /\[[^\]\r\n]*@[a-zA-Z0-9_:.+-]+[^\]\r\n]*\]/],
@@ -105,7 +108,11 @@ function inlineNodes(
     }
     ordinal += 1
     const id = `${idPrefix}-${candidate.kind}-${ordinal}`
-    if (candidate.kind === 'anchor') {
+    if (candidate.kind === 'escape') {
+      nodes.push(manuscriptSchema.text(candidate.raw.slice(1)))
+    } else if (candidate.kind === 'hard-break') {
+      nodes.push(manuscriptSchema.nodes.hard_break.createChecked())
+    } else if (candidate.kind === 'anchor') {
       const attributes = candidate.raw.slice(candidate.raw.indexOf('{') + 1, -1)
       nodes.push(manuscriptSchema.nodes.review_anchor.createChecked({
         id: attributes.match(/(?:^|\s)#([a-zA-Z][\w.:-]*)/)?.[1] ?? id,
@@ -208,13 +215,24 @@ function parseBlocks(
   ordinalRef: { value: number },
   publishedValues: Record<string, RetainedPublishedValue>,
   publishedValueLanguages: Record<string, ExecutionLanguage | undefined>,
+  rawBlocks?: Map<ProseMirrorNode, string>,
 ): ProseMirrorNode[] {
   const blocks: ProseMirrorNode[] = []
   const contents = lines.map((line) => line.content)
   let index = 0
+  let blockStart = 0
+  let recordedBlocks = 0
+  const recordRawBlock = () => {
+    if (blocks.length > recordedBlocks) {
+      rawBlocks?.set(blocks[blocks.length - 1], lines.slice(blockStart, index).map((line) => line.raw).join(''))
+      recordedBlocks = blocks.length
+    }
+    blockStart = index
+  }
   const id = (kind: string, raw: string) => nodeId(kind, raw, ++ordinalRef.value)
 
   while (index < lines.length) {
+    recordRawBlock()
     if (!lines[index].content.trim()) {
       index += 1
       continue
@@ -312,13 +330,39 @@ function parseBlocks(
     if (listMatch) {
       const ordered = /^\d/.test(listMatch[1])
       const items: ProseMirrorNode[] = []
-      let order = ordered ? Number.parseInt(listMatch[1], 10) : 1
+      const order = ordered ? Number.parseInt(listMatch[1], 10) : 1
+      const indentation = (line: string) => line.match(/^[ \t]*/)?.[0].replaceAll('\t', '    ').length ?? 0
+      const baseIndent = indentation(value)
       while (index < lines.length) {
-        const item = lines[index].content.match(/^\s*([-+*]|\d+[.)])\s+(.+)$/)
-        if (!item || /^\d/.test(item[1]) !== ordered) break
+        const item = lines[index].content.match(/^([ \t]*)([-+*]|\d+[.)])([ \t]+)(.+)$/)
+        if (!item || indentation(lines[index].content) !== baseIndent || /^\d/.test(item[2]) !== ordered) break
         const itemId = id('list-item', lines[index].raw)
-        items.push(manuscriptSchema.nodes.list_item.createChecked({ id: itemId }, [paragraph(`${itemId}-paragraph`, item[2], publishedValues, publishedValueLanguages)]))
+        const contentIndent = baseIndent + item[2].length + item[3].length
+        const firstEnding = lines[index].raw.slice(lines[index].content.length)
+        const itemLines: SourceLine[] = [{ content: item[4], raw: `${item[4]}${firstEnding}` }]
         index += 1
+        while (index < lines.length) {
+          const line = lines[index]
+          if (!line.content.trim()) {
+            itemLines.push(line)
+            index += 1
+            continue
+          }
+          const indent = indentation(line.content)
+          if (indent < contentIndent) {
+            if (!itemLines.at(-1)?.content.trim() || isBlockStart(lines, index)) break
+            // CommonMark permits lazy paragraph continuation within a list item.
+            itemLines.push(line)
+          } else {
+            const expanded = line.content.replace(/^[ \t]*/, (prefix) => prefix.replaceAll('\t', '    '))
+            const content = expanded.slice(contentIndent)
+            itemLines.push({ content, raw: `${content}${line.raw.slice(line.content.length)}` })
+          }
+          index += 1
+        }
+        const children = parseBlocks(itemLines, diagnostics, ordinalRef, publishedValues, publishedValueLanguages)
+        if (children[0]?.type !== manuscriptSchema.nodes.paragraph) children.unshift(paragraph(`${itemId}-paragraph`, '', publishedValues, publishedValueLanguages))
+        items.push(manuscriptSchema.nodes.list_item.createChecked({ id: itemId }, children))
       }
       const listType = ordered ? manuscriptSchema.nodes.ordered_list : manuscriptSchema.nodes.bullet_list
       blocks.push(listType.createChecked(ordered ? { id: id('list', String(order)), order } : { id: id('list', '-') }, items))
@@ -432,6 +476,7 @@ function parseBlocks(
     const raw = rawLines.join('')
     blocks.push(paragraph(id('paragraph', raw), paragraphLines.join('\n'), publishedValues, publishedValueLanguages))
   }
+  recordRawBlock()
   return blocks
 }
 
@@ -464,7 +509,8 @@ export function parseStructuredManuscript(source: string): StructuredManuscript 
     }
   }
 
-  const blocks = parseBlocks(sourceLines(body), diagnostics, { value: 0 }, retainedPublishedValues.values, publishedValueLanguages)
+  const rawBlocks = new Map<ProseMirrorNode, string>()
+  const blocks = parseBlocks(sourceLines(body), diagnostics, { value: 0 }, retainedPublishedValues.values, publishedValueLanguages, rawBlocks)
   if (!blocks.length) blocks.push(paragraph('dm-empty-paragraph', '', retainedPublishedValues.values, publishedValueLanguages))
   const document = manuscriptSchema.nodes.doc.createChecked(null, blocks)
   return {
@@ -474,6 +520,7 @@ export function parseStructuredManuscript(source: string): StructuredManuscript 
       reviewSection,
       lineEnding: ending,
       originalSource: source,
+      originalBlocks: blocks.map((node) => ({ id: node.attrs.id ?? null, source: rawBlocks.get(node) ?? '', documentJson: node.toJSON() })),
       originalDocumentJson: document.toJSON(),
     },
     diagnostics,
@@ -533,10 +580,10 @@ function serializeInline(node: ProseMirrorNode) {
   return node.textContent
 }
 
-function serializeInlineContent(node: ProseMirrorNode) {
+function serializeInlineContent(node: ProseMirrorNode, ending = '\n') {
   let value = ''
   node.forEach((child) => { value += serializeInline(child) })
-  return value
+  return value.replace(/\r?\n/g, ending)
 }
 
 function serializeTable(node: ProseMirrorNode, ending: string) {
@@ -545,7 +592,7 @@ function serializeTable(node: ProseMirrorNode, ending: string) {
   node.forEach((row) => {
     const cells: string[] = []
     row.forEach((cell, _offset, index) => {
-      cells.push(serializeInlineContent(cell.firstChild ?? cell))
+      cells.push(serializeInlineContent(cell.firstChild ?? cell, ending))
       if (rows.length === 0) alignments[index] = cell.attrs.alignment ?? null
     })
     rows.push(cells)
@@ -577,9 +624,9 @@ function serializeTable(node: ProseMirrorNode, ending: string) {
 function serializeBlock(node: ProseMirrorNode, ending: string, index = 0): string {
   if (node.type === manuscriptSchema.nodes.heading) {
     const attributes = node.attrs.sourceAttributes ? ` {${node.attrs.sourceAttributes}}` : ''
-    return `${'#'.repeat(node.attrs.level)} ${serializeInlineContent(node)}${attributes}`
+    return `${'#'.repeat(node.attrs.level)} ${serializeInlineContent(node, ending)}${attributes}`
   }
-  if (node.type === manuscriptSchema.nodes.paragraph) return serializeInlineContent(node)
+  if (node.type === manuscriptSchema.nodes.paragraph) return serializeInlineContent(node, ending)
   if (node.type === manuscriptSchema.nodes.blockquote) {
     const content: string[] = []
     node.forEach((child, _offset, childIndex) => content.push(serializeBlock(child, ending, childIndex)))
@@ -589,7 +636,10 @@ function serializeBlock(node: ProseMirrorNode, ending: string, index = 0): strin
     const items: string[] = []
     node.forEach((item, _offset, itemIndex) => {
       const prefix = node.type === manuscriptSchema.nodes.ordered_list ? `${node.attrs.order + itemIndex}.` : '-'
-      items.push(`${prefix} ${serializeInlineContent(item.firstChild ?? item)}`)
+      const children: string[] = []
+      item.forEach((child, _childOffset, childIndex) => children.push(serializeBlock(child, ending, childIndex)))
+      const content = children.join(`${ending}${ending}`).split(/\r\n|\r|\n/)
+      items.push(`${prefix} ${content[0]}${content.slice(1).map((line) => `${ending}${' '.repeat(prefix.length + 1)}${line}`).join('')}`)
     })
     return items.join(ending)
   }
@@ -609,7 +659,7 @@ function serializeBlock(node: ProseMirrorNode, ending: string, index = 0): strin
       : image.attrs.label
         ? `{#${image.attrs.label}}`
         : ''
-    return `![${image.attrs.alt}](${image.attrs.src}${title})${attributes}${caption ? `${ending}: ${serializeInlineContent(caption)}` : ''}`
+    return `![${image.attrs.alt}](${image.attrs.src}${title})${attributes}${caption ? `${ending}: ${serializeInlineContent(caption, ending)}` : ''}`
   }
   if (node.type === manuscriptSchema.nodes.footnote_definition) return `[^${node.attrs.label}]: ${node.attrs.contentMarkdown}`
   if (node.type === manuscriptSchema.nodes.table) return serializeTable(node, ending)
@@ -634,7 +684,7 @@ export function serializeStructuredManuscript(document: ProseMirrorNode, metadat
     if (!value || typeof value !== 'object') return value
     const record = value as Record<string, unknown>
     const normalized = Object.fromEntries(Object.entries(record).map(([key, item]) => [key, sourceSemanticJson(item)]))
-    if ((record.type === 'citation' || record.type === 'cross_reference' || record.type === 'published_value') && normalized.attrs && typeof normalized.attrs === 'object') {
+    if ((record.type === 'citation' || record.type === 'cross_reference' || record.type === 'published_value' || record.type === 'code_cell') && normalized.attrs && typeof normalized.attrs === 'object') {
       const attrs = { ...normalized.attrs as Record<string, unknown> }
       delete attrs.rendered
       if (record.type === 'published_value') {
@@ -642,6 +692,7 @@ export function serializeStructuredManuscript(document: ProseMirrorNode, metadat
         delete attrs.status
         delete attrs.language
       }
+      if (record.type === 'code_cell') delete attrs.status
       normalized.attrs = attrs
     }
     return normalized
@@ -649,7 +700,13 @@ export function serializeStructuredManuscript(document: ProseMirrorNode, metadat
   if (JSON.stringify(sourceSemanticJson(document.toJSON())) === JSON.stringify(sourceSemanticJson(metadata.originalDocumentJson))) return metadata.originalSource
   const ending = metadata.lineEnding
   const blocks: string[] = []
-  document.forEach((node, _offset, index) => blocks.push(serializeBlock(node, ending, index)))
+  const originals = new Map(metadata.originalBlocks?.filter((block) => block.id).map((block) => [block.id, block]))
+  document.forEach((node, _offset, index) => {
+    const original = originals.get(node.attrs.id)
+    blocks.push(original?.source && JSON.stringify(sourceSemanticJson(node.toJSON())) === JSON.stringify(sourceSemanticJson(original.documentJson))
+      ? original.source.replace(/(?:\r\n|\r|\n)+$/, '')
+      : serializeBlock(node, ending, index))
+  })
   const body = blocks.filter((block) => block !== '').join(`${ending}${ending}`)
   const pieces = [metadata.frontmatter?.replace(/(?:\r\n|\r|\n)+$/, ''), body, metadata.reviewSection?.replace(/(?:\r\n|\r|\n)+$/, '')].filter((piece): piece is string => Boolean(piece))
   return `${pieces.join(`${ending}${ending}`)}${ending}`

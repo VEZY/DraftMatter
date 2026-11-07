@@ -79,6 +79,28 @@ certified phase requirements without redefining their original gates.
 | Code and retained output form one quiet manuscript object with hover/focus controls, touch fallback, compact references, and responsive non-overlapping rows. | `src/cairoMakieOutput.test.tsx`, `src/StructuredManuscriptEditor.test.tsx`, rendered geometry inspection, and the focused authoring build. | `15e4b63`, `597fc3c` |
 | The White Graphite visual system and focused research/review surfaces replace the broad prototype styling. | Browser visual regression coverage and the application accessibility suites. | `a22554e`, `5920675`, `d483fd9` |
 
+## Release-readiness corrections — 2026-11-06
+
+These corrections follow a code and failure-path review of the local application and optional collaboration service. They do not certify a deployed service or installation on every supported OS.
+
+| Correction | Regression evidence |
+| --- | --- |
+| Edits preserve unchanged portable blocks; escaping remains stable over reopen cycles; nested lists and hard breaks keep their meaning. | `structuredManuscript.test.ts`, portable corpus, rendered editor/reordering tests. |
+| Node and Rust coordinate project writes and share durable recovery journals; competing revisions cannot both succeed. | `agentProjectStore.test.ts` and native `project_transactions` tests use independent processes and abrupt termination before commit, during rollback, and after the commit marker. See `project-transactions.md`. |
+| Full local collaboration checkpoints atomically save source, figure bytes and CSL bibliography with expected hashes. Opening another manuscript is blocked while a live room is active. | Native `collaboration_checkpoint` tests, `collaborationCheckpointApp.test.tsx`, `collaborationProjectSnapshot.test.ts`. |
+| Deferred Yjs structures/delete sets cannot evade role validation; writes are persisted before acknowledgement, and storage failures remain retryable. | `hocuspocusServer.test.ts`, `transportDurability.test.ts`, live `hocuspocusNetwork.test.ts`. |
+| Shared figures/references reach browser reviewers; reconnecting an older local copy does not automatically replace current server resources. | `projectResources.test.ts`, `collaborationBrowserEntryApp.test.tsx`, client/dialog tests and authenticated WebSocket test. Updated figures/references require an explicit publish action; newly accepted citations publish their metadata with the live editing workflow. |
+| Offline CRDT recovery merges concurrent tabs and compacts deleted image payloads. Failed persistence preserves the old journal and blocks unsafe navigation. | `collaborationJournal.test.ts`, `tests/e2e/collaboration-recovery.spec.ts` with real IndexedDB and reload. |
+| Desktop sign-in uses a system-browser PKCE return, rotating memory-only tokens, and exact callback validation. CSP permits encrypted collaboration without remote scripts or unrestricted HTTP. | `oidcDesktop.test.ts`, native `oidc_desktop` tests, `desktopCsp.test.ts`, local desktop build. Installed OS callback behavior still needs platform smoke checks. |
+| Native HTML/PDF contains static MathML and embedded figures; Word contains Office Math, images, formatting and hyperlinks. Submission ZIP and CLI image paths stay confined. | `publicationExportIntegrity.test.ts`, `publicationAssetReader.test.ts`, submission tests and `tests/e2e/publication-export.spec.ts`. A representative DOCX was converted with LibreOffice, rendered with Poppler and visually checked. |
+| Publication formatting is derived from the exact source snapshot; freshness checks code hashes, dependencies, missing figure/table outputs and the actual exported artifact bytes. | `publicationCitations.test.ts`, `publicationFreshness.test.ts`, browser export tests. Input-file and runtime availability still use the existing execution provenance checks; this is not a scientific validation of results. |
+| Production PostgreSQL TLS cannot be downgraded through a connection URL; exact desktop origins and a separate realtime rate budget are supported. | Configuration/workspace service tests and the complete service suite. Deployment remains separate work. |
+| Home/account routes defer loading the manuscript editor and publication engines. | Production entry JavaScript decreased from approximately 2,103 kB to 301 kB (gzip approximately 624 kB to 90 kB) in the locked local build. Router/desktop-launch tests and rendered navigation checks verify the loading boundary. These are byte measurements, not a measured startup-latency claim. |
+
+Verification on the local macOS arm64 checkout: 170 Vitest files / 900 tests passed (one Windows-only installer test skipped), 111 native Rust tests passed, all 40 application Chromium tests and 15 website Chromium tests passed. Type checks, production application/service/CLI/website builds, CLI/MCP/assistant gates, 689-component compliance inventory and release identity passed. The final macOS debug app bundled successfully and passed strict ad hoc signature verification. The routing/title follow-up also passed its focused unit and browser suites. No deployment was performed, and no actual Julia runtime was started.
+
+Remaining scope limits: complex bibliography YAML is preserved and rejected explicitly when a checkpoint cannot rewrite it safely; unsupported Word math structures fail clearly; older interrupted AI journals without process ownership need explicit recovery rather than destructive automatic cleanup. The clean-export CLI does not acquire or format an external bibliography automatically. These limits must not be presented as verified end-to-end publication/deployment support.
+
 ## Task evidence
 
 ### DM-P0 — Portable format and editor-risk spike

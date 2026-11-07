@@ -113,10 +113,10 @@ export class FileCollaborationStore implements CollaborationPersistence {
   constructor(options: FileCollaborationStoreOptions) {
     this.root = options.root
     this.clock = options.clock ?? Date.now
-    this.idFactory = options.idFactory ?? randomUUID
+    this.idFactory = options.idFactory ?? (() => `id-${randomUUID()}`)
     this.compactAfterUpdates = options.compactAfterUpdates ?? 128
     this.compactAfterBytes = options.compactAfterBytes ?? 2 * 1024 * 1024
-    this.maxUpdateBytes = options.maxUpdateBytes ?? 4 * 1024 * 1024
+    this.maxUpdateBytes = options.maxUpdateBytes ?? 16 * 1024 * 1024
     this.renameFile = options.renameFile ?? rename
     this.retryDelay = options.retryDelay ?? delay
     this.dashboard = options.dashboard ?? new CollaborationOperationsDashboard()

@@ -126,6 +126,23 @@ describe('PostgreSQL workspace authorization', () => {
     await pool.end()
   })
 
+  it('reauthorizes normal realtime traffic without consuming the HTTP write budget', async () => {
+    const { pool, service } = await database()
+    await service.createWorkspace('owner', { id: 'forest', name: 'Forest study' })
+    await service.createProject('owner', 'forest', { id: 'paper', name: 'Canopy response' })
+    const identity = { userId: 'owner', sessionId: 'session-owner' }
+    const before = await pool.query('SELECT COUNT(*) AS count FROM draftmatter_rate_limit_events')
+    for (let index = 0; index < 150; index += 1) {
+      await expect(service.reauthorizeProject(identity, 'forest', 'paper', 'edit')).resolves.toMatchObject({ role: 'owner' })
+    }
+    const after = await pool.query('SELECT COUNT(*) AS count FROM draftmatter_rate_limit_events')
+    expect(Number(after.rows[0].count)).toBe(Number(before.rows[0].count))
+    // The membership/entitlement query still runs on every frame, not a stale cache.
+    await pool.query(`UPDATE draftmatter_entitlements SET status = 'suspended' WHERE workspace_id = 'forest'`)
+    await expect(service.reauthorizeProject(identity, 'forest', 'paper', 'edit')).rejects.toMatchObject({ code: 'forbidden' })
+    await pool.end()
+  })
+
   it('persists tenant-scoped project roles and cancels reviews that a downgrade would strand', async () => {
     const policyChanges: string[] = []
     const { pool, service } = await database((workspaceId, userId) => policyChanges.push(`${workspaceId}:${userId}`))

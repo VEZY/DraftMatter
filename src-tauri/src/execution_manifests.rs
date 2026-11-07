@@ -203,6 +203,7 @@ pub fn save_execution_manifest_impl(
     request: SaveExecutionManifestRequest,
 ) -> Result<DocumentSnapshot, HostError> {
     let root = canonical_root(&request.root)?;
+    let _project_guard = crate::project_guard(&root)?;
     validate_manifest(&request.content, Some(&request.cell_id))?;
     let path = manifest_path(&root, &request.cell_id)?;
     if let Some(expected) = &request.expected_hash {
@@ -229,6 +230,7 @@ pub fn save_execution_manifest_impl(
 
 pub fn read_execution_manifests_impl(raw_root: &str) -> Result<Vec<DocumentSnapshot>, HostError> {
     let root = canonical_root(raw_root)?;
+    let _project_guard = crate::project_guard(&root)?;
     let directory = contained_path(&root, ".draftmatter/outputs")?;
     if !directory.exists() {
         return Ok(Vec::new());

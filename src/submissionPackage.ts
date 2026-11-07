@@ -6,6 +6,7 @@ import { projectComputationsForPublication } from './publicationComputation'
 import { parsePublicationMetadata, updatePublicationAuthorDetails, type PublicationAuthor } from './publicationMetadata'
 import type { CitationRecord } from './types'
 import { createStoredZip } from './zipArchive'
+import { validatePublicationAssets, type PublicationAsset } from './publicationAssets'
 
 export type SubmissionReviewModel = 'identified' | 'double-anonymous'
 
@@ -19,10 +20,7 @@ export interface SubmissionOptions {
   coverLetter?: string
 }
 
-export interface SubmissionAsset {
-  path: string
-  bytes: Uint8Array
-}
+export interface SubmissionAsset extends PublicationAsset {}
 
 export interface SubmissionFigure {
   index: number
@@ -323,6 +321,24 @@ function rewriteFigureSources(source: string, figures: SubmissionFigure[]) {
   })
 }
 
+function portableSubmissionSource(source: string, figures: SubmissionFigure[]) {
+  let portable = rewriteFigureSources(source, figures.map((figure) => ({ ...figure, packagedPath: figure.packagedPath ? `../${figure.packagedPath}` : undefined })))
+  const frontmatter = portable.match(/^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/)
+  const ending = portable.includes('\r\n') ? '\r\n' : '\n'
+  const bibliography = 'bibliography: "../references/references.json"'
+  if (!frontmatter) return `---${ending}${bibliography}${ending}---${ending}${ending}${portable}`
+  const lines = frontmatter[1].split(/\r?\n/)
+  const start = lines.findIndex((line) => /^bibliography[ \t]*:/.test(line))
+  if (start < 0) lines.push(bibliography)
+  else {
+    let end = start + 1
+    while (end < lines.length && !/^[A-Za-z_][\w-]*[ \t]*:/.test(lines[end])) end += 1
+    lines.splice(start, end - start, bibliography)
+  }
+  portable = `---${ending}${lines.join(ending)}${ending}---${ending}${portable.slice(frontmatter[0].length)}`
+  return portable
+}
+
 function html(value: string) {
   return value.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;')
 }
@@ -346,6 +362,7 @@ export function buildSubmissionPackage(input: SubmissionPackageInput): Submissio
     throw new Error(`Submission package has ${analysis.errors} blocking readiness ${analysis.errors === 1 ? 'check' : 'checks'}.`)
   }
   const suppliedAssets = new Map((input.assets ?? []).map((asset) => [normalizeProjectRelativePath(asset.path), asset.bytes]))
+  validatePublicationAssets(input.assets)
   const figureFiles = analysis.figures.map((figure) => {
     if (!figure.packagedPath) throw new Error(`Figure ${figure.index} cannot be packaged from ${figure.source}.`)
     if (figure.kind === 'embedded') return { name: figure.packagedPath, bytes: decodeDataImage(figure.source) }
@@ -355,7 +372,11 @@ export function buildSubmissionPackage(input: SubmissionPackageInput): Submissio
   })
   let packageSource = rewriteFigureSources(publicationSource, analysis.figures)
   if (input.options.reviewModel === 'double-anonymous') packageSource = updatePublicationAuthorDetails(packageSource, [])
-  const docx = renderDocxExport(packageSource, input.docx)
+  const docxAssets = analysis.figures.map((figure, index) => {
+    const prepared = [...input.assets ?? [], ...input.docx?.assets ?? []].find((asset) => asset.path === figure.source)
+    return { path: figureFiles[index].name, bytes: figureFiles[index].bytes, ...(prepared?.fallbackPng ? { fallbackPng: prepared.fallbackPng } : {}) }
+  })
+  const docx = renderDocxExport(packageSource, { ...input.docx, assets: docxAssets, requireAssets: true })
   const cited = new Set(analysis.citedKeys)
   const referenceRecords = input.citations.filter((record) => cited.has(record.citekey)).map(citationRecordToCsl)
   const formattedBibliography = input.docx?.bibliography ?? []
@@ -374,7 +395,7 @@ export function buildSubmissionPackage(input: SubmissionPackageInput): Submissio
     }, null, 2) },
     { name: 'manuscript.docx', bytes: docx.bytes },
     { name: 'submission-summary.html', bytes: submissionSummary(analysis, input.options, formattedBibliography) },
-    { name: 'source/manuscript.qmd', bytes: packageSource },
+    { name: 'source/manuscript.qmd', bytes: portableSubmissionSource(packageSource, analysis.figures) },
     { name: 'references/references.json', bytes: JSON.stringify(referenceRecords, null, 2) },
     ...figureFiles,
     ...(input.options.coverLetter?.trim() ? [{ name: 'cover-letter.txt', bytes: input.options.coverLetter.trim() + '\n' }] : []),

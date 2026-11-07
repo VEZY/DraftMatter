@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 280" role="img" aria-labelledby="title description">
+  <title id="title">Canopy response over time</title>
+  <desc id="description">A quiet line chart showing canopy response increasing across six observations with a pale uncertainty band.</desc>
+  <rect width="960" height="280" rx="12" fill="#fbfcfb"/>
+  <g stroke="#e6ebe8" stroke-width="1">
+    <path d="M92 50H910M92 100H910M92 150H910M92 200H910"/>
+  </g>
+  <g fill="#819087" font-family="Inter, system-ui, sans-serif" font-size="12">
+    <text x="54" y="204">0.2</text>
+    <text x="54" y="154">0.4</text>
+    <text x="54" y="104">0.6</text>
+    <text x="54" y="54">0.8</text>
+    <text x="86" y="238">May</text>
+    <text x="244" y="238">Jun</text>
+    <text x="406" y="238">Jul</text>
+    <text x="568" y="238">Aug</text>
+    <text x="730" y="238">Sep</text>
+    <text x="890" y="238">Oct</text>
+  </g>
+  <path d="M96 190C180 181 226 164 258 158S377 143 420 129S531 116 582 101S694 82 744 78S849 62 904 58L904 86C839 92 801 102 744 106S637 126 582 133S470 157 420 161S314 188 258 190S150 216 96 218Z" fill="#dfeae4"/>
+  <path d="M96 204C180 195 225 177 258 174S376 158 420 145S530 132 582 117S692 98 744 94S848 78 904 72" fill="none" stroke="#557768" stroke-linecap="round" stroke-linejoin="round" stroke-width="4"/>
+  <g fill="#fff" stroke="#557768" stroke-width="3">
+    <circle cx="96" cy="204" r="5"/><circle cx="258" cy="174" r="5"/><circle cx="420" cy="145" r="5"/><circle cx="582" cy="117" r="5"/><circle cx="744" cy="94" r="5"/><circle cx="904" cy="72" r="5"/>
+  </g>
+</svg>

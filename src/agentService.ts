@@ -2134,14 +2134,14 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
           return await runRequest()
         } catch (error) {
         if (error instanceof AgentProjectStoreError) {
-          const category = error.code === 'stale-revision'
+          const category = error.code === 'stale-revision' || error.code === 'project-busy'
             ? 'conflict'
             : error.code === 'path-outside-project' || error.code === 'path-symlink-escape'
               ? 'permission'
               : error.code === 'project-missing'
                 ? 'not-found'
                 : 'validation'
-          return failure(request, category, error.code, error.message, error.code === 'stale-revision', error.details)
+          return failure(request, category, error.code, error.message, error.code === 'stale-revision' || error.code === 'project-busy', error.details)
         }
         if (error instanceof AgentSelectorError) {
           return failure(request, error.code === 'ambiguous-selector' ? 'conflict' : error.code === 'not-found' ? 'not-found' : 'validation', error.code, error.message, error.code === 'ambiguous-selector')

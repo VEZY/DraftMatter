@@ -23,6 +23,7 @@ interface OidcTransaction {
   tokenEndpoint: string
   redirectUri: string
   createdAt: number
+  issuer?: string
 }
 
 export interface OidcAuthorizationRequest {
@@ -99,6 +100,7 @@ function secureEndpoint(value: string, label: string) {
     throw new Error(`${label} is not an absolute URL.`)
   }
   const loopback = url.hostname === 'localhost' || url.hostname === '127.0.0.1' || url.hostname === '[::1]'
+  if (url.username || url.password || url.hash) throw new Error(`${label} cannot contain credentials or a fragment.`)
   if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) throw new Error(`${label} must use HTTPS outside localhost development.`)
   return url.toString().replace(/\/$/, '')
 }
@@ -172,6 +174,7 @@ export async function prepareOidcAuthorization(
     tokenEndpoint,
     redirectUri,
     createdAt: clock(),
+    issuer,
   }
   storage.setItem(TRANSACTION_KEY, JSON.stringify(transaction))
 
@@ -210,6 +213,10 @@ export async function completeOidcAuthorization(
   if (callbackUri(locationUrl) !== transaction.redirectUri) {
     storage.removeItem(TRANSACTION_KEY)
     throw new Error('The identity sign-in returned to an unexpected application address.')
+  }
+  if (callback.searchParams.has('iss') && callback.searchParams.get('iss')?.replace(/\/$/, '') !== transaction.issuer) {
+    storage.removeItem(TRANSACTION_KEY)
+    throw new Error('The identity sign-in response issuer does not match this session.')
   }
 
   const form = new URLSearchParams({

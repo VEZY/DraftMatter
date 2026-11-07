@@ -177,6 +177,27 @@ export interface SaveDocumentResult {
   recoveryPath: string | null
 }
 
+/** Binary figure fingerprints match the native SHA-256 checkpoint guard. */
+export async function projectAssetHash(bytes: readonly number[] | Uint8Array) {
+  const digest = await crypto.subtle.digest('SHA-256', Uint8Array.from(bytes))
+  return `sha256:${Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')}`
+}
+
+export interface SaveCollaborationCheckpointRequest {
+  root: string
+  documentPath: string
+  documentContent: string
+  expectedDocumentHash: string
+  assets: Array<{ path: string; bytes: number[]; expectedHash: string | null }>
+  bibliography?: { path: string; content: string; expectedHash: string | null }
+}
+
+export interface SaveCollaborationCheckpointResult {
+  documentHash: string
+  assetHashes: Record<string, string>
+  bibliographyHash?: string
+}
+
 export interface SaveExportFileRequest {
   suggestedName: string
   bytes: number[]
@@ -632,6 +653,11 @@ export function createDesktopHost(
     },
     saveDocument(request: SaveDocumentRequest) {
       return invokeBridge<SaveDocumentResult>('save_document', { request })
+    },
+    saveCollaborationCheckpoint(request: SaveCollaborationCheckpointRequest) {
+      return available
+        ? invokeBridge<SaveCollaborationCheckpointResult>('save_collaboration_checkpoint', { request })
+        : Promise.reject<never>({ kind: 'integration', message: 'Local collaboration checkpoints require the desktop application.' } satisfies HostFailure)
     },
     saveExportFile(request: SaveExportFileRequest) {
       return available

@@ -124,7 +124,7 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
     this.idFactory = options.idFactory ?? randomUUID
     this.compactAfterUpdates = options.compactAfterUpdates ?? 128
     this.compactAfterBytes = options.compactAfterBytes ?? 2 * 1024 * 1024
-    this.maxUpdateBytes = options.maxUpdateBytes ?? 4 * 1024 * 1024
+    this.maxUpdateBytes = options.maxUpdateBytes ?? 16 * 1024 * 1024
     this.dashboard = options.dashboard ?? new CollaborationOperationsDashboard()
     this.objectPrefix = (options.objectPrefix ?? 'draftmatter').replace(/^\/+|\/+$/g, '')
     this.storageQuota = options.storageQuota

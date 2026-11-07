@@ -21,7 +21,7 @@ We tested a portable workflow.
 
 ## Results
 
-![Canopy response](data:image/png;base64,iVBORw==)
+![Canopy response](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aU1QAAAAASUVORK5CYII=)
 `
 
 function field(container: HTMLElement, name: string) {

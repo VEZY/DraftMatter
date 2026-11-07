@@ -9,6 +9,7 @@ import { renderNativeHtmlExport } from './nativeHtmlExport'
 import { projectComputationsForPublication } from './publicationComputation'
 import { renderReviewReport } from './reviewExport'
 import { projectPortableReviewSource } from './reviewProjector'
+import { publicationAssetPaths, type PublicationAsset } from './publicationAssets'
 
 export interface DraftMatterCliIo {
   readText(path: string): Promise<string>
@@ -16,6 +17,7 @@ export interface DraftMatterCliIo {
   openApplication(projectPath?: string): Promise<void>
   stdout(content: string): void
   stderr(content: string): void
+  readPublicationAssets?(input: string, paths: string[]): Promise<PublicationAsset[]>
 }
 
 type RenderFormat = 'markdown' | 'html'
@@ -468,7 +470,10 @@ export async function runDraftMatterCli(arguments_: string[], io: DraftMatterCli
   let output: string
   if (parsed.format === 'html') {
     try {
-      output = renderNativeHtmlExport(projection.source)
+      const paths = publicationAssetPaths(projection.source)
+      if (paths.length && !io.readPublicationAssets) throw new Error('Local figure files are unavailable to this renderer. Embed images as data URLs or render a manuscript file with the installed CLI.')
+      const assets = paths.length ? await io.readPublicationAssets!(parsed.input, paths) : []
+      output = renderNativeHtmlExport(projection.source, { assets, requireAssets: true })
     } catch (error) {
       io.stderr(`Native HTML rendering failed: ${errorMessage(error)}\n`)
       return 2

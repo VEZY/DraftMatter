@@ -1,8 +1,14 @@
+import { prepareCollaborationCheckpointSource, referencedBibliographyPaths } from './collaborationProjectSnapshot'
+import { createStoredZip } from './zipArchive'
+import { readBrowserPublicationAssets } from './browserPublicationAssets'
+import { preparePublicationCitations } from './publicationCitations'
+import { publicationAssetPaths, preparePublicationAssetsForDocx, type PublicationAsset } from './publicationAssets'
+import { base64ToBytes, sharedImage, publishProjectResources, type ProjectResources } from './sharedEditor/projectResources'
 import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, parseBibliographyFile, searchCitations } from './bibliography'
-import { desktopHost, normaliseHostFailure, resolveMainDocument, type AgentIntegrationStatus, type CodeFormatterStatus, type JuliaEnvironment, type ProjectExecutionPreferences, type ProjectSnapshot, type ZoteroAttachment } from './desktopHost'
+import { desktopHost, projectAssetHash, normaliseHostFailure, resolveMainDocument, type AgentIntegrationStatus, type CodeFormatterStatus, type JuliaEnvironment, type ProjectExecutionPreferences, type ProjectSnapshot, type ZoteroAttachment } from './desktopHost'
 import type { AssistantConnectionsStatus } from './desktopHost'
 import { AssistantConnectionsDialog } from './AssistantConnectionsDialog'
 import { parsePortableDocument, parseReviewMarkup } from './sharedEditor'
@@ -71,7 +77,7 @@ import { buildPublicationByline, parsePublicationMetadata, updatePublicationAuth
 import { forgetAuthor, normalizeAuthorProfile, readAuthorBank, rememberAuthors, saveAuthorBank, type RememberedAuthor } from './authorBank'
 import { copyPlainText } from './clipboard'
 import { parseRetainedPublishedValues } from './publishedValues'
-import { publicationFreshnessProblem } from './publicationFreshness'
+import { publicationFreshnessSnapshotProblem, publicationAssetFreshnessProblem } from './publicationFreshness'
 import { countWords, measurePortableManuscript } from './manuscriptMetrics'
 import { activeOutlineIdAtViewport, keepActiveOutlineItemVisible } from './outlineViewport'
 import { ReviewTimestamp } from './ReviewTimestamp'
@@ -83,6 +89,7 @@ import { desktopLaunchUrl } from './desktopLaunch'
 import { StartCollaborationDialog, type StartCollaborationResult } from './StartCollaborationDialog'
 import { KernelConsole, type KernelCellFailure, type KernelConsoleRestartEpochs, type KernelConsoleStatus, type KernelConsoleStatuses } from './KernelConsole'
 import { ManagedCodeCellEditor } from './ManagedCodeCellEditor'
+import sampleFigure from './fixtures/canopy-response.svg?raw'
 import completeExampleSource from './fixtures/projects/alpha-article/paper.qmd?raw'
 import completeExampleReferences from './fixtures/projects/alpha-article/references.json?raw'
 import completeExamplePythonFigure from './fixtures/projects/alpha-article/figures/python-canopy.svg?raw'
@@ -704,6 +711,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const [collaborationOpen, setCollaborationOpen] = useState(Boolean(collaborationLaunch))
   const [startCollaborationOpen, setStartCollaborationOpen] = useState(false)
   const [desktopProject, setDesktopProject] = useState<ProjectSnapshot | null>(desktopProjectLaunch ?? null)
+  const [dismissedInitialCollaboration, setDismissedInitialCollaboration] = useState(false)
   const [linkedCollaborationLaunch, setLinkedCollaborationLaunch] = useState<CollaborationProjectLaunch | null>(null)
   const initialExperienceOpenedRef = useRef(false)
   const desktopProjectOpenedRef = useRef('')
@@ -712,7 +720,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const [collaborationRole, setCollaborationRole] = useState<WorkspaceRole | null>(null)
   const [collaborativeEditorBinding, setCollaborativeEditorBinding] = useState<CollaborativeEditorBinding | null>(null)
   const [collaborationUncheckpointed, setCollaborationUncheckpointed] = useState(false)
-  const activeCollaborationLaunch = collaborationLaunch ?? linkedCollaborationLaunch ?? undefined
+  const activeCollaborationLaunch = linkedCollaborationLaunch ?? (!dismissedInitialCollaboration ? collaborationLaunch : undefined)
   const [filename, setFilename] = useState(initialProjectMeta.filename)
   const [projectName, setProjectName] = useState(initialProjectMeta.projectName)
   const [citationStyle, setCitationStyle] = useState<CitationStyleId>(initialProjectMeta.citationStyle)
@@ -737,6 +745,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const [doiLookupState, setDoiLookupState] = useState<'idle' | 'resolving'>('idle')
   const [scholarHelpOpen, setScholarHelpOpen] = useState(false)
   const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>(() => readRecoverySnapshots(localStorage))
+  const collaborationBaselineRef = useRef<Promise<{ root: string; assets: Record<string, string | null>; bibliographyHash: string | null }> | null>(null)
+  const collaborationSaveGuardRef = useRef<(() => Promise<boolean>) | null>(null)
+  const [sharedResources, setSharedResources] = useState<ProjectResources>({ images: [], citations: [] })
+  useEffect(() => { setSharedResources({ images: [], citations: [] }) }, [collaborationLaunch?.serviceUrl, collaborationLaunch?.workspaceId, collaborationLaunch?.projectId])
   const [citations, setCitations] = useState<CitationRecord[]>(() => collaborationLaunch || browserDocumentLaunch || initialExperience === 'browser-new' ? [] : getInitialCitations())
   const [stagedCitationRecords, setStagedCitationRecords] = useState<CitationRecord[]>([])
   const [citationQuery, setCitationQuery] = useState('')
@@ -775,6 +787,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const [openCommentRequest, setOpenCommentRequest] = useState(0)
   const [externalExportSource, setExternalExportSource] = useState<string>()
   const [submissionExportSource, setSubmissionExportSource] = useState<string>()
+  const [submissionReferences, setSubmissionReferences] = useState<{ records: CitationRecord[]; citationLabels: Record<string, string>; bibliography: Array<{ id: string; value: string }>; assets: PublicationAsset[] }>()
   const [executionResult, setExecutionResult] = useState<NormalizedExecutionResult>()
   const [executionResults, setExecutionResults] = useState<Record<string, NormalizedExecutionResult>>({})
   const [executionCellStates, setExecutionCellStates] = useState<ExecutionCellFreshness[]>([])
@@ -1374,6 +1387,11 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     }
     if (citationAcquisitionRunningRef.current) {
       setToast('Wait for the citation to finish saving before leaving the manuscript.')
+      return false
+    }
+    if (collaborationSessionActiveRef.current && collaborationSaveGuardRef.current && !await collaborationSaveGuardRef.current()) {
+      setCollaborationOpen(true)
+      setToast('Offline recovery could not be saved. Keep this manuscript open until it is safe to leave.')
       return false
     }
     const session = desktopSessionRef.current
@@ -2072,6 +2090,24 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   }
 
   const updateCollaborationSessionState = (active: boolean) => {
+    if (active && !collaborationSessionActiveRef.current) {
+      const local = desktopSessionRef.current
+      if (local) {
+        const beforeSource = manuscriptSourceRef.current
+        const baseline = (async () => {
+          const paths = publicationAssetPaths(beforeSource)
+          const entries = await Promise.all(paths.map(async (path): Promise<[string, string | null]> => {
+            try { const assets = await desktopHost.readProjectAssets(local.root, [path]); return [path, assets[0] ? await projectAssetHash(assets[0].bytes) : null] }
+            catch { return [path, null] }
+          }))
+          let bibliographyHash: string | null = null
+          try { bibliographyHash = (await desktopHost.readBibliography(local.root, DEFAULT_ACQUISITION_BIBLIOGRAPHY))?.hash ?? null } catch { /* An absent bibliography is guarded as an absent target. */ }
+          return { root: local.root, assets: Object.fromEntries(entries), bibliographyHash }
+        })()
+        collaborationBaselineRef.current = baseline
+        void baseline.catch(() => undefined)
+      } else collaborationBaselineRef.current = null
+    }
     collaborationSessionActiveRef.current = active
     setCollaborationSessionActive(active)
     if (!active) {
@@ -2090,10 +2126,21 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   }
 
   const checkpointCollaboration = async (checkpoint: CollaborationCheckpoint) => {
+    const referencedImages = new Set(publicationAssetPaths(checkpoint.source))
+    const checkpointImages = sharedResources.images.filter((image) => referencedImages.has(image.path))
     const parsed = parsePortableDocument(checkpoint.source, initialDraft)
     replaceManuscriptSource(checkpoint.source)
     setDiagnostics(parsed.diagnostics)
     if (!desktopHost.available || !desktopSessionRef.current) {
+      if (checkpointImages.length || sharedResources.citations.length) {
+        const bibliography = sharedResources.citations.length ? [{ name: DEFAULT_ACQUISITION_BIBLIOGRAPHY, bytes: JSON.stringify(sharedResources.citations.map((record) => citationRecordToAcquisitionCsl(record, DEFAULT_ACQUISITION_BIBLIOGRAPHY)), null, 2) + '\n' }] : []
+        queueFileExport({ suggestedName: `${filename.replace(/\.(qmd|md)$/i, '')}.project.zip`, bytes: createStoredZip([
+          { name: filename.split(/[\\/]/).at(-1) ?? 'paper.qmd', bytes: checkpoint.source },
+          ...bibliography,
+          ...checkpointImages.map((image) => ({ name: image.path, bytes: base64ToBytes(image.base64) })),
+        ]), mimeType: 'application/zip', formatLabel: 'portable collaboration project', successMessage: 'Portable manuscript, figures and references exported' })
+        return
+      }
       downloadText(filename, checkpoint.source)
       setToast(`Portable collaboration checkpoint downloaded · ${filename}`)
       return
@@ -2105,13 +2152,28 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       const current = desktopSessionRef.current
       if (!current) throw new Error('The desktop project is no longer open.')
       try {
-        const result = await desktopHost.saveDocument({
-          root: current.root,
-          path: current.path,
-          content: checkpoint.source,
-          expectedHash: current.hash,
-        })
-        replaceDesktopSession({ ...current, hash: result.hash, savedRevision: draftRevisionRef.current })
+        let savedHash: string
+        if (checkpointImages.length || sharedResources.citations.length) {
+          const baseline = await collaborationBaselineRef.current
+          if (!baseline || baseline.root !== current.root) throw new Error('The local resource baseline is unavailable. Reconnect this project before checkpointing shared figures or references.')
+          const bibliography = sharedResources.citations.length ? {
+            path: DEFAULT_ACQUISITION_BIBLIOGRAPHY,
+            content: JSON.stringify(sharedResources.citations.map((record) => citationRecordToAcquisitionCsl(record, DEFAULT_ACQUISITION_BIBLIOGRAPHY)), null, 2) + '\n',
+            expectedHash: baseline.bibliographyHash,
+          } : undefined
+          const result = await desktopHost.saveCollaborationCheckpoint({
+            root: current.root, documentPath: current.path, documentContent: checkpoint.source, expectedDocumentHash: current.hash,
+            assets: checkpointImages.map((image) => ({ path: image.path, bytes: [...base64ToBytes(image.base64)], expectedHash: baseline.assets[image.path] ?? null })),
+            bibliography,
+          })
+          savedHash = result.documentHash
+          if (result.bibliographyHash) citationBibliographyRef.current = { path: DEFAULT_ACQUISITION_BIBLIOGRAPHY, hash: result.bibliographyHash }
+          collaborationBaselineRef.current = Promise.resolve({ root: current.root, assets: { ...baseline.assets, ...result.assetHashes }, bibliographyHash: result.bibliographyHash ?? baseline.bibliographyHash })
+        } else {
+          const result = await desktopHost.saveDocument({ root: current.root, path: current.path, content: checkpoint.source, expectedHash: current.hash })
+          savedHash = result.hash
+        }
+        replaceDesktopSession({ ...current, hash: savedHash, savedRevision: draftRevisionRef.current })
         writeRecoverySnapshot(parsed.draft, filename, checkpoint.source)
         setSaveProblem('')
         setSaveState('saved')
@@ -3603,9 +3665,40 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     })
   }
 
-  const freshPublicationProblem = (source: string) => {
+  const readPublicationAssets = async (source: string, preferLocal = false): Promise<PublicationAsset[]> => {
+    const paths = publicationAssetPaths(source)
+    if (!paths.length) return []
+    if (desktopSession && (preferLocal || !collaborationSessionActive)) {
+      const assets = await desktopHost.readProjectAssets(desktopSession.root, paths)
+      return assets.map((asset) => ({ path: asset.path, bytes: Uint8Array.from(asset.bytes) }))
+    }
+    const known = paths.flatMap((path) => {
+      const shared = sharedResources.images.find((image) => image.path === path)
+      if (shared) return [{ path, bytes: base64ToBytes(shared.base64), mimeType: shared.mimeType }]
+      if (path === 'figures/generated/fig-canopy.svg' && !collaborationLaunch) return [{ path, bytes: new TextEncoder().encode(sampleFigure), mimeType: 'image/svg+xml' }]
+      const fixture = builtInProject === 'complete-example' ? completeExampleProjectFiles.find((file) => file.path === path) : undefined
+      return fixture ? [{ path, bytes: new TextEncoder().encode(fixture.content), mimeType: 'image/svg+xml' }] : []
+    })
+    const missing = paths.filter((path) => !known.some((asset) => asset.path === path))
+    return [...known, ...await readBrowserPublicationAssets(missing, window.location.href)]
+  }
+
+  const loadSharedProjectResources = async (preferLocal = false): Promise<ProjectResources> => {
+    const assets = await readPublicationAssets(manuscriptSource, preferLocal)
+    return { images: assets.map((asset) => sharedImage(asset.path, asset.bytes)), citations }
+  }
+  const applySharedProjectResources = (resources: ProjectResources) => {
+    setSharedResources(resources)
+    setCitations((current) => {
+      const incoming = new Map(resources.citations.map((record) => [record.citekey, record]))
+      const merged = [...current.filter((record) => !incoming.has(record.citekey)), ...resources.citations]
+      return JSON.stringify(current) === JSON.stringify(merged) ? current : merged
+    })
+  }
+
+  const freshPublicationProblem = async (source: string) => {
     if (!requireFreshPublication) return undefined
-    return publicationFreshnessProblem(source, executionCellStates)
+    return publicationFreshnessSnapshotProblem(source, executionCellStates)
   }
 
   const exportPublication = async (kind: 'html' | 'pdf') => {
@@ -3619,18 +3712,17 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       setToast('Publication export blocked · resolve the overlapping alternatives')
       return
     }
-    const freshnessProblem = freshPublicationProblem(projection.source)
+    const freshnessProblem = await freshPublicationProblem(projection.source)
     if (freshnessProblem) {
       setExportOpen(false)
       setToast(`Publication export blocked · ${freshnessProblem}`)
       return
     }
     try {
-      const html = renderNativeHtmlExport(projection.source, {
-        title: draft.title,
-        citationLabels: publicationCitationLabels,
-        bibliography: renderedBibliography,
-      })
+      const [assets, formatted] = await Promise.all([readPublicationAssets(projection.source), preparePublicationCitations(projection.source, structuredClone(citations), citationStyle, citationLocale)])
+      const assetProblem = requireFreshPublication ? await publicationAssetFreshnessProblem(assets, executionCellStates) : undefined
+      if (assetProblem) throw new Error(assetProblem)
+      const html = renderNativeHtmlExport(projection.source, { title: draft.title, ...formatted, assets, requireAssets: true })
       const base = filename.replace(/\.(qmd|md)$/i, '')
       if (kind === 'html') queueFileExport({
         suggestedName: `${base}.html`,
@@ -3650,24 +3742,25 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     }
   }
 
-  const exportDocx = () => {
+  const exportDocx = async () => {
     const projection = projectCurrentManuscriptSource(manuscriptSource, draft, structuredMode, 'final')
     if (!projection.ok) {
       setExportOpen(false)
       setToast('DOCX export blocked · resolve the overlapping alternatives')
       return
     }
-    const freshnessProblem = freshPublicationProblem(projection.source)
+    const freshnessProblem = await freshPublicationProblem(projection.source)
     if (freshnessProblem) {
       setExportOpen(false)
       setToast(`DOCX export blocked · ${freshnessProblem}`)
       return
     }
     try {
-      const result = renderDocxExport(projection.source, {
-        citationLabels: publicationCitationLabels,
-        bibliography: renderedBibliography,
-      })
+      const [images, formatted] = await Promise.all([readPublicationAssets(projection.source), preparePublicationCitations(projection.source, structuredClone(citations), citationStyle, citationLocale)])
+      const assetProblem = requireFreshPublication ? await publicationAssetFreshnessProblem(images, executionCellStates) : undefined
+      if (assetProblem) throw new Error(assetProblem)
+      const assets = await preparePublicationAssetsForDocx(images, projection.source)
+      const result = renderDocxExport(projection.source, { ...formatted, assets, requireAssets: true })
       const base = filename.replace(/\.(qmd|md)$/i, '')
       queueFileExport({
         suggestedName: `${base}.docx`,
@@ -3684,7 +3777,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     }
   }
 
-  const openExternalExport = () => {
+  const openExternalExport = async () => {
     if (!desktopSession) {
       setExportOpen(false)
       setToast('Pandoc and Quarto exports are available for desktop project folders')
@@ -3696,7 +3789,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       setToast('External export blocked · resolve the overlapping alternatives')
       return
     }
-    const freshnessProblem = freshPublicationProblem(projection.source)
+    const freshnessProblem = await freshPublicationProblem(projection.source)
     if (freshnessProblem) {
       setExportOpen(false)
       setToast(`External export blocked · ${freshnessProblem}`)
@@ -3706,7 +3799,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     setExportOpen(false)
   }
 
-  const openSubmissionPreparation = () => {
+  const openSubmissionPreparation = async () => {
     const projection = projectCurrentManuscriptSource(manuscriptSource, draft, structuredMode, 'final')
     if (!projection.ok) {
       setDiagnostics((current) => [
@@ -3717,15 +3810,22 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       setToast('Submission preparation blocked · resolve the overlapping alternatives')
       return
     }
-    const freshnessProblem = freshPublicationProblem(projection.source)
+    const freshnessProblem = await freshPublicationProblem(projection.source)
     if (freshnessProblem) {
       setExportOpen(false)
       setToast(`Submission preparation blocked · ${freshnessProblem}`)
       return
     }
     setDiagnostics((current) => current.filter((diagnostic) => !diagnostic.code.startsWith('final-projection-')))
-    setSubmissionExportSource(projectComputationsForPublication(projection.source))
-    setExportOpen(false)
+    try {
+      const records = structuredClone(citations)
+      const [formatted, assets] = await Promise.all([preparePublicationCitations(projection.source, records, citationStyle, citationLocale), readPublicationAssets(projection.source)])
+      const assetProblem = requireFreshPublication ? await publicationAssetFreshnessProblem(assets, executionCellStates) : undefined
+      if (assetProblem) throw new Error(assetProblem)
+      setSubmissionReferences({ records, ...formatted, assets })
+      setSubmissionExportSource(projectComputationsForPublication(projection.source))
+      setExportOpen(false)
+    } catch (error) { setToast(`Submission preparation blocked · ${readableError(error)}`) }
   }
 
   const showReviewPanel = () => {
@@ -3790,7 +3890,15 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     requestAnimationFrame(() => globalThis.document.getElementById(`review-item-${item.id}`)?.scrollIntoView({ block: 'nearest' }))
   }
 
+  const liveDocumentSwitchBlocked = () => {
+    if (!collaborationSessionActiveRef.current) return false
+    setCollaborationOpen(true)
+    setToast('Leave the live session before opening another manuscript. Your current changes stay in this shared draft.')
+    return true
+  }
+
   const openPortableFile = async (file: File, options: PortableFileOpenOptions = {}) => {
+    if (liveDocumentSwitchBlocked()) return
     if (!/\.(qmd|md)$/i.test(file.name)) {
       setToast('Choose a Markdown or Quarto manuscript (.md or .qmd)')
       return
@@ -3813,6 +3921,9 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       return
     }
     replaceDesktopSession(null)
+    setSharedResources({ images: [], citations: [] })
+    setDismissedInitialCollaboration(true)
+    setLinkedCollaborationLaunch(null)
     executionAbortRef.current?.abort()
     executionAbortRef.current = null
     executionManifestHashRef.current.clear()
@@ -3870,6 +3981,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   }
 
   const openCompleteExample = async () => {
+    if (liveDocumentSwitchBlocked()) return
     if (projectBusy) return
     setProjectBusy(true)
     try {
@@ -3902,6 +4014,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   }, [initialExperience])
 
   const applyDesktopProject = async (project: ProjectSnapshot, announce = true, selectedPath?: string, remember = true, reloadDisk = false) => {
+    if (liveDocumentSwitchBlocked()) return false
     if (!reloadDisk && (sourceEditing || draftRevisionRef.current !== 0) && !await flushDraftBeforeLeave()) return false
     const previousRevision = draftRevisionRef.current
     automaticSetupSignatureRef.current = ''
@@ -3916,10 +4029,13 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       throw new Error('This folder does not contain a Markdown or Quarto manuscript.')
     }
 
-    const [document, projectBibliography, lockSnapshot, cacheSnapshot, manifestSnapshots] = await Promise.all([
-      desktopHost.readDocument(project.root, mainPath),
+    const document = await desktopHost.readDocument(project.root, mainPath)
+    let citedBibliographies: string[] = []
+    try { citedBibliographies = referencedBibliographyPaths(document.content, mainPath) } catch { /* Unsupported source remains editable; checkpoint preparation reports its precise diagnostic. */ }
+    const bibliographyPaths = citedBibliographies.length ? citedBibliographies : project.bibliographies.map((entry) => entry.path)
+    const [projectBibliography, lockSnapshot, cacheSnapshot, manifestSnapshots] = await Promise.all([
       loadProjectBibliographies(
-        project.bibliographies.map((entry) => entry.path),
+        bibliographyPaths,
         async (path) => (await desktopHost.readBibliography(project.root, path)).content,
       ),
       desktopHost.readCitationLock(project.root),
@@ -4004,12 +4120,15 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     citationCacheRef.current = cacheResult.cache
     citationCacheHashRef.current = cacheSnapshot?.hash ?? null
     citationCacheLoadDiagnosticsRef.current = cacheResult.diagnostics
-    const acquisitionPath = project.config.citationBibliography ?? DEFAULT_ACQUISITION_BIBLIOGRAPHY
+    const acquisitionPath = citedBibliographies.find((path) => /\.json$/i.test(path)) ?? project.config.citationBibliography ?? DEFAULT_ACQUISITION_BIBLIOGRAPHY
     citationBibliographyRef.current = {
       path: acquisitionPath,
       hash: project.bibliographies.find((entry) => entry.path === acquisitionPath)?.hash ?? null,
     }
     replaceBuiltInProject(null)
+    setSharedResources({ images: [], citations: [] })
+    setDismissedInitialCollaboration(true)
+    setLinkedCollaborationLaunch(null)
     replaceDesktopSession({ root: project.root, path: mainPath, hash: document.hash, savedRevision: 0 })
     setDesktopProject(project)
     replaceManuscriptSource(document.content)
@@ -4061,13 +4180,13 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
 
   useEffect(() => {
     const link = desktopProject?.config.collaboration
-    if (!link || collaborationLaunch || linkedCollaborationLaunch || collaborationSession?.state !== 'ready') return
+    if (!link || (collaborationLaunch && !dismissedInitialCollaboration) || linkedCollaborationLaunch || collaborationSession?.state !== 'ready') return
     if (collaborationSession.serviceUrl !== link.serviceUrl) return
     const launch = collaborationSession.launchFor(link.workspaceId, link.projectId, { canBootstrap: false })
     if (!launch) return
     setLinkedCollaborationLaunch(launch)
     setCollaborationOpen(true)
-  }, [collaborationLaunch, collaborationSession, desktopProject?.config.collaboration, linkedCollaborationLaunch])
+  }, [collaborationLaunch, dismissedInitialCollaboration, collaborationSession, desktopProject?.config.collaboration, linkedCollaborationLaunch])
 
   const acceptStartedCollaboration = ({ project, launch }: StartCollaborationResult) => {
     setDesktopProject(project)
@@ -4091,6 +4210,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   }
 
   const openDesktopProject = async (knownRoot?: string, announce = true, reloadDisk = false) => {
+    if (liveDocumentSwitchBlocked()) return
     if (!desktopHost.available || projectBusy) return
     setProjectBusy(true)
     try {
@@ -4107,6 +4227,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   }
 
   const beginCreateDesktopProject = async () => {
+    if (liveDocumentSwitchBlocked()) return
     if (!desktopHost.available || projectBusy) return
     setProjectBusy(true)
     try {
@@ -4241,6 +4362,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   }
 
   const beginLocalExecutionCopy = () => {
+    if (liveDocumentSwitchBlocked()) return
     if (!desktopHost.available) return
     setLocalExecutionCopyName(projectName.trim() || 'DraftMatter project')
     setLocalExecutionCopyProblem('')
@@ -4288,6 +4410,9 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
         path: file.path,
         bytes: [...encoder.encode(file.content)],
       })))
+    }
+    if (sharedResources.images.length) {
+      await desktopHost.seedProjectFiles(project.root, sharedResources.images.map((image) => ({ path: image.path, bytes: [...base64ToBytes(image.base64)] })))
     }
     if (activeCollaborationLaunch) {
       await desktopHost.setCollaborationLink(project.root, {
@@ -4572,7 +4697,12 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     const selectedAcquisitions = transientAcquisitionRecords.filter((record) => citationPickerItems.some((item) => item.citekey === record.citekey))
     const session = desktopSessionRef.current
     const structuredCitationLabel = formatCitationCluster(mergeCitationRecords(citations, selectedAcquisitions), citationPickerItems)
-    if (!session || !selectedAcquisitions.length) {
+    if (!session || collaborationSessionActiveRef.current || !selectedAcquisitions.length) {
+      if (collaborationSessionActiveRef.current && collaborativeEditorBinding) {
+        const selected = mergeCitationRecords(citations, selectedAcquisitions).filter((record) => citationPickerItems.some((item) => item.citekey === record.citekey))
+        try { publishProjectResources(collaborativeEditorBinding.document, { images: [], citations: selected }) }
+        catch (error) { setToast(`Citation could not be shared · ${readableError(error)}`); return }
+      }
       if (selectedAcquisitions.length) setCitations((current) => mergeCitationRecords(current, selectedAcquisitions))
       if (citationPickerTarget === 'structured-selection') {
         if (!structuredEditorRef.current?.insertCitation(citationPickerItems, structuredCitationLabel)) {
@@ -5174,7 +5304,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
             {exportOpen && (
               <div className="popover export-menu">
                 <span className="export-menu-heading">Publish</span>
-                <label className="export-freshness-policy"><input type="checkbox" checked={requireFreshPublication} onChange={(event) => setRequireFreshPublication(event.target.checked)} /><span><strong>Require current computed values</strong><small>Block publication when a referenced value is missing or stale</small></span></label>
+                <label className="export-freshness-policy"><input type="checkbox" checked={requireFreshPublication} onChange={(event) => setRequireFreshPublication(event.target.checked)} /><span><strong>Require current computed results</strong><small>Block publication when a published value, figure, or table is missing or stale</small></span></label>
                 <button onClick={openSubmissionPreparation}><span><strong>Journal submission…</strong><small>Check and package manuscript files</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => exportPublication('html')}><span><strong>Web page</strong><small>Clean, styled, and self-contained</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => exportPublication('pdf')}><span><strong>PDF</strong><small>Print-ready manuscript</small></span><Icon name="arrowRight" /></button>
@@ -5465,7 +5595,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
                       : <button type="button" onClick={() => setExecutionWorkspaceOpen(true)}>Desktop instructions</button>}
               </section>
             )}
-            {!structuredOutline.some((item) => item.level === 1) && (
+            {!structuredDocument.content.content.some((node) => node.type.name === 'heading' && node.attrs.level === 1) && (
               <>
                 <ManuscriptTextEditor as="h1" value={draft.title} onChange={(title) => updateManuscriptText('title', title)} ariaLabel="Manuscript title" className="paper-title" readOnly={!canEditManuscript} />
                 <PublicationBylineView byline={publicationByline} />
@@ -5506,7 +5636,9 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
               activeReviewAnchorId={activeReviewAnchorId}
               collaboration={collaborativeEditorBinding}
               readOnly={Boolean(structuredReviewProjection) || !canEditManuscript}
-              resolveAssetUrl={(path) => desktopSession
+              resolveAssetUrl={(path) => sharedResources.images.some((image) => image.path === path)
+                ? (() => { const image = sharedResources.images.find((item) => item.path === path)!; return `data:${image.mimeType};base64,${image.base64}` })()
+                : desktopSession
                 ? projectArtifactUrl(desktopSession.root, path) ?? 'data:,'
                 : builtInProject === 'complete-example'
                   ? completeExampleAssetUrls[path] ?? path
@@ -5989,13 +6121,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
         <SubmissionPackageDialog
           source={submissionExportSource}
           baseName={filename}
-          citations={citations}
-          citationLabels={publicationCitationLabels}
-          bibliography={renderedBibliography}
-          loadProjectAssets={desktopSession ? async (paths) => {
-            const assets = await desktopHost.readProjectAssets(desktopSession.root, paths)
-            return assets.map((asset) => ({ path: asset.path, bytes: Uint8Array.from(asset.bytes) }))
-          } : undefined}
+          citations={submissionReferences?.records ?? citations}
+          citationLabels={submissionReferences?.citationLabels ?? publicationCitationLabels}
+          bibliography={submissionReferences?.bibliography ?? renderedBibliography}
+          loadProjectAssets={async (paths) => (submissionReferences?.assets ?? []).filter((asset) => paths.includes(asset.path))}
           onClose={() => setSubmissionExportSource(undefined)}
           onExport={(file) => {
             setSubmissionExportSource(undefined)
@@ -6281,6 +6410,9 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       <CollaborationDialog
         open={collaborationOpen}
         source={manuscriptSource}
+        loadResources={loadSharedProjectResources}
+        onResources={applySharedProjectResources}
+        onSaveGuardChange={(guard) => { collaborationSaveGuardRef.current = guard }}
         launch={activeCollaborationLaunch}
         onClose={() => setCollaborationOpen(false)}
         onConnected={() => { setCollaborationOpen(false); setStartCollaborationOpen(false) }}
@@ -6291,11 +6423,12 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
         onRoleChange={updateCollaborationRole}
         onEditorBindingChange={setCollaborativeEditorBinding}
         onRequestOpen={() => setCollaborationOpen(true)}
+        prepareCheckpointSource={(source) => prepareCollaborationCheckpointSource(source, sharedResources.citations, '../'.repeat(Math.max(0, (desktopSession?.path.split('/').length ?? 1) - 1)) + DEFAULT_ACQUISITION_BIBLIOGRAPHY)}
         onCheckpoint={checkpointCollaboration}
         onCheckpointStateChange={setCollaborationUncheckpointed}
         checkpointMode={desktopSession ? 'working-tree' : 'download'}
         checkpointTarget={desktopSession?.path ?? filename}
-        canUseBrowserSignIn={!desktopHost.available}
+        canUseBrowserSignIn
         localAuthor={userSettings.author}
       />
 

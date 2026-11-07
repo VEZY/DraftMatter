@@ -1,3 +1,5 @@
+import { sharedImage, type ProjectResources } from './sharedEditor/projectResources'
+import { publicationAssetPaths } from './publicationAssets'
 // @vitest-environment jsdom
 
 import { act, createElement } from 'react'
@@ -13,6 +15,7 @@ const source = reviewedProjection(initialDraft)
 const sharedSource = reviewedProjection({ ...initialDraft, title: 'Shared canopy revision' })
 const collaboration = CollaborativeDocument.fromPortableSource(sharedSource)
 const checkpoint = createCollaborationCheckpoint(collaboration)
+let resources: ProjectResources = { images: [], citations: [] }
 let editorDocument: Y.Doc
 let editorAwareness: Awareness
 let publishPortableSource: Mock<(source: string) => string>
@@ -22,6 +25,7 @@ vi.mock('./CollaborationDialog', () => ({
   CollaborationDialog: (props: {
     open: boolean
     onRemoteSource: (source: string) => void
+    onResources: (resources: ProjectResources) => void
     onStatus: (status: 'connected') => void
     onSessionStateChange: (active: boolean) => void
     onRoleChange: (role: 'owner' | 'editor' | 'commenter' | 'viewer' | null) => void
@@ -35,6 +39,7 @@ vi.mock('./CollaborationDialog', () => ({
         props.onRoleChange('owner')
         props.onStatus('connected')
         props.onRemoteSource(sharedSource)
+        props.onResources(resources)
         props.onCheckpointStateChange(true)
       },
     }, 'Apply live revision'),
@@ -79,6 +84,7 @@ describe('owner-controlled collaboration checkpoint', () => {
   beforeEach(async () => {
     ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
     localStorage.clear()
+    resources = { images: [], citations: [] }
     localStorage.setItem('draftmatter.last-project-root.v1', rootPath)
     previousAvailability = desktopHost.available
     desktopHost.available = true
@@ -140,6 +146,37 @@ describe('owner-controlled collaboration checkpoint', () => {
       expectedHash: 'document-old',
     })
     expect(container.textContent).toContain('Saved to project')
+  })
+
+  it('checkpoints shared figure bytes with the baseline revision in the native atomic transaction', async () => {
+    const path = publicationAssetPaths(checkpoint.source)[0]
+    const before = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><text>Before</text></svg>')
+    const after = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><text>After</text></svg>')
+    const { projectAssetHash } = await import('./desktopHost')
+    vi.spyOn(desktopHost, 'readProjectAssets').mockResolvedValue([{ path, bytes: [...before], mediaType: 'image/svg+xml' }])
+    const save = vi.spyOn(desktopHost, 'saveCollaborationCheckpoint').mockResolvedValue({ documentHash: 'document-complete', assetHashes: { [path]: await projectAssetHash(after) } })
+    resources = { images: [sharedImage(path, after)], citations: [] }
+    await act(async () => container.querySelector<HTMLButtonElement>('.collaboration-toggle')!.click())
+    const controls = container.querySelector<HTMLElement>('[data-testid="collaboration-test-controls"]')!
+    await act(async () => [...controls.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Apply live revision')!.click())
+    await act(async () => {
+      [...controls.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Checkpoint live revision')!.click()
+      await new Promise((resolve) => window.setTimeout(resolve, 20))
+    })
+    expect(desktopHost.saveDocument).not.toHaveBeenCalled()
+    expect(save).toHaveBeenCalledWith(expect.objectContaining({ root: rootPath, documentPath: 'paper.qmd', documentContent: checkpoint.source, expectedDocumentHash: 'document-old', assets: [{ path, bytes: [...after], expectedHash: await projectAssetHash(before) }] }))
+  })
+
+  it('prevents opening a different manuscript into the current live room', async () => {
+    await act(async () => container.querySelector<HTMLButtonElement>('.collaboration-toggle')!.click())
+    const controls = container.querySelector<HTMLElement>('[data-testid="collaboration-test-controls"]')!
+    await act(async () => [...controls.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Apply live revision')!.click())
+    const before = container.querySelector('.structured-manuscript-editor')?.textContent
+    await act(async () => container.querySelector<HTMLButtonElement>('.project-switcher')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('.project-menu-example')!.click())
+    expect(container.textContent).toContain('Leave the live session before opening another manuscript')
+    expect(container.querySelector('.structured-manuscript-editor')?.textContent).toBe(before)
+    expect(container.querySelector('.structured-manuscript-editor')?.textContent).not.toContain('A reproducible cross-language analysis')
   })
 
   it('enforces commenter and viewer capabilities across the rendered editor and review rail', async () => {

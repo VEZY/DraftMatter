@@ -1,4 +1,4 @@
-use crate::{canonical_root, contained_path, write_atomic, HostError};
+use crate::{canonical_root, contained_path, HostError};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::fs;
@@ -454,66 +454,18 @@ fn plan_project_changes(
     Ok(writes)
 }
 
-fn write_or_remove(root: &Path, relative: &str, content: Option<&[u8]>) -> Result<(), HostError> {
-    let path = contained_path(root, relative)?;
-    if let Some(bytes) = content {
-        return write_atomic(&path, bytes, false);
-    }
-    match fs::remove_file(&path) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
-        Err(error) => Err(error.into()),
-    }
-}
 
 fn apply_transaction(
     root: &Path,
     writes: &[PlannedWrite],
     fail_after_writes: Option<usize>,
 ) -> Result<Vec<String>, HostError> {
-    let originals = writes
-        .iter()
-        .map(|write| {
-            Ok((
-                write.path.clone(),
-                existing_bytes(&contained_path(root, &write.path)?)?,
-            ))
-        })
-        .collect::<Result<Vec<_>, HostError>>()?;
-    let mut written = Vec::new();
-    for write in writes {
-        let result = write_or_remove(root, &write.path, write.content.as_deref()).and_then(|_| {
-            if fail_after_writes == Some(written.len() + 1) {
-                Err(HostError::Io(format!(
-                    "Injected AI integration interruption after {} write(s).",
-                    written.len() + 1
-                )))
-            } else {
-                Ok(())
-            }
-        });
-        written.push(write.path.clone());
-        if let Err(error) = result {
-            let mut rollback_failures = Vec::new();
-            for rollback_path in written.iter().rev() {
-                let original = originals
-                    .iter()
-                    .find(|(path, _)| path == rollback_path)
-                    .and_then(|(_, content)| content.as_deref());
-                if let Err(rollback_error) = write_or_remove(root, rollback_path, original) {
-                    rollback_failures.push(format!("{rollback_path}: {rollback_error}"));
-                }
-            }
-            return Err(HostError::Io(if rollback_failures.is_empty() {
-                format!("{error} The project AI transaction was rolled back.")
-            } else {
-                format!(
-                    "{error} Project AI rollback requires recovery: {}",
-                    rollback_failures.join("; ")
-                )
-            }));
-        }
-    }
+    if writes.is_empty() { return Ok(Vec::new()); }
+    crate::project_transactions::apply(root, writes.iter().map(|write| (write.path.clone(), write.content.clone())).collect(), |count| {
+        if fail_after_writes == Some(count) { return Err(HostError::Io(format!("Injected AI integration interruption after {count} write(s)."))); }
+        Ok(())
+    })?;
+    let mut written = writes.iter().map(|write| write.path.clone()).collect::<Vec<_>>();
     written.sort();
     Ok(written)
 }
@@ -522,6 +474,7 @@ pub(crate) fn agent_integration_status_impl(
     raw_root: &str,
 ) -> Result<AgentIntegrationStatus, HostError> {
     let root = canonical_root(raw_root)?;
+    let _project_guard = crate::project_guard(&root)?;
     let agents = existing_text(&contained_path(&root, "AGENTS.md")?)?;
     let instructions_ready = agents
         .as_deref()
@@ -609,6 +562,7 @@ fn initialize_ai_integration_transaction(
     fail_after_writes: Option<usize>,
 ) -> Result<AgentIntegrationInitialization, HostError> {
     let root = canonical_root(raw_root)?;
+    let _project_guard = crate::project_guard(&root)?;
     let writes = plan_project_changes(&root, true, true)?;
     let files = apply_transaction(&root, &writes, fail_after_writes)?;
     Ok(AgentIntegrationInitialization {
@@ -629,6 +583,7 @@ pub(crate) fn disable_ai_integration_impl(
     raw_root: &str,
 ) -> Result<AgentIntegrationInitialization, HostError> {
     let root = canonical_root(raw_root)?;
+    let _project_guard = crate::project_guard(&root)?;
     let writes = plan_project_changes(&root, false, true)?;
     let files = apply_transaction(&root, &writes, None)?;
     Ok(AgentIntegrationInitialization {

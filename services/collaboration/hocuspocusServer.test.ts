@@ -6,6 +6,7 @@ import * as Y from 'yjs'
 import { AuthenticatedWorkspaceService } from '../../src/collaboration/workspaceService'
 import { parseReviewMarkup } from '../../src/reviewMarkup'
 import { appendReviewThreadMessage, createReviewChange, createReviewThread } from '../../src/reviewOperations'
+import { PROJECT_RESOURCES_ROOT, sharedImage } from '../../src/sharedEditor/projectResources'
 import { CollaborativeDocument } from '../../src/sharedEditor/collaboration'
 import { CollaborativeReviewBinding } from '../../src/sharedEditor/collaborativeReview'
 import { FileCollaborationStore } from './fileStore'
@@ -314,6 +315,46 @@ describe('authenticated Hocuspocus transport', () => {
 
     expect(editorUpdateDiagnostic(collaboration.doc, unrelatedStatus, 'editor')).toBe('review-record-invalid')
     collaboration.destroy()
+  })
+
+  it('rejects incomplete structures and deletion sets under every writable role', () => {
+    const source = CollaborativeDocument.fromPortableSource('Original text.')
+    const sender = new Y.Doc()
+    Y.applyUpdate(sender, Y.encodeStateAsUpdate(source.doc))
+    sender.getText('draftmatter:document').insert(0, 'First ')
+    const halfway = Y.encodeStateVector(sender)
+    sender.getText('draftmatter:document').insert(6, 'Second ')
+    const incompleteStructure = Y.encodeStateAsUpdate(sender, halfway)
+    const deletionSender = new Y.Doc()
+    deletionSender.getText('draftmatter:document').insert(0, 'not yet received')
+    const beforeDelete = Y.encodeStateVector(deletionSender)
+    deletionSender.getText('draftmatter:document').delete(0, 3)
+    const incompleteDeletion = Y.encodeStateAsUpdate(deletionSender, beforeDelete)
+    for (const update of [incompleteStructure, incompleteDeletion]) {
+      expect(commenterUpdateDiagnostic(source.doc, update, 'commenter')).toBe('update-invalid')
+      expect(editorUpdateDiagnostic(source.doc, update, 'editor')).toBe('update-invalid')
+      const empty = new Y.Doc()
+      expect(ownerUpdateDiagnostic(empty, update, 'owner')).toBe('update-invalid')
+      empty.destroy()
+    }
+    // A complete reconnect update is still valid for editors.
+    expect(editorUpdateDiagnostic(source.doc, Y.encodeStateAsUpdate(sender), 'editor')).toBeNull()
+    sender.destroy()
+    deletionSender.destroy()
+    source.destroy()
+  })
+
+  it('allows bounded shared project resources only for manuscript editors', () => {
+    const source = CollaborativeDocument.fromPortableSource('Article with figures.')
+    const image = sharedImage('figures/example.png', Uint8Array.from([137, 80, 78, 71]))
+    const update = updateFrom(source.doc, (candidate) => candidate.getMap(PROJECT_RESOURCES_ROOT).set('image:figures/example.png', image))
+    expect(commenterUpdateDiagnostic(source.doc, update, 'commenter')).toBe('protected-state-changed')
+    expect(editorUpdateDiagnostic(source.doc, update, 'editor')).toBeNull()
+    expect(ownerUpdateDiagnostic(source.doc, update, 'owner')).toBeNull()
+    const invalid = updateFrom(source.doc, (candidate) => candidate.getMap(PROJECT_RESOURCES_ROOT).set('image:../outside.png', { ...image, path: '../outside.png' }))
+    expect(editorUpdateDiagnostic(source.doc, invalid, 'editor')).not.toBeNull()
+    expect(ownerUpdateDiagnostic(source.doc, invalid, 'owner')).not.toBeNull()
+    source.destroy()
   })
 
   it('loads persisted state and stores authenticated server changes through narrow hooks', async () => {

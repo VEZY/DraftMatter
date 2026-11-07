@@ -89,12 +89,40 @@ function secret(value: string, name = 'DM_WEBHOOK_SECRET') {
   return Uint8Array.from(bytes)
 }
 
-function databaseSsl(environment: NodeJS.ProcessEnv) {
-  const mode = (environment.DM_DATABASE_TLS ?? 'require').trim().toLowerCase()
+function databaseSsl(environment: NodeJS.ProcessEnv, production: boolean) {
+  const mode = (environment.DM_DATABASE_TLS ?? (production ? 'verify-full' : 'require')).trim().toLowerCase()
+  if (production && mode !== 'verify-full') {
+    throw new CollaborationConfigError('DM_DATABASE_TLS must be verify-full in production.')
+  }
   if (mode === 'disable') return false
   if (mode === 'require') return { rejectUnauthorized: false }
   if (mode === 'verify-full') return { rejectUnauthorized: true }
   throw new CollaborationConfigError('DM_DATABASE_TLS must be disable, require, or verify-full.')
+}
+
+function databaseUrl(value: string) {
+  let url: URL
+  try {
+    url = new URL(value)
+  } catch {
+    throw new CollaborationConfigError('DM_DATABASE_URL must be a PostgreSQL URL.')
+  }
+  if (!['postgres:', 'postgresql:'].includes(url.protocol)) throw new CollaborationConfigError('DM_DATABASE_URL must be a PostgreSQL URL.')
+  // node-postgres replaces the explicit ssl object when these URL options are
+  // present. One configuration authority prevents even verify-full being downgraded.
+  const overrides = new Set(['ssl', 'sslmode', 'sslcert', 'sslkey', 'sslrootcert', 'sslnegotiation', 'uselibpqcompat'])
+  if ([...url.searchParams.keys()].some((key) => overrides.has(key.toLowerCase()))) {
+    throw new CollaborationConfigError('DM_DATABASE_URL cannot contain SSL options; configure TLS with DM_DATABASE_TLS and the platform CA.')
+  }
+  return value
+}
+
+function allowedOrigin(value: string) {
+  if (value === 'tauri://localhost' || value === 'http://tauri.localhost') return value
+  const normalized = httpsUrl(value, 'DM_ALLOWED_ORIGINS')
+  const url = new URL(normalized)
+  if (url.pathname !== '/' || url.search) throw new CollaborationConfigError('DM_ALLOWED_ORIGINS must contain exact origins without paths or queries.')
+  return url.origin
 }
 
 export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = process.env): CollaborationServiceConfig {
@@ -105,7 +133,7 @@ export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = 
   const audiences = required(environment, 'DM_OIDC_AUDIENCE').split(',').map((value) => value.trim()).filter(Boolean)
   if (!audiences.length) throw new CollaborationConfigError('DM_OIDC_AUDIENCE must contain at least one audience.')
   const clientId = environment.DM_OIDC_CLIENT_ID?.trim() || audiences[0]
-  const allowedOrigins = (environment.DM_ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean).map((value) => httpsUrl(value, 'DM_ALLOWED_ORIGINS'))
+  const allowedOrigins = (environment.DM_ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean).map(allowedOrigin)
   if (mode === 'production' && !allowedOrigins.length) throw new CollaborationConfigError('DM_ALLOWED_ORIGINS is required in production.')
 
   const endpoint = environment.DM_OBJECT_ENDPOINT?.trim()
@@ -128,11 +156,11 @@ export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = 
     address: environment.DM_ADDRESS?.trim() || '0.0.0.0',
     port: integer(environment, 'DM_PORT', 1234, 1, 65_535),
     database: {
-      connectionString: required(environment, 'DM_DATABASE_URL'),
+      connectionString: databaseUrl(required(environment, 'DM_DATABASE_URL')),
       max: integer(environment, 'DM_DATABASE_POOL_MAX', 10, 1, 200),
       idleTimeoutMillis: integer(environment, 'DM_DATABASE_IDLE_MS', 30_000, 1_000, 10 * 60_000),
       connectionTimeoutMillis: integer(environment, 'DM_DATABASE_CONNECT_MS', 5_000, 250, 60_000),
-      ssl: databaseSsl(environment),
+      ssl: databaseSsl(environment, mode === 'production'),
       application_name: 'draftmatter-collaboration',
     },
     objectStorage: {
@@ -155,7 +183,7 @@ export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = 
       },
     } : {}),
     allowedOrigins,
-    maxPayloadBytes: integer(environment, 'DM_MAX_PAYLOAD_BYTES', 1024 * 1024, 16 * 1024, 16 * 1024 * 1024),
+    maxPayloadBytes: integer(environment, 'DM_MAX_PAYLOAD_BYTES', 16 * 1024 * 1024, 16 * 1024, 16 * 1024 * 1024),
     tokenRefreshMs: integer(environment, 'DM_TOKEN_REFRESH_MS', 5 * 60_000, 30_000, 60 * 60_000),
     shutdownTimeoutMs: integer(environment, 'DM_SHUTDOWN_TIMEOUT_MS', 15_000, 1_000, 120_000),
     maintenanceIntervalMs: integer(environment, 'DM_MAINTENANCE_INTERVAL_MS', 24 * 60 * 60_000, 60_000, 7 * 24 * 60 * 60_000),

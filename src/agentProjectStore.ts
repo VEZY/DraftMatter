@@ -1,6 +1,6 @@
-import { mkdir, open, readFile, realpath, rename, stat, unlink, writeFile } from 'node:fs/promises'
-import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { readFile, realpath, stat } from 'node:fs/promises'
+import { isAbsolute, relative, resolve, sep } from 'node:path'
+import { applyProjectTransaction, confinedProjectPath, ProjectTransactionError, recoverProjectTransactions, withProjectWriteLock } from './projectTransactions'
 import { sha256 } from './kernelExecution'
 import { normalizeProjectRelativePath } from './projectPaths'
 import type { ProjectConfig } from './desktopHost'
@@ -37,11 +37,13 @@ export interface AgentProjectStore {
 export interface NodeAgentProjectStoreOptions {
   /** Deterministic transaction fault injection used by crash-recovery tests. */
   failAfterReplacements?: number
+  /** Test seam for real child-process interruption after a durable replacement. */
+  afterReplacement?: (count: number) => Promise<void>
 }
 
 export class AgentProjectStoreError extends Error {
   constructor(
-    readonly code: 'project-missing' | 'project-invalid' | 'path-outside-project' | 'path-symlink-escape' | 'stale-revision' | 'transaction-failed',
+    readonly code: 'project-missing' | 'project-invalid' | 'path-outside-project' | 'path-symlink-escape' | 'stale-revision' | 'transaction-failed' | 'project-busy',
     message: string,
     readonly details?: Record<string, unknown>,
   ) {
@@ -97,7 +99,9 @@ export class NodeAgentProjectStore implements AgentProjectStore {
       throw new AgentProjectStoreError('project-missing', `DraftMatter project root “${rawRoot}” was not found.`)
     }
     const identity = await stat(canonical, { bigint: true })
-    return new NodeAgentProjectStore(canonical, `${identity.dev}:${identity.ino}`, options)
+    const store = new NodeAgentProjectStore(canonical, `${identity.dev}:${identity.ino}`, options)
+    await store.locked(async () => undefined)
+    return store
   }
 
   private async assertRootIdentity() {
@@ -145,170 +149,95 @@ export class NodeAgentProjectStore implements AgentProjectStore {
     return { ...target, canonical }
   }
 
-  private async writablePath(path: string) {
+  private async locked<T>(action: () => Promise<T>): Promise<T> {
     await this.assertRootIdentity()
-    const target = this.unresolvedPath(path)
-    let ancestor = dirname(target.candidate)
-    while (true) {
-      try {
-        const canonical = await realpath(ancestor)
-        if (!inside(this.root, canonical)) {
-          throw new AgentProjectStoreError('path-symlink-escape', `Project path “${target.normalized}” has a parent that resolves outside the selected project.`)
-        }
-        break
-      } catch (error) {
-        if (error instanceof AgentProjectStoreError) throw error
-        const parent = dirname(ancestor)
-        if (parent === ancestor) {
-          throw new AgentProjectStoreError('path-outside-project', `Project path “${target.normalized}” has no confined writable parent.`)
-        }
-        ancestor = parent
-      }
+    try {
+      return await withProjectWriteLock(this.root, async () => {
+        await this.assertRootIdentity()
+        await recoverProjectTransactions(this.root)
+        return action()
+      })
+    } catch (error) {
+      if (error instanceof ProjectTransactionError) throw new AgentProjectStoreError(error.code, error.message)
+      throw error
     }
-    return target
   }
 
-  async readText(path: string) {
+  private async readTextUnlocked(path: string) {
     const target = await this.readablePath(path)
     const content = await readFile(target.canonical, 'utf8')
     return { content, revision: await fileRevision(content) }
   }
 
+  async readText(path: string) {
+    return this.locked(() => this.readTextUnlocked(path))
+  }
+
   async readBytes(path: string) {
-    const target = await this.readablePath(path)
-    return await readFile(target.canonical)
+    return this.locked(async () => {
+      const target = await this.readablePath(path)
+      return readFile(target.canonical)
+    })
   }
 
   async snapshot(): Promise<AgentProjectSnapshot> {
-    const configFile = await this.readText('.draftmatter/project.json')
-    let value: unknown
-    try {
-      value = JSON.parse(configFile.content)
-    } catch (error) {
-      throw new AgentProjectStoreError('project-invalid', `The DraftMatter project configuration is not valid JSON: ${error instanceof Error ? error.message : String(error)}`)
-    }
-    const config = parsedProjectConfig(value)
-    const mainDocument = this.portable(config.mainDocument)
-    const document = await this.readText(mainDocument)
-    return {
-      root: this.root,
-      config,
-      configRevision: configFile.revision,
-      mainDocument,
-      source: document.content,
-      documentRevision: document.revision,
-    }
+    return this.locked(async () => {
+      const configFile = await this.readTextUnlocked('.draftmatter/project.json')
+      let value: unknown
+      try {
+        value = JSON.parse(configFile.content)
+      } catch (error) {
+        throw new AgentProjectStoreError('project-invalid', `The DraftMatter project configuration is not valid JSON: ${error instanceof Error ? error.message : String(error)}`)
+      }
+      const config = parsedProjectConfig(value)
+      const mainDocument = this.portable(config.mainDocument)
+      const document = await this.readTextUnlocked(mainDocument)
+      return {
+        root: this.root,
+        config,
+        configRevision: configFile.revision,
+        mainDocument,
+        source: document.content,
+        documentRevision: document.revision,
+      }
+    })
   }
 
   async commit(writes: AgentProjectWrite[]): Promise<AgentProjectCommit> {
-    if (!writes.length) throw new AgentProjectStoreError('transaction-failed', 'A transaction requires at least one file write.')
-    const transactionId = randomUUID()
-    const transactionPath = join(this.root, '.draftmatter', 'transactions', transactionId)
-    const stagedPath = join(transactionPath, 'staged')
-    const backupPath = join(transactionPath, 'backup')
-    const targets = await Promise.all(writes.map(async (write) => {
-      const target = await this.writablePath(write.path)
-      let current: { content: string; revision: string } | undefined
-      try {
-        current = await this.readText(target.normalized)
-      } catch (error) {
-        if (!(error instanceof AgentProjectStoreError) || error.code !== 'project-missing') throw error
-      }
-      const currentRevision = current?.revision ?? null
-      if (write.expectedRevision !== currentRevision) {
-        throw new AgentProjectStoreError(
-          'stale-revision',
-          `Project file “${target.normalized}” changed after it was inspected.`,
-          { path: target.normalized, expectedRevision: write.expectedRevision, currentRevision },
+    return this.locked(async () => {
+      if (!writes.length) throw new AgentProjectStoreError('transaction-failed', 'A transaction requires at least one file write.')
+      // Revalidate every expected revision after acquiring the cross-process lock.
+      const targets = await Promise.all(writes.map(async (write) => {
+        const normalized = this.portable(write.path)
+        await confinedProjectPath(this.root, normalized)
+        let currentRevision: string | null = null
+        try { currentRevision = (await this.readTextUnlocked(normalized)).revision }
+        catch (error) {
+          if (!(error instanceof AgentProjectStoreError) || error.code !== 'project-missing') throw error
+        }
+        if (write.expectedRevision !== currentRevision) throw new AgentProjectStoreError(
+          'stale-revision', `Project file “${normalized}” changed after it was inspected.`,
+          { path: normalized, expectedRevision: write.expectedRevision, currentRevision },
         )
+        return { ...write, path: normalized }
+      }))
+      let transactionId: string
+      try {
+        transactionId = await applyProjectTransaction(this.root, targets.map((write) => ({
+          path: write.path, content: write.content === null ? null : new TextEncoder().encode(write.content),
+        })), async (count) => {
+          await this.options.afterReplacement?.(count)
+          if (this.options.failAfterReplacements === count) throw new Error(`Injected transaction interruption after ${count} replacement(s).`)
+        })
+      } catch (error) {
+        if (error instanceof ProjectTransactionError) throw error
+        throw new AgentProjectStoreError('transaction-failed', `The project transaction failed and was rolled back: ${error instanceof Error ? error.message : String(error)}`)
       }
-      return { ...target, write, current }
-    }))
-
-    await mkdir(stagedPath, { recursive: true })
-    await mkdir(backupPath, { recursive: true })
-    const journal = {
-      schemaVersion: 1,
-      transactionId,
-      state: 'staged',
-      files: targets.map((target) => ({
-        path: target.normalized,
-        action: target.write.content === null ? 'delete' : 'write',
-        existed: Boolean(target.current),
-      })),
-    }
-    await Promise.all(targets.map(async (target) => {
-      if (target.write.content !== null) {
-        const stage = join(stagedPath, ...target.normalized.split('/'))
-        await mkdir(dirname(stage), { recursive: true })
-        await writeFile(stage, target.write.content, 'utf8')
-        const handle = await open(stage, 'r+')
-        try {
-          await handle.sync()
-        } finally {
-          await handle.close()
-        }
-      }
-      if (target.current) {
-        const backup = join(backupPath, ...target.normalized.split('/'))
-        await mkdir(dirname(backup), { recursive: true })
-        await writeFile(backup, target.current.content, 'utf8')
-      }
-    }))
-    const journalPath = join(transactionPath, 'journal.json')
-    await writeFile(journalPath, `${JSON.stringify(journal, null, 2)}\n`, 'utf8')
-
-    const replaced: typeof targets = []
-    try {
-      for (const target of targets) {
-        if (target.write.content === null) {
-          if (target.current) await unlink(target.candidate)
-        } else {
-          await mkdir(dirname(target.candidate), { recursive: true })
-          await rename(join(stagedPath, ...target.normalized.split('/')), target.candidate)
-        }
-        replaced.push(target)
-        if (this.options.failAfterReplacements === replaced.length) {
-          throw new Error(`Injected transaction interruption after ${replaced.length} replacement(s).`)
-        }
-      }
-      await writeFile(journalPath, `${JSON.stringify({ ...journal, state: 'committed' }, null, 2)}\n`, 'utf8')
       return {
         transactionId,
         revisions: Object.fromEntries(await Promise.all(targets.map(async (target) =>
-          [target.normalized, target.write.content === null ? null : await fileRevision(target.write.content)] as const))),
+          [target.path, target.content === null ? null : await fileRevision(target.content)] as const))),
       }
-    } catch (error) {
-      const rollbackFailures: string[] = []
-      for (const target of [...replaced].reverse()) {
-        try {
-          if (target.current) {
-            try {
-              await unlink(target.candidate)
-            } catch {
-              // A deletion replacement already leaves no target to remove.
-            }
-            await rename(join(backupPath, ...target.normalized.split('/')), target.candidate)
-          } else if (target.write.content !== null) {
-            await unlink(target.candidate)
-          }
-        } catch (rollbackError) {
-          rollbackFailures.push(`${target.normalized}: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`)
-        }
-      }
-      await writeFile(journalPath, `${JSON.stringify({
-        ...journal,
-        state: rollbackFailures.length ? 'recovery-required' : 'rolled-back',
-        error: error instanceof Error ? error.message : String(error),
-        rollbackFailures,
-      }, null, 2)}\n`, 'utf8')
-      throw new AgentProjectStoreError(
-        'transaction-failed',
-        rollbackFailures.length
-          ? 'The project transaction failed and requires recovery.'
-          : 'The project transaction failed and was rolled back.',
-        { recoveryPath: relative(this.root, journalPath).split(sep).join('/'), rollbackFailures },
-      )
-    }
+    })
   }
 }

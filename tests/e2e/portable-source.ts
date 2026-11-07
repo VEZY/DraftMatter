@@ -1,4 +1,4 @@
-import type { Page } from '@playwright/test'
+import { expect, type Page } from '@playwright/test'
 
 export async function reloadWithPortableSource(page: Page, portableSource: string) {
   await page.evaluate((nextSource) => {
@@ -11,4 +11,5 @@ export async function reloadWithPortableSource(page: Page, portableSource: strin
     sessionStorage.removeItem('draftmatter.e2e-next-source')
   })
   await page.reload()
+  await expect(page.getByRole('textbox', { name: 'Rendered manuscript editor' })).toBeVisible()
 }

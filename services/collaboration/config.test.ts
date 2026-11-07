@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest'
+import { Client } from 'pg'
 import { loadCollaborationServiceConfig } from './config'
 
 function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -41,6 +42,29 @@ describe('collaboration service configuration', () => {
     expect(() => loadCollaborationServiceConfig(environment({ DM_WEBHOOK_SECRET: 'short' }))).toThrow(/32 bytes/)
     expect(() => loadCollaborationServiceConfig(environment({ NODE_ENV: 'production', DM_ALLOWED_ORIGINS: 'https://app.example.test', DM_OIDC_JWKS_URI: 'http://identity.example.test/jwks' }))).toThrow(/HTTPS/)
     expect(() => loadCollaborationServiceConfig(environment({ NODE_ENV: 'production', DM_ALLOWED_ORIGINS: '' }))).toThrow(/ALLOWED_ORIGINS/)
+  })
+
+  it('requires certificate verification in production and cannot be downgraded by a PostgreSQL URL', () => {
+    const production = environment({ NODE_ENV: 'production', DM_ALLOWED_ORIGINS: 'https://app.example.test', DM_DATABASE_TLS: undefined })
+    const config = loadCollaborationServiceConfig(production)
+    expect(config.database.ssl).toEqual({ rejectUnauthorized: true })
+    // Check node-postgres' effective configuration without making a connection.
+    const client = new Client(config.database)
+    expect((client as unknown as { connectionParameters: { ssl: unknown } }).connectionParameters.ssl).toEqual({ rejectUnauthorized: true })
+    for (const mode of ['disable', 'require']) {
+      expect(() => loadCollaborationServiceConfig({ ...production, DM_DATABASE_TLS: mode })).toThrow(/verify-full/)
+    }
+    for (const parameter of ['sslmode=disable', 'sslmode=require', 'ssl=true', 'sslcert=ignored', 'sslkey=ignored', 'sslrootcert=ignored', 'uselibpqcompat=true']) {
+      expect(() => loadCollaborationServiceConfig({ ...production, DM_DATABASE_URL: `${production.DM_DATABASE_URL}?${parameter}` })).toThrow(/cannot contain SSL options/)
+    }
+  })
+
+  it('accepts exact desktop application origins without permitting insecure remote origins or URL paths', () => {
+    const production = environment({ NODE_ENV: 'production', DM_DATABASE_TLS: 'verify-full', DM_ALLOWED_ORIGINS: 'tauri://localhost,http://tauri.localhost,https://app.example.test' })
+    expect(loadCollaborationServiceConfig(production).allowedOrigins).toEqual(['tauri://localhost', 'http://tauri.localhost', 'https://app.example.test'])
+    for (const origin of ['tauri://other', 'http://tauri.localhost.example.test', 'http://app.example.test', 'https://app.example.test/path', 'https://app.example.test/?query=1']) {
+      expect(() => loadCollaborationServiceConfig({ ...production, DM_ALLOWED_ORIGINS: origin })).toThrow()
+    }
   })
 
   it('never accepts a half-configured object-storage credential pair', () => {

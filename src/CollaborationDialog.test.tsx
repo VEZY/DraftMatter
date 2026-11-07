@@ -26,6 +26,113 @@ afterEach(() => {
 })
 
 describe('collaboration dialog', () => {
+  it('prepares portable bibliography source only for an explicit owner checkpoint', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ projects: [{ id: 'paper', workspaceId: 'forest', name: 'Paper', role: 'owner', createdAt: '2026-07-15T00:00:00.000Z' }] })))
+    const original = '---\nbibliography: old.bib\n---\n# Paper\n'
+    const prepared = original.replace('old.bib', 'references.json')
+    let current = original
+    const createCheckpoint = vi.fn(() => ({ source: current, contentHash: current, bytes: new TextEncoder().encode(current), revision: 'r1', recordCount: 0 }))
+    const publishPortableSource = vi.fn((source: string) => { current = source; return source })
+    vi.spyOn(HocuspocusCollaborationClient, 'connect').mockImplementation(async (options) => {
+      options.onPortableSource?.(`${original}\nA remote update.`)
+      return { publishPortableSource, createCheckpoint, destroy: vi.fn(), flushRecovery: vi.fn(async () => true), editorBinding: { document: {}, awareness: {} } } as unknown as HocuspocusCollaborationClient
+    })
+    const prepareCheckpointSource = vi.fn(() => prepared)
+    const onRemoteSource = vi.fn()
+    const onCheckpoint = vi.fn(async () => {})
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<CollaborationDialog open source={original} onClose={vi.fn()} onRemoteSource={onRemoteSource} onStatus={vi.fn()} onCheckpoint={onCheckpoint} prepareCheckpointSource={prepareCheckpointSource} checkpointMode="working-tree" checkpointTarget="paper.qmd" />))
+    change(input(container, 'Service URL'), 'https://collab.example.test')
+    change(input(container, 'Workspace ID'), 'forest')
+    change(input(container, 'Project ID'), 'paper')
+    change(input(container, 'Short-lived access token'), 'short-lived')
+    await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    expect(prepareCheckpointSource).not.toHaveBeenCalled()
+    expect(publishPortableSource).not.toHaveBeenCalled()
+    const checkpoint = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Checkpoint to project')!
+    await act(async () => checkpoint.click())
+    expect(prepareCheckpointSource).toHaveBeenCalledExactlyOnceWith(original)
+    expect(publishPortableSource).toHaveBeenCalledExactlyOnceWith(prepared)
+    expect(onRemoteSource).toHaveBeenLastCalledWith(prepared)
+    expect(onCheckpoint).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ source: prepared }))
+    expect(publishPortableSource.mock.invocationCallOrder[0]).toBeLessThan(createCheckpoint.mock.invocationCallOrder.at(-1)!)
+    await act(async () => root.unmount())
+  })
+
+  it('shares changed resources only on explicit action and keeps failed recovery visible after connection', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ projects: [{ id: 'paper', workspaceId: 'forest', name: 'Shared paper', role: 'owner', createdAt: '2026-07-15T00:00:00.000Z' }] })))
+    const destroy = vi.fn()
+    const publishResources = vi.fn()
+    const flushRecovery = vi.fn(async () => false)
+    const resources = { images: [], citations: [] }
+    const loadResources = vi.fn(async () => resources)
+    const onSaveGuardChange = vi.fn()
+    vi.spyOn(HocuspocusCollaborationClient, 'connect').mockImplementation(async (options) => {
+      options.onRecoveryWarning?.('Offline recovery could not be saved. Keep this window open.')
+      return { publishPortableSource: vi.fn((source) => source), publishResources, flushRecovery, destroy, editorBinding: { document: {}, awareness: {} } } as unknown as HocuspocusCollaborationClient
+    })
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    const props = { onClose: vi.fn(), onRemoteSource: vi.fn(), onStatus: vi.fn(), onCheckpoint: vi.fn(), checkpointMode: 'working-tree' as const, checkpointTarget: 'paper.qmd', loadResources, onSaveGuardChange }
+    await act(async () => root.render(<CollaborationDialog open source="# Paper" {...props} />))
+    change(input(container, 'Service URL'), 'https://collab.example.test')
+    change(input(container, 'Workspace ID'), 'forest')
+    change(input(container, 'Project ID'), 'paper')
+    change(input(container, 'Short-lived access token'), 'short-lived')
+    await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    expect(container.textContent).toContain('Working together')
+    expect(container.textContent).toContain('Offline recovery could not be saved')
+    expect(loadResources).not.toHaveBeenCalled()
+    await act(async () => root.render(<CollaborationDialog open source="# Paper\n\nA source edit." {...props} />))
+    expect(loadResources).not.toHaveBeenCalled()
+    const share = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Share updated figures & references')!
+    await act(async () => share.click())
+    expect(loadResources).toHaveBeenCalledExactlyOnceWith(true)
+    expect(publishResources).toHaveBeenCalledExactlyOnceWith(resources)
+    const guard = onSaveGuardChange.mock.calls.filter(([value]) => value).at(-1)?.[0] as () => Promise<boolean>
+    expect(await guard()).toBe(false)
+    const leave = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Leave session')!
+    await act(async () => leave.click())
+    expect(destroy).not.toHaveBeenCalled()
+    expect(container.textContent).toContain('Offline recovery could not be saved')
+    await act(async () => root.unmount())
+    expect(onSaveGuardChange).toHaveBeenLastCalledWith(null)
+  })
+
+  it('keeps a pending connection read-only, rejects duplicate joins, and destroys a late connection after unmount', async () => {
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ projects: [{ id: 'paper', workspaceId: 'forest', name: 'Shared paper', role: 'owner', createdAt: '2026-07-15T00:00:00.000Z' }] })))
+    let finish!: (client: HocuspocusCollaborationClient) => void
+    const pending = new Promise<HocuspocusCollaborationClient>((resolve) => { finish = resolve })
+    const connect = vi.spyOn(HocuspocusCollaborationClient, 'connect').mockImplementation((options) => {
+      // The socket can report connected before sync/filesystem preparation completes.
+      options.onStatus?.('connected')
+      return pending
+    })
+    const onRoleChange = vi.fn()
+    const onEditorBindingChange = vi.fn()
+    const onSaveGuardChange = vi.fn()
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<CollaborationDialog open source="# Paper" onClose={vi.fn()} onRemoteSource={vi.fn()} onStatus={vi.fn()} onCheckpoint={vi.fn()} onRoleChange={onRoleChange} onEditorBindingChange={onEditorBindingChange} onSaveGuardChange={onSaveGuardChange} checkpointMode="download" checkpointTarget="paper.qmd" />))
+    change(input(container, 'Service URL'), 'https://collab.example.test')
+    change(input(container, 'Workspace ID'), 'forest')
+    change(input(container, 'Project ID'), 'paper')
+    change(input(container, 'Short-lived access token'), 'short-lived')
+    await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    expect(connect).toHaveBeenCalledOnce()
+    expect(onRoleChange).not.toHaveBeenCalledWith('owner')
+    const guard = onSaveGuardChange.mock.calls.find(([value]) => value)?.[0] as () => Promise<boolean>
+    await act(async () => { expect(await guard()).toBe(false) })
+    await act(async () => root.unmount())
+    const destroy = vi.fn()
+    await act(async () => { finish({ destroy, editorBinding: {} } as unknown as HocuspocusCollaborationClient); await pending })
+    expect(destroy).toHaveBeenCalledOnce()
+    expect(onRoleChange).not.toHaveBeenCalledWith('owner')
+    expect(onEditorBindingChange.mock.calls.every(([value]) => value === null)).toBe(true)
+  })
+
   it('stops strict local bootstrap collisions and lets the user open the remote draft explicitly', async () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response(JSON.stringify({
       projects: [{ id: 'paper', workspaceId: 'forest', name: 'Remote paper', role: 'owner', createdAt: '2026-07-23T00:00:00.000Z' }],

@@ -591,6 +591,9 @@ fn status_entries(context: &RepositoryContext) -> Result<Vec<GitStatusEntry>, Ho
         let Some(path) = project_relative(context, &repository_path) else {
             continue;
         };
+        // Coordination/recovery files are transient runtime state, including
+        // the claim held while a guarded branch or restore command runs.
+        if path.starts_with(".draftmatter/write-locks/") || path.starts_with(".draftmatter/transactions/") { continue; }
         let kind = change_kind(index, worktree);
         entries.push(GitStatusEntry {
             binary: entry_binary(context, &path, &repository_path, index)?,
@@ -612,6 +615,7 @@ fn status_entries(context: &RepositoryContext) -> Result<Vec<GitStatusEntry>, Ho
 
 pub fn git_status_impl(raw_root: &str) -> Result<GitRepositoryStatus, HostError> {
     let root = canonical_root(raw_root)?;
+    let _project_guard = crate::project_guard(&root)?;
     let version = git_version(&root)?;
     if version.is_none() {
         return Ok(empty_status(None));
@@ -639,6 +643,7 @@ pub fn git_status_impl(raw_root: &str) -> Result<GitRepositoryStatus, HostError>
 
 pub fn git_initialize_impl(raw_root: &str) -> Result<GitInitializeResult, HostError> {
     let root = canonical_root(raw_root)?;
+    let _project_guard = crate::project_guard(&root)?;
     if repository_context(raw_root)?.is_some() {
         return Err(HostError::Conflict(
             "This project is already inside a Git repository.".to_string(),
@@ -651,7 +656,7 @@ pub fn git_initialize_impl(raw_root: &str) -> Result<GitInitializeResult, HostEr
     } else {
         fs::write(
             &ignore_path,
-            ".draftmatter/cache/\n.draftmatter/recovery/\n.draftmatter/kernels/\n",
+            ".draftmatter/cache/\n.draftmatter/recovery/\n.draftmatter/kernels/\n.draftmatter/write-locks/\n.draftmatter/transactions/\n",
         )?;
         true
     };
@@ -664,6 +669,7 @@ pub fn git_initialize_impl(raw_root: &str) -> Result<GitInitializeResult, HostEr
 
 pub fn git_diff_impl(request: GitDiffRequest) -> Result<GitDiffResult, HostError> {
     let context = require_repository(&request.root)?;
+    let _project_guard = crate::project_guard(&context.project_root)?;
     let repository_path = repository_path(&context, &request.path)?;
     let mut arguments = vec![
         "diff",
@@ -782,6 +788,7 @@ pub fn git_checkpoint_diff_impl(
     request: GitCheckpointDiffRequest,
 ) -> Result<GitCheckpointDiffResult, HostError> {
     let context = require_repository(&request.root)?;
+    let _project_guard = crate::project_guard(&context.project_root)?;
     let hash = validate_commit_hash(&request.hash)?;
     let verified = format!("{hash}^{{commit}}");
     require_success(
@@ -864,6 +871,7 @@ pub fn git_restore_checkpoint_impl(
     request: GitRestoreCheckpointRequest,
 ) -> Result<GitRepositoryStatus, HostError> {
     let context = require_repository(&request.root)?;
+    let _project_guard = crate::project_guard(&context.project_root)?;
     let hash = validate_commit_hash(&request.hash)?;
     let verified = format!("{hash}^{{commit}}");
     require_success(
@@ -960,6 +968,7 @@ fn selected_repository_paths(
 
 pub fn git_stage_impl(request: GitStageRequest) -> Result<GitRepositoryStatus, HostError> {
     let context = require_repository(&request.root)?;
+    let _project_guard = crate::project_guard(&context.project_root)?;
     let paths = selected_repository_paths(&context, &request.paths)?;
     let mut arguments = vec!["add", "--all", "--"];
     arguments.extend(paths.iter().map(String::as_str));
@@ -982,6 +991,7 @@ fn validate_commit_message(message: &str) -> Result<String, HostError> {
 
 pub fn git_create_commit_impl(request: GitCommitRequest) -> Result<GitCommitResult, HostError> {
     let context = require_repository(&request.root)?;
+    let _project_guard = crate::project_guard(&context.project_root)?;
     let message = validate_commit_message(&request.message)?;
     let staged = run_git(&context.repository_root, &["diff", "--cached", "--quiet"])?;
     if staged.status.success() {
@@ -1035,6 +1045,7 @@ pub fn git_create_checkpoint_impl(
     request: GitCheckpointRequest,
 ) -> Result<GitCommitResult, HostError> {
     let context = require_repository(&request.root)?;
+    let _project_guard = crate::project_guard(&context.project_root)?;
     let message = validate_commit_message(&request.message)?;
     let paths = selected_repository_paths(&context, &request.paths)?;
 
@@ -1135,6 +1146,7 @@ pub fn git_branches_impl(raw_root: &str) -> Result<GitBranchStatus, HostError> {
 
 pub fn git_create_branch_impl(request: GitBranchRequest) -> Result<GitBranchStatus, HostError> {
     let context = require_repository(&request.root)?;
+    let _project_guard = crate::project_guard(&context.project_root)?;
     validate_branch_name(&context, &request.name)?;
     require_clean_worktree(&request.root)?;
     require_success(
@@ -1149,6 +1161,7 @@ pub fn git_create_branch_impl(request: GitBranchRequest) -> Result<GitBranchStat
 
 pub fn git_switch_branch_impl(request: GitBranchRequest) -> Result<GitBranchStatus, HostError> {
     let context = require_repository(&request.root)?;
+    let _project_guard = crate::project_guard(&context.project_root)?;
     validate_branch_name(&context, &request.name)?;
     require_clean_worktree(&request.root)?;
     require_success(
@@ -1202,6 +1215,7 @@ fn remote_result(root: &str, action: &str, output: &Output) -> Result<GitRemoteR
 
 pub fn git_fetch_impl(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
     let context = require_repository(&request.root)?;
+    let _project_guard = crate::project_guard(&context.project_root)?;
     let remote = validate_remote(&context, request.remote.as_deref())?;
     if request.branch.is_some() {
         return Err(HostError::InvalidProject(
@@ -1223,6 +1237,7 @@ pub fn git_fetch_impl(request: GitRemoteRequest) -> Result<GitRemoteResult, Host
 
 pub fn git_pull_impl(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
     let context = require_repository(&request.root)?;
+    let _project_guard = crate::project_guard(&context.project_root)?;
     let remote = validate_remote(&context, request.remote.as_deref())?;
     if let Some(branch) = request.branch.as_deref() {
         validate_branch_name(&context, branch)?;
@@ -1247,6 +1262,7 @@ pub fn git_pull_impl(request: GitRemoteRequest) -> Result<GitRemoteResult, HostE
 
 pub fn git_push_impl(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
     let context = require_repository(&request.root)?;
+    let _project_guard = crate::project_guard(&context.project_root)?;
     let remote = validate_remote(&context, request.remote.as_deref())?;
     if let Some(branch) = request.branch.as_deref() {
         validate_branch_name(&context, branch)?;

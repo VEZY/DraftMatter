@@ -8,6 +8,9 @@ import { projectComputationsForPublication } from './publicationComputation'
 import { createStoredZip } from './zipArchive'
 import { isExplicitlyUnnumbered, numberedManuscriptObjects } from './numberedObjects'
 import { parseStructuredManuscript } from './structuredManuscript'
+import { publicationImageDimensions, publicationImageType, resolvePublicationImage, validatePublicationAssets, type PublicationAssetOptions } from './publicationAssets'
+import { publicationOfficeMath } from './publicationMath'
+import { isSafePortableLinkDestination } from './portableLink'
 
 export interface DocxExportDiagnostic {
   code: 'figure-reference' | 'raw-source'
@@ -20,11 +23,15 @@ export interface DocxExportResult {
   diagnostics: DocxExportDiagnostic[]
 }
 
-export interface DocxExportOptions {
+export interface DocxExportOptions extends PublicationAssetOptions {
   citationLabels?: Record<string, string>
   bibliography?: Array<{ id: string; value: string }>
   objectLabels?: Record<string, string>
 }
+
+interface DocxImage { name: string; bytes: Uint8Array; mimeType: string; relationshipId: string }
+interface DocxLink { target: string; relationshipId: string }
+interface DocxRenderOptions extends DocxExportOptions { images: DocxImage[]; links: DocxLink[] }
 
 function xml(value: string) {
   return value
@@ -42,9 +49,9 @@ function paragraph(value: string, style?: string) {
   return `<w:p>${properties}${runs}</w:p>`
 }
 
-function table(rows: string[][], alignments: TableAlignment[], numbers: Record<string, number>, options: DocxExportOptions) {
+function table(rows: string[][], alignments: TableAlignment[], numbers: Record<string, number>, options: DocxRenderOptions) {
   const columns = Math.max(...rows.map((row) => row.length))
-  return `<w:tbl><w:tblPr><w:tblStyle w:val="DraftMatterTable"/><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="D9E0DC"/><w:left w:val="nil"/><w:bottom w:val="single" w:sz="4" w:color="D9E0DC"/><w:right w:val="nil"/><w:insideH w:val="single" w:sz="4" w:color="E6EBE8"/><w:insideV w:val="nil"/></w:tblBorders></w:tblPr><w:tblGrid>${Array.from({ length: columns }, () => '<w:gridCol w:w="2400"/>').join('')}</w:tblGrid>${rows.map((row, rowIndex) => `<w:tr>${Array.from({ length: columns }, (_unused, index) => `<w:tc><w:tcPr><w:tcW w:w="2400" w:type="dxa"/></w:tcPr>${paragraphWithFootnotes(stripInlineMarkdown(row[index] ?? '', options), numbers, rowIndex === 0 ? 'TableHeader' : undefined, alignments[index])}</w:tc>`).join('')}</w:tr>`).join('')}</w:tbl>`
+  return `<w:tbl><w:tblPr><w:tblStyle w:val="DraftMatterTable"/><w:tblW w:w="0" w:type="auto"/><w:tblBorders><w:top w:val="single" w:sz="4" w:color="D9E0DC"/><w:left w:val="nil"/><w:bottom w:val="single" w:sz="4" w:color="D9E0DC"/><w:right w:val="nil"/><w:insideH w:val="single" w:sz="4" w:color="E6EBE8"/><w:insideV w:val="nil"/></w:tblBorders></w:tblPr><w:tblGrid>${Array.from({ length: columns }, () => '<w:gridCol w:w="2400"/>').join('')}</w:tblGrid>${rows.map((row, rowIndex) => `<w:tr>${Array.from({ length: columns }, (_unused, index) => `<w:tc><w:tcPr><w:tcW w:w="2400" w:type="dxa"/></w:tcPr>${paragraphWithFootnotes(stripInlineMarkdown(row[index] ?? '', options), numbers, rowIndex === 0 ? 'TableHeader' : undefined, alignments[index], options)}</w:tc>`).join('')}</w:tr>`).join('')}</w:tbl>`
 }
 
 function stripInlineMarkdown(value: string, options: DocxExportOptions) {
@@ -54,31 +61,47 @@ function stripInlineMarkdown(value: string, options: DocxExportOptions) {
       return options.citationLabels?.[cluster] ?? '(' + citekeys.join('; ') + ')'
     })
     .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/\*\*([^*]+)\*\*/g, '$1')
-    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '$1')
-    .replace(/\$([^$\r\n]+)\$/g, '$1')
     .replace(/@(fig|tbl|eq|sec)-[a-zA-Z0-9](?:[a-zA-Z0-9_.:-]*[a-zA-Z0-9])?/g, (reference) => options.objectLabels?.[reference.slice(1)] ?? formatCrossReferenceTarget(reference))
-    .replace(/`([^`]+)`/g, '$1')
 }
 
-function paragraphWithFootnotes(value: string, numbers: Record<string, number>, style?: string, alignment?: TableAlignment) {
+function inlineRuns(value: string, numbers: Record<string, number>, options?: DocxRenderOptions, properties = ''): string {
+  const runs: string[] = []
+  const plain = (text: string) => `<w:r>${properties ? `<w:rPr>${properties}</w:rPr>` : ''}<w:t xml:space="preserve">${xml(text)}</w:t></w:r>`
+  let cursor = 0
+  const pattern = /\\[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]| {2,}\n|\\\n|`[^`\r\n]+`|\*\*[^*\r\n]+\*\*|\*[^*\r\n]+\*|\$[^$\r\n]+\$|\[[^\]\r\n]+\]\([^)\r\n]+\)|\[\^[a-zA-Z0-9_.:-]+\]/g
+  for (const match of value.matchAll(pattern)) {
+    const start = match.index ?? 0
+    if (start > cursor) runs.push(plain(value.slice(cursor, start)))
+    const raw = match[0]
+    const link = raw.match(/^\[([^\]]+)\]\(([^)]+)\)$/)
+    if (/^(?: {2,}|\\)\n$/.test(raw)) runs.push('<w:r><w:br/></w:r>')
+    else if (raw.startsWith('\\')) runs.push(plain(raw.slice(1)))
+    else if (raw.startsWith('`')) runs.push(plain(raw.slice(1, -1)))
+    else if (raw.startsWith('**')) runs.push(inlineRuns(raw.slice(2, -2), numbers, options, `${properties}<w:b/>`))
+    else if (raw.startsWith('*')) runs.push(inlineRuns(raw.slice(1, -1), numbers, options, `${properties}<w:i/>`))
+    else if (raw.startsWith('$')) runs.push(publicationOfficeMath(raw.slice(1, -1)))
+    else if (link) {
+      const target = link[2].replace(/\s+["'][^"']*["']$/, '')
+      if (options && isSafePortableLinkDestination(target) && /^https?:\/\//i.test(target)) {
+        let reference = options.links.find((candidate) => candidate.target === target)
+        if (!reference) { reference = { target, relationshipId: `rIdLink${options.links.length + 1}` }; options.links.push(reference) }
+        runs.push(`<w:hyperlink r:id="${reference.relationshipId}">${inlineRuns(link[1], numbers, options, `${properties}<w:u w:val="single"/>`)}</w:hyperlink>`)
+      } else runs.push(inlineRuns(link[1], numbers, options, properties))
+    } else {
+      const label = raw.slice(2, -1)
+      const number = numbers[label]
+      runs.push(number ? `<w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteReference w:id="${number}"/></w:r>` : plain(raw))
+    }
+    cursor = start + raw.length
+  }
+  if (cursor < value.length) runs.push(plain(value.slice(cursor)))
+  return runs.join('') || plain('')
+}
+
+function paragraphWithFootnotes(value: string, numbers: Record<string, number>, style?: string, alignment?: TableAlignment, options?: DocxRenderOptions) {
   const propertyContent = `${style ? `<w:pStyle w:val="${style}"/>` : ''}${alignment ? `<w:jc w:val="${alignment}"/>` : ''}`
   const properties = propertyContent ? `<w:pPr>${propertyContent}</w:pPr>` : ''
-  const runs: string[] = []
-  let cursor = 0
-  for (const match of value.matchAll(/\[\^([a-zA-Z0-9_.:-]+)\]/g)) {
-    const start = match.index ?? 0
-    if (start > cursor) runs.push(`<w:r><w:t xml:space="preserve">${xml(value.slice(cursor, start))}</w:t></w:r>`)
-    const number = numbers[match[1]]
-    runs.push(number
-      ? `<w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteReference w:id="${number}"/></w:r>`
-      : `<w:r><w:t xml:space="preserve">${xml(match[0])}</w:t></w:r>`)
-    cursor = start + match[0].length
-  }
-  if (cursor < value.length) runs.push(`<w:r><w:t xml:space="preserve">${xml(value.slice(cursor))}</w:t></w:r>`)
-  if (!runs.length) runs.push('<w:r><w:t xml:space="preserve"></w:t></w:r>')
-  return `<w:p>${properties}${runs.join('')}</w:p>`
+  return `<w:p>${properties}${inlineRuns(value, numbers, options)}</w:p>`
 }
 
 function publicationBylineParagraphs(metadata: PublicationMetadata) {
@@ -102,7 +125,30 @@ function publicationBylineParagraphs(metadata: PublicationMetadata) {
   return [authorParagraph, ...affiliations]
 }
 
-function documentBody(source: string, diagnostics: DocxExportDiagnostic[], options: DocxExportOptions) {
+function imageParagraph(source: string, description: string, options: DocxRenderOptions) {
+  const asset = resolvePublicationImage(source, options)
+  if (!asset) return undefined
+  const type = publicationImageType(asset.bytes)
+  const ordinal = options.images.filter((image) => !image.relationshipId.startsWith('rIdSvg')).length + 1
+  const primaryBytes = type.extension === 'svg' ? asset.fallbackPng ?? asset.bytes : asset.bytes
+  if (type.extension === 'svg' && !asset.fallbackPng && options.requireAssets) throw new Error(`Figure needs a PNG fallback for Word. Prepare the SVG before exporting: ${source}.`)
+  const primaryType = publicationImageType(primaryBytes)
+  const relationshipId = `rIdImage${ordinal}`
+  options.images.push({ name: `image${ordinal}.${primaryType.extension}`, bytes: primaryBytes, mimeType: primaryType.mimeType, relationshipId })
+  let extension = ''
+  if (type.extension === 'svg' && asset.fallbackPng) {
+    const svgId = `rIdSvg${ordinal}`
+    options.images.push({ name: `image${ordinal}.svg`, bytes: asset.bytes, mimeType: type.mimeType, relationshipId: svgId })
+    extension = `<a:extLst><a:ext uri="{96DAC541-7B7A-43D3-8B79-37D633B846F1}"><asvg:svgBlip r:embed="${svgId}"/></a:ext></a:extLst>`
+  }
+  const dimensions = publicationImageDimensions(asset.bytes)
+  const scale = Math.min(9525, 5_486_400 / dimensions.width, 6_858_000 / dimensions.height)
+  const width = Math.max(1, Math.round(dimensions.width * scale))
+  const height = Math.max(1, Math.round(dimensions.height * scale))
+  return `<w:p><w:r><w:drawing><wp:inline distT="0" distB="0" distL="0" distR="0"><wp:extent cx="${width}" cy="${height}"/><wp:docPr id="${ordinal}" name="Figure ${ordinal}" descr="${xml(description)}"/><wp:cNvGraphicFramePr><a:graphicFrameLocks noChangeAspect="1"/></wp:cNvGraphicFramePr><a:graphic><a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/picture"><pic:pic><pic:nvPicPr><pic:cNvPr id="${ordinal}" name="Figure ${ordinal}" descr="${xml(description)}"/><pic:cNvPicPr/></pic:nvPicPr><pic:blipFill><a:blip r:embed="${relationshipId}">${extension}</a:blip><a:stretch><a:fillRect/></a:stretch></pic:blipFill><pic:spPr><a:xfrm><a:off x="0" y="0"/><a:ext cx="${width}" cy="${height}"/></a:xfrm><a:prstGeom prst="rect"><a:avLst/></a:prstGeom></pic:spPr></pic:pic></a:graphicData></a:graphic></wp:inline></w:drawing></w:r></w:p>`
+}
+
+function documentBody(source: string, diagnostics: DocxExportDiagnostic[], options: DocxRenderOptions) {
   const metadata = parsePublicationMetadata(source)
   const body = removeDuplicateLeadingTitle(metadata.body, metadata.title)
   const resolvedFootnotes = resolveFootnotes(body)
@@ -120,7 +166,7 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
     }
     const heading = line.match(/^(#{1,6})\s+(.+?)(?:\s+\{#[^}]+\})?\s*$/)
     if (heading) {
-      parts.push(paragraphWithFootnotes(stripInlineMarkdown(heading[2], options), resolvedFootnotes.numbers, `Heading${Math.min(heading[1].length, 3)}`))
+      parts.push(paragraphWithFootnotes(stripInlineMarkdown(heading[2], options), resolvedFootnotes.numbers, `Heading${Math.min(heading[1].length, 3)}`, undefined, options))
       index += 1
       continue
     }
@@ -144,8 +190,8 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
       const number = unnumbered ? undefined : ++counters.equation
       const caption = equation.closed ? parseTableCaptionLine(lines[equation.end] ?? '') : null
       if (equation.closed) {
-        parts.push(paragraph(`${equation.tex.replaceAll('\n', ' ')}${number ? `    (${number})` : ''}`, 'Equation'))
-        if (caption) parts.push(paragraphWithFootnotes(`${number ? `Equation ${number}. ` : ''}${stripInlineMarkdown(caption.captionMarkdown, options)}`, resolvedFootnotes.numbers, 'Caption'))
+        parts.push(`<w:p><w:pPr><w:pStyle w:val="Equation"/></w:pPr>${publicationOfficeMath(equation.tex, true)}${number ? `<w:r><w:t xml:space="preserve">    (${number})</w:t></w:r>` : ''}</w:p>`)
+        if (caption) parts.push(paragraphWithFootnotes(`${number ? `Equation ${number}. ` : ''}${stripInlineMarkdown(caption.captionMarkdown, options)}`, resolvedFootnotes.numbers, 'Caption', undefined, options))
       } else {
         parts.push(paragraph(lines.slice(index, equation.end).join('\n'), 'CodeBlock'))
         diagnostics.push({ code: 'raw-source', level: 'warning', message: 'An unclosed display equation was preserved as visible source in the DOCX.' })
@@ -163,8 +209,10 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
       const embedded = /^data:image\//i.test(source)
       const reference = embedded ? 'embedded image not included in native DOCX' : source
       const captionText = caption?.captionMarkdown || figure[1]
-      parts.push(paragraphWithFootnotes(`${number ? `Figure ${number}. ` : ''}${stripInlineMarkdown(captionText, options)} — ${reference}`, resolvedFootnotes.numbers, 'Caption'))
-      diagnostics.push({
+      const drawing = imageParagraph(source, figure[1], options)
+      if (drawing) parts.push(drawing)
+      parts.push(paragraphWithFootnotes(`${number ? `Figure ${number}. ` : ''}${stripInlineMarkdown(captionText, options)}${drawing ? '' : ` — ${reference}`}`, resolvedFootnotes.numbers, 'Caption', undefined, options))
+      if (!drawing) diagnostics.push({
         code: 'figure-reference',
         level: 'warning',
         message: embedded
@@ -186,7 +234,7 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
       if (caption) index += 1
       const unnumbered = isExplicitlyUnnumbered(caption?.sourceAttributes)
       const number = unnumbered ? undefined : ++counters.table
-      if (number || caption) parts.push(paragraphWithFootnotes(`${number ? `Table ${number}.` : ''}${caption ? `${number ? ' ' : ''}${stripInlineMarkdown(caption.captionMarkdown, options)}` : ''}`, resolvedFootnotes.numbers, 'Caption'))
+      if (number || caption) parts.push(paragraphWithFootnotes(`${number ? `Table ${number}.` : ''}${caption ? `${number ? ' ' : ''}${stripInlineMarkdown(caption.captionMarkdown, options)}` : ''}`, resolvedFootnotes.numbers, 'Caption', undefined, options))
       parts.push(table(rows, alignments, resolvedFootnotes.numbers, options))
       continue
     }
@@ -195,7 +243,7 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
       let ordinal = 1
       while (index < lines.length && (ordered ? /^\s*\d+[.)]\s+/.test(lines[index]) : /^\s*[-+*]\s+/.test(lines[index]))) {
         const item = lines[index].replace(/^\s*(?:[-+*]|\d+[.)])\s+/, '')
-        parts.push(paragraphWithFootnotes(`${ordered ? `${ordinal}.` : '•'} ${stripInlineMarkdown(item, options)}`, resolvedFootnotes.numbers, 'ListParagraph'))
+        parts.push(paragraphWithFootnotes(`${ordered ? `${ordinal}.` : '•'} ${stripInlineMarkdown(item, options)}`, resolvedFootnotes.numbers, 'ListParagraph', undefined, options))
         ordinal += 1
         index += 1
       }
@@ -218,7 +266,7 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
       text.push(lines[index])
       index += 1
     }
-    parts.push(paragraphWithFootnotes(stripInlineMarkdown(text.join(' '), options), resolvedFootnotes.numbers))
+    parts.push(paragraphWithFootnotes(stripInlineMarkdown(text.join('\n'), options), resolvedFootnotes.numbers, undefined, undefined, options))
   }
   if (options.bibliography?.length) {
     parts.push(paragraph('References', 'Heading1'))
@@ -227,19 +275,19 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
   return { body: parts.join(''), footnotes: resolvedFootnotes.footnotes }
 }
 
-function contentTypes(hasFootnotes: boolean) {
+function contentTypes(hasFootnotes: boolean, images: DocxImage[]) {
   const footnotes = hasFootnotes ? '<Override PartName="/word/footnotes.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml"/>' : ''
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>${footnotes}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/>${[...new Map(images.map((image) => [image.name.split('.').at(-1), image.mimeType])).entries()].map(([extension, mimeType]) => `<Default Extension="${extension}" ContentType="${mimeType}"/>`).join('')}<Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/><Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>${footnotes}<Override PartName="/docProps/core.xml" ContentType="application/vnd.openxmlformats-package.core-properties+xml"/></Types>`
 }
 
 const relationships = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/package/2006/relationships/metadata/core-properties" Target="docProps/core.xml"/></Relationships>`
 
-function documentRelationships(hasFootnotes: boolean) {
+function documentRelationships(hasFootnotes: boolean, options: DocxRenderOptions) {
   const footnotes = hasFootnotes ? '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/footnotes" Target="footnotes.xml"/>' : ''
   return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${footnotes}</Relationships>`
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>${footnotes}${options.images.map((image) => `<Relationship Id="${image.relationshipId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/image" Target="media/${image.name}"/>`).join('')}${options.links.map((link) => `<Relationship Id="${link.relationshipId}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="${xml(link.target)}" TargetMode="External"/>`).join('')}</Relationships>`
 }
 
 const baseStyles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
@@ -248,15 +296,16 @@ const baseStyles = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 const footnoteStyles = '<w:style w:type="paragraph" w:styleId="FootnoteText"><w:name w:val="footnote text"/><w:basedOn w:val="Normal"/><w:next w:val="FootnoteText"/><w:uiPriority w:val="99"/><w:semiHidden/><w:unhideWhenUsed/><w:rPr><w:sz w:val="18"/></w:rPr></w:style><w:style w:type="character" w:styleId="FootnoteReference"><w:name w:val="footnote reference"/><w:uiPriority w:val="99"/><w:semiHidden/><w:unhideWhenUsed/><w:rPr><w:vertAlign w:val="superscript"/></w:rPr></w:style>'
 const styles = baseStyles.replace('</w:styles>', `${footnoteStyles}</w:styles>`)
 
-function footnotesXml(footnotes: ResolvedFootnote[], options: DocxExportOptions) {
+function footnotesXml(footnotes: ResolvedFootnote[], options: DocxRenderOptions) {
   const notes = footnotes.map((footnote) => {
     const content = stripInlineMarkdown(footnote.content, options).replace(/\[\^([a-zA-Z0-9_.:-]+)\]/g, (_reference, label: string) => `[${label}]`)
-    return `<w:footnote w:id="${footnote.number}"><w:p><w:pPr><w:pStyle w:val="FootnoteText"/></w:pPr><w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteRef/></w:r><w:r><w:t xml:space="preserve"> ${xml(content)}</w:t></w:r></w:p></w:footnote>`
+    return `<w:footnote w:id="${footnote.number}"><w:p><w:pPr><w:pStyle w:val="FootnoteText"/></w:pPr><w:r><w:rPr><w:rStyle w:val="FootnoteReference"/></w:rPr><w:footnoteRef/></w:r>${inlineRuns(` ${content}`, {}, options)}</w:p></w:footnote>`
   }).join('')
-  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote><w:footnote w:type="continuationSeparator" w:id="0"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>${notes}</w:footnotes>`
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:footnotes xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:footnote w:type="separator" w:id="-1"><w:p><w:r><w:separator/></w:r></w:p></w:footnote><w:footnote w:type="continuationSeparator" w:id="0"><w:p><w:r><w:continuationSeparator/></w:r></w:p></w:footnote>${notes}</w:footnotes>`
 }
 
 export function renderDocxExport(source: string, options: DocxExportOptions = {}): DocxExportResult {
+  validatePublicationAssets(options.assets)
   const cleanDiagnostics = validateCleanProjection(source)
   if (cleanDiagnostics.some((diagnostic) => diagnostic.code === 'clean-anchor-leak' || diagnostic.code === 'clean-review-leak')) {
     throw new Error('DOCX export accepts only a clean DraftMatter projection without review storage markers.')
@@ -265,26 +314,30 @@ export function renderDocxExport(source: string, options: DocxExportOptions = {}
   const objectLabels = Object.fromEntries(numberedManuscriptObjects(parseStructuredManuscript(publicationSource).document)
     .filter((object) => object.label && object.number)
     .map((object) => [object.label!, `${object.kind === 'figure' ? 'Figure' : object.kind === 'table' ? 'Table' : 'Equation'} ${object.number}`]))
-  const renderOptions = { ...options, objectLabels }
+  const renderOptions: DocxRenderOptions = { ...options, objectLabels, images: [], links: [] }
   const diagnostics: DocxExportDiagnostic[] = []
   const rendered = documentBody(publicationSource, diagnostics, renderOptions)
   const metadata = parsePublicationMetadata(publicationSource)
   const hasFootnotes = rendered.footnotes.length > 0
-  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body>${rendered.body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`
+  const footnotesContent = hasFootnotes ? footnotesXml(rendered.footnotes, renderOptions) : ''
+  const documentXml = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:m="http://schemas.openxmlformats.org/officeDocument/2006/math" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships" xmlns:wp="http://schemas.openxmlformats.org/drawingml/2006/wordprocessingDrawing" xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:pic="http://schemas.openxmlformats.org/drawingml/2006/picture" xmlns:asvg="http://schemas.microsoft.com/office/drawing/2016/SVG/main"><w:body>${rendered.body}<w:sectPr><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1134" w:right="1134" w:bottom="1134" w:left="1134" w:header="708" w:footer="708" w:gutter="0"/></w:sectPr></w:body></w:document>`
   const created = new Date(0).toISOString()
   const creator = metadata.authors.length ? metadata.authors.join('; ') : 'DraftMatter'
   const core = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><cp:coreProperties xmlns:cp="http://schemas.openxmlformats.org/package/2006/metadata/core-properties" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:dcterms="http://purl.org/dc/terms/" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"><dc:creator>${xml(creator)}</dc:creator><cp:lastModifiedBy>DraftMatter</cp:lastModifiedBy><dcterms:created xsi:type="dcterms:W3CDTF">${created}</dcterms:created><dcterms:modified xsi:type="dcterms:W3CDTF">${created}</dcterms:modified><dc:description>Clean resolved manuscript export. DraftMatter review records and Word tracked changes are not included.</dc:description></cp:coreProperties>`
   const entries = [
-    { name: '[Content_Types].xml', content: contentTypes(hasFootnotes) },
+    { name: '[Content_Types].xml', content: contentTypes(hasFootnotes, renderOptions.images) },
     { name: '_rels/.rels', content: relationships },
     { name: 'docProps/core.xml', content: core },
     { name: 'word/document.xml', content: documentXml },
     { name: 'word/styles.xml', content: styles },
-    { name: 'word/_rels/document.xml.rels', content: documentRelationships(hasFootnotes) },
+    { name: 'word/_rels/document.xml.rels', content: documentRelationships(hasFootnotes, renderOptions) },
   ]
-  if (hasFootnotes) entries.push({ name: 'word/footnotes.xml', content: footnotesXml(rendered.footnotes, renderOptions) })
+  if (hasFootnotes) {
+    entries.push({ name: 'word/footnotes.xml', content: footnotesContent })
+    if (renderOptions.links.length) entries.push({ name: 'word/_rels/footnotes.xml.rels', content: documentRelationships(false, { ...renderOptions, images: [] }) })
+  }
   return {
-    bytes: createStoredZip(entries.map((entry) => ({ name: entry.name, bytes: entry.content }))),
+    bytes: createStoredZip([...entries.map((entry) => ({ name: entry.name, bytes: entry.content })), ...renderOptions.images.map((image) => ({ name: `word/media/${image.name}`, bytes: image.bytes }))]),
     diagnostics,
   }
 }

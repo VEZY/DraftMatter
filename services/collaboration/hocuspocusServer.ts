@@ -1,8 +1,9 @@
-import { Server, type ServerConfiguration } from '@hocuspocus/server'
+import { Server, type ServerConfiguration, type Connection, type Document } from '@hocuspocus/server'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import * as Y from 'yjs'
 import type { ProjectAuthorizationService, WorkspaceRole } from '../../src/collaboration/workspaceService'
 import { parseReviewMarkup } from '../../src/reviewMarkup'
+import { PROJECT_RESOURCES_ROOT, projectResourcesDiagnostic } from '../../src/sharedEditor/projectResources'
 import { CollaborationStoreError, type CollaborationProjectScope } from './fileStore'
 import type { CollaborationPersistence } from './persistence'
 
@@ -18,6 +19,7 @@ const ROOTS = {
   decisions: 'draftmatter:decisions',
   meta: 'draftmatter:meta',
   prosemirror: 'draftmatter:prosemirror',
+  resources: PROJECT_RESOURCES_ROOT,
 } as const
 const KNOWN_ROOTS = new Set<string>(Object.values(ROOTS))
 const SAFE_COLOR = /^#[a-f0-9]{6}$/i
@@ -40,6 +42,7 @@ export interface DraftMatterHocuspocusOptions {
   tokenRefreshMs?: number
   allowedOrigins?: string[]
   httpHandler?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
+  clock?: () => number
 }
 
 export type CollaborationPresenceDiagnostic = 'too-many-clients' | 'client-collision' | 'identity-mismatch' | 'state-invalid' | null
@@ -74,6 +77,7 @@ function protectedFingerprint(document: Y.Doc) {
     decisions: document.getMap(ROOTS.decisions).toJSON(),
     meta: document.getMap(ROOTS.meta).toJSON(),
     prosemirror: document.getXmlFragment(ROOTS.prosemirror).toJSON(),
+    resources: document.getMap(ROOTS.resources).toJSON(),
     unknownRoots,
   }))
 }
@@ -618,11 +622,19 @@ function editorMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
   return true
 }
 
+// Yjs keeps out-of-order structures/deletions outside the visible shared types.
+// They must be validated under their sender's role, not a later sender's role.
+// Rejecting incomplete updates makes the provider reconnect with a complete sync.
+function hasDeferredUpdate(document: Y.Doc) {
+  return document.store.pendingStructs !== null || document.store.pendingDs !== null
+}
+
 export function commenterUpdateDiagnostic(document: Y.Doc, update: Uint8Array, userId: string): 'update-invalid' | 'protected-state-changed' | 'comment-record-invalid' | null {
   const candidate = new Y.Doc()
   try {
     Y.applyUpdate(candidate, Y.encodeStateAsUpdate(document))
     Y.applyUpdate(candidate, update)
+    if (hasDeferredUpdate(candidate)) return 'update-invalid'
     if (protectedFingerprint(document) !== protectedFingerprint(candidate)) return 'protected-state-changed'
     if (!commenterMapsAllowed(document, candidate, userId)) return 'comment-record-invalid'
     return null
@@ -642,6 +654,8 @@ export function editorUpdateDiagnostic(document: Y.Doc, update: Uint8Array, user
   try {
     Y.applyUpdate(candidate, Y.encodeStateAsUpdate(document))
     Y.applyUpdate(candidate, update)
+    if (hasDeferredUpdate(candidate)) return 'update-invalid'
+    if (projectResourcesDiagnostic(candidate)) return 'review-record-invalid'
     const review = parseReviewMarkup(candidate.getText(ROOTS.document).toString())
     if (review.sectionStart !== undefined || review.anchors.length > 0) return 'reserved-review-markup'
     if (!editorMapsAllowed(document, candidate, userId)) return 'review-record-invalid'
@@ -660,7 +674,7 @@ export function editorUpdateAllowed(document: Y.Doc, update: Uint8Array, userId:
 function collaborationDocumentIsEmpty(document: Y.Doc) {
   return document.getText(ROOTS.document).length === 0
     && document.getXmlFragment(ROOTS.prosemirror).length === 0
-    && [ROOTS.anchors, ROOTS.authors, ROOTS.proposals, ROOTS.threads, ROOTS.threadMessages, ROOTS.threadStatuses, ROOTS.decisions, ROOTS.meta]
+    && [ROOTS.anchors, ROOTS.authors, ROOTS.proposals, ROOTS.threads, ROOTS.threadMessages, ROOTS.threadStatuses, ROOTS.decisions, ROOTS.meta, ROOTS.resources]
       .every((name) => document.getMap(name).size === 0)
     && unknownRoots(document).size === 0
 }
@@ -672,6 +686,8 @@ export function ownerUpdateDiagnostic(document: Y.Doc, update: Uint8Array, userI
     Y.applyUpdate(candidate, Y.encodeStateAsUpdate(document))
     const beforeVector = Y.encodeStateVector(candidate)
     Y.applyUpdate(candidate, update)
+    if (hasDeferredUpdate(candidate)) return 'update-invalid'
+    if (projectResourcesDiagnostic(candidate)) return 'review-record-invalid'
     if (same([...beforeVector], [...Y.encodeStateVector(candidate)])) return null
     const review = parseReviewMarkup(candidate.getText(ROOTS.document).toString())
     if (review.sectionStart !== undefined || review.anchors.length > 0) return 'reserved-review-markup'
@@ -685,7 +701,65 @@ export function ownerUpdateDiagnostic(document: Y.Doc, update: Uint8Array, userI
   }
 }
 
+class CollaborationTransportError extends Error {
+  constructor(readonly code: number, readonly reason: string) {
+    super(reason)
+  }
+}
+
+// A message's validation, durable write, and application form one room operation.
+// Hocuspocus serializes each connection, but independent connections otherwise race.
+class DocumentMessageQueue {
+  private readonly tails = new Map<string, Promise<void>>()
+
+  async acquire(name: string) {
+    const previous = this.tails.get(name) ?? Promise.resolve()
+    let finish!: () => void
+    const held = new Promise<void>((resolve) => { finish = resolve })
+    const tail = previous.then(() => held)
+    this.tails.set(name, tail)
+    await previous
+    let released = false
+    return () => {
+      if (released) return
+      released = true
+      finish()
+      if (this.tails.get(name) === tail) this.tails.delete(name)
+    }
+  }
+}
+
 export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocusOptions) {
+  const messages = new DocumentMessageQueue()
+  const releases = new WeakMap<Connection<CollaborationConnectionContext>, () => void>()
+  const messageBudgets = new WeakMap<Connection<CollaborationConnectionContext>, { tokens: number; at: number }>()
+  const clock = options.clock ?? Date.now
+  const localPending = new Map<string, Uint8Array[]>()
+  const localFlushes = new Map<string, Promise<boolean>>()
+  const storageUnavailable = () => new CollaborationTransportError(4503, 'Collaboration storage is unavailable; unsent changes remain on your device. Reconnect to retry.')
+  const flushLocalChanges = (name: string, document?: Document): Promise<boolean> => {
+    const running = localFlushes.get(name)
+    if (running) return running
+    const flush = (async () => {
+      const pending = localPending.get(name)
+      try {
+        while (pending?.length) {
+          await options.persistence.appendUpdate(parseCollaborationDocumentName(name), pending[0])
+          pending.shift()
+        }
+        localPending.delete(name)
+        return true
+      } catch {
+        // Never reject an onChange promise: Hocuspocus does not await that hook.
+        // Trusted server-side changes stay queued and are retried before a snapshot.
+        for (const connection of document?.getConnections() ?? []) connection.close(storageUnavailable())
+        return false
+      }
+    })().finally(() => { localFlushes.delete(name) })
+    localFlushes.set(name, flush)
+    return flush
+  }
+
   const snapshotIdFactory = options.snapshotIdFactory ?? (() => crypto.randomUUID())
   const authorizeConnection = async (token: string, scope: CollaborationProjectScope, connectionConfig: { readOnly: boolean }) => {
     const access = await options.authorization.authorizeProject(token, scope.workspaceId, scope.projectId, 'read')
@@ -708,10 +782,10 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
     quiet: true,
     debounce: options.debounceMs ?? 1_000,
     maxDebounce: options.maxDebounceMs ?? 10_000,
-    maxUnauthenticatedQueueSize: options.maxPayloadBytes ?? 1024 * 1024,
+    maxUnauthenticatedQueueSize: options.maxPayloadBytes ?? 16 * 1024 * 1024,
     maxUnauthenticatedQueueMessages: 256,
     maxPendingDocuments: 8,
-    websocketOptions: { maxPayload: options.maxPayloadBytes ?? 1024 * 1024 },
+    websocketOptions: { maxPayload: options.maxPayloadBytes ?? 16 * 1024 * 1024 },
     async onConnect({ requestHeaders }) {
       const origin = requestHeaders.get('origin')?.replace(/\/$/, '')
       if (origin && options.allowedOrigins?.length && !options.allowedOrigins.includes(origin)) {
@@ -737,20 +811,40 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
       connection.readOnly = connectionConfig.readOnly
       return context
     },
-    async beforeHandleMessage({ context, connection }) {
-      if (options.authorization.reauthorizeProject) {
-        try {
+    async beforeHandleMessage({ context, connection, documentName }) {
+      // Realtime traffic has a burst-tolerant budget, independent of REST actions.
+      // 30 frames/s permits typing plus cursor presence; the 120-frame burst is bounded.
+      const now = clock()
+      const budget = messageBudgets.get(connection) ?? { tokens: 120, at: now }
+      budget.tokens = Math.min(120, budget.tokens + Math.max(0, now - budget.at) * 30 / 1000)
+      budget.at = now
+      messageBudgets.set(connection, budget)
+      if (budget.tokens < 1) {
+        connection.close({ code: 4429, reason: 'Collaboration message rate exceeded. Reconnect after a short pause.' })
+        throw new CollaborationTransportError(4429, 'Collaboration message rate exceeded.')
+      }
+      budget.tokens -= 1
+      const release = await messages.acquire(documentName)
+      releases.set(connection, release)
+      try {
+        if (options.authorization.reauthorizeProject) {
           await options.authorization.reauthorizeProject(
             context,
             context.workspaceId,
             context.projectId,
             context.role === 'commenter' ? 'comment' : context.role === 'viewer' ? 'read' : 'edit',
           )
-        } catch (error) {
-          connection.close({ code: 4403, reason: 'Collaboration access was revoked.' })
-          throw error
         }
+      } catch {
+        releases.delete(connection)
+        release()
+        connection.close({ code: 4403, reason: 'Collaboration access was revoked.' })
+        throw new CollaborationTransportError(4403, 'Collaboration access was revoked.')
       }
+    },
+    async afterHandleMessage({ connection }) {
+      releases.get(connection)?.()
+      releases.delete(connection)
     },
     async beforeHandleAwareness({ context, states, document, connection }) {
       if (!context || !connection) return
@@ -767,8 +861,9 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
       )
       if (diagnostic) throw new Error(`Collaboration presence must match the authenticated connection (${diagnostic}).`)
     },
-    async beforeSync({ context, document, type, payload }) {
+    async beforeSync({ context, document, documentName, connection, type, payload }) {
       if (type !== 1 && type !== 2) return
+      if (connection.readOnly || context.role === 'viewer') return
       if (context.role === 'commenter' && !commenterUpdateAllowed(document, payload, context.userId)) {
         throw new Error('Commenter updates may only create attributed threads or append attributed replies.')
       }
@@ -777,6 +872,14 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
           ? ownerUpdateDiagnostic(document, payload, context.userId)
           : editorUpdateDiagnostic(document, payload, context.userId)
         if (diagnostic) throw new Error(`Collaboration review records must preserve immutable history and verified attribution (${diagnostic}).`)
+      }
+      if (!await flushLocalChanges(documentName, document)) throw storageUnavailable()
+      try {
+        // Hocuspocus applies and acknowledges only after this awaited hook returns.
+        // Fail before integration/broadcast, leaving the provider's update unacknowledged.
+        await options.persistence.appendUpdate(parseCollaborationDocumentName(documentName), payload)
+      } catch {
+        throw storageUnavailable()
       }
     },
     async onLoadDocument({ documentName }) {
@@ -787,18 +890,31 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
         return updates.length > 0 ? Y.mergeUpdates(updates) : undefined
       } catch (error) {
         if (error instanceof CollaborationStoreError && error.code === 'not-found') return undefined
-        throw error
+        throw storageUnavailable()
       }
     },
-    async onChange({ documentName, update }) {
-      await options.persistence.appendUpdate(parseCollaborationDocumentName(documentName), update)
+    async onChange({ documentName, document, update, connection }) {
+      if (connection) return // Already durably written by beforeSync, before acknowledgment.
+      const pending = localPending.get(documentName) ?? []
+      pending.push(Uint8Array.from(update))
+      localPending.set(documentName, pending)
+      await flushLocalChanges(documentName, document)
     },
     async onStoreDocument({ documentName, document }) {
-      await options.persistence.createSnapshot(
-        parseCollaborationDocumentName(documentName),
-        `snapshot-${snapshotIdFactory()}`,
-        Y.encodeStateAsUpdate(document),
-      )
+      const release = await messages.acquire(documentName)
+      try {
+        if (!await flushLocalChanges(documentName, document)) throw storageUnavailable()
+        await options.persistence.createSnapshot(
+          parseCollaborationDocumentName(documentName),
+          `snapshot-${snapshotIdFactory()}`,
+          Y.encodeStateAsUpdate(document),
+        )
+      } catch {
+        // Do not expose provider errors, credentials, or object keys in transport logs.
+        throw storageUnavailable()
+      } finally {
+        release()
+      }
     },
   }
   return new Server<CollaborationConnectionContext>(configuration)

@@ -105,7 +105,7 @@ test.describe('DM-P7-05 article-sized rendered dogfood', () => {
     await page.getByRole('button', { name: /Web page/ }).click()
     await expect(page.getByText(/Publication export blocked/)).toBeVisible()
     await page.getByRole('button', { name: 'Export' }).click()
-    await page.getByLabel('Require current computed values').uncheck()
+    await page.getByLabel('Require current computed results').uncheck()
     await page.getByRole('button', { name: /Web page/ }).click()
     const htmlDialog = page.getByRole('dialog', { name: 'Save clean HTML document' })
     const downloadEvent = page.waitForEvent('download')

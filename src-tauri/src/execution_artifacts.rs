@@ -88,7 +88,7 @@ fn safe_cell_filename(value: &str) -> String {
 }
 
 pub(crate) fn create_run_directory(root: &Path, cell_id: &str) -> Result<RunDirectory, HostError> {
-    let parent = root.join(".draftmatter/execution/tmp");
+    let parent = crate::contained_path(root, ".draftmatter/execution/tmp")?;
     fs::create_dir_all(&parent)?;
     for attempt in 0..100_u8 {
         let path = parent.join(format!(

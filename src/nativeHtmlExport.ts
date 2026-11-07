@@ -8,8 +8,10 @@ import { projectComputationsForPublication } from './publicationComputation'
 import { isExplicitlyUnnumbered, numberedManuscriptObjects } from './numberedObjects'
 import { parseStructuredManuscript } from './structuredManuscript'
 import { isSafePortableLinkDestination } from './portableLink'
+import { publicationBytesDataUrl, resolvePublicationImage, validatePublicationAssets, type PublicationAssetOptions } from './publicationAssets'
+import { publicationMathml } from './publicationMath'
 
-export interface NativeHtmlExportOptions {
+export interface NativeHtmlExportOptions extends PublicationAssetOptions {
   title?: string
   language?: string
   citationLabels?: Record<string, string>
@@ -79,14 +81,28 @@ interface FootnoteRenderContext {
 }
 
 function renderInline(value: string, options: NativeHtmlExportOptions, footnotes?: FootnoteRenderContext) {
-  const token = /(\[[^\]\r\n]*@[a-zA-Z0-9_:.+-]+[^\]\r\n]*\]|`[^`\r\n]*`|\[\^[a-zA-Z0-9_.:-]+\]|\$[^$\r\n]+\$|@(?:fig|tbl|eq|sec)-[a-zA-Z0-9](?:[a-zA-Z0-9_.:-]*[a-zA-Z0-9])?)/g
+  const token = /(\\[!"#$%&'()*+,\-./:;<=>?@[\\\]^_`{|}~]| {2,}\n|\\\n|\[[^\]\r\n]+\]\([^)\r\n]+\)|\[[^\]\r\n]*@[a-zA-Z0-9_:.+-]+[^\]\r\n]*\]|`[^`\r\n]*`|\*\*[^*\r\n]+\*\*|\*[^*\r\n]+\*|\[\^[a-zA-Z0-9_.:-]+\]|\$[^$\r\n]+\$|@(?:fig|tbl|eq|sec)-[a-zA-Z0-9](?:[a-zA-Z0-9_.:-]*[a-zA-Z0-9])?)/g
   let html = ''
   let cursor = 0
   for (const match of value.matchAll(token)) {
     const start = match.index ?? 0
     html += escapeHtml(value.slice(cursor, start))
     const raw = match[0]
-    if (raw.startsWith('`')) {
+    const link = raw.match(/^\[([^\]]+)\]\(([^)]+)\)$/)
+    if (/^(?: {2,}|\\)\n$/.test(raw)) {
+      html += '<br>'
+    } else if (raw.startsWith('\\')) {
+      html += escapeHtml(raw.slice(1))
+    } else if (link) {
+      const destination = link[2].match(/^(\S+?)(?:\s+["']([^"']*)["'])?$/)
+      const url = destination?.[1] ?? ''
+      const safe = isSafePortableLinkDestination(url) ? safeAssetUrl(url) : ''
+      html += safe ? `<a href="${safe}"${destination?.[2] ? ` title="${escapeHtml(destination[2])}"` : ''}>${renderInline(link[1], options, footnotes)}</a>` : renderInline(link[1], options, footnotes)
+    } else if (raw.startsWith('**')) {
+      html += `<strong>${renderInline(raw.slice(2, -2), options, footnotes)}</strong>`
+    } else if (raw.startsWith('*')) {
+      html += `<em>${renderInline(raw.slice(1, -1), options, footnotes)}</em>`
+    } else if (raw.startsWith('`')) {
       html += `<code>${escapeHtml(raw.slice(1, -1))}</code>`
     } else if (raw.startsWith('[^')) {
       const label = raw.slice(2, -1)
@@ -101,7 +117,7 @@ function renderInline(value: string, options: NativeHtmlExportOptions, footnotes
       }
     } else if (raw.startsWith('$')) {
       const equation = raw.slice(1, -1)
-      html += `<span class="equation inline-equation" data-tex="${escapeHtml(equation)}" role="math">${escapeHtml(equation)}</span>`
+      html += `<span class="equation inline-equation" data-tex="${escapeHtml(equation)}" role="math">${publicationMathml(equation)}</span>`
     } else if (raw.startsWith('@')) {
       const id = raw.slice(1)
       html += `<a class="cross-reference" href="#${escapeHtml(id)}">${escapeHtml(footnotes?.objectLabels[id] ?? formatCrossReferenceTarget(id))}</a>`
@@ -114,12 +130,6 @@ function renderInline(value: string, options: NativeHtmlExportOptions, footnotes
   }
   html += escapeHtml(value.slice(cursor))
   return html
-    .replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
-    .replace(/(?<!\*)\*([^*]+)\*(?!\*)/g, '<em>$1</em>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_match, label: string, url: string) => {
-      const safe = isSafePortableLinkDestination(url) ? safeAssetUrl(url) : ''
-      return safe ? `<a href="${safe}">${label}</a>` : label
-    })
 }
 
 function startsBlock(lines: string[], index: number) {
@@ -180,7 +190,7 @@ function renderBody(source: string, options: NativeHtmlExportOptions, footnotes:
         const id = equation.label ? ` id="${escapeHtml(equation.label)}"` : ''
         const numberMarkup = number ? `<span class="equation-number" aria-label="Equation ${number}">(${number})</span>` : ''
         const captionMarkup = caption ? `<figcaption>${number ? `<strong>Equation ${number}.</strong> ` : ''}${renderInline(caption.captionMarkdown, options, footnotes)}</figcaption>` : ''
-        html.push(`<figure class="equation-figure"><div${id} class="equation display-equation" data-tex="${escapeHtml(equation.tex)}" role="math">${escapeHtml(equation.tex)}${numberMarkup}</div>${captionMarkup}</figure>`)
+        html.push(`<figure class="equation-figure"><div${id} class="equation display-equation" data-tex="${escapeHtml(equation.tex)}" role="math">${publicationMathml(equation.tex, true)}${numberMarkup}</div>${captionMarkup}</figure>`)
       } else {
         html.push(`<pre class="raw-source" aria-label="Unclosed display equation">${escapeHtml(lines.slice(index, equation.end).join('\n'))}</pre>`)
       }
@@ -195,7 +205,8 @@ function renderBody(source: string, options: NativeHtmlExportOptions, footnotes:
       const number = unnumbered ? undefined : ++counters.figure
       const caption = parseTableCaptionLine(lines[index + 1] ?? '')
       const source = figure[2].startsWith('<') ? figure[2].slice(1, -1) : figure[2]
-      const url = safeAssetUrl(source)
+      const asset = resolvePublicationImage(source, options)
+      const url = safeAssetUrl(asset ? publicationBytesDataUrl(asset.bytes) : source)
       const id = label ? ` id="${escapeHtml(label)}"` : ''
       const captionText = caption?.captionMarkdown
       const captionMarkup = number || captionText
@@ -264,7 +275,7 @@ function renderBody(source: string, options: NativeHtmlExportOptions, footnotes:
       paragraph.push(lines[index])
       index += 1
     }
-    html.push(`<p>${renderInline(paragraph.join(' '), options, footnotes)}</p>`)
+    html.push(`<p>${renderInline(paragraph.join('\n'), options, footnotes)}</p>`)
   }
   return html.join('\n')
 }
@@ -281,6 +292,7 @@ function renderFootnotes(resolved: ResolvedFootnoteDocument, options: NativeHtml
 }
 
 export function renderNativeHtmlExport(source: string, options: NativeHtmlExportOptions = {}) {
+  validatePublicationAssets(options.assets)
   const diagnostics = validateCleanProjection(source)
   if (diagnostics.some((diagnostic) => diagnostic.code === 'clean-anchor-leak' || diagnostic.code === 'clean-review-leak')) {
     throw new Error('Native HTML export accepts only a clean DraftMatter projection without review storage markers.')
@@ -355,6 +367,15 @@ export async function printNativeHtml(
   }
   window.addEventListener('afterprint', cleanup, { once: true })
   try {
+    await Promise.all([...printRoot.querySelectorAll('img')].map(async (image) => {
+      if (typeof image.decode === 'function') await image.decode()
+      else if (!image.complete) await new Promise<void>((resolve, reject) => {
+        image.onload = () => resolve()
+        image.onerror = () => reject(new Error('A publication figure could not be loaded for printing.'))
+      })
+      if (!image.naturalWidth) throw new Error('A publication figure could not be loaded for printing.')
+    }))
+    if (document.fonts?.ready) await document.fonts.ready
     await requestPrint()
     window.setTimeout(cleanup, 60_000)
   } catch (error) {

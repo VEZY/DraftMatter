@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { createDesktopHost, normaliseCrossrefFailure, normaliseHostFailure, resolveMainDocument, type ProjectSnapshot } from './desktopHost'
+import { createDesktopHost, normaliseCrossrefFailure, normaliseHostFailure, projectAssetHash, resolveMainDocument, type ProjectSnapshot } from './desktopHost'
 
 const project: ProjectSnapshot = {
   root: '/research/canopy',
@@ -248,5 +248,26 @@ describe('desktop host adapter', () => {
     expect(resolveMainDocument(multiple)).toBeNull()
     expect(resolveMainDocument(multiple, 'notes.md')).toBe('notes.md')
     expect(resolveMainDocument({ ...multiple, documents: [multiple.documents[0]] })).toBe('article.qmd')
+  })
+})
+
+describe('complete collaboration checkpoint host boundary', () => {
+  it('fingerprints binary project assets with the cross-language SHA-256 contract', async () => {
+    await expect(projectAssetHash([97, 98, 99])).resolves.toBe('sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad')
+  })
+
+  it('keeps manuscript and resource revision guards in one native operation', async () => {
+    const invoke = vi.fn().mockResolvedValue({ documentHash: 'fnv1a:next', assetHashes: { 'figures/result.svg': 'sha256:next' } })
+    const host = createDesktopHost(invoke, vi.fn(), true)
+    const request = {
+      root: '/research/project', documentPath: 'paper.qmd', documentContent: 'Checkpoint source', expectedDocumentHash: 'fnv1a:before',
+      assets: [{ path: 'figures/result.svg', bytes: [60, 115, 118, 103, 47, 62], expectedHash: null }],
+      bibliography: { path: 'references.json', content: '[]', expectedHash: 'fnv1a:references' },
+    }
+    await expect(host.saveCollaborationCheckpoint(request)).resolves.toMatchObject({ documentHash: 'fnv1a:next' })
+    expect(invoke).toHaveBeenCalledExactlyOnceWith('save_collaboration_checkpoint', { request })
+    const browser = createDesktopHost(invoke, vi.fn(), false)
+    await expect(browser.saveCollaborationCheckpoint(request)).rejects.toMatchObject({ kind: 'integration' })
+    expect(invoke).toHaveBeenCalledTimes(1)
   })
 })

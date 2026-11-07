@@ -14,6 +14,8 @@ The release CI ceilings are deliberately above typical developer-machine timings
 
 The interactive gate mounts all 90 sections and tables in the real ProseMirror editor, inserts a labeled section through an editor transaction, and measures the complete portable-source serialization. Expensive publication exports still run only after an explicit action. Product-specific release profiling may tighten these conservative cross-platform CI ceilings without weakening them.
 
+The home/account router loads the manuscript editor on demand. In the 2026-11-06 locked production build, entry JavaScript is approximately 301 kB (90 kB gzip), compared with 2,103 kB (624 kB gzip) before that split. The editor is a separate approximately 1,801 kB chunk. This reduces the initial transfer for Home; it does not assert a corresponding startup-latency gain or reduce the whole editor's dependency size.
+
 ## Recovery invariants
 
 - Browser recovery uses a schema-versioned journal and reads the legacy array format.
@@ -25,3 +27,7 @@ The interactive gate mounts all 90 sections and tables in the real ProseMirror e
 - Git checkpoints are separate, named user actions. Recovery never commits, pushes, switches branches, or executes manuscript code.
 
 These mechanisms are complementary: browser/on-disk recovery protects unsaved work, while Git records deliberate project milestones.
+
+The desktop host and assistant clients use one interprocess project-write protocol. Revision checks run under that lock; multi-file transactions fsync their backup and prepared journal before replacing targets, and either host can recover an interrupted transaction. Unknown or ambiguous legacy journals are preserved with an actionable error, never silently deleted. This also prevents two assistants from successfully replacing the same inspected revision.
+
+Collaborative recovery separately journals CRDT state in IndexedDB, scoped by server, project and account. It preserves offline updates across reloads, and warns if local persistence or server synchronization is pending. This cache is not an infrastructure backup.

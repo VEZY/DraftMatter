@@ -20,6 +20,7 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
     objects,
     objectPrefix: config.objectStorage.prefix,
     storageQuota: entitlements,
+    maxUpdateBytes: config.maxPayloadBytes,
   })
   const identity = new OidcIdentityVerifier(config.oidc)
   let server: ReturnType<typeof createDraftMatterHocuspocusServer>

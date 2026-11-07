@@ -2,13 +2,14 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HocuspocusProvider, WebSocketStatus } from '@hocuspocus/provider'
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
 import { AuthenticatedWorkspaceService } from '../../src/collaboration/workspaceService'
 import { createReviewChange, createReviewThread } from '../../src/reviewOperations'
 import { CollaborativeDocument } from '../../src/sharedEditor/collaboration'
 import { createCollaborationCheckpoint } from '../../src/sharedEditor/collaborationCheckpoint'
 import { CollaborativeReviewBinding } from '../../src/sharedEditor/collaborativeReview'
+import { PROJECT_RESOURCES_ROOT, publishProjectResources, readProjectResources, sharedImage } from '../../src/sharedEditor/projectResources'
 import { reviewDecisionConflicts } from '../../src/sharedEditor/reviewDecisions'
 import { FileCollaborationStore } from './fileStore'
 import { collaborationDocumentName, createDraftMatterHocuspocusServer } from './hocuspocusServer'
@@ -16,6 +17,7 @@ import { collaborationDocumentName, createDraftMatterHocuspocusServer } from './
 const roots: string[] = []
 
 afterEach(async () => {
+  vi.restoreAllMocks()
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })))
 })
 
@@ -234,6 +236,12 @@ describe('live Hocuspocus collaboration', () => {
     await Promise.all([owner.synced, reviewer.synced])
     const ownerCollaboration = new CollaborativeDocument(ownerDocument)
     const reviewerCollaboration = new CollaborativeDocument(reviewerDocument)
+    const figure = sharedImage('figures/shared.svg', new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg"><text>Shared result</text></svg>'))
+    const reference = { citekey: 'shared2026', type: 'article-journal', title: 'Shared reference', authors: ['Ada Author'], source: 'csl-json' as const }
+    publishProjectResources(ownerDocument, { images: [figure], citations: [reference] })
+    await waitFor(() => readProjectResources(reviewerDocument).images.length === 1 && readProjectResources(reviewerDocument).citations.length === 1, 'Project resources did not reach the browser reviewer.')
+    expect(readProjectResources(reviewerDocument)).toEqual({ images: [figure], citations: [reference] })
+
     const quote = 'Canopy response'
     const start = source.indexOf(quote)
     const thread = createReviewThread(source, {
@@ -262,6 +270,13 @@ describe('live Hocuspocus collaboration', () => {
       }),
     ])
     expect(createCollaborationCheckpoint(ownerCollaboration).source).toContain('data-author="reviewer"')
+
+    // The reader receives the bytes, but its role cannot change or remove them.
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    reviewerDocument.getMap(PROJECT_RESOURCES_ROOT).delete('image:figures/shared.svg')
+    await waitFor(() => !server.hocuspocus.documents.get(name)?.getConnections().some((connection) => connection.context.userId === 'reviewer'), 'A commenter resource mutation was not refused.')
+    expect(readProjectResources(ownerDocument)).toEqual({ images: [figure], citations: [reference] })
+    errors.mockRestore()
 
     owner.connection.destroy()
     reviewer.connection.destroy()

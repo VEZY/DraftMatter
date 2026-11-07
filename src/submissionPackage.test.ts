@@ -71,7 +71,7 @@ describe('journal submission package', () => {
       baseName: 'canopy-paper.qmd',
       options,
       citations: [citation],
-      assets: [{ path: 'figures/canopy.svg', bytes: new TextEncoder().encode('<svg/>') }],
+      assets: [{ path: 'figures/canopy.svg', bytes: new TextEncoder().encode('<svg/>'), fallbackPng: Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aU1QAAAAASUVORK5CYII='), (character) => character.charCodeAt(0)) }],
       docx: {
         citationLabels: { '[@field2026]': '(Field, 2026)' },
         bibliography: [{ id: 'field2026', value: 'Field, A. (2026). Field canopy measurements.' }],
@@ -105,7 +105,7 @@ describe('journal submission package', () => {
       baseName: 'anonymous',
       options: { ...options, reviewModel: 'double-anonymous' },
       citations: [citation],
-      assets: [{ path: 'figures/canopy.svg', bytes: new TextEncoder().encode('<svg/>') }],
+      assets: [{ path: 'figures/canopy.svg', bytes: new TextEncoder().encode('<svg/>'), fallbackPng: Uint8Array.from(atob('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aU1QAAAAASUVORK5CYII='), (character) => character.charCodeAt(0)) }],
     })
     const readable = new TextDecoder().decode(result.bytes)
     const manuscriptStart = readable.indexOf('source/manuscript.qmd')
