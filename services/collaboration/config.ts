@@ -128,7 +128,10 @@ function allowedOrigin(value: string) {
 export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = process.env): CollaborationServiceConfig {
   const mode = environment.NODE_ENV === 'production' ? 'production' : environment.NODE_ENV === 'test' ? 'test' : 'development'
   const allowInsecureOidc = mode !== 'production'
-  const issuer = httpsUrl(required(environment, 'DM_OIDC_ISSUER'), 'DM_OIDC_ISSUER', allowInsecureOidc)
+  // JWT issuer matching is exact: URL canonicalization or removing a final
+  // slash changes the identity the provider signs into its access tokens.
+  const issuer = required(environment, 'DM_OIDC_ISSUER')
+  httpsUrl(issuer, 'DM_OIDC_ISSUER', allowInsecureOidc)
   const jwksUri = httpsUrl(required(environment, 'DM_OIDC_JWKS_URI'), 'DM_OIDC_JWKS_URI', allowInsecureOidc)
   const audiences = required(environment, 'DM_OIDC_AUDIENCE').split(',').map((value) => value.trim()).filter(Boolean)
   if (!audiences.length) throw new CollaborationConfigError('DM_OIDC_AUDIENCE must contain at least one audience.')

@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { Client } from 'pg'
+import { generateKeyPair, SignJWT } from 'jose'
+import { OidcIdentityVerifier } from './oidcIdentity'
 import { loadCollaborationServiceConfig } from './config'
 
 function environment(overrides: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
@@ -32,6 +34,21 @@ describe('collaboration service configuration', () => {
       allowedOrigins: ['https://app.example.test'],
     })
     expect(config.webhookSecret.byteLength).toBeGreaterThanOrEqual(32)
+  })
+
+  it('preserves the exact configured issuer through verification of a real signed access token', async () => {
+    const issuer = 'https://identity.example.test/'
+    const config = loadCollaborationServiceConfig(environment({
+      NODE_ENV: 'production', DM_DATABASE_TLS: 'verify-full', DM_ALLOWED_ORIGINS: 'https://app.example.test', DM_OIDC_ISSUER: issuer,
+    }))
+    expect(config.oidc.issuer).toBe(issuer)
+    const pair = await generateKeyPair('ES256')
+    const verifier = new OidcIdentityVerifier({ ...config.oidc, keyResolver: async () => pair.publicKey })
+    const accessToken = (tokenIssuer: string) => new SignJWT({})
+      .setProtectedHeader({ alg: 'ES256' }).setIssuer(tokenIssuer).setAudience(config.oidc.audience)
+      .setSubject('exact-issuer-subject').setIssuedAt().setExpirationTime('5m').sign(pair.privateKey)
+    await expect(verifier.verify(await accessToken(issuer))).resolves.toMatchObject({ issuer })
+    await expect(verifier.verify(await accessToken(issuer.slice(0, -1)))).rejects.toMatchObject({ code: 'unauthenticated' })
   })
 
   it('defaults the public client ID to the first accepted audience', () => {

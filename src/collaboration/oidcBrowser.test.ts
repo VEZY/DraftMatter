@@ -69,6 +69,36 @@ describe('browser OIDC Authorization Code + PKCE', () => {
     }))
   })
 
+  it.each(['https://identity.example.test/', 'https://identity.example.test/realms/draftmatter/'])(
+    'preserves exact issuer %s through discovery and callback without adding a doubled URL slash', async (issuer) => {
+      const storage = memoryStorage()
+      const request = vi.fn<typeof fetch>()
+        .mockResolvedValueOnce(Response.json({ oidc: { issuer, clientId: 'draftmatter-public' } }))
+        .mockResolvedValueOnce(Response.json({ issuer, authorization_endpoint: `${issuer}authorize`, token_endpoint: `${issuer}token`, code_challenge_methods_supported: ['S256'] }))
+        .mockResolvedValueOnce(Response.json({ access_token: 'access-token', expires_in: 300 }))
+      const prepared = await prepareOidcAuthorization('https://collab.example.test', 'https://app.example.test/invite', storage, request)
+      expect(request.mock.calls[1][0]).toBe(`${issuer.slice(0, -1)}/.well-known/openid-configuration`)
+      expect(JSON.parse([...storage.values.values()][0]).issuer).toBe(issuer)
+      const state = new URL(prepared.authorizationUrl).searchParams.get('state')!
+      await expect(completeOidcAuthorization(`https://app.example.test/invite?code=code&state=${state}&iss=${encodeURIComponent(issuer)}`, storage, request)).resolves.toMatchObject({ accessToken: 'access-token' })
+    },
+  )
+
+  it('does not treat issuers differing only by a final slash as the same discovery or callback identity', async () => {
+    const issuer = 'https://identity.example.test/'
+    const metadata = (discoveryIssuer: string) => vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ oidc: { issuer, clientId: 'draftmatter-public' } }))
+      .mockResolvedValueOnce(Response.json({ issuer: discoveryIssuer, authorization_endpoint: `${issuer}authorize`, token_endpoint: `${issuer}token` }))
+    const discovery = metadata(issuer.slice(0, -1))
+    await expect(prepareOidcAuthorization('https://collab.example.test', 'https://app.example.test/', memoryStorage(), discovery)).rejects.toThrow(/issuer does not match/)
+    const storage = memoryStorage()
+    const request = metadata(issuer)
+    const prepared = await prepareOidcAuthorization('https://collab.example.test', 'https://app.example.test/', storage, request)
+    const state = new URL(prepared.authorizationUrl).searchParams.get('state')!
+    await expect(completeOidcAuthorization(`https://app.example.test/?code=code&state=${state}&iss=${encodeURIComponent(issuer.slice(0, -1))}`, storage, request)).rejects.toThrow(/issuer does not match/)
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+
   it('rejects issuer substitution and callback state mismatch before token exchange', async () => {
     const storage = memoryStorage()
     const substituted = vi.fn<typeof fetch>()

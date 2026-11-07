@@ -105,6 +105,13 @@ function secureEndpoint(value: string, label: string) {
   return url.toString().replace(/\/$/, '')
 }
 
+function secureIssuer(value: string, label: string) {
+  secureEndpoint(value, label)
+  // An issuer is an exact identifier, independently of the URL used to locate
+  // its discovery document. Preserve its trailing slash and original spelling.
+  return value
+}
+
 async function json<T>(request: typeof fetch, url: string, init?: RequestInit) {
   const response = await request(url, init)
   if (!response.ok) throw new Error(`Identity sign-in returned ${response.status}.`)
@@ -150,10 +157,10 @@ export async function prepareOidcAuthorization(
 ): Promise<OidcAuthorizationRequest> {
   const urls = normalizeCollaborationServiceUrl(serviceUrl)
   const publicConfig = await json<OidcPublicConfig>(request, `${urls.apiUrl}/config`, { credentials: 'omit' })
-  const issuer = secureEndpoint(publicConfig.oidc.issuer, 'OIDC issuer')
+  const issuer = secureIssuer(publicConfig.oidc.issuer, 'OIDC issuer')
   if (!publicConfig.oidc.clientId.trim()) throw new Error('The collaboration service did not publish an OIDC client ID.')
-  const discovery = await json<OidcDiscovery>(request, `${issuer}/.well-known/openid-configuration`, { credentials: 'omit' })
-  if (secureEndpoint(discovery.issuer, 'OIDC discovery issuer') !== issuer) throw new Error('The identity discovery issuer does not match the collaboration service.')
+  const discovery = await json<OidcDiscovery>(request, `${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`, { credentials: 'omit' })
+  if (secureIssuer(discovery.issuer, 'OIDC discovery issuer') !== issuer) throw new Error('The identity discovery issuer does not match the collaboration service.')
   if (discovery.code_challenge_methods_supported && !discovery.code_challenge_methods_supported.includes('S256')) {
     throw new Error('The identity provider does not support secure S256 PKCE sign-in.')
   }
@@ -214,7 +221,7 @@ export async function completeOidcAuthorization(
     storage.removeItem(TRANSACTION_KEY)
     throw new Error('The identity sign-in returned to an unexpected application address.')
   }
-  if (callback.searchParams.has('iss') && callback.searchParams.get('iss')?.replace(/\/$/, '') !== transaction.issuer) {
+  if (callback.searchParams.has('iss') && callback.searchParams.get('iss') !== transaction.issuer) {
     storage.removeItem(TRANSACTION_KEY)
     throw new Error('The identity sign-in response issuer does not match this session.')
   }
