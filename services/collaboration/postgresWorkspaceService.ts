@@ -111,7 +111,7 @@ interface PostgresWorkspaceServiceOptions {
   entitlements?: PostgresEntitlementService
   clock?: () => number
   idFactory?: () => string
-  rateLimits?: Partial<Record<'read' | 'write' | 'invite', WorkspaceRateLimit>>
+  rateLimits?: Partial<Record<'read' | 'write' | 'invite' | 'files', WorkspaceRateLimit>>
   onMembershipRevoked?: (workspaceId: string, userId: string) => void | Promise<void>
 }
 
@@ -232,7 +232,7 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
   readonly entitlements: PostgresEntitlementService
   private readonly clock: () => number
   private readonly idFactory: () => string
-  private readonly rateLimits: Record<'read' | 'write' | 'invite', WorkspaceRateLimit>
+  private readonly rateLimits: Record<'read' | 'write' | 'invite' | 'files', WorkspaceRateLimit>
   private readonly onMembershipRevoked?: PostgresWorkspaceServiceOptions['onMembershipRevoked']
 
   constructor(options: PostgresWorkspaceServiceOptions) {
@@ -245,6 +245,7 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
       read: options.rateLimits?.read ?? { limit: 240, windowMs: 60_000 },
       write: options.rateLimits?.write ?? { limit: 120, windowMs: 60_000 },
       invite: options.rateLimits?.invite ?? { limit: 20, windowMs: 60 * 60_000 },
+      files: options.rateLimits?.files ?? { limit: 1_200, windowMs: 60_000 },
     }
     this.onMembershipRevoked = options.onMembershipRevoked
   }
@@ -264,7 +265,7 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
     )
   }
 
-  private async consumeRateLimit(identity: VerifiedCollaborationIdentity, category: 'read' | 'write' | 'invite') {
+  private async consumeRateLimit(identity: VerifiedCollaborationIdentity, category: 'read' | 'write' | 'invite' | 'files') {
     const rule = this.rateLimits[category]
     const now = this.clock()
     const principal = `${identity.userId}:${identity.sessionId}`
@@ -290,7 +291,7 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
     })
   }
 
-  private async authenticate(token: string, category: 'read' | 'write' | 'invite') {
+  private async authenticate(token: string, category: 'read' | 'write' | 'invite' | 'files') {
     const identity = await this.identity.verify(token)
     await this.upsertIdentity(identity)
     await this.consumeRateLimit(identity, category)
@@ -543,6 +544,14 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
 
   async authorizeProject(token: string, workspaceId: string, projectId: string, capability: ProjectCapability) {
     const identity = await this.authenticate(token, capability === 'read' ? 'read' : 'write')
+    const access = await this.requireProjectAccess(this.pool, workspaceId, projectId, identity.userId, capability)
+    if (capability !== 'read') await this.entitlements.assertWorkspaceWritable(workspaceId)
+    return { userId: identity.userId, sessionId: identity.sessionId, role: access.membership.role, capability }
+  }
+
+  /** Binary parts have a separate bounded budget from low-volume administration. */
+  async authorizeProjectFileTransfer(token: string, workspaceId: string, projectId: string, capability: ProjectCapability) {
+    const identity = await this.authenticate(token, 'files')
     const access = await this.requireProjectAccess(this.pool, workspaceId, projectId, identity.userId, capability)
     if (capability !== 'read') await this.entitlements.assertWorkspaceWritable(workspaceId)
     return { userId: identity.userId, sessionId: identity.sessionId, role: access.membership.role, capability }

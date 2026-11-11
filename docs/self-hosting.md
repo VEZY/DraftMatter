@@ -31,6 +31,16 @@ Stop containers without deleting data using `docker compose down`. Add `--volume
 
 ## Production configuration
 
+Private research data transfers are described in
+[Project data files](project-data-files.md). They have a separate 1 GB per-project
+quota and resumable multipart transport; the small figure/reference limits below
+apply only to live manuscript resources.
+
+For the first private Linux deployment, use the separate
+[production template and runbook](../deploy/production/README.md). It includes the
+browser application, HTTPS/WebSocket proxy, production Compose file and an
+offline configuration check. The root `compose.yaml` remains development-only.
+
 The container starts only after database migrations, a PostgreSQL query, and an object-storage bucket probe succeed. It serves:
 
 - `/health/live` for process liveness;
@@ -50,13 +60,13 @@ Required variables and safe development defaults are documented in `.env.example
 - a random `DM_WEBHOOK_SECRET` of at least 32 bytes;
 - optional review-email delivery configured as one set with `DM_NOTIFICATION_WEBHOOK_URL`, a separate `DM_NOTIFICATION_WEBHOOK_SECRET` of at least 32 bytes, and `DM_PUBLIC_APP_URL`; `DM_NOTIFICATION_INTERVAL_MS` controls the bounded five-second to five-minute delivery poll (30 seconds by default), and the endpoint receives a bounded provider-neutral template request over HTTPS and must honor its notification ID as an idempotency key;
 - bucket versioning or immutability, server-side encryption, and a separately administered backup destination;
-- a reverse-proxy request limit no larger than `DM_MAX_PAYLOAD_BYTES`.
+- a reverse-proxy HTTP body limit compatible with the API's 64 KiB JSON limit, and WebSocket support without a short stream timeout; the service enforces `DM_MAX_PAYLOAD_BYTES` on collaboration frames.
 
 Production database connections default to `verify-full`; unverified or disabled TLS is rejected in production. Do not put SSL options such as `sslmode` or `sslrootcert` in `DM_DATABASE_URL`: they can replace the explicit node-postgres SSL configuration and are rejected. Install the database CA in Node's trust store instead.
 
 For desktop sign-in, register the exact public PKCE redirect URI `draftmatter://auth/callback` at the identity provider. Allow the desktop origins `tauri://localhost` (macOS/Linux) and `http://tauri.localhost` (Windows), as appropriate, in both `DM_ALLOWED_ORIGINS` and the identity provider's web origins. DraftMatter opens the system browser; the verifier and rotating tokens remain in memory in the running app. Keep browser redirect URIs and origins separately registered. The native callback is delivered to the existing application instance.
 
-Shared projects synchronize bounded figure bytes and bibliography records alongside the manuscript. Each shared image is limited to 2 MiB and shared resource metadata to 8 MiB per project. `DM_MAX_PAYLOAD_BYTES` defaults to 16 MiB so initial synchronization can carry that snapshot; use the same or a larger compatible request limit at the reverse proxy. Unsupported or oversized figures produce an explicit error before sharing.
+Shared projects synchronize bounded figure bytes and bibliography records alongside the manuscript. Each shared image is limited to 2 MiB and shared resource metadata to 8 MiB per project. `DM_MAX_PAYLOAD_BYTES` defaults to 16 MiB so initial WebSocket synchronization can carry that snapshot. This frame limit is separate from an HTTP request-body limit. Unsupported or oversized figures produce an explicit error before sharing.
 
 The bundled identity realm and single-node object store are intentionally not a high-availability topology. A managed production deployment should use an operated OIDC provider, replicated PostgreSQL, versioned S3-compatible storage, scheduled backups, alert routing, and restore drills. Review-email requests contain the recipient address, event kind, actor/workspace/project display names, and the configured application link, but never review text, manuscript content, access tokens, or invitation secrets. Delivery is queued transactionally with the in-app notification, leased by maintenance, retried with bounded exponential backoff, and discarded after eight failed provider attempts. The service remains vendor-neutral: billing and email providers integrate through narrow webhook boundaries, and no provider SDK or exact pricing is embedded.
 

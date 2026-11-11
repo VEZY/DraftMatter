@@ -50,6 +50,25 @@ async function database(onMembershipRevoked?: (workspaceId: string, userId: stri
 }
 
 describe('PostgreSQL workspace authorization', () => {
+  it('gives file parts a separate bounded budget and still rechecks project roles and revocation', async () => {
+    const { pool, service } = await database()
+    await service.createWorkspace('owner', { id: 'forest', name: 'Forest study' })
+    await service.createProject('owner', 'forest', { id: 'paper', name: 'Canopy response' })
+    const invitation = await service.createInvitation('owner', 'forest', { role: 'editor' })
+    await service.acceptInvitation('editor', invitation.token)
+    const limited = new PostgresWorkspaceService({ pool, identity: new FixtureIdentity('files'), rateLimits: {
+      write: { limit: 1, windowMs: 60_000 }, files: { limit: 2, windowMs: 60_000 },
+    } })
+    await limited.authorizeProject('editor', 'forest', 'paper', 'edit')
+    await expect(limited.authorizeProject('editor', 'forest', 'paper', 'edit')).rejects.toMatchObject({ code: 'rate-limited' })
+    await expect(limited.authorizeProjectFileTransfer('editor', 'forest', 'paper', 'edit')).resolves.toMatchObject({ role: 'editor' })
+    await expect(limited.authorizeProjectFileTransfer('editor', 'forest', 'paper', 'edit')).resolves.toMatchObject({ role: 'editor' })
+    await expect(limited.authorizeProjectFileTransfer('editor', 'forest', 'paper', 'edit')).rejects.toMatchObject({ code: 'rate-limited' })
+    await service.revokeMember('owner', 'forest', 'editor')
+    await expect(service.authorizeProjectFileTransfer('editor', 'forest', 'paper', 'read')).rejects.toMatchObject({ code: 'not-found' })
+    await pool.end()
+  })
+
   it('persists onboarding progress per authenticated user', async () => {
     const { pool, service } = await database()
     await expect(service.getOnboardingProgress('owner')).resolves.toEqual({ completedTaskIds: [], dismissed: false })

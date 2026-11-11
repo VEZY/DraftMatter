@@ -21,6 +21,7 @@ mod assistant_connections;
 mod execution_artifacts;
 mod execution_manifests;
 mod project_transactions;
+mod project_file_download;
 mod execution_trust;
 mod export_adapter;
 mod git_adapter;
@@ -3504,6 +3505,7 @@ pub fn run() {
         })
         .manage(ExecutionTrustStore::default())
         .manage(KernelProcessRegistry::default())
+        .manage(project_file_download::DownloadRegistry::default())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
@@ -3526,6 +3528,11 @@ pub fn run() {
             save_citation_lock,
             save_document,
             save_export_file,
+            project_file_download::begin_project_file_download,
+            project_file_download::write_project_file_download_part,
+            project_file_download::project_file_download_status,
+            project_file_download::save_project_file_download,
+            project_file_download::cancel_project_file_download,
             print_publication,
             acquire_citations,
             document_status,

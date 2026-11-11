@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import type { Pool } from 'pg'
 import { CollaborationStoreError } from './fileStore'
 import type { ObjectStorage } from './objectStorage'
@@ -6,7 +6,7 @@ import type { NotificationEmailDelivery } from './notificationDelivery'
 import { PostgresCollaborationStore } from './postgresStore'
 
 interface MaintenanceOptions {
-  pool: Pick<Pool, 'query'>
+  pool: Pick<Pool, 'query' | 'connect'>
   persistence: PostgresCollaborationStore
   objects: ObjectStorage
   objectPrefix?: string
@@ -15,6 +15,10 @@ interface MaintenanceOptions {
   onWorkspaceDeleted?: (workspaceId: string) => void | Promise<void>
   notificationDelivery?: NotificationEmailDelivery
   publicAppUrl?: string
+  fileTransfers?: {
+    cleanupExpiredUploads(): Promise<void>
+    deleteWorkspaceFiles(workspaceId: string): Promise<void>
+  }
 }
 
 interface PolicyRow {
@@ -66,7 +70,7 @@ function backupId(time: number, suffix: string) {
 }
 
 export class CollaborationMaintenanceCoordinator {
-  private readonly pool: Pick<Pool, 'query'>
+  private readonly pool: Pick<Pool, 'query' | 'connect'>
   private readonly persistence: PostgresCollaborationStore
   private readonly objects: ObjectStorage
   private readonly objectPrefix: string
@@ -75,6 +79,7 @@ export class CollaborationMaintenanceCoordinator {
   private readonly onWorkspaceDeleted?: MaintenanceOptions['onWorkspaceDeleted']
   private readonly notificationDelivery?: NotificationEmailDelivery
   private readonly publicAppUrl?: string
+  private readonly fileTransfers?: MaintenanceOptions['fileTransfers']
   private metrics: MaintenanceMetrics = {
     runs: 0,
     backupSuccesses: 0,
@@ -98,6 +103,7 @@ export class CollaborationMaintenanceCoordinator {
     this.onWorkspaceDeleted = options.onWorkspaceDeleted
     this.notificationDelivery = options.notificationDelivery
     this.publicAppUrl = options.publicAppUrl
+    this.fileTransfers = options.fileTransfers
   }
 
   snapshot() {
@@ -164,23 +170,39 @@ export class CollaborationMaintenanceCoordinator {
   async processDeletionRequests() {
     const due = await this.pool.query<{ id: string; workspace_id: string }>(
       `SELECT id, workspace_id FROM draftmatter_deletion_requests
-       WHERE status = 'scheduled' AND execute_after <= $1 ORDER BY execute_after, id`,
+       WHERE (status = 'scheduled' AND execute_after <= $1) OR status = 'running'
+       ORDER BY execute_after, id`,
       [iso(this.clock())],
     )
     for (const request of due.rows) {
-      const claimed = await this.pool.query(
-        `UPDATE draftmatter_deletion_requests SET status = 'running', failure = NULL
-         WHERE id = $1 AND status = 'scheduled' RETURNING id`,
-        [request.id],
-      )
-      if (!claimed.rowCount) continue
+      // A session lock has no stale-time heuristic: a long purge retains its
+      // lease, and a crashed process loses it as soon as PostgreSQL disconnects.
+      // Keep this connection out of the pool until cleanup or failure is final.
+      const lease = await this.pool.connect()
+      const key = createHash('sha256').update(`draftmatter:workspace-deletion:${request.workspace_id}`).digest().readBigInt64BE(0).toString()
+      let held = false, lost = false
+      const disconnected = () => { lost = true }
+      lease.on('error', disconnected)
       try {
+        const lock = await lease.query<{ acquired: boolean }>('SELECT pg_try_advisory_lock($1::bigint) AS acquired', [key])
+        if (!lock.rows[0]?.acquired) continue
+        held = true
+        const claimed = await lease.query(
+          `UPDATE draftmatter_deletion_requests SET status = 'running', failure = NULL
+           WHERE id = $1 AND ((status = 'scheduled' AND execute_after <= $2) OR status = 'running') RETURNING id`,
+          [request.id, iso(this.clock())],
+        )
+        if (!claimed.rowCount) continue
         await this.onWorkspaceDeleted?.(request.workspace_id)
+        if (lost) throw new Error('Workspace deletion lease was lost.')
+        await this.fileTransfers?.deleteWorkspaceFiles(request.workspace_id)
+        if (lost) throw new Error('Workspace deletion lease was lost.')
         const projects = await this.pool.query<{ id: string }>(
           'SELECT id FROM draftmatter_projects WHERE workspace_id = $1',
           [request.workspace_id],
         )
         for (const project of projects.rows) {
+          if (lost) throw new Error('Workspace deletion lease was lost.')
           try {
             await this.persistence.deleteProjectState({ workspaceId: request.workspace_id, projectId: project.id })
           } catch (error) {
@@ -188,16 +210,26 @@ export class CollaborationMaintenanceCoordinator {
           }
         }
         const remainingPrefix = `${this.objectPrefix}/workspaces/${request.workspace_id}/`
-        for (const objectKey of await this.objects.list(remainingPrefix)) await this.objects.delete(objectKey)
-        await this.pool.query('DELETE FROM draftmatter_workspaces WHERE id = $1', [request.workspace_id])
+        for (const objectKey of await this.objects.list(remainingPrefix)) {
+          if (lost) throw new Error('Workspace deletion lease was lost.')
+          await this.objects.delete(objectKey)
+        }
+        // Check the same session before removing the final metadata. Never let a
+        // worker whose lease was lost mark another worker's request failed.
+        await lease.query('SELECT 1')
+        await lease.query('DELETE FROM draftmatter_workspaces WHERE id = $1', [request.workspace_id])
         this.metrics.deletionSuccesses += 1
       } catch {
-        await this.pool.query(
+        if (held && !lost) await lease.query(
           `UPDATE draftmatter_deletion_requests SET status = 'failed', failure = $2
-           WHERE id = $1`,
+           WHERE id = $1 AND status = 'running'`,
           [request.id, 'Managed workspace deletion failed; an operator retry or owner cancellation is required.'],
-        )
+        ).catch(() => { lost = true })
         this.metrics.deletionFailures += 1
+      } finally {
+        if (held && !lost) await lease.query('SELECT pg_advisory_unlock($1::bigint)', [key]).catch(() => { lost = true })
+        lease.removeListener('error', disconnected)
+        lease.release(lost)
       }
     }
   }
@@ -294,6 +326,7 @@ export class CollaborationMaintenanceCoordinator {
       this.metrics.lastRunAt = iso(this.clock())
       await this.runBackupCycle()
       await this.runLifecycleCycle()
+      try { await this.fileTransfers?.cleanupExpiredUploads() } catch { this.metrics.lifecycleFailures += 1 }
       await this.processNotificationDeliveries()
       await this.processDeletionRequests()
       return this.snapshot()

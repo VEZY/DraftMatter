@@ -229,7 +229,7 @@ export function StartCollaborationDialog({
             </div>
             <div className="start-collaboration-boundary">
               <Icon name="info" size={17} />
-              <span><strong>What synchronizes</strong><small>The portable manuscript, review history, and retained figures, tables, and values. DraftMatter does not upload arbitrary files in this folder and does not enable browser code execution.</small></span>
+              <span><strong>What synchronizes</strong><small>The portable manuscript, review history, and retained figures, tables, and values. Data files are uploaded only when you select them in Shared data files, with up to 1 GB of versioned storage per project. Browser collaborators cannot execute project code.</small></span>
             </div>
             <label className="start-collaboration-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /><span>I understand which manuscript content will be shared.</span></label>
           </>

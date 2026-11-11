@@ -69,7 +69,8 @@ class OidcTokenSession {
 
   private async refresh() {
     const form = new URLSearchParams({ grant_type: 'refresh_token', client_id: this.clientId, refresh_token: this.refreshToken! })
-    const response = await this.request(this.tokenEndpoint, {
+    const request = this.request
+    const response = await request(this.tokenEndpoint, {
       method: 'POST',
       credentials: 'omit',
       headers: { 'content-type': 'application/x-www-form-urlencoded;charset=UTF-8' },

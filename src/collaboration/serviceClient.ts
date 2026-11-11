@@ -123,11 +123,14 @@ export class CollaborationServiceClient {
     return token
   }
 
-  private async call<T>(path: string, init: RequestInit = {}): Promise<T> {
+  /** Same refreshed identity and safe errors for JSON and bounded binary transfers. */
+  async authenticatedFetch(path: string, init: RequestInit = {}): Promise<Response> {
+    if (!path.startsWith('/api/') || path.includes('://') || path.includes('\\')) throw new Error('Invalid collaboration API path.')
     const headers = new Headers(init.headers)
     headers.set('authorization', `Bearer ${await this.token()}`)
-    if (init.body !== undefined) headers.set('content-type', 'application/json')
-    const response = await this.request(`${this.urls.apiUrl}${path}`, { ...init, headers })
+    // Browser fetch must not receive this client instance as its Window receiver.
+    const request = this.request
+    const response = await request(`${this.urls.apiUrl}${path}`, { ...init, headers, credentials: 'omit', redirect: 'error' })
     if (!response.ok) {
       let payload: { error?: { code?: string; message?: string }; requestId?: string } = {}
       try {
@@ -142,6 +145,13 @@ export class CollaborationServiceClient {
         payload.requestId ?? response.headers.get('x-request-id') ?? undefined,
       )
     }
+    return response
+  }
+
+  private async call<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const headers = new Headers(init.headers)
+    if (init.body !== undefined) headers.set('content-type', 'application/json')
+    const response = await this.authenticatedFetch(path, { ...init, headers })
     if (response.status === 204) return undefined as T
     return response.json() as Promise<T>
   }

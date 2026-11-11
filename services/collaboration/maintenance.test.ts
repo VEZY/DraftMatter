@@ -23,6 +23,11 @@ function memoryPool() {
     returns: DataType.integer,
     implementation: (value) => String(value).length,
   })
+  // Only exercise ordinary deletion here; real session exclusion/recovery is
+  // covered against PostgreSQL in maintenancePostgres.test.ts.
+  for (const name of ['pg_try_advisory_lock', 'pg_advisory_unlock']) memory.public.registerFunction({
+    name, args: [DataType.bigint], returns: DataType.bool, impure: true, implementation: () => true,
+  })
   return new (memory.adapters.createPg().Pool)()
 }
 

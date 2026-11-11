@@ -6,6 +6,29 @@ import {
 } from './serviceClient'
 
 describe('browser collaboration service client', () => {
+  it('refreshes binary transfer identity on each request and never forwards it to redirects or non-API addresses', async () => {
+    const bytes = new Uint8Array([0, 7, 255])
+    const request = vi.fn<typeof fetch>(async function(this: unknown) {
+      expect(this).toBeUndefined()
+      return new Response(bytes)
+    })
+    let revision = 0
+    const client = new CollaborationServiceClient('https://sync.example.test', () => `token-${++revision}`, request)
+    for (let index = 1; index <= 2; index++) {
+      const response = await client.authenticatedFetch('/api/workspaces/lab/projects/paper/files/uploads/one/parts/1', {
+        method: 'PUT', headers: { 'content-type': 'application/octet-stream' }, body: bytes,
+      })
+      expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes)
+      const options = request.mock.calls[index - 1][1]!
+      expect(new Headers(options.headers).get('authorization')).toBe(`Bearer token-${index}`)
+      expect(new Headers(options.headers).get('content-type')).toBe('application/octet-stream')
+      expect(options).toMatchObject({ credentials: 'omit', redirect: 'error' })
+    }
+    await expect(client.authenticatedFetch('https://another.example.test/steal')).rejects.toThrow(/Invalid collaboration API path/)
+    expect(revision).toBe(2)
+    expect(request).toHaveBeenCalledTimes(2)
+  })
+
   it('derives API and WebSocket addresses without weakening remote transport', () => {
     expect(normalizeCollaborationServiceUrl('https://collab.example.org/')).toEqual({
       apiUrl: 'https://collab.example.org',

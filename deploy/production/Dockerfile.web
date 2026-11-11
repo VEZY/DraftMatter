@@ -1,0 +1,38 @@
+FROM node:24.10.0-bookworm-slim AS build
+
+WORKDIR /app
+COPY package.json package-lock.json ./
+RUN npm ci
+
+# Copy only browser build inputs. In particular, never COPY an operator's env file.
+COPY index.html vite.config.ts tsconfig.app.json ./
+COPY LICENSE ./
+COPY src ./src
+COPY public ./public
+COPY integrations ./integrations
+
+# This is public configuration, compiled into the browser bundle, not a secret.
+ARG VITE_DRAFTMATTER_COLLABORATION_URL
+ENV VITE_DRAFTMATTER_COLLABORATION_URL=${VITE_DRAFTMATTER_COLLABORATION_URL}
+RUN node --input-type=module -e 'const value = new URL(process.env.VITE_DRAFTMATTER_COLLABORATION_URL); if (value.protocol !== "https:" || value.username || value.password || value.search || value.hash) throw new Error("A public HTTPS collaboration URL is required.")' \
+    && npm run check \
+    && npx vite build
+
+FROM caddy:2.11.9-alpine AS runtime
+
+# Privileged ports are not used. Remove the base image's binding capability as
+# well, so the binary needs no file capabilities under the Compose restrictions.
+RUN if getcap /usr/bin/caddy | grep -q .; then setcap -r /usr/bin/caddy; fi \
+    && addgroup -g 1000 draftmatter \
+    && adduser -D -H -u 1000 -G draftmatter draftmatter \
+    && mkdir -p /data /config \
+    && chown -R 1000:1000 /data /config
+
+COPY --from=build /app/dist /srv/draftmatter
+COPY deploy/production/Caddyfile /etc/caddy/Caddyfile
+COPY LICENSE compliance/THIRD_PARTY_NOTICES.md /usr/share/doc/draftmatter/
+
+# Internal high ports let the production Compose service drop every capability.
+EXPOSE 8080 8443
+USER 1000:1000
+CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]

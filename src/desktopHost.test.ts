@@ -271,3 +271,27 @@ describe('complete collaboration checkpoint host boundary', () => {
     expect(invoke).toHaveBeenCalledTimes(1)
   })
 })
+
+describe('bounded native project file download bridge', () => {
+  it('uses opaque cache operations and a save dialog without passing an arbitrary destination or whole file', async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined)
+    const host = createDesktopHost(invoke, vi.fn(), true)
+    const spec = { cacheKey: 'a'.repeat(64), filename: 'measurements.csv', size: 3, chunkSize: 8 * 1024 * 1024, parts: [{ partNumber: 1, size: 3, sha256: 'b'.repeat(64) }] }
+    const operation = { cacheKey: spec.cacheKey, operationId: 'opaque-operation' }
+    await host.beginProjectFileDownload(spec)
+    await host.writeProjectFileDownloadPart({ ...operation, partNumber: 1, bytes: [1, 2, 3] })
+    await host.projectFileDownloadStatus(operation)
+    await host.saveProjectFileDownload(operation)
+    await host.cancelProjectFileDownload(operation.operationId)
+    expect(invoke.mock.calls).toEqual([
+      ['begin_project_file_download', { request: spec }],
+      ['write_project_file_download_part', { request: { ...operation, partNumber: 1, bytes: [1, 2, 3] } }],
+      ['project_file_download_status', { request: operation }],
+      ['save_project_file_download', { request: operation }],
+      ['cancel_project_file_download', { operationId: operation.operationId }],
+    ])
+    const browser = createDesktopHost(invoke, vi.fn(), false)
+    await expect(browser.saveProjectFileDownload(operation)).rejects.toMatchObject({ kind: 'integration', message: expect.stringContaining('desktop app') })
+    expect(invoke).toHaveBeenCalledTimes(5)
+  })
+})

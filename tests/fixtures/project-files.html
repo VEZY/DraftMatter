@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Project files browser test</title></head>
+  <body>
+    <main id="project-files-test" style="max-width:780px;margin:20px auto;padding:12px"></main>
+    <script type="module">
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { ProjectFilesPanel } from '/src/ProjectFilesPanel.tsx'
+      import { CollaborationServiceClient } from '/src/collaboration/serviceClient.ts'
+      import '/src/styles.css'
+      const client = new CollaborationServiceClient(location.origin, async () => 'project-files-browser-test')
+      createRoot(document.getElementById('project-files-test')).render(React.createElement(ProjectFilesPanel, {
+        client,
+        workspace: { id: 'lab', name: 'Lab', role: 'owner', createdAt: '2026-11-11T10:00:00Z' },
+        projectId: 'paper',
+        currentUserId: 'alice',
+      }))
+    </script>
+  </body>
+</html>

@@ -8,6 +8,9 @@ playwright-report/
 .DS_Store
 *.local
 .env
+.env.*
+!.env.example
+deploy/production/secrets/
 *.log
 *.tsbuildinfo
 vite.config.js

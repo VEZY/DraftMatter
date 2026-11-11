@@ -1,5 +1,8 @@
 .git
 .github
+.aws
+.codex
+.agents
 node_modules
 dist
 dist-service
@@ -7,3 +10,11 @@ src-tauri/target
 *.log
 .DS_Store
 .env
+**/.env
+**/.env.*
+!**/.env.example
+deploy/production/secrets
+dist-cli
+dist-website
+test-results
+playwright-report

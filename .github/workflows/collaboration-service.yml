@@ -13,6 +13,18 @@ concurrency:
 jobs:
   verify-service:
     runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18.4-alpine
+        env:
+          POSTGRES_USER: draftmatter_test
+          POSTGRES_PASSWORD: local-integration-test-only
+          POSTGRES_DB: draftmatter_test_files
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U draftmatter_test -d draftmatter_test_files"
+          --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v7
 
@@ -25,7 +37,23 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Start private S3 integration fixture
+        run: |
+          docker run --detach --rm --name draftmatter-test-s3 --env AWS_ACCESS_KEY_ID=draftmatter-local --env AWS_SECRET_ACCESS_KEY=local-integration-test-only --env S3_BUCKET=draftmatter --publish 127.0.0.1:8333:8333 chrislusf/seaweedfs:4.29 mini -dir=/data
+          node --input-type=module <<'JS'
+          import { S3Client, HeadBucketCommand } from '@aws-sdk/client-s3'
+          const client = new S3Client({ endpoint: 'http://127.0.0.1:8333', region: 'us-east-1', forcePathStyle: true, credentials: { accessKeyId: 'draftmatter-local', secretAccessKey: 'local-integration-test-only' } })
+          for (let attempt = 0; ; attempt++) {
+            try { await client.send(new HeadBucketCommand({ Bucket: 'draftmatter' })); break }
+            catch (error) { if (attempt === 39) throw error; await new Promise(resolve => setTimeout(resolve, 500)) }
+          }
+          client.destroy()
+          JS
+
       - name: Test collaboration service
+        env:
+          DM_TEST_POSTGRES_URL: postgresql://draftmatter_test:local-integration-test-only@127.0.0.1:5432/draftmatter_test_files
+          DM_TEST_S3_ENDPOINT: http://127.0.0.1:8333
         run: npm test
 
       - name: Build browser and service bundles
@@ -34,5 +62,14 @@ jobs:
       - name: Validate portable Compose topology
         run: docker compose config --quiet
 
+      - name: Validate production Compose topology
+        run: docker compose --env-file deploy/production/.env.example -f deploy/production/compose.yaml config --quiet
+
       - name: Build non-root service image
         run: docker build --tag draftmatter-collaboration:${{ github.sha }} .
+
+      - name: Build production browser and proxy image
+        run: docker build --file deploy/production/Dockerfile.web --build-arg VITE_DRAFTMATTER_COLLABORATION_URL=https://sync.example.invalid --tag draftmatter-web:${{ github.sha }} .
+
+      - name: Validate production proxy configuration without starting it
+        run: docker run --rm --network none --env APP_HOST=app.example.invalid --env COLLABORATION_HOST=sync.example.invalid --env ACME_EMAIL=operations@example.invalid --entrypoint caddy draftmatter-web:${{ github.sha }} validate --config /etc/caddy/Caddyfile --adapter caddyfile

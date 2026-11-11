@@ -198,6 +198,21 @@ export interface SaveCollaborationCheckpointResult {
   bibliographyHash?: string
 }
 
+export interface ProjectFileDownloadSpec {
+  cacheKey: string
+  filename: string
+  size: number
+  chunkSize: number
+  parts: Array<{ partNumber: number; size: number; sha256: string }>
+}
+export interface ProjectFileDownloadProgress {
+  completedParts: number[]
+  completedBytes: number
+  totalBytes: number
+}
+export interface ProjectFileDownloadStarted extends ProjectFileDownloadProgress { operationId: string }
+export interface ProjectFileDownloadOperation { cacheKey: string; operationId: string }
+
 export interface SaveExportFileRequest {
   suggestedName: string
   bytes: number[]
@@ -580,6 +595,10 @@ export function createDesktopHost(
     kind: 'integration',
     message: 'External desktop renderers are unavailable in browser collaboration sessions.',
   } satisfies HostFailure)
+  const projectDownloadUnavailable = () => Promise.reject<never>({
+    kind: 'integration',
+    message: 'Private local download storage is available only in the desktop app.',
+  } satisfies HostFailure)
   const agentIntegrationUnavailable = () => Promise.reject<never>({
     kind: 'integration',
     message: 'Local AI integration is available only in a desktop project.',
@@ -658,6 +677,21 @@ export function createDesktopHost(
       return available
         ? invokeBridge<SaveCollaborationCheckpointResult>('save_collaboration_checkpoint', { request })
         : Promise.reject<never>({ kind: 'integration', message: 'Local collaboration checkpoints require the desktop application.' } satisfies HostFailure)
+    },
+    beginProjectFileDownload(request: ProjectFileDownloadSpec) {
+      return available ? invokeBridge<ProjectFileDownloadStarted>('begin_project_file_download', { request }) : projectDownloadUnavailable()
+    },
+    writeProjectFileDownloadPart(request: ProjectFileDownloadOperation & { partNumber: number; bytes: number[] }) {
+      return available ? invokeBridge<void>('write_project_file_download_part', { request }) : projectDownloadUnavailable()
+    },
+    projectFileDownloadStatus(request: ProjectFileDownloadOperation) {
+      return available ? invokeBridge<ProjectFileDownloadProgress>('project_file_download_status', { request }) : projectDownloadUnavailable()
+    },
+    saveProjectFileDownload(request: ProjectFileDownloadOperation) {
+      return available ? invokeBridge<SaveExportFileResult | null>('save_project_file_download', { request }) : projectDownloadUnavailable()
+    },
+    cancelProjectFileDownload(operationId: string) {
+      return available ? invokeBridge<void>('cancel_project_file_download', { operationId }) : projectDownloadUnavailable()
     },
     saveExportFile(request: SaveExportFileRequest) {
       return available

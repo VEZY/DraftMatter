@@ -3,6 +3,7 @@ import { signInDesktop, usesDesktopIdentity } from './collaboration/oidcDesktop'
 import { useEffect, useRef, useState } from 'react'
 import { CollaborationAccessPanel } from './CollaborationAccessPanel'
 import { CollaborationReviewPanel } from './CollaborationReviewPanel'
+import { ProjectFilesPanel } from './ProjectFilesPanel'
 import {
   CollaborationServiceClient,
   type CollaborationAccessToken,
@@ -519,6 +520,7 @@ export function CollaborationDialog({
             <div className="collaboration-note"><Icon name="check" size={16} /><span>Offline edits reconnect through Yjs. Incompatible review decisions pause checkpointing until they are explicitly resolved.</span></div>
             {loadResources && (activeRole === 'owner' || activeRole === 'editor') && <div className="collaboration-checkpoint"><span><strong>Figures and references</strong><small>Share an updated local snapshot explicitly. Joining and typing keep the existing shared resources.</small></span><button onClick={() => void shareUpdatedResources()} disabled={sharingResources}>{sharingResources ? 'Sharing…' : 'Share updated figures & references'}</button></div>}
             {serviceClient && activeProjectWorkspace && profile && <CollaborationReviewPanel client={serviceClient} workspace={activeProjectWorkspace} projectId={projectId} currentUserId={profile.userId} />}
+            {serviceClient && activeProjectWorkspace && profile && <ProjectFilesPanel client={serviceClient} workspace={activeProjectWorkspace} projectId={projectId} currentUserId={profile.userId} />}
             {serviceClient && activeWorkspace?.role === 'owner' && profile && <CollaborationAccessPanel client={serviceClient} workspace={activeWorkspace} projectId={projectId} currentUserId={profile.userId} projects={projects} />}
             <div className={`collaboration-checkpoint ${uncheckpointed ? 'pending' : ''}`}>
               <span><strong>{checkpointMode === 'working-tree' ? 'Owner-controlled working tree' : 'Portable owner copy'}</strong><small>{canCheckpoint ? (checkpointMode === 'working-tree' ? `Write deterministic review state to ${checkpointTarget}. Git remains a separate explicit action.` : `Download deterministic review state as ${checkpointTarget}.`) : 'Only this manuscript’s owner can materialize the live state as a portable checkpoint.'}</small></span>

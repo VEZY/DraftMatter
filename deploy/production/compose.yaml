@@ -1,0 +1,94 @@
+name: draftmatter-production
+
+# Supply --env-file with an absolute path outside the checkout/build context.
+# This file intentionally contains no development identity, database, or S3 service.
+services:
+  edge:
+    image: draftmatter-web:${RELEASE_ID:?Set RELEASE_ID to the reviewed release identifier}
+    build:
+      context: ../..
+      dockerfile: deploy/production/Dockerfile.web
+      args:
+        VITE_DRAFTMATTER_COLLABORATION_URL: https://${COLLABORATION_HOST:?Set COLLABORATION_HOST}
+    environment:
+      APP_HOST: ${APP_HOST:?Set APP_HOST}
+      COLLABORATION_HOST: ${COLLABORATION_HOST:?Set COLLABORATION_HOST}
+      ACME_EMAIL: ${ACME_EMAIL:?Set ACME_EMAIL}
+    ports:
+      - "80:8080"
+      - "443:8443"
+    volumes:
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      collaboration:
+        condition: service_healthy
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    stop_grace_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  collaboration:
+    image: draftmatter-collaboration:${RELEASE_ID:?Set RELEASE_ID to the reviewed release identifier}
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      DM_ADDRESS: 0.0.0.0
+      DM_PORT: "1234"
+      DM_DATABASE_URL: ${DM_DATABASE_URL:?Set DM_DATABASE_URL}
+      DM_DATABASE_TLS: verify-full
+      # If the database uses a private CA, mount it read-only and configure
+      # NODE_EXTRA_CA_CERTS through a target-specific override before launch.
+      DM_OBJECT_BUCKET: ${DM_OBJECT_BUCKET:?Set DM_OBJECT_BUCKET}
+      DM_OBJECT_REGION: ${DM_OBJECT_REGION:?Set DM_OBJECT_REGION}
+      DM_OBJECT_PREFIX: ${DM_OBJECT_PREFIX:-draftmatter}
+      DM_OBJECT_ENDPOINT: ${DM_OBJECT_ENDPOINT:-}
+      DM_OBJECT_FORCE_PATH_STYLE: ${DM_OBJECT_FORCE_PATH_STYLE:-false}
+      # Leave both empty only when an external credential provider is configured.
+      DM_OBJECT_ACCESS_KEY: ${DM_OBJECT_ACCESS_KEY:-}
+      DM_OBJECT_SECRET_KEY: ${DM_OBJECT_SECRET_KEY:-}
+      DM_OIDC_ISSUER: ${DM_OIDC_ISSUER:?Set DM_OIDC_ISSUER}
+      DM_OIDC_JWKS_URI: ${DM_OIDC_JWKS_URI:?Set DM_OIDC_JWKS_URI}
+      DM_OIDC_AUDIENCE: ${DM_OIDC_AUDIENCE:?Set DM_OIDC_AUDIENCE}
+      DM_OIDC_CLIENT_ID: ${DM_OIDC_CLIENT_ID:?Set DM_OIDC_CLIENT_ID}
+      DM_ALLOWED_ORIGINS: ${DM_ALLOWED_ORIGINS:?Set DM_ALLOWED_ORIGINS}
+      DM_WEBHOOK_SECRET: ${DM_WEBHOOK_SECRET:?Set DM_WEBHOOK_SECRET}
+      DM_MAX_PAYLOAD_BYTES: ${DM_MAX_PAYLOAD_BYTES:-16777216}
+      # Configure this optional delivery set entirely, or leave all three empty.
+      DM_NOTIFICATION_WEBHOOK_URL: ${DM_NOTIFICATION_WEBHOOK_URL:-}
+      DM_NOTIFICATION_WEBHOOK_SECRET: ${DM_NOTIFICATION_WEBHOOK_SECRET:-}
+      DM_PUBLIC_APP_URL: ${DM_PUBLIC_APP_URL:-}
+    # The image's /health/ready check runs on its fixed internal port 1234.
+    # No host port is published; the edge reaches it on the private Compose network.
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    init: true
+    stop_grace_period: 30s
+    restart: unless-stopped
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  caddy-data:
+  caddy-config:

@@ -14,6 +14,7 @@
     "build:collaboration": "npm run check:service && vite build --config vite.service.config.ts && node scripts/copy-collaboration-assets.mjs",
     "build:cli": "vite build --config vite.cli.config.ts",
     "collaboration:start": "node dist-service/main.js",
+    "deploy:check": "node scripts/check-production-config.mjs",
     "preview": "vite preview",
     "preview:website": "vite preview --config vite.website.config.ts",
     "check": "tsc -p tsconfig.app.json --noEmit",

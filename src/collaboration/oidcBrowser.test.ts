@@ -24,7 +24,10 @@ describe('browser OIDC Authorization Code + PKCE', () => {
         code_challenge_methods_supported: ['S256'],
       }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'short-lived-access-token', refresh_token: 'memory-only-refresh', expires_in: 300 }), { status: 200 }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'refreshed-access-token', refresh_token: 'rotated-memory-only-refresh', expires_in: 300 }), { status: 200 }))
+      .mockImplementationOnce(async function(this: unknown) {
+        expect(this).toBeUndefined()
+        return Response.json({ access_token: 'refreshed-access-token', refresh_token: 'rotated-memory-only-refresh', expires_in: 300 })
+      })
     const prepared = await prepareOidcAuthorization(
       'https://collab.example.test',
       'https://app.example.test/writer?draft=forest#review',

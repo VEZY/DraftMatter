@@ -10,6 +10,9 @@ import { S3ObjectStorage } from './objectStorage'
 import { OidcIdentityVerifier } from './oidcIdentity'
 import { PostgresCollaborationStore } from './postgresStore'
 import { PostgresWorkspaceService } from './postgresWorkspaceService'
+import { PostgresProjectFileService } from './projectFiles'
+import { S3ProjectFileStorage } from './projectFileStorage'
+import type { ProjectAuthorizationService } from '../../src/collaboration/workspaceService'
 
 export function createCollaborationService(config: CollaborationServiceConfig) {
   const pool = new Pool(config.database)
@@ -33,6 +36,13 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
     onMembershipRevoked: () => server?.hocuspocus.closeConnections(),
   })
   const webhooks = new SignedEntitlementWebhookProcessor({ pool, secret: config.webhookSecret })
+  const fileAuthorization: ProjectAuthorizationService = { authorizeProject: (token, workspaceId, projectId, capability) => workspaces.authorizeProjectFileTransfer(token, workspaceId, projectId, capability) }
+  const files = new PostgresProjectFileService({
+    pool,
+    storage: new S3ProjectFileStorage(config.objectStorage.bucket, config.objectStorage.client),
+    authorization: fileAuthorization,
+    objectPrefix: config.objectStorage.prefix,
+  })
   const notificationDelivery = config.notificationDelivery ? new WebhookNotificationEmailDelivery({
     url: config.notificationDelivery.webhookUrl,
     secret: config.notificationDelivery.webhookSecret,
@@ -46,6 +56,7 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
     onWorkspaceDeleted: () => server?.hocuspocus.closeConnections(),
     notificationDelivery,
     publicAppUrl: config.notificationDelivery?.appUrl,
+    fileTransfers: files,
   })
   const readiness = async () => {
     await pool.query('SELECT 1')
@@ -62,6 +73,8 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
     publicConfig: { oidcIssuer: config.oidc.issuer, oidcClientId: config.oidc.clientId },
     maintenanceMetrics: () => maintenance.snapshot(),
     backups: persistence,
+    files,
+    fileAuthorization,
     onProjectRestored: ({ workspaceId, projectId }) => server?.hocuspocus.closeConnections(`${workspaceId}:${projectId}`),
   })
   server = createDraftMatterHocuspocusServer({
@@ -86,12 +99,21 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
     workspaces,
     server,
     api,
+    files,
     async start() {
       if (started) return server.address
       await runCollaborationMigrations(pool)
       await readiness()
       await server.listen()
       started = true
+      // Resume authorized deletion work immediately after a crash, rather than
+      // leaving its workspace blocked until the daily maintenance interval.
+      void maintenance.processDeletionRequests().catch(() => {
+        process.stderr.write(`${JSON.stringify({ level: 'error', event: 'collaboration.deletion_recovery_failed' })}\n`)
+      })
+      void files.cleanupExpiredUploads().catch(() => {
+        process.stderr.write(`${JSON.stringify({ level: 'error', event: 'collaboration.file_cleanup_failed' })}\n`)
+      })
       maintenanceTimer = setInterval(() => {
         void maintenance.runOnce().catch(() => {
           process.stderr.write(`${JSON.stringify({ level: 'error', event: 'collaboration.maintenance_failed' })}\n`)
