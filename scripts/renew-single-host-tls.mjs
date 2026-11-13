@@ -25,6 +25,8 @@ function bytes(path, { secret = false, limit = 128 * 1024 } = {}) {
 }
 function writePrivate(path, contents) { writeFileSync(path, contents, { mode: 0o600, flag: 'wx', flush: true }) }
 function syncDirectory(path) {
+  // Node cannot fsync directories on Windows; regular files are always flushed.
+  if (process.platform === 'win32') return
   const file = openSync(path, 'r')
   try { fsyncSync(file) } finally { closeSync(file) }
 }
@@ -164,7 +166,8 @@ export function renewSingleHostTls(envFile, { now = Date.now() } = {}) {
       const generated = pair(stage, name, { hosts: leaf.hosts, caFile: join(context.directory, 'ca.crt') })
       if (Date.parse(generated.certificate.validTo) > Date.parse(ca.certificate.validTo)) fail('A renewed certificate would outlive the private CA; plan a CA trust transition first.')
       for (const extension of ['crt', 'key']) {
-        const file = openSync(join(stage, `${name}.${extension}`), 'r')
+        // FlushFileBuffers on Windows requires write access; r+ preserves the staged bytes.
+        const file = openSync(join(stage, `${name}.${extension}`), 'r+')
         try { fsyncSync(file) } finally { closeSync(file) }
       }
     }

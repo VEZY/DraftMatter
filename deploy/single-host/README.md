@@ -233,6 +233,11 @@ the tool then recovers the old complete pairs before attempting another renewal.
 It refuses a CA with fewer than 90 days remaining: plan the CA trust transition
 instead of silently extending that CA or disabling verification.
 
+Regular certificate, key and journal files are flushed on every platform. POSIX
+systems also flush directory entries; Node does not support this on Windows.
+Windows local runs therefore do not provide the same power-loss durability. Run
+production certificate renewal on the Linux VPS.
+
 Configuration references: [Keycloak hostname and edge TLS termination](https://www.keycloak.org/server/hostname),
 [Keycloak reverse-proxy boundaries](https://www.keycloak.org/server/reverseproxy),
 [PostgreSQL TLS and private-key permissions](https://www.postgresql.org/docs/18/ssl-tcp.html),

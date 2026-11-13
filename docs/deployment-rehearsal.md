@@ -141,3 +141,22 @@ capabilities. PostgreSQL now uses its official PID-1 process (`init: false` for
 that service only), rather than adding a broader signal capability. The isolated
 PostgreSQL instance was verified as PID 1/UID 70, with no published database port,
 a healthy restart and a clean exit-0 shutdown, without a signal-forwarding error.
+
+## Linux CI recovery confirmation
+
+The isolated candidate `4b921c82e35856501c6d671e21af3c3825f4a17b` passed the
+[complete Linux collaboration workflow](https://github.com/VEZY/DraftMatter/actions/runs/43457485075),
+including the full PostgreSQL/S3 test suite, image builds, browser sign-in and
+shared-file checks, restart persistence, encrypted infrastructure backup,
+fresh-volume restoration, restored file hashes and manuscript state, access
+control, and cleanup of both dedicated projects. Restart and restored persistence
+checks completed in 4.7 and 4.6 seconds respectively. The backup suite passed all
+ten tests.
+
+The first CI attempt at `d04be68` stopped during restart persistence. Its private
+child-output boundary did not identify the failing browser sub-check. The later
+successful run used the same assertions and timeouts, with fixed, allowlisted
+sub-check identifiers added to diagnostics; no retry was added. The initial
+failure has not been reproduced or assigned a demonstrated cause and remains a
+monitoring point for the real VPS rehearsal. This does not replace verification
+on the actual production host or an independent off-host recovery test.
