@@ -20,6 +20,10 @@ for (const width of [1280, 390]) {
       await expect(page).toHaveURL(`http://127.0.0.1:4186/#legal/${id}`)
       await expect(page.getByRole('heading', { level: 1 })).toHaveText(title)
       await expect(page.getByRole('heading', { level: 1 })).toBeInViewport()
+      const configuredContact = process.env.VITE_DM_LEGAL_CONTACT_EMAIL
+      if (configuredContact) {
+        await expect(page.getByRole('link', { name: configuredContact, exact: true }).first()).toHaveAttribute('href', `mailto:${configuredContact}`)
+      }
       await page.reload()
       await expect(page.getByRole('heading', { level: 1 })).toHaveText(title)
       expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width)

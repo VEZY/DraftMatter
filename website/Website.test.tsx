@@ -5,6 +5,22 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Website } from './Website'
 
+// Keep component tests independent of the actual hosting variables used by CI.
+// A distinct contact checks that the website renders configured legal metadata.
+vi.mock('../src/legalConfig', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/legalConfig')>()
+  return {
+    ...actual,
+    legalConfiguration: actual.readLegalConfiguration({
+      VITE_DM_LEGAL_PUBLISHER_NAME: 'Website test editor',
+      VITE_DM_LEGAL_CONTACT_EMAIL: 'website-editor@draftmatter.test',
+      VITE_DM_LEGAL_HOSTING_DETAILS: 'Static website test hosting',
+      VITE_DM_LEGAL_DATA_LOCATION: 'Isolated website test environment',
+      VITE_DM_LEGAL_ADDITIONAL_PROCESSORS: 'Test contact provider',
+    }),
+  }
+})
+
 describe('DraftMatter website', () => {
   let container: HTMLDivElement
   let root: ReturnType<typeof createRoot>
@@ -14,6 +30,7 @@ describe('DraftMatter website', () => {
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
+    vi.stubEnv('VITE_ALPHA_SIGNUP_URL', '')
     window.history.replaceState({}, '', '/DraftMatter/')
   })
 
@@ -22,6 +39,7 @@ describe('DraftMatter website', () => {
     container.remove()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
   })
 
   it('preserves the paper-led product story and interactive guided preview', async () => {
@@ -74,7 +92,7 @@ describe('DraftMatter website', () => {
     await act(async () => root.render(<Website />))
     expect(container.querySelector('main')?.lang).toBe('fr')
     expect(container.querySelector('h1')?.textContent).toBe('Politique de confidentialité')
-    expect(container.querySelector<HTMLAnchorElement>('a[href^="mailto:"]')?.href).toBe('mailto:vezy.remi@gmail.com')
+    expect(container.querySelector<HTMLAnchorElement>('a[href^="mailto:"]')?.href).toBe('mailto:website-editor@draftmatter.test')
     expect(container.querySelector('.home-showcase')).toBeNull()
     await act(async () => {
       window.history.replaceState({}, '', '/DraftMatter/#top')
