@@ -1,0 +1,108 @@
+name: DraftMatter website on OVH
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/ovh-website.yml'
+      - '.node-version'
+      - 'package.json'
+      - 'package-lock.json'
+      - 'public/**'
+      - 'website/**'
+      - 'src/HomeLearningGuide.tsx'
+      - 'src/HomeShowcase.tsx'
+      - 'src/Icon.tsx'
+      - 'src/home.css'
+      - 'src/LegalDocuments.tsx'
+      - 'src/legal*'
+      - 'tsconfig*.json'
+      - 'vite.website.config.ts'
+      - 'deploy/website/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ovh-public-website
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    environment: ovh-website
+    env:
+      DRAFTMATTER_SITE_BASE: /
+      VITE_DM_LEGAL_PUBLISHER_NAME: ${{ vars.DRAFTMATTER_LEGAL_PUBLISHER_NAME }}
+      VITE_DM_LEGAL_CONTACT_EMAIL: ${{ vars.DRAFTMATTER_LEGAL_CONTACT_EMAIL }}
+      VITE_DM_LEGAL_HOSTING_DETAILS: ${{ vars.DRAFTMATTER_WEBSITE_HOSTING_DETAILS }}
+      VITE_DM_LEGAL_DATA_LOCATION: ${{ vars.DRAFTMATTER_WEBSITE_DATA_LOCATION }}
+      VITE_DM_LEGAL_ADDITIONAL_PROCESSORS: ${{ vars.DRAFTMATTER_LEGAL_ADDITIONAL_PROCESSORS }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: '.node-version'
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci
+      - name: Require complete public legal information
+        run: >-
+          node --input-type=module -e
+          'import { readLegalConfiguration } from "./src/legalConfig.ts";
+          const keys = ["PUBLISHER_NAME", "CONTACT_EMAIL", "HOSTING_DETAILS", "DATA_LOCATION", "ADDITIONAL_PROCESSORS"];
+          if (keys.some(key => !process.env[`VITE_DM_LEGAL_${key}`]?.trim()) || !readLegalConfiguration(process.env).ready)
+          throw Error("Configure the public website legal variables in the ovh-website environment before publishing.")'
+      - name: Check website and legal navigation
+        run: npx vitest run website/Website.test.tsx src/legalConfig.test.ts --exclude 'tests/e2e/**'
+      - name: Build for www.draftmatter.eu
+        run: npm run build:website
+      - name: Install browser for public website checks
+        run: npx playwright install --with-deps chromium
+      - name: Check the built custom-domain website
+        run: npx playwright test --config deploy/website/playwright.config.ts
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install locked SFTP test tooling
+        run: python3 -m pip install -r deploy/website/requirements.txt
+      - name: Validate deployment and transfer safeguards
+        run: python3 -m unittest discover -s deploy/website -p 'test_*.py'
+      - name: Validate the exact public artifact
+        run: python3 deploy/website/deploy.py --build-dir dist-website --validate-only
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ovh-public-website
+          path: dist-website/
+          if-no-files-found: error
+          retention-days: 14
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: ovh-website
+      url: https://www.draftmatter.eu
+    env:
+      OVH_SFTP_HOST: ${{ vars.OVH_SFTP_HOST }}
+      OVH_SFTP_DIRECTORY: ${{ vars.OVH_SFTP_DIRECTORY }}
+      OVH_SFTP_HOST_KEY: ${{ vars.OVH_SFTP_HOST_KEY }}
+      OVH_SFTP_USERNAME: ${{ secrets.OVH_SFTP_USERNAME }}
+      OVH_SFTP_PASSWORD: ${{ secrets.OVH_SFTP_PASSWORD }}
+      WEBSITE_RELEASE: ${{ github.sha }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v4
+        with:
+          name: ovh-public-website
+          path: dist-website
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Install locked SFTP tooling
+        run: python3 -m pip install -r deploy/website/requirements.txt
+      - name: Publish through pinned-key SFTP
+        run: python3 deploy/website/deploy.py --build-dir dist-website
+      - name: Verify the HTTPS site and release
+        run: python3 deploy/website/deploy.py --verify-release

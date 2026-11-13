@@ -14,6 +14,7 @@ describe('DraftMatter website', () => {
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
+    window.history.replaceState({}, '', '/DraftMatter/')
   })
 
   afterEach(async () => {
@@ -58,5 +59,34 @@ describe('DraftMatter website', () => {
     await act(async () => action.click())
 
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+  })
+
+  it('offers legal documents under the configured website base without opening the application', async () => {
+    await act(async () => root.render(<Website />))
+    const links = [...container.querySelectorAll<HTMLAnchorElement>('.legal-links a')]
+    expect(links).toHaveLength(3)
+    for (const link of links) expect(link.getAttribute('href')).toMatch(/^.*#legal\//)
+    expect(container.textContent).toContain('The hosted alpha is free and available by invitation.')
+  })
+
+  it('opens a bookmarked legal document and returns to the website through hash navigation', async () => {
+    window.history.replaceState({}, '', '/DraftMatter/#legal/confidentialite')
+    await act(async () => root.render(<Website />))
+    expect(container.querySelector('main')?.lang).toBe('fr')
+    expect(container.querySelector('h1')?.textContent).toBe('Politique de confidentialité')
+    expect(container.querySelector<HTMLAnchorElement>('a[href^="mailto:"]')?.href).toBe('mailto:vezy.remi@gmail.com')
+    expect(container.querySelector('.home-showcase')).toBeNull()
+    await act(async () => {
+      window.history.replaceState({}, '', '/DraftMatter/#top')
+      window.dispatchEvent(new HashChangeEvent('hashchange'))
+    })
+    expect(container.querySelector('h1')?.textContent).toContain('Your paper should be')
+  })
+
+  it('does not treat an unknown legal fragment as a document', async () => {
+    window.history.replaceState({}, '', '/DraftMatter/#legal/untrusted')
+    await act(async () => root.render(<Website />))
+    expect(container.querySelector('.legal-page')).toBeNull()
+    expect(container.querySelector('h1')?.textContent).toContain('Your paper should be')
   })
 })
