@@ -1,9 +1,17 @@
+import { useEffect, useState } from 'react'
 import { Icon } from '../src/Icon'
+import { LegalLinks, LegalPage } from '../src/LegalDocuments'
+import { isLegalDocumentId, type LegalDocumentId } from '../src/legalConfig'
 import { HomeTrustGuide } from '../src/HomeLearningGuide'
 import { HomeHeroPreview, HomeShowcase } from '../src/HomeShowcase'
 
 const repositoryUrl = 'https://github.com/VEZY/DraftMatter'
 const releasesUrl = `${repositoryUrl}/releases`
+
+function legalDocumentFromHash(): LegalDocumentId | null {
+  const id = window.location.hash.slice('#legal/'.length)
+  return window.location.hash.startsWith('#legal/') && isLegalDocumentId(id) ? id : null
+}
 
 function scrollTo(id: string) {
   const section = document.getElementById(id)
@@ -31,6 +39,13 @@ function AlphaAction({ compact = false }: { compact?: boolean }) {
 }
 
 export function Website() {
+  const [legalDocument, setLegalDocument] = useState(legalDocumentFromHash)
+  useEffect(() => {
+    const onHashChange = () => setLegalDocument(legalDocumentFromHash())
+    window.addEventListener('hashchange', onHashChange)
+    return () => window.removeEventListener('hashchange', onHashChange)
+  }, [])
+  if (legalDocument) return <LegalPage documentId={legalDocument} linkBase={`${import.meta.env.BASE_URL}#`} onBack={() => { window.location.hash = 'top' }} />
   return (
     <main id="top" className="home-welcome website">
       <header className="home-welcome-header">
@@ -107,7 +122,7 @@ export function Website() {
         <div>
           <span className="website-alpha-label">Private alpha · pre-release</span>
           <h2 id="website-alpha-title">Help shape a better way to write research.</h2>
-          <p>DraftMatter is not a finished public release yet. Alpha participants will test real paper workflows, report rough edges, and help decide what deserves attention before wider distribution.</p>
+          <p>DraftMatter is not a finished public release yet. The hosted alpha is free and available by invitation. Participants will test real paper workflows, report rough edges, and help decide what deserves attention before wider distribution.</p>
           <ul>
             <li><Icon name="check" size={14} />Clear pre-release expectations</li>
             <li><Icon name="check" size={14} />No DraftMatter account required for local papers</li>
@@ -117,7 +132,7 @@ export function Website() {
         <aside>
           <strong>{import.meta.env.VITE_ALPHA_SIGNUP_URL ? 'Interested in testing DraftMatter?' : 'The alpha is being prepared.'}</strong>
           <p>{import.meta.env.VITE_ALPHA_SIGNUP_URL
-            ? 'Leave your email on the registration page. We will use it only for alpha access and product updates.'
+            ? 'Read the alpha terms and privacy policy below before requesting access. The registration page identifies any separate provider it uses. Your email is used to organise the test and send essential alpha updates.'
             : 'Follow the repository for now. A private email registration link can be enabled here as soon as the alpha intake is ready.'}</p>
           <AlphaAction />
           <small>No public download is advertised until a supported pre-release exists.</small>
@@ -135,6 +150,7 @@ export function Website() {
           <a href={`${repositoryUrl}/blob/main/README.md`}>Documentation</a>
           <a href={`${repositoryUrl}/blob/main/LICENSE`}>MIT License</a>
         </nav>
+        <LegalLinks basePath={`${import.meta.env.BASE_URL}#`} />
       </footer>
     </main>
   )

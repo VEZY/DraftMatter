@@ -5,6 +5,22 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Website } from './Website'
 
+// Keep component tests independent of the actual hosting variables used by CI.
+// A distinct contact checks that the website renders configured legal metadata.
+vi.mock('../src/legalConfig', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/legalConfig')>()
+  return {
+    ...actual,
+    legalConfiguration: actual.readLegalConfiguration({
+      VITE_DM_LEGAL_PUBLISHER_NAME: 'Website test editor',
+      VITE_DM_LEGAL_CONTACT_EMAIL: 'website-editor@draftmatter.test',
+      VITE_DM_LEGAL_HOSTING_DETAILS: 'Static website test hosting',
+      VITE_DM_LEGAL_DATA_LOCATION: 'Isolated website test environment',
+      VITE_DM_LEGAL_ADDITIONAL_PROCESSORS: 'Test contact provider',
+    }),
+  }
+})
+
 describe('DraftMatter website', () => {
   let container: HTMLDivElement
   let root: ReturnType<typeof createRoot>
@@ -14,6 +30,8 @@ describe('DraftMatter website', () => {
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
+    vi.stubEnv('VITE_ALPHA_SIGNUP_URL', '')
+    window.history.replaceState({}, '', '/DraftMatter/')
   })
 
   afterEach(async () => {
@@ -21,6 +39,7 @@ describe('DraftMatter website', () => {
     container.remove()
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
+    vi.unstubAllEnvs()
   })
 
   it('preserves the paper-led product story and interactive guided preview', async () => {
@@ -58,5 +77,34 @@ describe('DraftMatter website', () => {
     await act(async () => action.click())
 
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' })
+  })
+
+  it('offers legal documents under the configured website base without opening the application', async () => {
+    await act(async () => root.render(<Website />))
+    const links = [...container.querySelectorAll<HTMLAnchorElement>('.legal-links a')]
+    expect(links).toHaveLength(3)
+    for (const link of links) expect(link.getAttribute('href')).toMatch(/^.*#legal\//)
+    expect(container.textContent).toContain('The hosted alpha is free and available by invitation.')
+  })
+
+  it('opens a bookmarked legal document and returns to the website through hash navigation', async () => {
+    window.history.replaceState({}, '', '/DraftMatter/#legal/confidentialite')
+    await act(async () => root.render(<Website />))
+    expect(container.querySelector('main')?.lang).toBe('fr')
+    expect(container.querySelector('h1')?.textContent).toBe('Politique de confidentialité')
+    expect(container.querySelector<HTMLAnchorElement>('a[href^="mailto:"]')?.href).toBe('mailto:website-editor@draftmatter.test')
+    expect(container.querySelector('.home-showcase')).toBeNull()
+    await act(async () => {
+      window.history.replaceState({}, '', '/DraftMatter/#top')
+      window.dispatchEvent(new HashChangeEvent('hashchange'))
+    })
+    expect(container.querySelector('h1')?.textContent).toContain('Your paper should be')
+  })
+
+  it('does not treat an unknown legal fragment as a document', async () => {
+    window.history.replaceState({}, '', '/DraftMatter/#legal/untrusted')
+    await act(async () => root.render(<Website />))
+    expect(container.querySelector('.legal-page')).toBeNull()
+    expect(container.querySelector('h1')?.textContent).toContain('Your paper should be')
   })
 })
