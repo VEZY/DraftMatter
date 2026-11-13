@@ -1,8 +1,9 @@
 /// <reference types="node" />
 
-import { readFileSync } from 'node:fs'
+import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { NodeAgentProjectStore } from './agentProjectStore'
 import { createDraftMatterAgentService } from './agentService'
 import { assertDraftMatterAiProjectEnabled } from './agentProjectEnablement'
@@ -53,8 +54,18 @@ function authoringSnapshot(portableSource: string) {
 }
 
 describe('DM-P7-GATE alpha authoring workflow', () => {
+  const temporaryRoots: string[] = []
+
+  afterEach(() => {
+    for (const root of temporaryRoots.splice(0)) rmSync(root, { recursive: true, force: true })
+  })
+
   it('reopens every bundled computation as current while keeping the review intentionally open', async () => {
-    const store = await NodeAgentProjectStore.open(fixtureRoot)
+    const projectRoot = mkdtempSync(join(tmpdir(), 'draftmatter-alpha-authoring-'))
+    temporaryRoots.push(projectRoot)
+    // Opening a store writes coordination files; keep the bundled fixture read-only.
+    cpSync(fixtureRoot, projectRoot, { recursive: true })
+    const store = await NodeAgentProjectStore.open(projectRoot)
     const service = createDraftMatterAgentService(store)
     try {
       await expect(assertDraftMatterAiProjectEnabled(store)).resolves.toMatchObject({

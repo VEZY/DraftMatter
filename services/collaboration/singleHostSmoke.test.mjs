@@ -1,3 +1,4 @@
+import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { assertMissingPkceRejected, smokeSettings } from '../../scripts/smoke-single-host.mjs'
 
@@ -52,11 +53,12 @@ describe('real OAuth missing-PKCE rejection', () => {
 
 describe('isolated single-host smoke safety', () => {
   it('uses one local TLS port consistently for app, identity and WebSocket requests', () => {
-    const settings = smokeSettings(environment(), '/tmp/draftmatter-rehearsal/runtime.env')
+    const directory = resolve('/tmp/draftmatter-rehearsal')
+    const settings = smokeSettings(environment(), join(directory, 'runtime.env'))
     expect(settings.appOrigin).toBe('https://app.draftmatter.localhost:8443')
     expect(settings.issuer).toBe('https://auth.draftmatter.localhost:8443/realms/draftmatter')
     expect(settings.websocketUrl).toBe('wss://sync.draftmatter.localhost:8443')
-    expect(settings.reportFile).toBe('/tmp/draftmatter-rehearsal/rehearsal-report.json')
+    expect(settings.reportFile).toBe(join(directory, 'rehearsal-report.json'))
   })
 
   it.each(['APP_HOST', 'COLLABORATION_HOST', 'AUTH_HOST'])('refuses fixture account provisioning against a public %s', (name) => {

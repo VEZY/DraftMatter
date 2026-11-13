@@ -1,5 +1,5 @@
 import { readFileSync, statSync, realpathSync, existsSync, lstatSync } from 'node:fs'
-import { resolve, dirname, relative } from 'node:path'
+import { resolve, dirname, relative, isAbsolute, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { parseEnv } from 'node:util'
 import { isDeepStrictEqual } from 'node:util'
@@ -8,13 +8,17 @@ import { buildSingleHostRealm } from '../deploy/single-host/keycloak/realm.mjs'
 
 export const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
+export function isOutsideDirectory(parent, directory, paths = { relative, isAbsolute, sep }) {
+  const relationship = paths.relative(parent, directory)
+  return paths.isAbsolute(relationship) || relationship === '..' || relationship.startsWith(`..${paths.sep}`)
+}
+
 export function outsideCheckout(directory) {
   const absolute = resolve(directory)
   let existing = absolute
   while (!existsSync(existing)) existing = dirname(existing)
   const canonical = resolve(realpathSync(existing), relative(existing, absolute))
-  const path = relative(realpathSync(repositoryRoot), canonical)
-  if (!path || (!path.startsWith('..' + '/') && path !== '..')) throw new Error('Keep deployment secrets outside the checkout and build context.')
+  if (!isOutsideDirectory(realpathSync(repositoryRoot), canonical)) throw new Error('Keep deployment secrets outside the checkout and build context.')
   return absolute
 }
 

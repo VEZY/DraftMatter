@@ -41,12 +41,56 @@ export function rehearsalSettings(environment, file) {
   }
 }
 
-async function run(program, args, { signal, env = process.env, capture = false, label } = {}) {
+// Only these fixed identifiers can cross the private child-output boundary.
+const smokeCheckNames = new Set([
+  'public-checks', 'public-legal-mentions-legales', 'public-legal-confidentialite', 'public-legal-conditions-utilisation',
+  'browser-launch', 'collaboration-bundle', 'application-drafts', 'application-home', 'application-open-login', 'application-username', 'application-password',
+  'application-submit', 'application-session', 'application-account', 'pkce-load', 'pkce-username', 'pkce-password',
+  'pkce-submit', 'pkce-callback', 'pkce-exchange', 'verify-report', 'verify-owner-login', 'verify-editor-login',
+  'verify-outsider-login', 'verify-catalogue', 'verify-file-bytes', 'verify-outsider-denied', 'verify-backups',
+  'verify-backup-integrity', 'verify-document', 'verify-clone',
+])
+export async function runSmokeCheck(name, action, emit = (line) => process.stdout.write(line + '\n')) {
+  if (!smokeCheckNames.has(name)) throw new Error('Unknown rehearsal smoke check identifier.')
+  emit('DM_REHEARSAL_CHECK=' + name + ':started')
+  try { const result = await action(); emit('DM_REHEARSAL_CHECK=' + name + ':passed'); return result }
+  catch (error) { emit('DM_REHEARSAL_CHECK=' + name + ':failed'); throw error }
+}
+export function createSmokeCheckParser(onCheck = () => {}) {
+  let line = '', dropping = false, last, failed
+  const complete = () => {
+    if (!dropping) {
+      const match = /^DM_REHEARSAL_CHECK=([a-z0-9-]+):(started|passed|failed)$/.exec(line)
+      if (match && smokeCheckNames.has(match[1])) {
+        last = { name: match[1], status: match[2] }
+        if (last.status === 'failed') failed ??= last.name
+        onCheck(last)
+      }
+    }
+    line = ''; dropping = false
+  }
+  return {
+    write(chunk) {
+      const parts = chunk.toString('utf8').split('\n')
+      for (let index = 0; index < parts.length; index++) {
+        if (!dropping) { if (line.length + parts[index].length > 128) { line = ''; dropping = true } else line += parts[index] }
+        if (index < parts.length - 1) complete()
+      }
+    },
+    finish: complete,
+    get last() { return last },
+    get failed() { return failed },
+  }
+}
+
+export async function runRehearsalCommand(program, args, { signal, env = process.env, capture = false, label, onCheck } = {}) {
   const child = spawn(program, args, { cwd: repositoryRoot, env, signal, stdio: ['ignore', 'pipe', 'pipe'] })
+  const checks = createSmokeCheckParser(onCheck)
   const chunks = []
   let captured = 0, spawnFailed = false, exceeded = false
   child.on('error', () => { spawnFailed = true })
   child.stdout.on('data', (bytes) => {
+    if (onCheck) checks.write(bytes)
     if (!capture || exceeded) return
     captured += bytes.length
     if (captured > 64 * 1024) { exceeded = true; child.kill(); return }
@@ -56,7 +100,10 @@ async function run(program, args, { signal, env = process.env, capture = false, 
   // are copied into the sanitized orchestration report or console output.
   child.stderr.resume()
   const exit = await new Promise((done) => child.once('close', done))
-  if (spawnFailed || exit !== 0 || exceeded) throw new RehearsalError(`${label ?? 'Rehearsal command'} failed; run that phase directly for private diagnostics.`)
+  if (onCheck) checks.finish()
+  const check = checks.failed ?? checks.last?.name
+  const relation = !checks.failed && checks.last?.status === 'passed' ? 'after' : 'at'
+  if (spawnFailed || exit !== 0 || exceeded) throw new RehearsalError(`${label ?? 'Rehearsal command'} failed${check ? ` ${relation} smoke check ${check}` : ''}; run that phase directly for private diagnostics.`)
   return capture ? Buffer.concat(chunks).toString('utf8').trim() : undefined
 }
 
@@ -213,12 +260,16 @@ export async function rehearseSingleHost(options) {
     catch (error) { entry.status = 'failed'; throw error }
     finally { clearInterval(heartbeat); entry.durationMs = Date.now() - started; log(`Rehearsal: ${name} ${entry.status} (${entry.durationMs} ms).`) }
   }
-  const docker = (value, args, label, cleanup = false, capture = false) => run('docker', composeArgs(value, args), { signal: cleanup ? undefined : options.signal, capture, label })
+  const docker = (value, args, label, cleanup = false, capture = false) => runRehearsalCommand('docker', composeArgs(value, args), { signal: cleanup ? undefined : options.signal, capture, label })
   const stop = async (value, cleanup = false) => {
     await docker(value, ['stop', '--timeout', '60'], 'Stop dedicated rehearsal project', cleanup)
     if (await docker(value, ['ps', '--status', 'running', '-q'], 'Verify dedicated rehearsal stopped', cleanup, true)) throw new RehearsalError('A dedicated rehearsal project still has running containers.')
   }
-  const node = (args, value, capture = false) => run(process.execPath, args, { env: smokeChildEnvironment(value), signal: options.signal, capture, label: 'Rehearsal Node phase' })
+  const node = (args, value, capture = false) => runRehearsalCommand(process.execPath, args, { env: smokeChildEnvironment(value), signal: options.signal, capture, label: 'Rehearsal Node phase', onCheck: (check) => {
+    const entry = report.phases.at(-1)
+    if (entry) { entry.lastSmokeCheck = check.name; if (check.status === 'failed') entry.failedSmokeCheck ??= check.name }
+    log(`Rehearsal check: ${check.name} ${check.status}.`)
+  } })
   try {
     outcome = await executeRehearsalPlan(settings, {
       phase,

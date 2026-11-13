@@ -1,5 +1,5 @@
 import { mkdirSync, writeFileSync, readdirSync, existsSync, chmodSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { resolve, sep } from 'node:path'
 import { randomBytes } from 'node:crypto'
 import { spawnSync } from 'node:child_process'
 import { parseArgs } from 'node:util'
@@ -24,7 +24,8 @@ export function createSingleHostEnvironment(options) {
   const id = new Date().toISOString().replace(/[^0-9]/g, '').slice(0, 14)
   const env = {
     DM_SINGLE_HOST_MODE: rehearsal ? 'rehearsal' : 'production',
-    DM_SINGLE_HOST_DIR: directory,
+    // Forward slashes work in native Windows paths and quoted Compose env files.
+    DM_SINGLE_HOST_DIR: directory.split(sep).join('/'),
     COMPOSE_PROJECT_NAME: options.project ?? `draftmatter-${rehearsal ? 'rehearsal' : 'alpha'}-${id}`,
     RELEASE_ID: options.release ?? `local-${rehearsal ? 'rehearsal' : 'prepared'}-${id}`,
     APP_HOST: appHost, COLLABORATION_HOST: syncHost, AUTH_HOST: authHost,

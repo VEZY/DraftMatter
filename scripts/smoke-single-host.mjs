@@ -10,6 +10,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { chromium } from '@playwright/test'
 import { build } from 'vite'
 import { readSingleHostEnvironment, validateSingleHostEnvironment } from './single-host-config.mjs'
+import { runSmokeCheck } from './rehearse-single-host.mjs'
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const CHUNK_BYTES = 8 * 1024 * 1024
@@ -199,14 +200,14 @@ async function login(browser, settings, name) {
       navigations.push({ origin: url.origin, path: url.pathname, queryKeys: [...url.searchParams.keys()] })
       observeCallback(frame.url())
     })
-    await page.goto(authorization.toString())
-    await page.locator('input[name="username"]').fill(`rehearsal-${name}`)
-    await page.locator('input[name="password"]').fill(settings.environment[`REHEARSAL_${name.toUpperCase()}_PASSWORD`])
-    await page.locator('#kc-login').click()
-    const code = await Promise.race([callback, new Promise((_, reject) => setTimeout(() => reject(new Error(`OIDC browser login timed out for ${name}`)), 30_000).unref())])
-    const response = await http(settings, `${settings.issuer}/protocol/openid-connect/token`, { method: 'POST', form: new URLSearchParams({
+    await runSmokeCheck('pkce-load', () => page.goto(authorization.toString()))
+    await runSmokeCheck('pkce-username', () => page.locator('input[name="username"]').fill(`rehearsal-${name}`))
+    await runSmokeCheck('pkce-password', () => page.locator('input[name="password"]').fill(settings.environment[`REHEARSAL_${name.toUpperCase()}_PASSWORD`]))
+    await runSmokeCheck('pkce-submit', () => page.locator('#kc-login').click())
+    const code = await runSmokeCheck('pkce-callback', () => Promise.race([callback, new Promise((_, reject) => setTimeout(() => reject(new Error(`OIDC browser login timed out for ${name}`)), 30_000).unref())]))
+    const response = await runSmokeCheck('pkce-exchange', () => http(settings, `${settings.issuer}/protocol/openid-connect/token`, { method: 'POST', form: new URLSearchParams({
       grant_type: 'authorization_code', client_id: settings.clientId, redirect_uri: redirectUri, code, code_verifier: verifier,
-    }) })
+    }) }))
     assert(response.data.access_token && response.data.refresh_token, 'OIDC code exchange did not issue a session')
     const claims = JSON.parse(Buffer.from(response.data.access_token.split('.')[1], 'base64url').toString('utf8'))
     assert.equal(claims.iss, settings.issuer)
@@ -234,14 +235,14 @@ async function applicationSignIn(browser, settings) {
   const context = await browser.newContext()
   const page = await context.newPage()
   try {
-    await page.goto(settings.appOrigin)
-    await page.getByRole('button', { name: 'Sign in', exact: true }).click()
-    await page.locator('input[name="username"]').fill('rehearsal-alice')
-    await page.locator('input[name="password"]').fill(settings.environment.REHEARSAL_ALICE_PASSWORD)
-    await page.locator('#kc-login').click()
-    await page.getByRole('button', { name: 'Sign out', exact: true }).waitFor({ state: 'visible', timeout: 30_000 })
-    await page.getByText('Signed in', { exact: true }).waitFor({ state: 'visible' })
-    await page.getByRole('heading', { name: 'Drafts', exact: true }).waitFor({ state: 'visible' })
+    await runSmokeCheck('application-home', () => page.goto(settings.appOrigin))
+    await runSmokeCheck('application-open-login', () => page.getByRole('button', { name: 'Sign in', exact: true }).click())
+    await runSmokeCheck('application-username', () => page.locator('input[name="username"]').fill('rehearsal-alice'))
+    await runSmokeCheck('application-password', () => page.locator('input[name="password"]').fill(settings.environment.REHEARSAL_ALICE_PASSWORD))
+    await runSmokeCheck('application-submit', () => page.locator('#kc-login').click())
+    await runSmokeCheck('application-session', () => page.getByRole('button', { name: 'Sign out', exact: true }).waitFor({ state: 'visible', timeout: 30_000 }))
+    await runSmokeCheck('application-account', () => page.getByText('Signed in', { exact: true }).waitFor({ state: 'visible' }))
+    await runSmokeCheck('application-drafts', () => page.getByRole('heading', { name: 'Drafts', exact: true }).waitFor({ state: 'visible' }))
     const displayName = (await page.locator('.home-account strong').innerText()).trim()
     assert.match(displayName, /^(?:alice Rehearsal|rehearsal-alice(?:@example\.test)?)$/i, 'The application must display the signed-in rehearsal account')
     const returned = new URL(page.url())
@@ -273,8 +274,10 @@ async function publicChecks(browser, settings) {
   try {
     const page = await context.newPage()
     for (const [path, heading] of [['mentions-legales', 'Legal notice'], ['confidentialite', 'Privacy policy'], ['conditions-utilisation', 'Terms of use']]) {
-      await page.goto(`${settings.appOrigin}/legal/${path}`)
-      await page.getByRole('heading', { name: heading, exact: true }).waitFor()
+      await runSmokeCheck(`public-legal-${path}`, async () => {
+        await page.goto(`${settings.appOrigin}/legal/${path}`)
+        await page.getByRole('heading', { name: heading, exact: true }).waitFor()
+      })
       assert(!await page.getByLabel('Alpha preparation').count(), 'Hosted legal information is still marked unconfigured')
     }
   } finally { await context.close() }
@@ -374,22 +377,22 @@ async function checkFile(settings, token, base, file, expectedHash) {
 async function verifyReport(browser, settings, bundle, report) {
   assert.equal(report.schemaVersion, 1)
   const browserSignIn = await applicationSignIn(browser, settings)
-  const alice = await login(browser, settings, 'alice')
-  const bob = await login(browser, settings, 'bob')
-  const eve = await login(browser, settings, 'eve')
+  const alice = await runSmokeCheck('verify-owner-login', () => login(browser, settings, 'alice'))
+  const bob = await runSmokeCheck('verify-editor-login', () => login(browser, settings, 'bob'))
+  const eve = await runSmokeCheck('verify-outsider-login', () => login(browser, settings, 'eve'))
   const base = `/api/workspaces/${encodeURIComponent(report.workspaceId)}/projects/${encodeURIComponent(report.projectId)}`
-  const catalogue = (await http(settings, `${base}/files`, { token: bob.token })).data
+  const catalogue = (await runSmokeCheck('verify-catalogue', () => http(settings, `${base}/files`, { token: bob.token }))).data
   const file = catalogue.files.find((value) => value.id === report.file.id)
   assert(file, 'Restored file catalogue is missing the rehearsal file')
   assert.equal(catalogue.quota.limitBytes, QUOTA_BYTES)
-  await checkFile(settings, bob.token, base, file, report.file.sha256)
-  await http(settings, `${base}/files`, { token: eve.token, expected: [403, 404] })
+  await runSmokeCheck('verify-file-bytes', () => checkFile(settings, bob.token, base, file, report.file.sha256))
+  await runSmokeCheck('verify-outsider-denied', () => http(settings, `${base}/files`, { token: eve.token, expected: [403, 404] }))
   await http(settings, `${base}/files/${file.id}/parts/1`, { token: eve.token, expected: [403, 404] })
-  const backups = (await http(settings, `${base}/backups`, { token: alice.token })).data.backups
+  const backups = (await runSmokeCheck('verify-backups', () => http(settings, `${base}/backups`, { token: alice.token }))).data.backups
   assert(backups.some((value) => value.id === report.backupId), 'Restored backup catalogue is missing the managed backup')
-  await http(settings, `${base}/backups/${encodeURIComponent(report.backupId)}/verify`, { method: 'POST', token: alice.token })
-  await checkMarker(browser, settings, bundle, alice.token, report.workspaceId, report.projectId, report.marker)
-  await checkMarker(browser, settings, bundle, alice.token, report.workspaceId, report.cloneProjectId, report.marker)
+  await runSmokeCheck('verify-backup-integrity', () => http(settings, `${base}/backups/${encodeURIComponent(report.backupId)}/verify`, { method: 'POST', token: alice.token }))
+  await runSmokeCheck('verify-document', () => checkMarker(browser, settings, bundle, alice.token, report.workspaceId, report.projectId, report.marker))
+  await runSmokeCheck('verify-clone', () => checkMarker(browser, settings, bundle, alice.token, report.workspaceId, report.cloneProjectId, report.marker))
   return { ...report, browserSignIn, checks: [...new Set([...report.checks, 'application-sign-in-and-visible-account'])], verifiedAt: new Date().toISOString() }
 }
 
@@ -488,17 +491,17 @@ async function main() {
   validateSingleHostEnvironment(environment)
   const certificate = new X509Certificate(readFileSync(join(dirname(envFile), 'tls/public.crt')))
   const publicKeyPin = createHash('sha256').update(certificate.publicKey.export({ type: 'spki', format: 'der' })).digest('base64')
-  const browser = await chromium.launch({ headless: true, args: [
+  const browser = await runSmokeCheck('browser-launch', () => chromium.launch({ headless: true, args: [
     `--host-resolver-rules=${settings.hosts.map((host) => `MAP ${host} 127.0.0.1`).join(',')}`,
     // Trust only the locally generated proxy key in this ephemeral browser,
     // including WSS; do not install a CA globally or disable TLS validation.
     `--ignore-certificate-errors-spki-list=${publicKeyPin}`,
-  ] })
+  ] }))
   try {
-    await publicChecks(browser, settings)
-    const bundle = await collaborationBundle()
+    await runSmokeCheck('public-checks', () => publicChecks(browser, settings))
+    const bundle = await runSmokeCheck('collaboration-bundle', () => collaborationBundle())
     const report = args[2] === '--verify-report'
-      ? await verifyReport(browser, settings, bundle, JSON.parse(readFileSync(settings.reportFile, 'utf8')))
+      ? await runSmokeCheck('verify-report', () => verifyReport(browser, settings, bundle, JSON.parse(readFileSync(settings.reportFile, 'utf8'))))
       : await exercise(browser, settings, bundle)
     writeFileSync(settings.reportFile, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 })
     chmodSync(settings.reportFile, 0o600)

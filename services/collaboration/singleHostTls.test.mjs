@@ -39,7 +39,10 @@ describe('single-host private TLS renewal', () => {
     expect(renewed.status).toBe('renewed')
     expect(renewed.certificates.map((certificate) => certificate.name)).toEqual(['ca', 'postgres', 'objects', 'public'])
     expect(new X509Certificate(readFileSync(join(tls, 'ca.crt'))).fingerprint256).toBe(ca.fingerprint256)
-    for (const file of ['ca.crt', 'ca.key', 'ca.srl']) expect(readFileSync(join(tls, file))).toEqual(originalTls[file])
+    // OpenSSL versions differ in whether -CAcreateserial writes ca.srl.
+    // Renewal must preserve every issued CA artifact without requiring that optional file.
+    const authorityFiles = (files) => Object.fromEntries(Object.entries(files).filter(([name]) => name.startsWith('ca.')))
+    expect(authorityFiles(snapshot(tls))).toEqual(authorityFiles(originalTls))
     expect(snapshot(directory)).toEqual(originalRoot)
     const expectedNames = { postgres: 'DNS:postgres', objects: 'DNS:object-storage', public: 'DNS:app.draftmatter.localhost, DNS:sync.draftmatter.localhost, DNS:auth.draftmatter.localhost' }
     const rollback = join(tls, renewed.rollbackDirectory)
