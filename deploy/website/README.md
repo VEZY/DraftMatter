@@ -57,8 +57,9 @@ The build job receives only public variables. The SFTP secrets are referenced
 only in the deploy job, which downloads the already validated public artifact.
 
 The workflow must be on the default branch before GitHub permits its initial
-manual dispatch. Once integrated, changes to the website on `main` build and
-publish automatically. An environment protection rule restricting deployments
+manual dispatch. Once integrated, changes to the website on `main` always build and test. Set the
+**repository variable** `OVH_WEBSITE_AUTO_DEPLOY=true` only after the first verified
+publication to enable automatic uploads. Leave it absent or `false` during setup. An environment protection rule restricting deployments
 to `main` can be added after integration if desired.
 
 ## Build, test and publish
@@ -83,6 +84,9 @@ files. Stale assets from prior releases remain for open browsers; monitor OVH's
 space usage and review a separate cleanup before the free quota fills.
 
 Run **Actions → DraftMatter website on OVH → Run workflow** after configuration.
+A manual run builds and tests by default; check **publish** only when the SFTP
+credentials and HTTPS certificate are ready. The first automatic build keeps
+uploads disabled, so it can be verified before the OVH setup is complete.
 Success requires HTTPS responses for the release manifest, every file digest
 compared against the downloaded build, and the actual domain root. A green
 build alone is not a completed deployment. DNS and SSL must already be ready;

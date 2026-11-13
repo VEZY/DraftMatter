@@ -2,6 +2,11 @@ name: DraftMatter website on OVH
 
 on:
   workflow_dispatch:
+    inputs:
+      publish:
+        description: 'Publish to OVH after SFTP and public HTTPS are configured'
+        type: boolean
+        default: false
   push:
     branches: [main]
     paths:
@@ -79,6 +84,9 @@ jobs:
           retention-days: 14
 
   deploy:
+    # Keep the first GitHub build independent of the pending OVH setup.
+    # OVH_WEBSITE_AUTO_DEPLOY is a repository variable, available in job conditions.
+    if: ${{ (github.event_name == 'workflow_dispatch' && inputs.publish) || (github.event_name == 'push' && vars.OVH_WEBSITE_AUTO_DEPLOY == 'true') }}
     needs: build
     runs-on: ubuntu-latest
     environment:
