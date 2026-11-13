@@ -57,10 +57,12 @@ The build job receives only public variables. The SFTP secrets are referenced
 only in the deploy job, which downloads the already validated public artifact.
 
 The workflow must be on the default branch before GitHub permits its initial
-manual dispatch. Once integrated, changes to the website on `main` always build and test. Set the
-**repository variable** `OVH_WEBSITE_AUTO_DEPLOY=true` only after the first verified
-publication to enable automatic uploads. Leave it absent or `false` during setup. An environment protection rule restricting deployments
-to `main` can be added after integration if desired.
+manual dispatch. Every push to `main` builds and tests the public website, even
+when that commit changes only application or server files. After the first verified
+publication, set the **repository variable** `OVH_WEBSITE_AUTO_DEPLOY=true` to upload
+each successful build automatically. Failed checks prevent the upload. Leave the
+variable absent or `false` to pause automatic publication. Restrict the
+`ovh-website` environment to `main`.
 
 ## Build, test and publish
 
