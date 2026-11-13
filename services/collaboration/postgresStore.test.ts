@@ -47,7 +47,7 @@ describe('managed PostgreSQL and object-storage persistence', () => {
   it('runs ordered migrations idempotently and enforces one active owner', async () => {
     const { pool } = await database()
     const repeated = await runCollaborationMigrations(pool)
-    expect(repeated).toEqual({ applied: [], alreadyApplied: ['001', '002', '003', '004', '005', '006', '007', '008', '010'] })
+    expect(repeated).toEqual({ applied: [], alreadyApplied: ['001', '002', '003', '004', '005', '006', '007', '008', '010', '011'] })
     await expect(pool.query(`INSERT INTO draftmatter_memberships(workspace_id, user_id, role) VALUES ('forest', 'editor', 'owner')`)).rejects.toThrow()
     const tables = await pool.query(`SELECT table_name FROM information_schema.tables WHERE table_schema = 'public' AND table_name LIKE 'draftmatter_%'`)
     expect(tables.rows.map((row: { table_name: string }) => row.table_name)).toEqual(expect.arrayContaining([
@@ -204,6 +204,74 @@ describe('managed PostgreSQL and object-storage persistence', () => {
     await pool.query(`UPDATE draftmatter_entitlements SET status = 'suspended' WHERE workspace_id = 'forest'`)
     await expect(persistence.appendUpdate(scope, fixture.second)).rejects.toMatchObject({ code: 'forbidden' })
     fixture.document.destroy()
+    await pool.end()
+  })
+
+  it('expires technical backups at the age limit even when they are the last recovery copies', async () => {
+    const { pool } = await database()
+    const objects = new MemoryObjectStorage()
+    const day = 24 * 60 * 60_000
+    let now = Date.parse('2026-07-01T00:00:00.000Z')
+    const persistence = new PostgresCollaborationStore({ pool, objects, clock: () => now })
+    const fixture = documentFixture()
+    const scope = { workspaceId: 'forest', projectId: 'paper' }
+    await persistence.appendUpdate(scope, Y.encodeStateAsUpdate(fixture.document))
+    await persistence.createSnapshot(scope, 'current-project', Y.encodeStateAsUpdate(fixture.document))
+    await persistence.createBackup(scope, 'oldest')
+    now += day
+    await persistence.createBackup(scope, 'newer')
+    now += 29 * day
+
+    // The old minimum of seven could retain both copies indefinitely. Exactly
+    // thirty days is now expired, while the newer copy can still be restored.
+    await expect(persistence.applyBackupLifecycle(scope, { retainLatest: 7, maxAgeMs: 30 * day, now })).resolves.toEqual({
+      retained: ['newer'], removed: ['oldest'],
+    })
+    await expect(objects.get('draftmatter/workspaces/forest/projects/paper/backups/oldest.json')).rejects.toMatchObject({ code: 'not-found' })
+    await expect(persistence.verifyBackup(scope, 'newer')).resolves.toMatchObject({ id: 'newer' })
+
+    now += day
+    await expect(persistence.applyBackupLifecycle(scope, { retainLatest: 7, maxAgeMs: 30 * day, now })).resolves.toEqual({
+      retained: [], removed: ['newer'],
+    })
+    expect(await persistence.listBackups(scope)).toEqual([])
+    // An idle active manuscript is not a technical backup and must stay intact.
+    const loaded = await persistence.load(scope)
+    const reopened = new Y.Doc()
+    Y.applyUpdate(reopened, loaded.snapshot!)
+    expect(reopened.getText('draftmatter:document').toString()).toBe('Canopy response under drought')
+    fixture.document.destroy()
+    reopened.destroy()
+    await pool.end()
+  })
+
+  it('limits new workspace backup policies to at most thirty days', async () => {
+    const { pool } = await database()
+    await pool.query("INSERT INTO draftmatter_workspace_policies(workspace_id) VALUES ('forest')")
+    expect((await pool.query("SELECT backup_max_age_days FROM draftmatter_workspace_policies WHERE workspace_id = 'forest'")).rows[0].backup_max_age_days).toBe(30)
+    await expect(pool.query("UPDATE draftmatter_workspace_policies SET backup_max_age_days = 90 WHERE workspace_id = 'forest'")).rejects.toThrow()
+    await pool.end()
+  })
+
+  it('upgrades an existing ninety-day workspace backup policy before enforcing the alpha maximum', async () => {
+    const { pool } = await database()
+    // Reconstruct the v010 policy schema/data to exercise the upgrade path,
+    // rather than checking only newly created workspaces.
+    await pool.query('ALTER TABLE draftmatter_workspace_policies DROP CONSTRAINT draftmatter_alpha_backup_max_age')
+    await pool.query('ALTER TABLE draftmatter_workspace_policies ALTER COLUMN backup_max_age_days SET DEFAULT 90')
+    await pool.query("INSERT INTO draftmatter_workspace_policies(workspace_id) VALUES ('forest')")
+    await pool.query("DELETE FROM draftmatter_schema_migrations WHERE version = '011'")
+    expect((await pool.query("SELECT backup_max_age_days FROM draftmatter_workspace_policies WHERE workspace_id = 'forest'")).rows[0].backup_max_age_days).toBe(90)
+    expect((await runCollaborationMigrations(pool)).applied).toEqual(['011'])
+    expect((await pool.query("SELECT backup_max_age_days FROM draftmatter_workspace_policies WHERE workspace_id = 'forest'")).rows[0].backup_max_age_days).toBe(30)
+    await expect(pool.query("UPDATE draftmatter_workspace_policies SET backup_max_age_days = 31 WHERE workspace_id = 'forest'")).rejects.toThrow()
+    await pool.end()
+  })
+
+  it.each([Number.NaN, Number.POSITIVE_INFINITY, -1])('rejects an unbounded or invalid backup age (%s)', async (maxAgeMs) => {
+    const { pool } = await database()
+    const persistence = new PostgresCollaborationStore({ pool, objects: new MemoryObjectStorage() })
+    await expect(persistence.applyBackupLifecycle({ workspaceId: 'forest', projectId: 'paper' }, { retainLatest: 7, maxAgeMs })).rejects.toThrow('Backup lifecycle policy is invalid.')
     await pool.end()
   })
 

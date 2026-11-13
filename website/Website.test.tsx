@@ -4,6 +4,8 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Website } from './Website'
+import { LegalDocumentContent } from '../src/legalContent'
+import { readLegalConfiguration } from '../src/legalConfig'
 
 // Keep component tests independent of the actual hosting variables used by CI.
 // A distinct contact checks that the website renders configured legal metadata.
@@ -83,6 +85,7 @@ describe('DraftMatter website', () => {
     await act(async () => root.render(<Website />))
     const links = [...container.querySelectorAll<HTMLAnchorElement>('.legal-links a')]
     expect(links).toHaveLength(3)
+    expect(links.map((link) => link.textContent)).toEqual(['Legal notice', 'Privacy policy', 'Terms of use'])
     for (const link of links) expect(link.getAttribute('href')).toMatch(/^.*#legal\//)
     expect(container.textContent).toContain('The hosted alpha is free and available by invitation.')
   })
@@ -90,8 +93,8 @@ describe('DraftMatter website', () => {
   it('opens a bookmarked legal document and returns to the website through hash navigation', async () => {
     window.history.replaceState({}, '', '/DraftMatter/#legal/confidentialite')
     await act(async () => root.render(<Website />))
-    expect(container.querySelector('main')?.lang).toBe('fr')
-    expect(container.querySelector('h1')?.textContent).toBe('Politique de confidentialité')
+    expect(container.querySelector('main')?.lang).toBe('en')
+    expect(container.querySelector('h1')?.textContent).toBe('Privacy policy')
     expect(container.querySelector<HTMLAnchorElement>('a[href^="mailto:"]')?.href).toBe('mailto:website-editor@draftmatter.test')
     expect(container.querySelector('.home-showcase')).toBeNull()
     await act(async () => {
@@ -99,6 +102,48 @@ describe('DraftMatter website', () => {
       window.dispatchEvent(new HashChangeEvent('hashchange'))
     })
     expect(container.querySelector('h1')?.textContent).toContain('Your paper should be')
+  })
+
+  it('shows the pre-production backup responsibilities in the public website terms', async () => {
+    window.history.replaceState({}, '', '/DraftMatter/#legal/conditions-utilisation')
+    await act(async () => root.render(<Website />))
+    expect(container.querySelector('h1')?.textContent).toBe('Terms of use')
+    const heading = [...container.querySelectorAll('h2')].find((element) => element.textContent === 'Testing and data loss')
+    const warning = heading?.closest('section')?.textContent ?? ''
+    expect(warning).toMatch(/pre-production/i)
+    expect(warning).toMatch(/data loss/i)
+    expect(warning).toMatch(/independent backups/i)
+    expect(warning).toMatch(/outside (?:DraftMatter|the service)/i)
+    expect(warning).toMatch(/synchroni[sz]ation/i)
+    expect(warning).toMatch(/history/i)
+    expect(warning).toMatch(/server backups/i)
+    expect(warning).toMatch(/You are .*responsible .*independent backups/i)
+    expect(warning).toMatch(/Synchroni[sz]ation, version history and server backups do not replace independent backups/i)
+    expect(container.querySelector('article')?.textContent).toMatch(/(?:mandatory|statutory).*rights|rights.*(?:mandatory|statutory)/i)
+    expect(container.querySelector('article')?.textContent).not.toMatch(/Docker|PostgreSQL|\bS3\b|Keycloak|\bVPS\b/i)
+  })
+
+  it.each(['mentions-legales', 'confidentialite'] as const)('shows concise public hosting information in %s without infrastructure details', async (documentId) => {
+    const hostingDetails = 'Hosting Test SAS, 10 Research Street, Paris, France. Contact: hosting@example.fr.'
+    const dataLocation = 'France, with a French hosting company.'
+    const configuration = readLegalConfiguration({
+      VITE_DM_LEGAL_PUBLISHER_NAME: 'Test operator',
+      VITE_DM_LEGAL_CONTACT_EMAIL: 'operator@example.fr',
+      VITE_DM_LEGAL_HOSTING_DETAILS: hostingDetails,
+      VITE_DM_LEGAL_DATA_LOCATION: dataLocation,
+      VITE_DM_LEGAL_ADDITIONAL_PROCESSORS: 'No additional processors for this test instance.',
+    })
+    await act(async () => root.render(<LegalDocumentContent documentId={documentId} configuration={configuration} />))
+    expect(container.textContent).toContain(dataLocation)
+    if (documentId === 'mentions-legales') expect(container.textContent).toContain(hostingDetails)
+    else expect(container.textContent).not.toContain(hostingDetails)
+    expect(container.textContent).not.toMatch(/Docker|PostgreSQL|\bS3\b|Keycloak|\bVPS\b/i)
+  })
+
+  it('describes unconfigured alpha hosting as planned rather than already deployed', async () => {
+    await act(async () => root.render(<LegalDocumentContent documentId="confidentialite" configuration={readLegalConfiguration()} />))
+    expect(container.textContent).toContain('Hosting for the hosted alpha is planned in France, with a French hosting company.')
+    expect(container.textContent).not.toMatch(/Docker|PostgreSQL|\bS3\b|Keycloak|\bVPS\b/i)
   })
 
   it('does not treat an unknown legal fragment as a document', async () => {

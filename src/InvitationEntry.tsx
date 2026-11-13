@@ -1,13 +1,17 @@
 import { useEffect, useRef, useState } from 'react'
 import { Icon } from './Icon'
 import { useCollaborationSession, type CollaborationProjectLaunch } from './collaboration/sessionContext'
+import { LegalLinks } from './LegalDocuments'
+import type { LegalDocumentId } from './legalConfig'
 
 export function InvitationEntry({
   onOpenDraft,
   onBack,
+  onOpenLegal,
 }: {
   onOpenDraft: (launch: CollaborationProjectLaunch) => void
   onBack: () => void
+  onOpenLegal?: (documentId: LegalDocumentId) => void
 }) {
   const session = useCollaborationSession()
   const [accepting, setAccepting] = useState(false)
@@ -57,7 +61,7 @@ export function InvitationEntry({
   if (!session.pendingInvitation) {
     return (
       <main className="home-invitation">
-        <section><span className="home-invitation-icon"><Icon name="link" size={23} /></span><h1>This invitation is no longer available</h1><p>It may already have been accepted, expired, or been revoked. Ask the workspace owner for a new invitation.</p><button onClick={onBack}>Return to Home</button></section>
+        <section><span className="home-invitation-icon"><Icon name="link" size={23} /></span><h1>This invitation is no longer available</h1><p>It may already have been accepted, expired, or been revoked. Ask the workspace owner for a new invitation.</p><button onClick={onBack}>Return to Home</button><LegalLinks onNavigate={onOpenLegal} target={onOpenLegal ? undefined : '_blank'} /></section>
       </main>
     )
   }
@@ -69,6 +73,8 @@ export function InvitationEntry({
         <span className="home-invitation-icon"><Icon name="users" size={24} /></span>
         <h1>You have been invited to collaborate</h1>
         <p>{session.profile ? 'Accept the invitation to add this workspace to your DraftMatter account.' : 'Sign in securely first. DraftMatter will keep this invitation through the sign-in round trip.'}</p>
+        <p>The hosted alpha is free and by invitation. Please read the terms of use and privacy policy before continuing.</p>
+        <LegalLinks onNavigate={onOpenLegal} target={onOpenLegal ? undefined : '_blank'} />
         {message && <p className="home-account-error" role="alert">{message}</p>}
         <div>
           <button onClick={onBack}>Not now</button>

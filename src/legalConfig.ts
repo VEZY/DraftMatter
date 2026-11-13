@@ -1,7 +1,7 @@
 export const legalDocuments = [
-  { id: 'mentions-legales', title: 'Mentions légales' },
-  { id: 'confidentialite', title: 'Politique de confidentialité' },
-  { id: 'conditions-utilisation', title: 'Conditions d’utilisation' },
+  { id: 'mentions-legales', title: 'Legal notice' },
+  { id: 'confidentialite', title: 'Privacy policy' },
+  { id: 'conditions-utilisation', title: 'Terms of use' },
 ] as const
 
 export type LegalDocumentId = typeof legalDocuments[number]['id']
@@ -18,7 +18,7 @@ export interface LegalConfiguration {
   ready: boolean
 }
 
-export const LEGAL_DOCUMENT_VERSION = '2026-11-11'
+export const LEGAL_DOCUMENT_VERSION = '2026-11-13'
 
 export function isLegalDocumentId(value: string): value is LegalDocumentId {
   return legalDocuments.some((document) => document.id === value)
@@ -43,9 +43,9 @@ export function readLegalConfiguration(environment: Record<string, string | unde
   const contactEmail = value('DM_LEGAL_CONTACT_EMAIL', 'vezy.remi@gmail.com')
   const hostingDetails = value('DM_LEGAL_HOSTING_DETAILS')
   const dataLocation = value('DM_LEGAL_DATA_LOCATION')
-  const additionalProcessors = value('DM_LEGAL_ADDITIONAL_PROCESSORS', 'Google (Gmail), pour les messages que vous envoyez à l’adresse de contact. N’envoyez pas de manuscrit ni de données de recherche par e-mail ; indiquez seulement le projet concerné et votre demande.')
+  const additionalProcessors = value('DM_LEGAL_ADDITIONAL_PROCESSORS', 'Google (Gmail), for messages sent to the contact address. Do not send manuscripts or research data by email; include only the project concerned and your request.')
   const fields = [publisherName, contactEmail, hostingDetails, dataLocation, additionalProcessors]
-  const ready = fields.every((field) => Boolean(field) && !/REPLACE_|à (?:renseigner|confirmer)|example\.(?:com|org|net|test|invalid)/i.test(field))
+  const ready = fields.every((field) => Boolean(field) && !/REPLACE_|à (?:renseigner|confirmer)|\b(?:to be (?:confirmed|provided|completed)|not yet (?:confirmed|configured)|TBD|TODO)\b|example\.(?:com|org|net|test|invalid)/i.test(field))
     && /^[^\s@<>]+@[^\s@<>]+\.[^\s@<>]+$/.test(contactEmail)
   return { publisherName, contactEmail, hostingDetails, dataLocation, additionalProcessors, deletionDays: 30, backupDays: 30, noticeDays: 30, ready }
 }

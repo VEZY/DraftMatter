@@ -1,11 +1,32 @@
-import { cp, mkdir } from 'node:fs/promises'
-import { join } from 'node:path'
+import { copyFile, mkdir, readdir, unlink } from 'node:fs/promises'
+import { join, resolve } from 'node:path'
+import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const root = new URL('..', import.meta.url)
-const target = new URL('../dist-service/migrations/', import.meta.url)
-await mkdir(target, { recursive: true })
-for (const file of ['001_managed_collaboration.sql', '002_rate_limits_and_recovery.sql', '003_managed_identity.sql', '004_maintenance_and_backups.sql']) {
-  await cp(new URL(`../services/collaboration/migrations/${file}`, import.meta.url), new URL(file, target))
+// Keep the format in sync with the discovery performed by migrations.ts.
+const migrationName = /^\d+_[a-z0-9_]+\.sql$/i
+const source = fileURLToPath(new URL('../services/collaboration/migrations/', import.meta.url))
+const target = fileURLToPath(new URL('../dist-service/migrations/', import.meta.url))
+
+export async function copyCollaborationAssets({ sourceDirectory = source, targetDirectory = target } = {}) {
+  const files = (await readdir(sourceDirectory, { withFileTypes: true }))
+    .filter((entry) => entry.isFile() && migrationName.test(entry.name))
+    .map((entry) => entry.name).sort()
+  await mkdir(targetDirectory, { recursive: true })
+  const existing = await readdir(targetDirectory, { withFileTypes: true })
+  for (const file of files) {
+    const destination = existing.find((entry) => entry.name === file)
+    if (destination && !destination.isFile()) throw new Error(`Migration asset destination is not a regular file: ${file}`)
+    await copyFile(join(sourceDirectory, file), join(targetDirectory, file))
+  }
+  // Remove only stale regular migration assets; preserve unrelated build files,
+  // directories and links, including names ending in .sql outside this format.
+  for (const entry of existing) {
+    if (entry.isFile() && migrationName.test(entry.name) && !files.includes(entry.name)) await unlink(join(targetDirectory, entry.name))
+  }
+  return files
 }
 
-process.stdout.write(`Copied collaboration migration assets to ${join(root.pathname, 'dist-service/migrations')}.\n`)
+if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+  const files = await copyCollaborationAssets()
+  process.stdout.write(`Copied ${files.length} collaboration migration assets to ${target}.\n`)
+}

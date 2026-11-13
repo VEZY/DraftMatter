@@ -48,10 +48,72 @@ describe('DraftMatter application entry', () => {
     expect(container.textContent).toContain('Set up DraftMatter')
     expect(container.textContent).toContain('AI connections')
     expect(container.textContent).toContain('Account & collaboration')
+    expect(container.textContent).toContain('The hosted alpha is free and by invitation.')
+    expect(container.textContent).toContain('Pre-production: data loss is possible. Keep independent backups of your work outside DraftMatter.')
+    expect(container.querySelector('footer a[href="/legal/mentions-legales"]')).not.toBeNull()
+    expect(container.querySelector('footer a[href="/legal/confidentialite"]')).not.toBeNull()
+    expect(container.querySelector('footer a[href="/legal/conditions-utilisation"]')).not.toBeNull()
     expect(container.querySelector('.home-showcase')).toBeNull()
     expect(container.textContent).not.toContain('Your paper should be as reproducible as your research.')
+    await act(async () => container.querySelector<HTMLAnchorElement>('footer a[href="/legal/conditions-utilisation"]')!.click())
+    expect(window.location.pathname).toBe('/legal/conditions-utilisation')
+    expect(container.querySelector('h1')?.textContent).toBe('Terms of use')
+    const terms = container.querySelector('article')?.textContent ?? ''
+    expect(terms).toContain('Testing and data loss')
+    expect(terms).toMatch(/independent backups/i)
+    expect(terms).toMatch(/outside (?:DraftMatter|the service)/i)
+    expect(terms).not.toMatch(/Docker|PostgreSQL|\bS3\b|Keycloak|\bVPS\b/i)
+    await act(async () => container.querySelector<HTMLButtonElement>('button')!.click())
+    expect(container.querySelector('h1')?.textContent).toBe('Your papers')
     await act(async () => root.unmount())
     container.remove()
+  })
+
+  it('opens the public privacy document without authentication and returns to Home', async () => {
+    window.history.replaceState({}, '', '/legal/confidentialite')
+    const request = vi.fn()
+    vi.stubGlobal('fetch', request)
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<DraftMatterApplication />))
+
+    expect(container.querySelector('h1')?.textContent).toBe('Privacy policy')
+    expect(container.querySelector('main')?.lang).toBe('en')
+    expect(container.querySelector('[data-testid="editor"]')).toBeNull()
+    expect(container.querySelector('.home-app-home')).toBeNull()
+    expect(request).not.toHaveBeenCalled()
+    const back = container.querySelector<HTMLButtonElement>('button')!
+    await act(async () => back.click())
+    expect(window.location.pathname).toBe('/')
+    expect(container.querySelector('h1')?.textContent).toBe('Your papers')
+    await act(async () => root.unmount())
+  })
+
+  it('shows a legal document even when the current URL carries an invitation', async () => {
+    window.history.replaceState({}, '', '/legal/conditions-utilisation#dm-invite=private-invitation&dm-service=https%3A%2F%2Fcollaboration.example.test')
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<DraftMatterApplication />))
+
+    expect(container.querySelector('h1')?.textContent).toBe('Terms of use')
+    expect(container.textContent).not.toContain('private-invitation')
+    expect(container.querySelector('a[href*="private-invitation"]')).toBeNull()
+    expect(window.location.hash).toBe('')
+    const back = container.querySelector<HTMLButtonElement>('button')!
+    await act(async () => back.click())
+    expect(container.querySelector('h1')?.textContent).toBe('You have been invited to collaborate')
+    const legalLinks = [...container.querySelectorAll<HTMLAnchorElement>('a[href^="/legal/"]')]
+    expect(legalLinks).toHaveLength(3)
+    for (const link of legalLinks) {
+      expect(link.href).not.toContain('private-invitation')
+    }
+    await act(async () => legalLinks.find((link) => link.pathname === '/legal/confidentialite')!.click())
+    expect(window.location.pathname).toBe('/legal/confidentialite')
+    expect(container.querySelector('h1')?.textContent).toBe('Privacy policy')
+    await act(async () => container.querySelector<HTMLButtonElement>('button')!.click())
+    expect(window.location.pathname).toBe('/invite')
+    expect(container.querySelector('h1')?.textContent).toBe('You have been invited to collaborate')
+    await act(async () => root.unmount())
   })
 
   it.each([
@@ -194,6 +256,8 @@ describe('DraftMatter application entry', () => {
     expect(container.textContent).toContain('New draft')
     expect(container.querySelector('.home-showcase')).toBeNull()
     expect(container.textContent).not.toContain('Your paper should be as reproducible as your research.')
+
+    expect(container.querySelector('footer a[href="/legal/confidentialite"]')).not.toBeNull()
 
     await act(async () => root.unmount())
     container.remove()

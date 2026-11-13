@@ -11,6 +11,11 @@ const environment = () => ({
   COLLABORATION_HOST: 'sync.draftmatter-pilot.fr',
   ACME_EMAIL: 'operations@draftmatter-pilot.fr',
   RELEASE_ID: 'ee11e8d',
+  DM_LEGAL_PUBLISHER_NAME: 'Rémi Vezy',
+  DM_LEGAL_CONTACT_EMAIL: 'vezy.remi@gmail.com',
+  DM_LEGAL_HOSTING_DETAILS: 'Hébergeur du pilote : coordonnées vérifiées dans le contrat.',
+  DM_LEGAL_DATA_LOCATION: 'France : serveur, stockage et sauvegardes du pilote.',
+  DM_LEGAL_ADDITIONAL_PROCESSORS: 'Google (Gmail) pour la messagerie de contact.',
   DM_DATABASE_URL: 'postgresql://writer:private-db-password@db.internal/draftmatter',
   DM_DATABASE_TLS: 'verify-full',
   DM_OBJECT_BUCKET: 'draftmatter-private',
@@ -74,6 +79,9 @@ describe('production deployment preflight', () => {
     ['RELEASE_ID', 'latest', /explicit immutable/],
     ['DM_WEBHOOK_SECRET', '$SECRET_VARIABLE', /literal/],
     ['DM_NOTIFICATION_WEBHOOK_URL', 'https://mail.draftmatter-pilot.fr', /configured together/],
+    ['DM_LEGAL_HOSTING_DETAILS', '', /DM_LEGAL_HOSTING_DETAILS/],
+    ['DM_LEGAL_CONTACT_EMAIL', 'not-an-email', /legal information/],
+    ['DM_LEGAL_DATA_LOCATION', 'à confirmer', /legal information/],
     ['NODE_ENV', 'development', /production/],
   ])('refuses unsafe or inconsistent %s', (name, value, message) => {
     expect(() => validateProductionEnvironment({ ...environment(), [name]: value })).toThrow(message)

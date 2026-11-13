@@ -88,6 +88,14 @@ describe('collaboration service configuration', () => {
     expect(() => loadCollaborationServiceConfig(environment({ DM_OBJECT_SECRET_KEY: '' }))).toThrow(/configured together/)
   })
 
+  it('validates the optional shared data storage budget without changing the project quota', () => {
+    expect(loadCollaborationServiceConfig(environment()).projectFilesTotalQuotaBytes).toBeUndefined()
+    expect(loadCollaborationServiceConfig(environment({ DM_PROJECT_FILES_TOTAL_QUOTA_BYTES: '25000000000' })).projectFilesTotalQuotaBytes).toBe(25_000_000_000)
+    for (const value of ['0', '-1', '1.5', 'NaN', '999999999', '9007199254740992']) {
+      expect(() => loadCollaborationServiceConfig(environment({ DM_PROJECT_FILES_TOTAL_QUOTA_BYTES: value }))).toThrow(/DM_PROJECT_FILES_TOTAL_QUOTA_BYTES/)
+    }
+  })
+
   it('configures notification delivery only as one secure bounded set', () => {
     const config = loadCollaborationServiceConfig(environment({
       DM_NOTIFICATION_WEBHOOK_URL: 'https://mail.example.test/draftmatter',

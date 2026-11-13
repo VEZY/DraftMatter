@@ -10,71 +10,12 @@
 	}
 }
 
-{$APP_HOST} {
-	root * /srv/draftmatter
-	encode zstd gzip
-	header {
-		-Server
-		X-Content-Type-Options nosniff
-		X-Frame-Options DENY
-		Referrer-Policy no-referrer
-		Strict-Transport-Security "max-age=31536000"
-	}
+import routes.caddy
 
-	# A missing build asset must be a 404, never the SPA entrypoint.
-	handle /assets/* {
-		header Cache-Control "public, max-age=31536000, immutable"
-		file_server
-	}
-	@staticFile {
-		path_regexp staticFile \.[A-Za-z0-9]+$
-		# Dotted project IDs are valid application routes, not static files.
-		not path /index.html /workspace/* /local/* /learn/*
-	}
-	handle @staticFile {
-		header Cache-Control "public, max-age=3600"
-		file_server
-	}
-	handle {
-		header Cache-Control no-cache
-		try_files {path} /index.html
-		file_server
-	}
-	handle_errors {
-		# A missing chunk must not retain the immutable cache policy of /assets/.
-		header Cache-Control no-store
-		respond "{err.status_code} {err.status_text}" {err.status_code}
-	}
+{$APP_HOST} {
+	import draftmatter_app
 }
 
 {$COLLABORATION_HOST} {
-	header {
-		-Server
-		X-Content-Type-Options nosniff
-		Referrer-Policy no-referrer
-		Strict-Transport-Security "max-age=31536000"
-	}
-	# Scrape this on the private Docker network, not through the public proxy.
-	handle /metrics* {
-		respond "Not found" 404
-	}
-	@filePart {
-		method PUT
-		path_regexp filePart ^/api/workspaces/[^/]+/projects/[^/]+/files/uploads/[^/]+/parts/[1-9][0-9]{0,3}$
-	}
-	handle @filePart {
-		request_body {
-			max_size 8388608
-		}
-		reverse_proxy collaboration:1234
-	}
-	handle {
-		# HTTP administration accepts 64 KiB. WebSocket frame limits are enforced
-		# separately by DM_MAX_PAYLOAD_BYTES and are not HTTP request bodies.
-		request_body {
-			max_size 65536
-		}
-		# Caddy forwards WebSocket upgrades without rewriting their paths.
-		reverse_proxy collaboration:1234
-	}
+	import draftmatter_sync
 }

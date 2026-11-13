@@ -1,5 +1,9 @@
 # First private server deployment
 
+For the budget alpha with database, identity and file storage on the same VPS,
+use the [single-host stack and local rehearsal](../single-host/README.md).
+This directory retains the topology with separately operated dependencies.
+
 This directory prepares a single Linux host running two containers: the browser
 application and HTTPS proxy in `edge`, and one `collaboration` service. It needs an
 operated HTTPS OIDC provider, a TLS PostgreSQL database, and a private S3 bucket.
@@ -31,7 +35,10 @@ site (`dist-website/`) is a separate build and is not served by this stack.
   the CA read-only and setting `NODE_EXTRA_CA_CERTS` to its container path before
   starting. Never disable verification. Do not add `sslmode`, `sslrootcert`, or
   other SSL options to the DSN; configure `DM_DATABASE_TLS=verify-full` instead.
-- Create a bucket with encryption, versioning, and separate backup credentials.
+- Create a private bucket with encryption and separate backup credentials.
+  For the closed alpha, prefer versioning disabled or explicitly configure
+  noncurrent-version expiry and physical deletion; application deletion alone
+  does not erase old S3 versions. Apply the [alpha retention runbook](../../docs/alpha-operations.md).
   The service needs HeadBucket, ListBucket, GetObject, PutObject and DeleteObject
   on its configured prefix. Its immutable writes use `If-None-Match: *` and
   `ServerSideEncryption: AES256`; verify provider compatibility. A ready health
@@ -69,6 +76,19 @@ Qualify a complete login on an installed desktop build; a browser login alone
 does not prove OS callback registration.
 
 ## Configuration and build
+
+The free closed-alpha legal pages are public application routes under `/legal/`.
+Set the public `DM_LEGAL_*` values using the actual operator and contact, the
+hosting provider’s legal identity/address/contact, a short English statement of
+the hosting country, and any additional data-processing providers. Keep server
+architecture, addresses, ports and component names in operator documentation,
+outside these public fields. Only claim hosting in France by a French company
+after confirming both facts; a website on another host must identify that host. The preflight and browser image build
+refuse missing or placeholder hosting information. These fields are compiled
+into the browser bundle, so they must never contain credentials. Rebuild after
+changing them. Local builds show preparation wording until hosting is known.
+See [alpha publication and OVH preparation](../../docs/alpha-launch.md) for the
+website configuration, legal scope and the next provisioning steps.
 
 Use Node 24.10.0 (the repository's `.node-version`) and Docker Engine with Compose
 v2. Keep real secrets outside the checkout and Docker build context. Container

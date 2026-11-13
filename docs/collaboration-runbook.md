@@ -37,7 +37,9 @@ Only an owner can schedule workspace deletion. `DELETE /api/workspaces/{workspac
 
 If deletion fails, the request remains `failed` with a generic bounded message. Investigate object-store permissions/availability, retry only after the cause is fixed, and let the owner cancel if required. Never mark deletion complete while scoped objects remain.
 
-Retention defaults are 20 snapshots for 30 days and 7 backups for 90 days. The newest configured set is always retained. Reduce retention only after privacy, contractual, recovery-point, and infrastructure-backup requirements have been reconciled.
+Historical snapshot retention defaults to keeping at least the newest 20 snapshots, plus snapshots younger than 30 days. These are active project recovery history; the latest durable snapshot is also the current manuscript state and must not expire merely because a project is idle. Workspace deletion removes that history with the rest of the project.
+
+Technical managed backups have an absolute maximum age of 30 days. Migration `011` updates existing longer policies, changes the default to 30 days, and rejects a longer policy. The former minimum of seven backup copies does not exempt the newest or last backup from expiry. Lifecycle cleanup removes expired copies even when that leaves no technical backup; active manuscript state remains intact. Cleanup runs with the maintenance cycle and must be monitored for failure or downtime. Infrastructure/PostgreSQL backups and object-store noncurrent versions are operated separately and need their own retention configuration; see [closed-alpha operations](alpha-operations.md).
 
 ## Security response
 

@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { isLegalDocumentId, legalEnvironmentKeys, readLegalConfiguration } from './legalConfig'
+import { LEGAL_DOCUMENT_VERSION, isLegalDocumentId, legalDocuments, legalEnvironmentKeys, readLegalConfiguration } from './legalConfig'
 
 const deployment = {
   VITE_DM_LEGAL_PUBLISHER_NAME: 'Rémi Vezy',
   VITE_DM_LEGAL_CONTACT_EMAIL: 'vezy.remi@gmail.com',
-  VITE_DM_LEGAL_HOSTING_DETAILS: 'OVH SAS, coordonnées confirmées dans le contrat d’hébergement.',
-  VITE_DM_LEGAL_DATA_LOCATION: 'France, région du VPS et du stockage vérifiée par l’exploitant.',
+  VITE_DM_LEGAL_HOSTING_DETAILS: 'OVH SAS, contact details confirmed in the hosting agreement.',
+  VITE_DM_LEGAL_DATA_LOCATION: 'Hosted in France by a French company.',
 }
 
 describe('public alpha legal configuration', () => {
@@ -15,6 +15,7 @@ describe('public alpha legal configuration', () => {
     expect(config.contactEmail).toBe('vezy.remi@gmail.com')
     expect(config.hostingDetails).toBe('')
     expect(config.dataLocation).toBe('')
+    expect(config.additionalProcessors).toContain('Google (Gmail), for messages sent to the contact address.')
     expect(config).toMatchObject({ deletionDays: 30, backupDays: 30, noticeDays: 30 })
   })
 
@@ -31,9 +32,20 @@ describe('public alpha legal configuration', () => {
     expect(legalEnvironmentKeys.every((key) => key.startsWith('DM_LEGAL_'))).toBe(true)
   })
 
+  it.each(['To be confirmed', 'Provider to be provided', 'Not yet configured', 'TBD'])('keeps English placeholders in preparation (%s)', (placeholder) => {
+    expect(readLegalConfiguration({ ...deployment, VITE_DM_LEGAL_DATA_LOCATION: placeholder }).ready).toBe(false)
+  })
+
   it('accepts only the three published document identifiers', () => {
+    expect(legalDocuments).toEqual([
+      { id: 'mentions-legales', title: 'Legal notice' },
+      { id: 'confidentialite', title: 'Privacy policy' },
+      { id: 'conditions-utilisation', title: 'Terms of use' },
+    ])
     expect(isLegalDocumentId('confidentialite')).toBe(true)
     expect(isLegalDocumentId('../confidentialite')).toBe(false)
     expect(isLegalDocumentId('confidentialite?token=private')).toBe(false)
+    expect(isLegalDocumentId('privacy-policy')).toBe(false)
+    expect(LEGAL_DOCUMENT_VERSION).toBe('2026-11-13')
   })
 })

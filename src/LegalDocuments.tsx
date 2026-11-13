@@ -5,7 +5,7 @@ import './legal.css'
 
 export function LegalLinks({ basePath = '/', target, onNavigate }: { basePath?: string; target?: '_blank'; onNavigate?: (id: LegalDocumentId) => void }) {
   return (
-    <nav className="legal-links" aria-label="Informations légales">
+    <nav className="legal-links" aria-label="Legal information">
       {legalDocuments.map((document) => (
         <a key={document.id} href={`${basePath}legal/${document.id}`} target={onNavigate ? undefined : target} rel={target && !onNavigate ? 'noreferrer' : undefined}
           onClick={(event) => {
@@ -34,18 +34,18 @@ export function LegalPage({ documentId, onBack, linkBase = '/', onNavigate }: { 
     return () => { window.document.title = previousTitle }
   }, [document.title])
   return (
-    <main className="legal-page" lang="fr" ref={pageRef}>
+    <main className="legal-page" lang="en" ref={pageRef}>
       <header className="legal-page-header">
         <span className="legal-brand">DraftMatter</span>
-        <button type="button" onClick={onBack}>Retour / Back</button>
+        <button type="button" onClick={onBack}>Back</button>
       </header>
       <article aria-labelledby="legal-page-title">
-        <p className="legal-kicker">Alpha fermée gratuite · sur invitation</p>
+        <p className="legal-kicker">Free closed alpha · by invitation</p>
         <h1 id="legal-page-title" tabIndex={-1} ref={titleRef}>{document.title}</h1>
-        <p className="legal-version">Version du <time dateTime={LEGAL_DOCUMENT_VERSION}>11 novembre 2026</time></p>
+        <p className="legal-version">Version dated <time dateTime={LEGAL_DOCUMENT_VERSION}>{new Intl.DateTimeFormat('en-GB', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${LEGAL_DOCUMENT_VERSION}T00:00:00Z`))}</time></p>
         {!legalConfiguration.ready && (
-          <aside className="legal-preparation" aria-label="Préparation de l’alpha">
-            L’alpha hébergée est en préparation. Son hébergeur et les lieux de traitement doivent être confirmés ci-dessous avant l’accueil des testeurs.
+          <aside className="legal-preparation" aria-label="Alpha preparation">
+            The hosted alpha is being prepared. Its hosting provider and data processing locations must be confirmed below before testers are invited.
           </aside>
         )}
         <LegalDocumentContent documentId={documentId} configuration={legalConfiguration} />

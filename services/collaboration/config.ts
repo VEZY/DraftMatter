@@ -26,6 +26,7 @@ export interface CollaborationServiceConfig {
   }
   allowedOrigins: string[]
   maxPayloadBytes: number
+  projectFilesTotalQuotaBytes?: number
   tokenRefreshMs: number
   shutdownTimeoutMs: number
   maintenanceIntervalMs: number
@@ -187,6 +188,9 @@ export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = 
     } : {}),
     allowedOrigins,
     maxPayloadBytes: integer(environment, 'DM_MAX_PAYLOAD_BYTES', 16 * 1024 * 1024, 16 * 1024, 16 * 1024 * 1024),
+    ...(environment.DM_PROJECT_FILES_TOTAL_QUOTA_BYTES?.trim() ? {
+      projectFilesTotalQuotaBytes: integer(environment, 'DM_PROJECT_FILES_TOTAL_QUOTA_BYTES', 25_000_000_000, 1_000_000_000, Number.MAX_SAFE_INTEGER),
+    } : {}),
     tokenRefreshMs: integer(environment, 'DM_TOKEN_REFRESH_MS', 5 * 60_000, 30_000, 60 * 60_000),
     shutdownTimeoutMs: integer(environment, 'DM_SHUTDOWN_TIMEOUT_MS', 15_000, 1_000, 120_000),
     maintenanceIntervalMs: integer(environment, 'DM_MAINTENANCE_INTERVAL_MS', 24 * 60 * 60_000, 60_000, 7 * 24 * 60 * 60_000),

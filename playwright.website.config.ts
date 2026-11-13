@@ -3,7 +3,7 @@ import applicationConfig from './playwright.config'
 
 export default defineConfig({
   ...applicationConfig,
-  testMatch: 'home-landing.spec.ts',
+  testMatch: ['home-landing.spec.ts', 'website-legal.spec.ts'],
   testIgnore: [],
   outputDir: 'test-results/playwright-website',
   webServer: {

@@ -1,3 +1,5 @@
+import type { LegalDocumentId } from './legalConfig'
+
 export type ApplicationRoute =
   | { destination: 'home'; workspaceId?: string }
   | { destination: 'collaborative-editor'; workspaceId: string; projectId: string }
@@ -9,6 +11,7 @@ export type ApplicationRoute =
   | { destination: 'languages' }
   | { destination: 'tutorial' }
   | { destination: 'browser-editor' }
+  | { destination: 'legal'; documentId: LegalDocumentId }
 
 function decoded(value: string | undefined) {
   if (!value) return ''
@@ -21,6 +24,12 @@ function decoded(value: string | undefined) {
 
 export function parseApplicationRoute(location: Pick<Location, 'pathname' | 'search'>): ApplicationRoute {
   const parts = location.pathname.split('/').filter(Boolean)
+  if (parts[0] === 'legal') {
+    const documentId = parts[1]
+    return parts.length === 2 && (documentId === 'mentions-legales' || documentId === 'confidentialite' || documentId === 'conditions-utilisation')
+      ? { destination: 'legal', documentId }
+      : { destination: 'home' }
+  }
   if (parts[0] === 'workspace' && parts[1] && parts[2] === 'project' && parts[3]) {
     return { destination: 'collaborative-editor', workspaceId: decoded(parts[1]), projectId: decoded(parts[3]) }
   }
@@ -41,6 +50,7 @@ export function parseApplicationRoute(location: Pick<Location, 'pathname' | 'sea
 }
 
 export function applicationRoutePath(route: ApplicationRoute) {
+  if (route.destination === 'legal') return `/legal/${route.documentId}`
   if (route.destination === 'collaborative-editor') return `/workspace/${encodeURIComponent(route.workspaceId)}/project/${encodeURIComponent(route.projectId)}`
   if (route.destination === 'local-editor') return `/local/${encodeURIComponent(route.localProjectId)}${route.startCollaboration ? '?start=collaboration' : ''}`
   if (route.destination === 'invitation') return '/invite'

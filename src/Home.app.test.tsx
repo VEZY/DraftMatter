@@ -83,6 +83,8 @@ describe('DraftMatter desktop home', () => {
     expect(container.querySelector('input[placeholder="Search papers on this computer"]')).not.toBeNull()
     expect(container.querySelector('.home-showcase')).toBeNull()
     expect(container.textContent).not.toContain('Your paper should be as reproducible as your research.')
+    expect([...container.querySelectorAll('footer .legal-links a')].map((link) => link.textContent)).toEqual(['Legal notice', 'Privacy policy', 'Terms of use'])
+    expect(container.textContent).toContain('Pre-production: data loss is possible. Keep independent backups of your work outside DraftMatter.')
   })
 
   it('filters recent papers and exposes collaboration account setup', async () => {

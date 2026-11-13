@@ -26,7 +26,7 @@
     "fixture:check": "node scripts/sync-complete-example-manifests.mjs --check",
     "pack:cli": "npm pack ./dist-cli",
     "release:verify": "node scripts/verify-release.mjs",
-    "test": "vitest run src services website --maxWorkers=1 --testTimeout=15000",
+    "test": "vitest run src services website --exclude \"tests/e2e/**\" --maxWorkers=1 --testTimeout=15000",
     "test:alpha": "vitest run src/phase7AlphaDogfood.test.ts src/phase7AlphaAuthoringGate.test.ts",
     "test:cli": "node scripts/verify-cli.mjs",
     "test:mcp": "node scripts/verify-mcp.mjs",
@@ -48,7 +48,13 @@
     "test:release": "npm run release:verify && npm run check && npm test && npm run test:e2e && npm run test:e2e:website && npm run build && npm run test:cli && npm run test:mcp && npm run test:agent-adapters && npm run test:agent-performance && npm run validate:agent-skill && npm run compliance:check",
     "tauri": "tauri",
     "desktop:dev": "tauri dev",
-    "desktop:build": "tauri build"
+    "desktop:build": "tauri build",
+    "deploy:single-host:init": "node scripts/init-single-host.mjs",
+    "deploy:single-host:check": "node scripts/check-single-host.mjs",
+    "test:deployment": "vitest run services/collaboration/singleHost*.test.mjs services/collaboration/rehearsalOrchestration.test.mjs services/collaboration/migrationPackaging.test.mjs services/collaboration/productionDeployment.test.mjs --maxWorkers=1 && node --test deploy/single-host/backup/backup.test.mjs",
+    "test:deployment:smoke": "node scripts/smoke-single-host.mjs",
+    "deploy:single-host:rehearse": "node scripts/rehearse-single-host.mjs",
+    "deploy:single-host:tls": "node scripts/renew-single-host-tls.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1087.0",

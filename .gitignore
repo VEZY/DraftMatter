@@ -11,6 +11,7 @@ playwright-report/
 .env.*
 !.env.example
 deploy/production/secrets/
+deploy/single-host/secrets/
 *.log
 *.tsbuildinfo
 vite.config.js

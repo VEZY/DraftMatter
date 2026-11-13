@@ -12,6 +12,10 @@ on:
       - 'src/HomeShowcase.tsx'
       - 'src/Icon.tsx'
       - 'src/home.css'
+      - 'src/LegalDocuments.tsx'
+      - 'src/legalContent.tsx'
+      - 'src/legalConfig.ts'
+      - 'src/legal.css'
       - 'website/**'
       - 'package.json'
       - 'package-lock.json'
@@ -48,6 +52,11 @@ jobs:
       - name: Build website
         env:
           VITE_ALPHA_SIGNUP_URL: ${{ vars.DRAFTMATTER_ALPHA_SIGNUP_URL }}
+          VITE_DM_LEGAL_PUBLISHER_NAME: ${{ vars.DRAFTMATTER_LEGAL_PUBLISHER_NAME }}
+          VITE_DM_LEGAL_CONTACT_EMAIL: ${{ vars.DRAFTMATTER_LEGAL_CONTACT_EMAIL }}
+          VITE_DM_LEGAL_HOSTING_DETAILS: ${{ vars.DRAFTMATTER_WEBSITE_HOSTING_DETAILS }}
+          VITE_DM_LEGAL_DATA_LOCATION: ${{ vars.DRAFTMATTER_WEBSITE_DATA_LOCATION }}
+          VITE_DM_LEGAL_ADDITIONAL_PROCESSORS: ${{ vars.DRAFTMATTER_LEGAL_ADDITIONAL_PROCESSORS }}
         run: npm run build:website
 
       - name: Upload website

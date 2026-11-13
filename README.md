@@ -218,6 +218,9 @@ Production desktop installers are built from version tags as draft GitHub releas
 - [Collaboration beta core gate](./docs/collaboration-beta-gate.md)
 - [Collaboration service and self-hosting](./docs/self-hosting.md)
 - [Collaboration operations runbook](./docs/collaboration-runbook.md)
+- [Single-VPS deployment and local recovery rehearsal](./deploy/single-host/README.md)
+- [Closed free alpha, legal pages and OVH preparation](./docs/alpha-launch.md)
+- [Alpha data retention and requests](./docs/alpha-operations.md)
 
 ## License
 

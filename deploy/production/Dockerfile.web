@@ -14,7 +14,18 @@ COPY integrations ./integrations
 # This is public configuration, compiled into the browser bundle, not a secret.
 ARG VITE_DRAFTMATTER_COLLABORATION_URL
 ENV VITE_DRAFTMATTER_COLLABORATION_URL=${VITE_DRAFTMATTER_COLLABORATION_URL}
+ARG VITE_DM_LEGAL_PUBLISHER_NAME
+ARG VITE_DM_LEGAL_CONTACT_EMAIL
+ARG VITE_DM_LEGAL_HOSTING_DETAILS
+ARG VITE_DM_LEGAL_DATA_LOCATION
+ARG VITE_DM_LEGAL_ADDITIONAL_PROCESSORS
+ENV VITE_DM_LEGAL_PUBLISHER_NAME=${VITE_DM_LEGAL_PUBLISHER_NAME} \
+    VITE_DM_LEGAL_CONTACT_EMAIL=${VITE_DM_LEGAL_CONTACT_EMAIL} \
+    VITE_DM_LEGAL_HOSTING_DETAILS=${VITE_DM_LEGAL_HOSTING_DETAILS} \
+    VITE_DM_LEGAL_DATA_LOCATION=${VITE_DM_LEGAL_DATA_LOCATION} \
+    VITE_DM_LEGAL_ADDITIONAL_PROCESSORS=${VITE_DM_LEGAL_ADDITIONAL_PROCESSORS}
 RUN node --input-type=module -e 'const value = new URL(process.env.VITE_DRAFTMATTER_COLLABORATION_URL); if (value.protocol !== "https:" || value.username || value.password || value.search || value.hash) throw new Error("A public HTTPS collaboration URL is required.")' \
+    && node --input-type=module -e 'import { readLegalConfiguration } from "./src/legalConfig.ts"; if (!readLegalConfiguration(process.env).ready) throw new Error("Complete the public legal hosting and contact information before building the alpha image.")' \
     && npm run check \
     && npx vite build
 
@@ -30,6 +41,7 @@ RUN if getcap /usr/bin/caddy | grep -q .; then setcap -r /usr/bin/caddy; fi \
 
 COPY --from=build /app/dist /srv/draftmatter
 COPY deploy/production/Caddyfile /etc/caddy/Caddyfile
+COPY deploy/production/routes.caddy /etc/caddy/routes.caddy
 COPY LICENSE compliance/THIRD_PARTY_NOTICES.md /usr/share/doc/draftmatter/
 
 # Internal high ports let the production Compose service drop every capability.

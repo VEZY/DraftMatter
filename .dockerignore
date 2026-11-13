@@ -14,6 +14,7 @@ src-tauri/target
 **/.env.*
 !**/.env.example
 deploy/production/secrets
+deploy/single-host/secrets
 dist-cli
 dist-website
 test-results

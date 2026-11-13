@@ -42,6 +42,7 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
     storage: new S3ProjectFileStorage(config.objectStorage.bucket, config.objectStorage.client),
     authorization: fileAuthorization,
     objectPrefix: config.objectStorage.prefix,
+    totalQuotaBytes: config.projectFilesTotalQuotaBytes,
   })
   const notificationDelivery = config.notificationDelivery ? new WebhookNotificationEmailDelivery({
     url: config.notificationDelivery.webhookUrl,

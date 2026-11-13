@@ -23,6 +23,8 @@ export interface PostgresProjectFileServiceOptions {
   clock?: () => number
   idFactory?: () => string
   uploadTtlMs?: number
+  /** Optional aggregate logical DATA limit across every project in this database. */
+  totalQuotaBytes?: number
 }
 
 export class ProjectFileError extends Error {
@@ -33,6 +35,10 @@ const storageFailure = () => new ProjectFileError('storage-unavailable', 503, 'P
 const conflict = (message: string) => new ProjectFileError('upload-conflict', 409, message)
 const SAFE_ID = /^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/
 const MAX_ENTRIES = 1000
+// Stable PostgreSQL advisory namespace, shared by all application processes.
+// It protects only the short SQL reservation, never an S3 transfer.
+const TOTAL_QUOTA_LOCK = [0x444d4651, 1] as const
+const TOTAL_QUOTA_QUEUE = 'draftmatter-project-files-total-quota'
 function identifier(value: string) { if (!SAFE_ID.test(value)) throw notFound(); return value }
 function scopeKey(scope: ProjectFileScope) { return `${identifier(scope.workspaceId)}\0${identifier(scope.projectId)}` }
 function iso(value: Date | string | number) { return new Date(value).toISOString() }
@@ -56,10 +62,10 @@ function requestMetadata(request: BeginProjectFileUpload) {
 // PostgreSQL supplies cross-process exclusion. This small per-pool queue also
 // avoids competing transactions inside one process (and in pg-mem regressions).
 const processQueues = new WeakMap<Database, Map<string, Promise<void>>>()
-async function acquire(pool: Database, scope: ProjectFileScope) {
+async function acquire(pool: Database, key: string) {
   let queue = processQueues.get(pool)
   if (!queue) { queue = new Map(); processQueues.set(pool, queue) }
-  const key = scopeKey(scope), previous = queue.get(key) ?? Promise.resolve()
+  const previous = queue.get(key) ?? Promise.resolve()
   let release!: () => void
   const held = new Promise<void>((resolve) => { release = resolve })
   const tail = previous.then(() => held)
@@ -76,24 +82,31 @@ export class PostgresProjectFileService {
   private readonly clock: () => number
   private readonly idFactory: () => string
   private readonly uploadTtlMs: number
+  private readonly totalQuotaBytes: number | undefined
   constructor(options: PostgresProjectFileServiceOptions) {
     this.pool = options.pool; this.storage = options.storage; this.authorization = options.authorization
     this.prefix = (options.objectPrefix ?? 'draftmatter').replace(/^\/+|\/+$/g, '')
     if (!this.prefix || this.prefix.includes('\\') || this.prefix.split('/').some((part) => !part || part === '.' || part === '..')) throw new Error('The project file storage prefix is invalid.')
     this.clock = options.clock ?? Date.now; this.idFactory = options.idFactory ?? randomUUID
     this.uploadTtlMs = options.uploadTtlMs ?? 7 * 24 * 60 * 60_000
+    if (options.totalQuotaBytes !== undefined && (!Number.isSafeInteger(options.totalQuotaBytes) || options.totalQuotaBytes < 0)) throw new Error('The total project file quota must be a non-negative safe integer.')
+    this.totalQuotaBytes = options.totalQuotaBytes
   }
 
   private async authorized(token: string, scope: ProjectFileScope, capability: 'read' | 'edit') {
     scopeKey(scope)
     return this.authorization.authorizeProject(token, scope.workspaceId, scope.projectId, capability)
   }
-  private async locked<T>(scope: ProjectFileScope, run: (client: PoolClient) => Promise<T>, maintenance = false) {
-    const release = await acquire(this.pool, scope)
+  private async locked<T>(scope: ProjectFileScope, run: (client: PoolClient) => Promise<T>, maintenance = false, totalReservation = false) {
+    const release = await acquire(this.pool, scopeKey(scope))
+    let releaseTotal: (() => void) | undefined
     let client: PoolClient | undefined
     try {
+      if (totalReservation) releaseTotal = await acquire(this.pool, TOTAL_QUOTA_QUEUE)
       client = await this.pool.connect()
-      await client.query('BEGIN')
+      // A repeatable-read default could retain a snapshot from before waiting
+      // on the advisory lock and miss another process's committed reservation.
+      await client.query(totalReservation ? 'BEGIN ISOLATION LEVEL READ COMMITTED' : 'BEGIN')
       const project = await client.query(`SELECT id FROM draftmatter_projects WHERE workspace_id = $1 AND id = $2${maintenance ? '' : ' AND deleted_at IS NULL'} FOR UPDATE`, [scope.workspaceId, scope.projectId])
       if (!project.rowCount) throw notFound()
       if (!maintenance) {
@@ -107,7 +120,17 @@ export class PostgresProjectFileService {
       await client?.query('ROLLBACK').catch(() => {})
       if (error instanceof ProjectFileError || (error as { name?: string }).name === 'WorkspaceAccessError') throw error
       throw storageFailure()
-    } finally { client?.release(); release() }
+    } finally { client?.release(); releaseTotal?.(); release() }
+  }
+  private async assertTotalCapacity(client: PoolClient, requestedBytes: number) {
+    if (this.totalQuotaBytes === undefined) return
+    await client.query('SELECT pg_advisory_xact_lock($1::integer, $2::integer)', [...TOTAL_QUOTA_LOCK])
+    const result = await client.query<{ total_bytes: string | number }>("SELECT COALESCE(SUM(size), 0) AS total_bytes FROM draftmatter_project_files WHERE state NOT IN ('cancelled', 'deleted')")
+    const value = result.rows[0]?.total_bytes ?? 0
+    if (typeof value === 'number' && !Number.isSafeInteger(value)) throw storageFailure()
+    const used = BigInt(value)
+    if (used < 0n) throw storageFailure()
+    if (used + BigInt(requestedBytes) > BigInt(this.totalQuotaBytes)) throw new ProjectFileError('total-quota-exceeded', 413, 'Shared file storage has reached this server’s total data quota, including unfinished uploads and retained versions. Remove old versions or cancel unfinished uploads before trying again.')
   }
   private projectPrefix(scope: ProjectFileScope) {
     scopeKey(scope)
@@ -165,11 +188,12 @@ export class PostgresProjectFileService {
       if (rows.length >= MAX_ENTRIES) throw new ProjectFileError('catalogue-full', 409, 'This project already contains 1,000 file versions or uploads. Remove old versions before adding another.')
       const used = rows.reduce((sum, row) => sum + Number(row.size), 0)
       if (used + metadata.size > PROJECT_FILE_QUOTA_BYTES) throw new ProjectFileError('quota-exceeded', 413, 'This project has reached its 1 GB file quota, including unfinished uploads and retained versions.')
+      await this.assertTotalCapacity(client, metadata.size)
       const id = identifier(`file-${this.idFactory()}`), now = iso(this.clock())
       await client.query(`INSERT INTO draftmatter_project_files(workspace_id, project_id, id, path, size, media_type, created_by, created_at, updated_at, state, object_key)
         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $8, 'uploading', $9)`, [scope.workspaceId, scope.projectId, id, metadata.path, metadata.size, metadata.mediaType, access.userId, now, `${this.projectPrefix(scope)}${id}`])
       return id
-    })
+    }, false, this.totalQuotaBytes !== undefined)
     // Reservation is committed before any S3 side effect. A failed initialization
     // remains visible to its creator in list(), and getUpload safely resumes it.
     return this.getUpload(token, scope, id)

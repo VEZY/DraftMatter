@@ -3,6 +3,7 @@ import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { parseEnv } from 'node:util'
 import { loadCollaborationServiceConfig } from '../services/collaboration/config.ts'
+import { legalEnvironmentKeys, readLegalConfiguration } from '../src/legalConfig.ts'
 
 class ProductionCheckError extends Error {
   constructor(message) {
@@ -17,18 +18,21 @@ function requireValue(environment, name) {
   return value
 }
 
-function hostname(environment, name) {
+function hostname(environment, name, localRehearsal = false) {
   const value = requireValue(environment, name)
   const labels = value.split('.')
   if (value.length > 253 || labels.length < 2 || labels.some((label) => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label)) ||
-      /(?:^|\.)(?:localhost|local|test|invalid|example)$/.test(value) || /^(?:\d+\.){3}\d+$/.test(value)) {
+      (!localRehearsal && /(?:^|\.)(?:localhost|local|test|invalid|example)$/.test(value)) || /^(?:\d+\.){3}\d+$/.test(value)) {
     throw new ProductionCheckError(`${name} must be a public DNS hostname without scheme, port, or path.`)
+  }
+  if (localRehearsal && !['app.draftmatter.localhost', 'sync.draftmatter.localhost'].includes(value)) {
+    throw new ProductionCheckError('Local rehearsal requires the dedicated DraftMatter localhost hosts.')
   }
   return value
 }
 
 /** Validate the same service configuration used at startup, without opening any connections. */
-export function validateProductionEnvironment(environment) {
+export function validateProductionEnvironment(environment, { localRehearsal = false } = {}) {
   for (const [name, value] of Object.entries(environment)) {
     if (!/^(?:APP_HOST|COLLABORATION_HOST|ACME_EMAIL|RELEASE_ID|DM_|NODE_ENV)/.test(name) || !value) continue
     if (/REPLACE_|change[-_]?(?:me|this)|example\.(?:com|org|net|test|invalid)/i.test(value)) {
@@ -36,8 +40,8 @@ export function validateProductionEnvironment(environment) {
     }
     if (value.includes('$')) throw new ProductionCheckError(`${name} must be literal, without dollar signs or environment expansion.`)
   }
-  const appHost = hostname(environment, 'APP_HOST')
-  const serviceHost = hostname(environment, 'COLLABORATION_HOST')
+  const appHost = hostname(environment, 'APP_HOST', localRehearsal)
+  const serviceHost = hostname(environment, 'COLLABORATION_HOST', localRehearsal)
   if (appHost === serviceHost) throw new ProductionCheckError('APP_HOST and COLLABORATION_HOST must differ for this topology.')
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(requireValue(environment, 'ACME_EMAIL'))) {
     throw new ProductionCheckError('ACME_EMAIL must be an email address for certificate renewal notices.')
@@ -49,7 +53,8 @@ export function validateProductionEnvironment(environment) {
   if (environment.NODE_ENV && environment.NODE_ENV !== 'production') throw new ProductionCheckError('NODE_ENV must be production.')
   for (const name of ['DM_OBJECT_REGION', 'DM_OIDC_CLIENT_ID']) requireValue(environment, name)
   const config = loadCollaborationServiceConfig({ ...environment, NODE_ENV: 'production' })
-  const appOrigin = `https://${appHost}`
+  const port = localRehearsal ? ':8443' : ''
+  const appOrigin = `https://${appHost}${port}`
   if (!config.allowedOrigins.includes(appOrigin)) throw new ProductionCheckError('DM_ALLOWED_ORIGINS must include the HTTPS APP_HOST origin.')
   for (const value of [config.oidc.issuer, config.oidc.jwksUri, ...config.allowedOrigins.filter((origin) => !['tauri://localhost', 'http://tauri.localhost'].includes(origin))]) {
     if (new URL(value).protocol !== 'https:') throw new ProductionCheckError('Public identity and browser origins must use HTTPS in this topology.')
@@ -61,10 +66,14 @@ export function validateProductionEnvironment(environment) {
       throw new ProductionCheckError('DM_OBJECT_ENDPOINT must be HTTPS without credentials, query, or fragment.')
     }
   }
+  const publicLegalEnvironment = Object.fromEntries(legalEnvironmentKeys.map((name) => [`VITE_${name}`, requireValue(environment, name)]))
+  if (!readLegalConfiguration(publicLegalEnvironment).ready) {
+    throw new ProductionCheckError('The public legal information must identify the operator, contact, hosting providers and actual data locations before opening the alpha.')
+  }
   // Return only public settings. Never print the service config or environment.
   return {
     appOrigin,
-    serviceOrigin: `https://${serviceHost}`,
+    serviceOrigin: `https://${serviceHost}${port}`,
     issuer: config.oidc.issuer,
     jwksUri: config.oidc.jwksUri,
     clientId: config.oidc.clientId,

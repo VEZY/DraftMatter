@@ -512,7 +512,8 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
   }
 
   async applyBackupLifecycle(scope: CollaborationProjectScope, policy: { retainLatest: number; maxAgeMs: number; now?: number }) {
-    if (!Number.isSafeInteger(policy.retainLatest) || policy.retainLatest < 1 || policy.maxAgeMs < 0) throw new Error('Backup lifecycle policy is invalid.')
+    if (!Number.isSafeInteger(policy.retainLatest) || policy.retainLatest < 1 || !Number.isFinite(policy.maxAgeMs) || policy.maxAgeMs < 0 ||
+        (policy.now !== undefined && !Number.isFinite(policy.now))) throw new Error('Backup lifecycle policy is invalid.')
     const result = await this.pool.query<BackupRow>(
       `SELECT id, created_at, object_key, bytes, sha256, state_sha256
        FROM draftmatter_collaboration_backups WHERE workspace_id = $1 AND project_id = $2 AND state = 'ready'
@@ -520,7 +521,11 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
       [scope.workspaceId, scope.projectId],
     )
     const now = policy.now ?? this.clock()
-    const remove = result.rows.slice(policy.retainLatest).filter((row) => now - new Date(row.created_at).getTime() > policy.maxAgeMs)
+    // Unlike the current project snapshot, every backup is a technical copy.
+    // Keeping a minimum number of recent backups must never exempt an old copy
+    // from the maximum age promised to alpha participants. Unexpired backups
+    // remain available; the latest active project state is not removed here.
+    const remove = result.rows.filter((row) => now - new Date(row.created_at).getTime() >= policy.maxAgeMs)
     for (const row of remove) {
       await this.pool.query(
         `UPDATE draftmatter_collaboration_backups SET state = 'deleting'

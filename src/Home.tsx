@@ -10,6 +10,8 @@ import {
 import type { WorkspaceRole } from './collaboration/workspaceService'
 import type { LocalProjectRecent } from './localProjectCatalogue'
 import { HomeLearningGuide } from './HomeLearningGuide'
+import { LegalLinks } from './LegalDocuments'
+import type { LegalDocumentId } from './legalConfig'
 
 interface HomeProps {
   preferredWorkspaceId?: string
@@ -28,6 +30,7 @@ interface HomeProps {
   onOpenAiLearn: () => void
   onOpenLanguages: () => void
   onOpenTutorial: () => void
+  onOpenLegal?: (documentId: LegalDocumentId) => void
 }
 
 function roleLabel(role: WorkspaceRole) {
@@ -96,6 +99,20 @@ function AdvancedConnectionSetup() {
   )
 }
 
+function AlphaAccountNotice({ onOpenLegal }: Pick<HomeProps, 'onOpenLegal'>) {
+  return (
+    <div className="alpha-account-notice">
+      <p>The hosted alpha is free and by invitation. Before signing in, read the terms of use and privacy policy.</p>
+      <p>Pre-production: data loss is possible. Keep independent backups of your work outside DraftMatter.</p>
+      <LegalLinks onNavigate={onOpenLegal} target={onOpenLegal ? undefined : '_blank'} />
+    </div>
+  )
+}
+
+function AlphaLegalFooter({ onOpenLegal }: Pick<HomeProps, 'onOpenLegal'>) {
+  return <footer className="legal-footer"><p>Free closed alpha · DraftMatter</p><LegalLinks onNavigate={onOpenLegal} /></footer>
+}
+
 function AppHome({
   onOpenLocalProject,
   onOpenLocalRecent,
@@ -111,7 +128,8 @@ function AppHome({
   onOpenTutorial,
   onConnectAssistants,
   onOpenAiLearn,
-}: Pick<HomeProps, 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenBrowserDraft' | 'onOpenLearn' | 'onOpenAiLearn' | 'onOpenLanguages' | 'onOpenTutorial'> & { onConnectAssistants: () => void }) {
+  onOpenLegal,
+}: Pick<HomeProps, 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenBrowserDraft' | 'onOpenLearn' | 'onOpenAiLearn' | 'onOpenLanguages' | 'onOpenTutorial' | 'onOpenLegal'> & { onConnectAssistants: () => void }) {
   const session = useCollaborationSession()
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -207,6 +225,7 @@ function AppHome({
             <article>
               <span><Icon name="users" size={19} /></span>
               <div><h3>Account &amp; collaboration</h3><p>{session.serviceUrl ? 'A collaboration service is configured. Sign in to access shared papers.' : 'You are working locally. Add an account only when you need shared papers or browser collaboration.'}</p></div>
+              <AlphaAccountNotice onOpenLegal={onOpenLegal} />
               <div>{session.serviceUrl && <button onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}>Sign in</button>}<button onClick={() => document.getElementById('home-account-setup')?.querySelector<HTMLButtonElement>('.home-disclosure')?.click()}>Configure collaboration</button></div>
             </article>
           </div>
@@ -215,6 +234,7 @@ function AppHome({
         {session.error && <p className="home-account-error" role="alert">{session.error}</p>}
         <AdvancedConnectionSetup />
       </div>
+      <AlphaLegalFooter onOpenLegal={onOpenLegal} />
     </main>
   )
 }
@@ -234,7 +254,8 @@ function Catalogue({
   onOpenLanguages,
   onOpenTutorial,
   onConnectAssistants,
-}: Pick<HomeProps, 'preferredWorkspaceId' | 'onOpenDraft' | 'onNewDraft' | 'onNewLocalDraft' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'localProjects' | 'localProblem' | 'onOpenLearn' | 'onOpenLanguages' | 'onOpenTutorial'> & { onConnectAssistants: () => void }) {
+  onOpenLegal,
+}: Pick<HomeProps, 'preferredWorkspaceId' | 'onOpenDraft' | 'onNewDraft' | 'onNewLocalDraft' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'localProjects' | 'localProblem' | 'onOpenLearn' | 'onOpenLanguages' | 'onOpenTutorial' | 'onOpenLegal'> & { onConnectAssistants: () => void }) {
   const session = useCollaborationSession()
   const [query, setQuery] = useState('')
   const [workspaceId, setWorkspaceId] = useState(() => (
@@ -327,6 +348,7 @@ function Catalogue({
         {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} />}
         <HomeLearningGuide onStartTour={onOpenTutorial} />
       </div>
+      <AlphaLegalFooter onOpenLegal={onOpenLegal} />
     </main>
   )
 }

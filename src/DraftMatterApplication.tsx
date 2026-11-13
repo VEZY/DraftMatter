@@ -9,6 +9,8 @@ import { Learn } from './Learn'
 import { AiLearn } from './AiLearn'
 import { AssistantConnectionsDialog } from './AssistantConnectionsDialog'
 import { ProgrammingLanguages } from './ProgrammingLanguages'
+import { LegalPage } from './LegalDocuments'
+import type { LegalDocumentId } from './legalConfig'
 import { applicationRoutePath, parseApplicationRoute, type ApplicationRoute } from './applicationRoute'
 import {
   CollaborationSessionProvider,
@@ -40,6 +42,7 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
   const [localProblem, setLocalProblem] = useState('')
   const [browserDraftIsNew, setBrowserDraftIsNew] = useState(false)
   const [assistantConnectionsOpen, setAssistantConnectionsOpen] = useState(false)
+  const legalReturnRouteRef = useRef<ApplicationRoute>({ destination: 'home' })
 
   useEffect(() => {
     let active = true
@@ -69,6 +72,11 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
     const path = applicationRoutePath(next)
     window.history[replace ? 'replaceState' : 'pushState']({}, '', path)
     setRoute(next)
+  }
+
+  const openLegal = (documentId: LegalDocumentId) => {
+    if (route.destination !== 'legal') legalReturnRouteRef.current = route
+    navigate({ destination: 'legal', documentId })
   }
 
   const openDraft = (nextLaunch: CollaborationProjectLaunch) => {
@@ -124,6 +132,7 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
         onOpenAiLearn={() => navigate({ destination: 'learn-ai' })}
         onOpenLanguages={() => navigate({ destination: 'languages' })}
         onOpenTutorial={() => navigate({ destination: 'tutorial' })}
+        onOpenLegal={openLegal}
       />
       <NewDraftWizard
         open={newDraftOpen}
@@ -155,8 +164,11 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localLaunch, route])
 
+  // Legal information remains public, including while an invitation is pending.
+  if (route.destination === 'legal') return <LegalPage documentId={route.documentId} onNavigate={openLegal} onBack={() => navigate(session.pendingInvitation ? { destination: 'invitation' } : legalReturnRouteRef.current)} />
+
   if (session.pendingInvitation || route.destination === 'invitation') {
-    return <InvitationEntry onOpenDraft={openDraft} onBack={() => navigate({ destination: 'home' })} />
+    return <InvitationEntry onOpenDraft={openDraft} onBack={() => navigate({ destination: 'home' })} onOpenLegal={openLegal} />
   }
 
   if (route.destination === 'collaborative-editor') {

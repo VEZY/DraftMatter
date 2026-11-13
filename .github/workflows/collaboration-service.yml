@@ -15,7 +15,7 @@ jobs:
     runs-on: ubuntu-24.04
     services:
       postgres:
-        image: postgres:18.4-alpine
+        image: postgres:18.7-alpine
         env:
           POSTGRES_USER: draftmatter_test
           POSTGRES_PASSWORD: local-integration-test-only
@@ -69,7 +69,41 @@ jobs:
         run: docker build --tag draftmatter-collaboration:${{ github.sha }} .
 
       - name: Build production browser and proxy image
-        run: docker build --file deploy/production/Dockerfile.web --build-arg VITE_DRAFTMATTER_COLLABORATION_URL=https://sync.example.invalid --tag draftmatter-web:${{ github.sha }} .
+        run: |
+          docker build --file deploy/production/Dockerfile.web \
+            --build-arg VITE_DRAFTMATTER_COLLABORATION_URL=https://sync.example.invalid \
+            --build-arg VITE_DM_LEGAL_PUBLISHER_NAME='CI build fixture' \
+            --build-arg VITE_DM_LEGAL_CONTACT_EMAIL=operations@draftmatter-pilot.fr \
+            --build-arg VITE_DM_LEGAL_HOSTING_DETAILS='Non-deployed CI fixture, no actual hosted alpha' \
+            --build-arg VITE_DM_LEGAL_DATA_LOCATION='Non-deployed CI fixture' \
+            --build-arg VITE_DM_LEGAL_ADDITIONAL_PROCESSORS='Non-deployed CI fixture' \
+            --tag draftmatter-web:${{ github.sha }} .
 
       - name: Validate production proxy configuration without starting it
         run: docker run --rm --network none --env APP_HOST=app.example.invalid --env COLLABORATION_HOST=sync.example.invalid --env ACME_EMAIL=operations@example.invalid --entrypoint caddy draftmatter-web:${{ github.sha }} validate --config /etc/caddy/Caddyfile --adapter caddyfile
+
+      - name: Test encrypted backup and retention tooling
+        run: node --test deploy/single-host/backup/backup.test.mjs
+
+      - name: Install rehearsal browser
+        run: npx playwright install --with-deps chromium
+
+      - name: Prepare isolated single-host rehearsal
+        run: |
+          node scripts/init-single-host.mjs --directory "$RUNNER_TEMP/draftmatter-rehearsal" \
+            --rehearsal --project draftmatter-rehearsal-ci --release "${{ github.sha }}-rehearsal"
+          node scripts/check-single-host.mjs "$RUNNER_TEMP/draftmatter-rehearsal/runtime.env"
+
+      - name: Rehearse login, data sharing, restart and encrypted infrastructure recovery
+        timeout-minutes: 15
+        run: node scripts/rehearse-single-host.mjs --env-file "$RUNNER_TEMP/draftmatter-rehearsal/runtime.env"
+
+      - name: Stop isolated rehearsal containers
+        if: always()
+        run: |
+          for directory in "$RUNNER_TEMP/draftmatter-rehearsal" "$RUNNER_TEMP/draftmatter-rehearsal-restore"; do
+            if [ -f "$directory/runtime.env" ]; then
+              docker compose --env-file "$directory/runtime.env" \
+                -f deploy/single-host/compose.yaml -f deploy/single-host/rehearsal.yaml stop
+            fi
+          done

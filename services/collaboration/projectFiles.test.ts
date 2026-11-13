@@ -14,9 +14,10 @@ const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('he
 const cleanups: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 
-async function fixture(storage = new MemoryProjectFileStorage()) {
+async function fixture(storage = new MemoryProjectFileStorage(), totalQuotaBytes?: number) {
   const memory = newDb({ autoCreateForeignKeyIndices: true, noAstCoverageCheck: true })
   memory.public.registerOperator({ operator: '~', left: DataType.text, right: DataType.text, returns: DataType.bool, implementation: (value, pattern) => new RegExp(pattern).test(value) })
+  memory.public.registerFunction({ name: 'pg_advisory_xact_lock', args: [DataType.integer, DataType.integer], returns: DataType.integer, implementation: () => 1 })
   memory.public.registerFunction({ name: 'char_length', args: [DataType.text], returns: DataType.integer, implementation: (value) => value.length })
   const adapter = memory.adapters.createPg(), pool = new adapter.Pool()
   cleanups.push(() => pool.end())
@@ -32,7 +33,7 @@ async function fixture(storage = new MemoryProjectFileStorage()) {
     await workspaces.acceptInvitation(user, invitation.token)
   }
   const authorization = { authorizeProject: (...args: Parameters<typeof workspaces.authorizeProjectFileTransfer>) => workspaces.authorizeProjectFileTransfer(...args) }
-  const makeService = (database: Pick<Pool, 'connect' | 'query'> = pool) => new PostgresProjectFileService({ pool: database, storage, authorization, clock: () => now, idFactory: () => String(++nextId) })
+  const makeService = (database: Pick<Pool, 'connect' | 'query'> = pool) => new PostgresProjectFileService({ pool: database, storage, authorization, clock: () => now, idFactory: () => String(++nextId), totalQuotaBytes })
   const files = makeService()
   const upload = async (bytes: Uint8Array, path = 'data/observations.csv', token = 'owner') => {
     const created = await files.begin(token, scope, { path, size: bytes.length, mediaType: 'text/csv' })
@@ -87,6 +88,75 @@ describe('durable shared project files', () => {
     await expect(files.begin('owner', scope, { path: 'data/extra.bin', size: 1, mediaType: 'application/octet-stream' })).rejects.toMatchObject({ code: 'quota-exceeded' })
     await files.begin('owner', otherScope, { path: 'data/independent.bin', size: PROJECT_FILE_QUOTA_BYTES, mediaType: 'application/octet-stream' })
     expect((await files.list('owner', otherScope)).quota.reservedBytes).toBe(PROJECT_FILE_QUOTA_BYTES)
+  })
+
+  it('caps aggregate reservations across projects and uploaders while preserving retries at the exact limit', async () => {
+    const { files, makeService, pool } = await fixture(undefined, 100)
+    const requests = [
+      { token: 'editor', target: scope, path: 'data/global-first.csv' },
+      { token: 'owner', target: otherScope, path: 'data/global-second.csv' },
+    ]
+    const results = await Promise.allSettled(requests.map((request) => makeService().begin(request.token, request.target, { path: request.path, size: 60, mediaType: 'text/csv' })))
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect((results.find((result) => result.status === 'rejected') as PromiseRejectedResult).reason).toMatchObject({ code: 'total-quota-exceeded', status: 413 })
+    const winnerIndex = results.findIndex((result) => result.status === 'fulfilled')
+    const winner = (results[winnerIndex] as PromiseFulfilledResult<Awaited<ReturnType<typeof files.begin>>>).value
+    const retry = requests[winnerIndex]
+    const other = requests[1 - winnerIndex]
+    await files.begin(other.token, other.target, { path: other.path, size: 40, mediaType: 'text/csv' })
+    await expect(makeService().begin(retry.token, retry.target, { path: retry.path, size: 60, mediaType: 'text/csv' })).resolves.toMatchObject({ id: winner.id })
+    await expect(files.begin('owner', scope, { path: 'data/no-global-room.csv', size: 1, mediaType: 'text/csv' })).rejects.toMatchObject({ code: 'total-quota-exceeded' })
+    const aggregate = await pool.query("SELECT SUM(size) AS total FROM draftmatter_project_files WHERE state NOT IN ('cancelled', 'deleted')")
+    expect(Number(aggregate.rows[0].total)).toBe(100)
+  })
+
+  it('counts ready, cancelling and deleting files until storage cleanup succeeds', async () => {
+    const { files, upload, storage } = await fixture(undefined, 6)
+    const version = await upload(new Uint8Array([1, 2, 3]))
+    const pending = await files.begin('owner', otherScope, { path: 'data/other.csv', size: 3, mediaType: 'text/csv' })
+    const extra = () => files.begin('owner', scope, { path: 'data/extra.csv', size: 1, mediaType: 'text/csv' })
+    await expect(extra()).rejects.toMatchObject({ code: 'total-quota-exceeded' })
+    vi.spyOn(storage, 'abort').mockRejectedValueOnce(new Error('Temporary provider outage'))
+    await expect(files.cancel('owner', otherScope, pending.id)).rejects.toMatchObject({ code: 'storage-unavailable' })
+    await expect(extra()).rejects.toMatchObject({ code: 'total-quota-exceeded' })
+    await files.cancel('owner', otherScope, pending.id)
+    await files.begin('owner', otherScope, { path: 'data/replacement.csv', size: 3, mediaType: 'text/csv' })
+    vi.spyOn(storage, 'delete').mockRejectedValueOnce(new Error('Temporary provider outage'))
+    await expect(files.deleteVersion('owner', scope, version.id)).rejects.toMatchObject({ code: 'storage-unavailable' })
+    await expect(extra()).rejects.toMatchObject({ code: 'total-quota-exceeded' })
+    await files.deleteVersion('owner', scope, version.id)
+    await expect(files.begin('owner', scope, { path: 'data/now-available.csv', size: 3, mediaType: 'text/csv' })).resolves.toMatchObject({ size: 3 })
+  })
+
+  it('retains failed initialization reservations globally and does not double count a resumed session', async () => {
+    const { files, storage, makeService } = await fixture(undefined, 100)
+    vi.spyOn(storage, 'begin').mockRejectedValueOnce(new Error('Storage initialization failed'))
+    await expect(files.begin('editor', scope, { path: 'data/failed.csv', size: 100, mediaType: 'text/csv' })).rejects.toMatchObject({ code: 'storage-unavailable' })
+    await expect(files.begin('owner', otherScope, { path: 'data/blocked.csv', size: 1, mediaType: 'text/csv' })).rejects.toMatchObject({ code: 'total-quota-exceeded' })
+    const previous = (await files.list('editor', scope)).uploads[0]
+    await expect(makeService().begin('editor', scope, { path: previous.path, size: previous.size, mediaType: previous.mediaType })).resolves.toMatchObject({ id: previous.id })
+    await files.cancel('editor', scope, previous.id)
+    await expect(files.begin('owner', otherScope, { path: 'data/available.csv', size: 100, mediaType: 'text/csv' })).resolves.toMatchObject({ size: 100 })
+  })
+
+  it('releases the global reservation lock before a slow storage initialization in another project', async () => {
+    const { files, storage } = await fixture(undefined, 100)
+    const original = storage.begin.bind(storage)
+    let release!: () => void
+    const held = new Promise<void>((resolve) => { release = resolve })
+    const starting = vi.spyOn(storage, 'begin').mockImplementationOnce(async (...args) => { await held; return original(...args) })
+    const slow = files.begin('owner', scope, { path: 'data/slow.csv', size: 60, mediaType: 'text/csv' })
+    try {
+      await vi.waitFor(() => expect(starting).toHaveBeenCalledOnce())
+      await expect(files.begin('owner', otherScope, { path: 'data/parallel.csv', size: 40, mediaType: 'text/csv' })).resolves.toMatchObject({ size: 40 })
+    } finally { release(); await slow }
+  })
+
+  it('still enforces the unchanged 1 GB per-project limit below a larger aggregate cap', async () => {
+    const { files } = await fixture(undefined, 25_000_000_000)
+    await files.begin('owner', scope, { path: 'data/exact-project.bin', size: PROJECT_FILE_QUOTA_BYTES, mediaType: 'application/octet-stream' })
+    await expect(files.begin('owner', scope, { path: 'data/project-overflow.csv', size: 1, mediaType: 'text/csv' })).rejects.toMatchObject({ code: 'quota-exceeded' })
+    await expect(files.begin('owner', otherScope, { path: 'data/other-project.bin', size: PROJECT_FILE_QUOTA_BYTES, mediaType: 'application/octet-stream' })).resolves.toMatchObject({ size: PROJECT_FILE_QUOTA_BYTES })
   })
 
   it('commits hash claims before storage writes so retries cannot replace bytes after an outage', async () => {

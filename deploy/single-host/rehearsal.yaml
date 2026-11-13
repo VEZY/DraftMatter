@@ -1,0 +1,9 @@
+# No public ports or public certificate requests during the local rehearsal.
+# The initializer fixes BIND_ADDRESS=127.0.0.1, HTTP_PORT=8088, HTTPS_PORT=8443.
+services:
+  edge:
+    ports: !override
+      - 127.0.0.1:8088:8088
+      - 127.0.0.1:8443:8443
+    environment:
+      DRAFTMATTER_LOCAL_REHEARSAL: 'true'
