@@ -10,6 +10,7 @@ import { parseStructuredManuscript } from './structuredManuscript'
 import { isSafePortableLinkDestination } from './portableLink'
 import { publicationBytesDataUrl, resolvePublicationImage, validatePublicationAssets, type PublicationAssetOptions } from './publicationAssets'
 import { publicationMathml } from './publicationMath'
+import { parseMarkdownImage } from './imageMarkdown'
 
 export interface NativeHtmlExportOptions extends PublicationAssetOptions {
   title?: string
@@ -134,7 +135,8 @@ function renderInline(value: string, options: NativeHtmlExportOptions, footnotes
 
 function startsBlock(lines: string[], index: number) {
   const line = lines[index] ?? ''
-  return /^\s*(?:#{1,6}\s+|```|~~~|>\s?|[-+*]\s+|\d+[.)]\s+|\$\$|!\[[^\]]*\]\([^)]*\))/.test(line)
+  return /^\s*(?:#{1,6}\s+|```|~~~|>\s?|[-+*]\s+|\d+[.)]\s+|\$\$)/.test(line)
+    || Boolean(parseMarkdownImage(line))
     || (line.includes('|') && isPipeTableSeparator(lines[index + 1] ?? ''))
 }
 
@@ -197,24 +199,25 @@ function renderBody(source: string, options: NativeHtmlExportOptions, footnotes:
       index = equation.end + (caption ? 1 : 0)
       continue
     }
-    const figure = line.match(/^\s*!\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)(?:\{([^}]*)\})?\s*$/)
+    const figure = parseMarkdownImage(line)
     if (figure) {
-      const attributes = figure[3]?.trim()
+      const attributes = figure.attributes?.trim()
       const label = attributes?.match(/(?:^|\s)#([a-zA-Z][\w.:-]*)/)?.[1]
       const unnumbered = isExplicitlyUnnumbered(attributes)
       const number = unnumbered ? undefined : ++counters.figure
       const caption = parseTableCaptionLine(lines[index + 1] ?? '')
-      const source = figure[2].startsWith('<') ? figure[2].slice(1, -1) : figure[2]
+      const source = figure.source
       const asset = resolvePublicationImage(source, options)
       const url = safeAssetUrl(asset ? publicationBytesDataUrl(asset.bytes) : source)
       const id = label ? ` id="${escapeHtml(label)}"` : ''
+      const title = figure.title ? ` title="${escapeHtml(figure.title)}"` : ''
       const captionText = caption?.captionMarkdown
       const captionMarkup = number || captionText
         ? `<figcaption>${number ? `<strong>Figure ${number}.</strong>` : ''}${captionText ? `${number ? ' ' : ''}${renderInline(captionText, options, footnotes)}` : ''}</figcaption>`
         : ''
       html.push(url
-        ? `<figure${id}><img src="${url}" alt="${escapeHtml(figure[1])}">${captionMarkup}</figure>`
-        : `<figure${id} class="missing-asset">${captionMarkup || `<figcaption>${escapeHtml(figure[1])}</figcaption>`}<p>Unsafe or missing asset path</p></figure>`)
+        ? `<figure${id}><img src="${url}" alt="${escapeHtml(figure.alt)}"${title}>${captionMarkup}</figure>`
+        : `<figure${id} class="missing-asset">${captionMarkup || `<figcaption>${escapeHtml(figure.alt)}</figcaption>`}<p>Unsafe or missing asset path</p></figure>`)
       index += caption ? 2 : 1
       continue
     }

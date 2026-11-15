@@ -165,6 +165,12 @@ export class HocuspocusCollaborationClient {
       resolveSync = resolve
       rejectSync = reject
     })
+    let roomSynced = false
+    let initialized = false
+    let roomCloseReason: string | undefined
+    const requireRoom = () => {
+      if (!roomSynced) throw new Error(roomCloseReason || 'The collaborative room disconnected before initialization completed. Your local recovery is preserved.')
+    }
     const providerOptions = {
       url,
       name,
@@ -172,16 +178,34 @@ export class HocuspocusCollaborationClient {
       document: collaboration.doc,
       awareness: collaboration.awareness,
       flushDelay: 120,
-      onSynced: ({ state }: { state: boolean }) => { if (state) resolveSync() },
+      onSynced: ({ state }: { state: boolean }) => {
+        roomSynced = state
+        if (state) {
+          roomCloseReason = undefined
+          resolveSync()
+          if (initialized) options.onStatus?.('connected')
+        } else options.onStatus?.('connecting')
+      },
       onAuthenticationFailed: ({ reason }: { reason: string }) => {
         const message = reason || 'Collaboration authentication failed.'
+        roomSynced = false
         options.onStatus?.('error', message)
         rejectSync(new Error(message))
       },
+      // Hocuspocus can close one room while its multiplexed WebSocket stays open.
+      // Keep the document and journal alive, but stop advertising a usable session.
+      onClose: ({ event }: { event: { reason?: string } }) => {
+        roomSynced = false
+        roomCloseReason = event.reason || 'The collaborative room disconnected. Your local changes remain in offline recovery.'
+        options.onStatus?.('disconnected', roomCloseReason)
+        if (!initialized) rejectSync(new Error(roomCloseReason))
+      },
       onStatus: ({ status }: { status: WebSocketStatus }) => {
-        if (status === 'connected') options.onStatus?.('connected')
-        else if (status === 'disconnected') options.onStatus?.('disconnected')
-        else options.onStatus?.('connecting')
+        if (status === 'connected') options.onStatus?.(initialized && roomSynced ? 'connected' : 'connecting')
+        else {
+          roomSynced = false
+          options.onStatus?.(status === 'disconnected' ? 'disconnected' : 'connecting')
+        }
       },
     } as ConstructorParameters<typeof HocuspocusProvider>[0]
     const provider = new HocuspocusProvider(providerOptions)
@@ -199,6 +223,7 @@ export class HocuspocusCollaborationClient {
     try {
       await synced
       window.clearTimeout(timeout)
+      requireRoom()
       await initializeCollaborationSource(collaboration, {
         source: options.bootstrapSource,
         canBootstrap: options.canBootstrap === true,
@@ -206,13 +231,16 @@ export class HocuspocusCollaborationClient {
         resources: options.resources,
         resourceProvider: options.resourceProvider,
       })
+      requireRoom()
       client.resourceHandler()
       await recovery.flush()
+      requireRoom()
       options.onRecoveryWarning?.(recovery.unsafeToClose ? 'Offline recovery could not be saved. Keep this window open until your changes synchronize.' : '')
       const source = projectCollaborationPortableSource(collaboration)
       client.lastPortableSource = source
       options.onPortableSource?.(source)
       options.onCollaborators?.(collaboration.activeCollaborators())
+      initialized = true
       options.onStatus?.('connected')
       return client
     } catch (error) {

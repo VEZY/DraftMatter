@@ -1,0 +1,40 @@
+.selective-sync-panel { background: #f8faf7; border: 1px solid #dce5d9; border-radius: 8px; color: #465644; margin-bottom: 24px; padding: 16px; }
+.selective-sync-panel > header { align-items: flex-start; display: flex; gap: 14px; justify-content: space-between; }
+.selective-sync-panel h3 { font-size: 15px; font-weight: 550; margin: 5px 0 8px; }
+.selective-sync-panel header p, .selective-sync-explanation { color: #788373; font-size: 11px; line-height: 1.6; margin: 8px 0; }
+.selective-sync-panel button { align-items: center; background: #fff; border: 1px solid #d4dece; border-radius: 5px; color: #526b47; display: inline-flex; font-family: inherit; font-size: 10px; gap: 4px; padding: 6px 9px; }
+.selective-sync-panel button:disabled { opacity: .45; }
+.selective-sync-panel button:focus-visible, .selective-sync-panel input:focus-visible { outline: 2px solid #709664; outline-offset: 2px; }
+.selective-sync-actions { display: flex; flex: none; gap: 6px; }
+.selective-sync-filter { align-items: center; display: flex; gap: 12px; margin: 14px 0 10px; }
+.selective-sync-filter label { align-items: center; background: #fff; border: 1px solid #dce4d7; border-radius: 5px; display: flex; flex: 1; gap: 6px; padding: 0 8px; }
+.selective-sync-filter input { background: transparent; border: 0; color: #52634b; font-family: inherit; font-size: 11px; min-width: 0; padding: 8px 0; width: 100%; }
+.selective-sync-filter > span { color: #7d8c73; flex: none; font-size: 10px; }
+.selective-sync-files { background: #fff; border: 1px solid #e1e7dd; border-radius: 6px; list-style: none; margin: 0; max-height: 360px; overflow: auto; padding: 0; }
+.selective-sync-file { border-bottom: 1px solid #edf0ea; padding: 11px 12px; }
+.selective-sync-file:last-child { border-bottom: 0; }
+.selective-sync-selection { align-items: flex-start; display: flex; gap: 9px; }
+.selective-sync-selection input { accent-color: #648454; flex: none; margin: 3px 0 0; }
+.selective-sync-selection > span { display: grid; gap: 4px; min-width: 0; }
+.selective-sync-selection strong { font-size: 11px; font-weight: 500; overflow-wrap: anywhere; }
+.selective-sync-selection small { color: #89947f; font-size: 10px; }
+.selective-sync-file > p { color: #85907c; font-size: 10px; line-height: 1.5; margin: 7px 0 0 22px; }
+.selective-sync-file.conflict, .selective-sync-file.local-missing, .selective-sync-file.remote-missing { background: #fffaf1; }
+.selective-sync-resolve { align-items: center; display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 0 22px; }
+.selective-sync-resolve span { color: #988057; flex-basis: 100%; font-size: 10px; margin-bottom: 3px; }
+.selective-sync-comparison { background: #fff; border: 1px solid #dedfce; border-radius: 5px; margin: 12px 0 0 22px; padding: 10px; }
+.selective-sync-comparison > header { align-items: center; display: flex; font-size: 11px; justify-content: space-between; }
+.selective-sync-comparison > div { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+.selective-sync-comparison article { min-width: 0; }
+.selective-sync-comparison h4 { color: #8b8c70; font-size: 10px; font-weight: 500; }
+.selective-sync-comparison pre { background: #f8f9f5; border: 1px solid #e9ebdf; border-radius: 4px; color: #5b6554; font: 11px/1.6 ui-monospace, monospace; max-height: 240px; overflow: auto; padding: 10px; white-space: pre-wrap; }
+.selective-sync-comparison img { max-height: 240px; max-width: 100%; object-fit: contain; }
+.selective-sync-comparison p { color: #8d7c5b; font-size: 10px; line-height: 1.6; }
+.selective-sync-problem { background: #fff3ed; border-radius: 5px; color: #986444; font-size: 11px; line-height: 1.6; padding: 10px; }
+.selective-sync-panel > footer { color: #939c89; font-size: 10px; line-height: 1.6; margin-top: 12px; }
+.sync-attention-count { align-items: center; background: #aa754d; border-radius: 8px; color: #fff; display: flex; font-size: 8px; height: 13px; justify-content: center; min-width: 13px; padding: 0 3px; position: absolute; right: -3px; top: -3px; }
+.selective-sync-disconnected { background: #f7f9f4; border: 1px solid #e0e6d8; border-radius: 7px; color: #68775b; font-size: 11px; line-height: 1.6; margin-bottom: 20px; padding: 14px; }
+.selective-sync-disconnected strong { color: #526448; font-size: 13px; }
+.selective-sync-disconnected button { background: #fff; border: 1px solid #ced9c5; border-radius: 5px; color: #5b754d; font-size: 11px; padding: 7px 10px; }
+@media (max-width: 640px) { .selective-sync-panel > header { flex-direction: column; } .selective-sync-filter { align-items: stretch; flex-direction: column; } }
+@media (max-width: 640px) { .selective-sync-comparison > div { grid-template-columns: 1fr; } }

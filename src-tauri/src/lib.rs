@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fmt::{Display, Formatter};
 use std::fs::{self, File, OpenOptions};
@@ -22,6 +23,8 @@ mod execution_artifacts;
 mod execution_manifests;
 mod project_transactions;
 mod project_file_download;
+mod project_inventory;
+mod project_sync;
 mod execution_trust;
 mod export_adapter;
 mod git_adapter;
@@ -141,6 +144,7 @@ const CROSSREF_MAILTO: Option<&str> = option_env!("DRAFTMATTER_CROSSREF_MAILTO")
 pub struct ProjectConfig {
     pub schema_version: u32,
     pub name: String,
+    #[serde(default)]
     pub main_document: String,
     #[serde(default = "default_citation_style")]
     pub citation_style: String,
@@ -152,6 +156,8 @@ pub struct ProjectConfig {
     pub execution: ProjectExecutionPreferences,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub collaboration: Option<ProjectCollaborationLink>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub other_manuscript_links: BTreeMap<String, ProjectCollaborationLink>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -805,15 +811,16 @@ fn default_config(root: &Path, documents: &[ProjectEntry]) -> ProjectConfig {
     ProjectConfig {
         schema_version: PROJECT_SCHEMA,
         name,
-        main_document: documents
-            .first()
-            .map(|entry| entry.path.clone())
-            .unwrap_or_else(|| "paper.qmd".to_string()),
+        main_document: match documents {
+            [only] => only.path.clone(),
+            _ => String::new(),
+        },
         citation_style: default_citation_style(),
         citation_locale: default_citation_locale(),
         citation_bibliography: None,
         execution: ProjectExecutionPreferences::default(),
         collaboration: None,
+        other_manuscript_links: BTreeMap::new(),
     }
 }
 
@@ -835,7 +842,7 @@ fn load_config(root: &Path, documents: &[ProjectEntry]) -> Result<ProjectConfig,
     }
     validate_citation_preferences(&config.citation_style, &config.citation_locale)?;
     validate_execution_preferences(&config.execution)?;
-    if let Some(link) = &config.collaboration {
+    for link in config.collaboration.iter().chain(config.other_manuscript_links.values()) {
         validate_collaboration_link(link)?;
     }
     Ok(config)
@@ -853,6 +860,7 @@ pub(crate) fn project_guard(root: &Path) -> Result<project_transactions::Project
     let guard = project_transactions::ProjectLock::acquire(root)?;
     project_transactions::recover(root)?;
     recover_citation_transactions(root)?;
+    project_sync::recover(root)?;
     Ok(guard)
 }
 
@@ -1816,7 +1824,11 @@ fn document_status_impl(
     Ok(DocumentStatus::Deleted)
 }
 
-fn set_main_document_impl(raw_root: &str, relative: &str) -> Result<ProjectSnapshot, HostError> {
+fn set_main_document_impl(
+    raw_root: &str,
+    relative: &str,
+    renamed_from: Option<&str>,
+) -> Result<ProjectSnapshot, HostError> {
     let root = canonical_root(raw_root)?;
     let _project_guard = project_guard(&root)?;
     let path = contained_path(&root, relative)?;
@@ -1825,11 +1837,24 @@ fn set_main_document_impl(raw_root: &str, relative: &str) -> Result<ProjectSnaps
             "The main manuscript was not found: {relative}"
         )));
     }
-    let snapshot = open_project_impl(raw_root)?;
-    let mut config = snapshot.config;
-    config.main_document = relative.to_string();
-    persist_config(&root, &config)?;
-    open_project_impl(raw_root)
+    let mut snapshot = open_project_impl(raw_root)?;
+    let config = &mut snapshot.config;
+    if config.main_document != relative {
+        if let Some(previous) = renamed_from {
+            if previous != config.main_document && !config.main_document.is_empty() {
+                return Err(HostError::Conflict("The active manuscript changed before its rename could be saved.".into()));
+            }
+        } else {
+            // A collaboration room belongs to the selected paper within the folder.
+            if let Some(link) = config.collaboration.take() {
+                config.other_manuscript_links.insert(config.main_document.clone(), link);
+            }
+            config.collaboration = config.other_manuscript_links.remove(relative);
+        }
+        config.main_document = relative.to_string();
+    }
+    persist_config(&root, config)?;
+    Ok(snapshot)
 }
 
 fn set_citation_preferences_impl(
@@ -2804,6 +2829,7 @@ fn initialize_project_root(
         citation_bibliography: None,
         execution: ProjectExecutionPreferences::default(),
         collaboration: None,
+        other_manuscript_links: BTreeMap::new(),
     };
     persist_config(&canonical, &config)?;
     let document = canonical.join(&main_document);
@@ -2941,6 +2967,11 @@ fn read_project_assets(root: String, paths: Vec<String>) -> Result<Vec<ProjectAs
 }
 
 #[tauri::command]
+fn list_project_files(root: String) -> Result<project_inventory::ProjectFileInventory, HostError> {
+    project_inventory::list_project_files_impl(&root)
+}
+
+#[tauri::command]
 fn seed_project_files(root: String, files: Vec<ProjectSeedFile>) -> Result<Vec<String>, HostError> {
     seed_project_files_impl(&root, &files)
 }
@@ -3035,8 +3066,12 @@ fn document_status(
 }
 
 #[tauri::command]
-fn set_main_document(root: String, path: String) -> Result<ProjectSnapshot, HostError> {
-    set_main_document_impl(&root, &path)
+fn set_main_document(
+    root: String,
+    path: String,
+    renamed_from: Option<String>,
+) -> Result<ProjectSnapshot, HostError> {
+    set_main_document_impl(&root, &path, renamed_from.as_deref())
 }
 
 #[tauri::command]
@@ -3522,6 +3557,12 @@ pub fn run() {
             read_document,
             read_bibliography,
             read_project_assets,
+            list_project_files,
+            project_sync::read_project_sync_state,
+            project_sync::save_project_sync_state,
+            project_sync::inspect_project_sync_files,
+            project_sync::read_project_sync_file,
+            project_sync::apply_project_sync_file,
             seed_project_files,
             read_citation_lock,
             read_citation_cache,
@@ -4342,6 +4383,12 @@ mod tests {
         assert!(!persisted.to_ascii_lowercase().contains("token"));
         assert!(!persisted.to_ascii_lowercase().contains("secret"));
 
+        fs::write(root.join("notes.md"), "# Notes").unwrap();
+        let notes = set_main_document_impl(root.to_str().unwrap(), "notes.md", None).unwrap();
+        assert!(notes.config.collaboration.is_none());
+        let paper = set_main_document_impl(root.to_str().unwrap(), "paper.qmd", None).unwrap();
+        assert_eq!(paper.config.collaboration, linked.config.collaboration);
+
         let unlinked = set_collaboration_link_impl(root.to_str().unwrap(), None).unwrap();
         assert_eq!(unlinked.config.collaboration, None);
         assert!(!fs::read_to_string(root.join(".draftmatter/project.json"))
@@ -4506,6 +4553,40 @@ mod tests {
             read_bibliography_impl(root.to_str().unwrap(), "../references.bib"),
             Err(HostError::InvalidPath(_))
         ));
+    }
+
+    #[test]
+    fn ambiguous_manuscripts_require_a_choice_and_reopen_the_selected_path() {
+        let folder = tempdir().unwrap();
+        let root = folder.path();
+        let raw = root.to_str().unwrap();
+        let documents = [
+            ("MAD_conceptual_framework.md", "# Framework"),
+            ("MAD_paper.md", "# Paper"),
+            ("notes.qmd", "# Notes"),
+        ];
+        for (path, source) in documents {
+            fs::write(root.join(path), source).unwrap();
+        }
+        fs::write(root.join("MAD_paper.pdf"), "PDF").unwrap();
+        let project = open_project_impl(raw).unwrap();
+        assert_eq!(project.documents.len(), 3);
+        assert!(project.config.main_document.is_empty());
+        let config = root.join(".draftmatter/project.json");
+        assert!(!config.exists());
+        fs::write(config, r#"{"schemaVersion":1,"name":"MAD"}"#).unwrap();
+        assert!(open_project_impl(raw)
+            .unwrap()
+            .config
+            .main_document
+            .is_empty());
+        for (path, _) in documents {
+            set_main_document_impl(raw, path, None).unwrap();
+            assert_eq!(open_project_impl(raw).unwrap().config.main_document, path);
+        }
+        for (path, source) in documents {
+            assert_eq!(fs::read_to_string(root.join(path)).unwrap(), source);
+        }
     }
 
     #[test]
@@ -4704,7 +4785,7 @@ mod tests {
             document_status_impl(root.to_str().unwrap(), "paper.qmd", &before.hash).unwrap(),
             DocumentStatus::Renamed { path, .. } if path == "renamed.qmd"
         ));
-        let updated = set_main_document_impl(root.to_str().unwrap(), "renamed.qmd").unwrap();
+        let updated = set_main_document_impl(root.to_str().unwrap(), "renamed.qmd", Some("paper.qmd")).unwrap();
         assert_eq!(updated.config.main_document, "renamed.qmd");
 
         fs::remove_file(root.join("renamed.qmd")).unwrap();

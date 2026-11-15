@@ -153,8 +153,13 @@ describe('shared Jupyter execution workspace', () => {
     await settleUntil(() => Boolean(container.querySelector('.code-workspace-toolbar')))
   }
 
-  it('keeps the chosen code workspace open while automatic project setup starts and finishes', async () => {
-    await settleUntil(() => container.querySelector('.rail-terminal-button')?.getAttribute('data-label') === 'Terminal · Ready')
+  async function prepareEnvironments() {
+    await openCodeWorkspace()
+    const prepare = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Prepare environments')!
+    await act(async () => prepare.click())
+  }
+
+  it('keeps the chosen code workspace open during requested project setup', async () => {
     await act(async () => appRoot.unmount())
 
     const discoverKernels = vi.mocked(desktopHost.discoverJupyterKernels)
@@ -178,8 +183,8 @@ describe('shared Jupyter execution workspace', () => {
     })
     appRoot = createRoot(container)
     await act(async () => appRoot.render(<App desktopProjectLaunch={project} />))
+    await prepareEnvironments()
     await settleUntil(() => discoverKernels.mock.calls.length > 0)
-    await openCodeWorkspace()
     const workspace = container.querySelector('.code-workspace-toolbar')!
     await act(async () => discovery.finish())
     await settleUntil(() => listPackages.mock.calls.length > 0)
@@ -193,13 +198,12 @@ describe('shared Jupyter execution workspace', () => {
     expect(workspace.textContent).toContain('Environments')
   })
 
-  it('keeps Code and computation visible as a primary workspace with concise state', () => {
+  it('keeps optional computation accessible through a compact tool with its state in the tooltip', () => {
     const codeWorkspace = container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!
     expect(codeWorkspace).not.toBeNull()
-    expect(codeWorkspace.querySelector('.code-workspace-label-full')?.textContent).toBe('Code & computation')
-    expect(codeWorkspace.querySelector('.code-workspace-label-short')?.textContent).toBe('Code')
-    expect(codeWorkspace.querySelector('.code-workspace-state')?.textContent).toBe('Needs run')
-    expect(codeWorkspace.querySelector('.count-badge')?.textContent).toBe('4')
+    expect(codeWorkspace.classList.contains('compact-tool')).toBe(true)
+    expect(codeWorkspace.getAttribute('data-tooltip')).toBe('Code & computation · Needs run')
+    expect(container.querySelector('[aria-label="Open command menu"]')?.textContent).toContain('Find a tool or action')
   })
 
   it('runs setup before the first ordinary cell in the exact same selected kernel', async () => {
@@ -285,7 +289,7 @@ describe('shared Jupyter execution workspace', () => {
     expect(savedSources.join('\n')).toMatch(/```julia \{#cell-julia-[^}]+ \.execute output="table" reference="tbl-result"\}/)
   })
 
-  it('checks detected project languages automatically and restores remembered trust', async () => {
+  it('waits for explicit setup even when the project has remembered trust', async () => {
     await act(async () => appRoot.unmount())
     localStorage.setItem('draftmatter.trusted-project-roots.v1', JSON.stringify([rootPath]))
     vi.mocked(desktopHost.executionTrustStatus).mockReset().mockResolvedValue({ trusted: false, scope: 'session', warning: 'not trusted in the new host session' })
@@ -294,6 +298,13 @@ describe('shared Jupyter execution workspace', () => {
     appRoot = createRoot(container)
     await act(async () => appRoot.render(<App />))
     await settle(420)
+    expect(desktopHost.probeRuntime).not.toHaveBeenCalled()
+    expect(desktopHost.listJuliaPackages).not.toHaveBeenCalled()
+    expect(desktopHost.executeKernel).not.toHaveBeenCalled()
+    expect(desktopHost.trustProjectForSession).not.toHaveBeenCalled()
+    await prepareEnvironments()
+    await settleUntil(() => vi.mocked(desktopHost.listJuliaPackages).mock.calls.length > 0
+      && container.querySelector('.rail-terminal-button')?.getAttribute('data-label') === 'Terminal · Ready')
 
     expect(desktopHost.trustProjectForSession).toHaveBeenCalledWith(rootPath, 'run-project-code-with-user-permissions')
     expect(desktopHost.listJuliaPackages).toHaveBeenCalledWith(rootPath, expect.any(String))
@@ -338,7 +349,8 @@ describe('shared Jupyter execution workspace', () => {
     })
     appRoot = createRoot(container)
     await act(async () => appRoot.render(<App />))
-    await settle(520)
+    await prepareEnvironments()
+    await settleUntil(() => vi.mocked(desktopHost.setExecutionPreferences).mock.calls.some(([, preferences]) => preferences.julia?.kernel === 'julia-draftmatter-fixture'))
 
     expect(desktopHost.setupKernelIntegration).toHaveBeenCalledWith(
       rootPath,

@@ -251,6 +251,38 @@ Short conclusion placeholder.
       .toBe('#fig-canopy .wide data-credit="Field team"')
   })
 
+  it('round-trips image alt text, filenames and titles with Markdown punctuation', () => {
+    const parsed = parseStructuredManuscript('![Old](figures/old.png){#fig-original .wide}\n: Original caption.\n')
+    const image = parsed.document.firstChild!.firstChild!
+    const attributes = {
+      ...image.attrs,
+      src: 'figures/Canopy (A) [raw] <version 2>.png',
+      alt: 'Growth [A] \\ set *literal* <canopy> &copy;',
+      title: 'A "quoted" title \\ original &amp;',
+    }
+    const changed = EditorState.create({ doc: parsed.document }).tr.setNodeMarkup(1, undefined, attributes).doc
+    const portable = serializeStructuredManuscript(changed, parsed.metadata)
+    const reopened = parseStructuredManuscript(portable)
+    expect(portable).toContain('(<figures/Canopy (A) [raw] \\<version 2\\>.png>')
+    expect(portable).toContain('Growth \\[A\\] \\\\ set \\*literal\\* \\<canopy\\> \\&copy;')
+    expect(reopened.document.firstChild?.type).toBe(manuscriptSchema.nodes.figure)
+    expect(reopened.document.firstChild?.firstChild?.attrs).toMatchObject({
+      src: attributes.src, alt: attributes.alt, title: attributes.title,
+      label: 'fig-original', sourceAttributes: '#fig-original .wide',
+    })
+    expect(reopened.document.firstChild?.lastChild?.textContent).toBe('Original caption.')
+  })
+
+  it('recognizes escaped and angle-bracket image destinations without requiring an empty preceding line', () => {
+    const parsed = parseStructuredManuscript('Context.\n![Growth \\[A\\]](<figures/growth (A).png> "A \\"quoted\\" title"){#fig-growth}\n: Growth response.\n')
+    expect(parsed.document.childCount).toBe(2)
+    expect(parsed.document.lastChild?.firstChild?.attrs).toMatchObject({
+      alt: 'Growth [A]', src: 'figures/growth (A).png', title: 'A "quoted" title', label: 'fig-growth',
+    })
+    const bare = parseStructuredManuscript('![Growth](figures/growth\\(A\\).png \'A "quoted" title\')\n')
+    expect(bare.document.firstChild?.firstChild?.attrs).toMatchObject({ src: 'figures/growth(A).png', title: 'A "quoted" title' })
+  })
+
   it('round-trips table captions, labels, attributes, and column alignment after an edit', () => {
     const source = '# Tables\n\nSee @tbl-yield for the summary.\n\n| Treatment | Mean | Range |\n| :--- | ---: | :---: |\n| Dry | 18 | 16–20 |\n: Yield **summary**. {#tbl-yield .striped data-owner="Field team"}\n'
     const parsed = parseStructuredManuscript(source)

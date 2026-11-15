@@ -19,6 +19,8 @@ test('opens a focused single-field comment from the manuscript context menu', as
   await expect(composer.locator('input, select, blockquote, .comment-quote')).toHaveCount(0)
   await expect(composer.locator('textarea')).toHaveCount(1)
   await expect(composer.locator('textarea')).toBeFocused()
+  await expect(composer.getByText('New comment', { exact: true })).toHaveCount(0)
+  await expect(composer.getByText('Comment', { exact: true })).toHaveCount(0)
   await composer.getByLabel('Comment', { exact: true }).fill('Explain which result supports this sentence.')
   await composer.getByRole('button', { name: 'Add comment', exact: true }).click()
   const comment = page.locator('.portable-comment-bubble').filter({ hasText: 'Explain which result supports this sentence.' })
@@ -90,9 +92,11 @@ test('comments on the exact mouse-selected occurrence and preserves its anchor a
   expect(portable.slice(0, portable.indexOf('[]{'))).toBe(source.slice(0, selectedOffset))
 
   await comment.getByRole('button', { name: 'Reply', exact: true }).click()
+  await expect(comment.getByRole('button', { name: 'Reply', exact: true })).toHaveCount(0)
   await comment.getByRole('textbox', { name: /^Reply to / }).fill('The second measurement is independently confirmed.')
   await comment.getByRole('button', { name: 'Send reply', exact: true }).click()
   await expect(comment).toContainText('The second measurement is independently confirmed.')
+  await expect(comment.getByRole('button', { name: 'Reply', exact: true })).toBeVisible()
   await comment.getByRole('button', { name: /^Collapse comment by / }).click()
   await expect(comment.getByRole('button', { name: /^Expand comment by / })).toHaveAttribute('aria-expanded', 'false')
   await expect(comment.getByText('The second measurement is independently confirmed.', { exact: true })).toBeHidden()
@@ -209,3 +213,35 @@ test('comments across bold and italic prose without rewriting its text or Markdo
   await expect(paragraph.locator('em')).toHaveText('water stress')
   expect(await savedSource()).toBe(portable)
 })
+
+for (const shortcut of ['Control+Enter', 'Meta+Enter']) {
+  test(`submits a nonempty comment with ${shortcut} while plain Enter inserts a newline`, async ({ page }) => {
+    const source = '# Shortcut comments\n\nAssess this measurement.\n'
+    await page.addInitScript((portableSource) => {
+      localStorage.setItem('draftmatter.structured-source.v1', portableSource)
+      localStorage.setItem('draftmatter.structured-mode.v1', 'true')
+    }, source)
+    await page.goto('/draft')
+    const paragraph = page.getByRole('article', { name: 'Editable manuscript' }).getByText('Assess this measurement.', { exact: true })
+    await selectRenderedTextWithMouse(page, paragraph, 'this measurement')
+    await page.getByRole('button', { name: 'Add comment to selection', exact: true }).click()
+    const composer = page.getByRole('group', { name: 'New comment' })
+    const textarea = composer.getByRole('textbox', { name: 'Comment', exact: true })
+    await expect(textarea).toHaveAttribute('placeholder', 'Write a comment…')
+    await expect(composer.getByText('New comment', { exact: true })).toHaveCount(0)
+    await expect(composer.getByText('Comment', { exact: true })).toHaveCount(0)
+
+    await textarea.press(shortcut)
+    await expect(composer).toBeVisible()
+    await expect(page.locator('.portable-comment-bubble')).toHaveCount(0)
+    await textarea.fill('First line')
+    await textarea.press('Enter')
+    await expect(textarea).toHaveValue('First line\n')
+    await expect(composer).toBeVisible()
+    await page.keyboard.type('Second line')
+    await textarea.press(shortcut)
+    await expect(composer).toHaveCount(0)
+    await expect(page.locator('.portable-comment-body')).toHaveText('First line\nSecond line')
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toContain('First line\nSecond line')
+  })
+}

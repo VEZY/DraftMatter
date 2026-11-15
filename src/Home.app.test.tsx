@@ -37,6 +37,7 @@ const props = {
   onOpenDraft: vi.fn(),
   onNewDraft: vi.fn(),
   onNewLocalDraft: vi.fn(),
+  onOpenLocalPaper: vi.fn(),
   onOpenLocalProject: vi.fn(),
   onOpenLocalRecent: vi.fn(),
   onForgetLocalRecent: vi.fn(),

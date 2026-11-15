@@ -7,6 +7,7 @@ import { parsePublicationMetadata, updatePublicationAuthorDetails, type Publicat
 import type { CitationRecord } from './types'
 import { createStoredZip } from './zipArchive'
 import { validatePublicationAssets, type PublicationAsset } from './publicationAssets'
+import { unescapeImageText } from './imageMarkdown'
 
 export type SubmissionReviewModel = 'identified' | 'double-anonymous'
 
@@ -67,7 +68,7 @@ export interface SubmissionPackageResult {
   files: string[]
 }
 
-const FIGURE_PATTERN = /(!\[([^\]\r\n]*)\]\(\s*)(<[^>\r\n]+>|data:image\/[^\s)]+|[^)\s]+)(\s+(?:"[^"\r\n]*"|'[^'\r\n]*'))?(\s*\)(?:\{[^}\r\n]*\})?)/g
+const FIGURE_PATTERN = /(!\[((?:\\.|[^\]\\\r\n])*)\]\(\s*)(<(?:(?:\\.)|[^>\\\r\n])*>|(?:\\.|[^\\)\s])+)(\s+(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'))?(\s*\)(?:\{[^}\r\n]*\})?)/g
 
 function frontmatter(source: string) {
   if (!source.startsWith('---\n') && !source.startsWith('---\r\n')) return ''
@@ -117,7 +118,7 @@ function safeFilename(value: string, fallback: string) {
 }
 
 function sourceTarget(raw: string) {
-  return raw.startsWith('<') && raw.endsWith('>') ? raw.slice(1, -1) : raw
+  return unescapeImageText(raw.startsWith('<') && raw.endsWith('>') ? raw.slice(1, -1) : raw)
 }
 
 function embeddedExtension(source: string) {
@@ -138,17 +139,17 @@ export function submissionFigures(source: string): SubmissionFigure[] {
     const target = sourceTarget(match[3])
     if (/^data:image\//i.test(target)) return {
       index: index + 1,
-      alt: match[2].trim(),
+      alt: unescapeImageText(match[2]).trim(),
       source: target,
       packagedPath: `figures/Figure${index + 1}.${embeddedExtension(target)}`,
       kind: 'embedded' as const,
     }
-    if (/^https?:\/\//i.test(target)) return { index: index + 1, alt: match[2].trim(), source: target, kind: 'remote' as const }
+    if (/^https?:\/\//i.test(target)) return { index: index + 1, alt: unescapeImageText(match[2]).trim(), source: target, kind: 'remote' as const }
     const normalized = normalizeProjectRelativePath(target)
-    if (!normalized) return { index: index + 1, alt: match[2].trim(), source: target, kind: 'unsafe' as const }
+    if (!normalized) return { index: index + 1, alt: unescapeImageText(match[2]).trim(), source: target, kind: 'unsafe' as const }
     return {
       index: index + 1,
-      alt: match[2].trim(),
+      alt: unescapeImageText(match[2]).trim(),
       source: normalized,
       packagedPath: projectFigureName(normalized, index + 1),
       kind: 'project' as const,

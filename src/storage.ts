@@ -21,6 +21,7 @@ export interface RecoverySnapshot {
   sourceHash: string
   source: string
   draft: DraftState
+  browserAssetScope?: string
 }
 
 export interface KeyValueStorage {
@@ -47,6 +48,7 @@ function isRecoverySnapshot(value: unknown): value is RecoverySnapshot {
     && typeof candidate.draft === 'object'
     && candidate.draft !== null
     && typeof candidate.draft.title === 'string'
+    && (candidate.browserAssetScope === undefined || typeof candidate.browserAssetScope === 'string' && candidate.browserAssetScope.length > 0 && candidate.browserAssetScope.length <= 2048 && !/[\u0000-\u001f]/.test(candidate.browserAssetScope))
 }
 
 export function readRecoverySnapshots(storage: KeyValueStorage): RecoverySnapshot[] {
@@ -69,10 +71,11 @@ export function saveRecoverySnapshot(
   filename: string,
   source: string,
   savedAt = new Date().toISOString(),
+  browserAssetScope?: string,
 ) {
   const hash = sourceHash(source)
   const existing = readRecoverySnapshots(storage)
-  if (existing[0]?.sourceHash === hash && existing[0]?.filename === filename) return existing
+  if (existing[0]?.sourceHash === hash && existing[0]?.filename === filename && existing[0]?.browserAssetScope === browserAssetScope) return existing
 
   const snapshot: RecoverySnapshot = {
     id: `${Date.parse(savedAt).toString(36)}-${hash.slice(-6)}`,
@@ -82,6 +85,7 @@ export function saveRecoverySnapshot(
     sourceHash: hash,
     source,
     draft: structuredClone(draft),
+    ...(browserAssetScope ? { browserAssetScope } : {}),
   }
   const next = [snapshot, ...existing].slice(0, MAX_RECOVERIES)
   const encode = (snapshots: RecoverySnapshot[]) => JSON.stringify({

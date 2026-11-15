@@ -58,6 +58,7 @@ describe('focused authoring workspace', () => {
 
   it('enters a manuscript-only focus mode and leaves it with Escape', async () => {
     await act(async () => root.render(<App />))
+    await act(async () => container.querySelector<HTMLButtonElement>('.project-switcher')!.click())
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Enter focus mode"]')!.click())
 
     expect(container.querySelector('.app-shell')?.classList.contains('focus-mode')).toBe(true)

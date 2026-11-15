@@ -62,6 +62,24 @@ The UI and protocol keep four states distinct:
 Setup does not contact a model, execute manuscript code, grant execution trust,
 enable Zotero/Crossref access, or approve future client tool calls.
 
+## Codex reconnection check (2026-11-13)
+
+Reproduced with a copy of an existing Codex configuration: Codex had inserted
+another server and its environment table before DraftMatter’s closing comment.
+Update exited with a conflict (73); Repair erased the inserted tables. The
+installer now parses TOML and edits the managed launch values by source range.
+With that same configuration, the repaired file differed only in the Node
+executable: the development launcher now uses its absolute path. Comments,
+other servers, and skill files were preserved.
+
+The installed desktop Codex app-server (0.167.0-alpha.4.1) was tested with
+temporary client state, the actual registered stdio launch settings and the
+original enabled MAD folder. A chat opened before registration listed no
+DraftMatter tools. A new chat in the same running app-server listed all six;
+`draftmatter_project` with `action: inspect` returned the SHA-256 of the MAD
+manuscript. Calling `config/mcpServer/reload` also made that inspection work in
+the first chat. The test used no model turn or manuscript code execution.
+
 ## Acceptance evidence
 
 | Requirement | Evidence |

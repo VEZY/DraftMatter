@@ -1,0 +1,62 @@
+/* Keep the paper and the action finder ahead of project machinery. */
+.app-shell .topbar { grid-template-columns: minmax(240px, 1fr) minmax(210px, 320px) minmax(240px, 1fr); column-gap: 24px; }
+.app-shell .topbar .brand-block { gap: 10px; }
+.app-shell .topbar .project-switcher { max-width: 245px; }
+.app-shell .topbar .project-dot.saving { background: #b5954a; animation: none; }
+.app-shell .topbar .project-dot.error, .app-shell .topbar .project-dot.conflict, .app-shell .topbar .project-dot.checkpoint-needed { background: #b57b4b; }
+.app-shell .topbar .writing-command { align-items: center; background: #f6f7f5; border: 1px solid #d7ddd7; border-radius: 7px; box-shadow: none; color: #69756b; cursor: pointer; display: flex; font-family: inherit; gap: 10px; height: 37px; justify-content: flex-start; min-width: 0; padding: 0 12px; width: 100%; }
+.app-shell .topbar .writing-command:hover, .app-shell .topbar .writing-command:focus-visible { background: #edf2ed; border-color: #8da18f; color: #344f3c; }
+.writing-command .writing-command-label { flex: 1; font-size: 11px; text-align: left; white-space: nowrap; }
+.app-shell .topbar .writing-command .shortcut { align-items: center; background: #fff; border: 1px solid #dfe4de; border-radius: 4px; color: #8b948c; display: inline-flex; font-size: 9px; gap: 2px; padding: 3px 4px; }
+.app-shell .topbar .topbar-actions { gap: 12px; justify-content: flex-end; min-width: 0; }
+.app-shell .topbar .topbar-primary-workspaces { gap: 5px; }
+.app-shell .topbar .compact-tool { align-items: center; background: transparent; border: 1px solid transparent; border-radius: 6px; box-shadow: none; color: #758176; display: inline-flex; flex: none; height: 33px; justify-content: center; min-width: 33px; padding: 0; position: relative; width: 33px; }
+.app-shell .topbar .compact-tool:hover, .app-shell .topbar .compact-tool:focus-visible, .app-shell .topbar .compact-tool.active { background: #edf2ec; border-color: #d6e0d5; color: #425d48; }
+.app-shell .topbar .collaboration-toggle i { bottom: 4px; height: 4px; position: absolute; right: 4px; width: 4px; }
+.app-shell .topbar .review-toggle { background: #f8f9f6; border-color: #dce2d9; box-shadow: none; color: #56694f; font-size: 11px; gap: 6px; height: 33px; padding: 0 10px; }
+.app-shell .topbar .review-toggle .count-badge { font-size: 9px; }
+.app-shell .topbar .topbar-completion-actions { gap: 9px; }
+.app-shell .topbar [data-tooltip]::after { background: #35423a; border-radius: 5px; bottom: auto; box-shadow: 0 4px 14px #25352b1c; color: #fff; content: attr(data-tooltip); display: block; font-family: inherit; font-size: 10px; font-weight: 400; left: 50%; letter-spacing: 0; line-height: 1.4; opacity: 0; padding: 7px 9px; pointer-events: none; position: absolute; text-align: center; text-transform: none; top: calc(100% + 10px); transform: translateX(-50%); transition: opacity 100ms ease; white-space: nowrap; width: max-content; z-index: 150; }
+.app-shell .topbar [data-tooltip]:hover::after, .app-shell .topbar [data-tooltip]:focus-visible::after { opacity: 1; transition-delay: 200ms; }
+.app-shell .topbar .export-trigger::after { left: auto; right: 0; transform: none; }
+.figure-file-picker { align-items: center; background: #f7f9f6; border: 1px dashed #bdccba; border-radius: 8px; display: flex !important; gap: 8px; padding: 20px; text-align: center; }
+.figure-file-picker > svg { color: #7b9475; }
+.figure-file-picker > strong { color: #4b6544; font-size: 13px; max-width: 100%; overflow-wrap: anywhere; }
+.figure-file-picker > span, .figure-file-picker > small { color: #879381; font-size: 10px; }
+.figure-file-picker input[type="file"] { background: #fff; font-size: 11px; margin: 3px 0; max-width: 100%; padding: 7px; }
+.figure-advanced-options { border-top: 1px solid #e4e8df; color: #788573; font-size: 11px; padding-top: 12px; }
+.figure-advanced-options summary { cursor: pointer; margin-bottom: 10px; }
+.figure-advanced-options label + label { margin-top: 12px; }
+.toolbar-computation-options { border-top: 1px solid #e4e8df; margin-top: 4px; padding-top: 4px; }
+.toolbar-computation-options > summary { align-items: center; color: #83907e; cursor: pointer; display: flex; font-size: 10px; gap: 8px; list-style: none; padding: 10px; }
+.toolbar-computation-options > summary::-webkit-details-marker { display: none; }
+.toolbar-computation-options > summary > svg:last-child { margin-left: auto; }
+.toolbar-computation-options[open] > summary > svg:last-child { transform: rotate(180deg); }
+.project-files-workspace-backdrop { z-index: 130; }
+.project-files-workspace-dialog { max-height: calc(100dvh - 32px); outline: none; }
+.structured-block-drop-indicator[data-placement="figure"]::before { border-radius: 2px; height: 8px; left: -2px; top: -3px; width: 4px; }
+.equation-insertion-preview { background: #f7f9f6; border: 1px solid #e1e6dc; border-radius: 6px; color: #52664b; min-height: 65px; overflow-x: auto; padding: 14px; }
+.equation-insertion-preview > small { color: #8b9686; display: block; font-size: 10px; margin-bottom: 7px; }
+@media (max-width: 1200px) {
+  .app-shell .topbar { grid-template-columns: minmax(190px, 1fr) minmax(180px, 260px) auto; column-gap: 16px; }
+  .app-shell .topbar .wordmark > span:last-child { display: none; }
+  .app-shell .topbar .project-switcher { max-width: 215px; }
+}
+@media (max-width: 800px) {
+  .app-shell .topbar { grid-template-columns: minmax(140px, 1fr) 38px auto; column-gap: 8px; }
+  .app-shell .topbar .writing-command { display: flex; justify-content: center; padding: 0; }
+  .app-shell .topbar .writing-command-label, .app-shell .topbar .writing-command .shortcut { display: none; }
+  .app-shell .topbar .project-switcher { display: flex; max-width: 175px; }
+  .app-shell .topbar .topbar-actions { gap: 6px; }
+  .app-shell .topbar .review-toggle { font-size: 10px; }
+}
+@media (max-width: 560px) {
+  .app-shell .topbar { grid-template-columns: minmax(90px, 1fr) 34px auto; gap: 6px; padding-inline: 7px; }
+  .app-shell .topbar .wordmark, .app-shell .topbar .topbar-code-workspace, .app-shell .topbar .avatar { display: none; }
+  .app-shell .topbar .brand-block { gap: 5px; }
+  .app-shell .topbar .project-switcher { max-width: 130px; padding-inline: 5px; }
+  .app-shell .topbar .compact-tool { height: 30px; min-width: 30px; width: 30px; }
+  .app-shell .topbar .topbar-primary-workspaces { gap: 2px; }
+  .app-shell .topbar .topbar-completion-actions { gap: 3px; }
+  .app-shell .topbar .review-toggle { gap: 3px; padding-inline: 5px; }
+}

@@ -142,7 +142,7 @@ describe('bounded and resumable project file transfers', () => {
   it('validates quota and paths before creating sessions, and releases explicit cancellations', async () => {
     const backend = server()
     await expect(backend.api().transfer(selectedFile(PROJECT_FILE_QUOTA_BYTES + 1).source, 'data/too-big.bin')).rejects.toThrow(/1 GB/)
-    await expect(backend.api().transfer(selectedFile(1).source, '../private.bin')).rejects.toThrow(/inside data/)
+    await expect(backend.api().transfer(selectedFile(1).source, '../private.bin')).rejects.toThrow(/relative project path/)
     expect(backend.requests).toHaveLength(0)
     const upload = await backend.api().begin({ path: 'data/cancel.bin', size: 15, mediaType: 'application/octet-stream' })
     await backend.api().cancel(upload.id)
@@ -151,4 +151,27 @@ describe('bounded and resumable project file transfers', () => {
     await backend.api().deleteVersion(file.id)
     expect((await backend.api().catalogue()).files).toEqual([])
   })
+  it('forwards an explicit absent version and refuses to resume against a different server base', async () => {
+    const backend = server()
+    const complete = await backend.api().transfer(selectedFile(2).source, 'figures/result.svg', { expectedVersionId: null })
+    expect(complete.path).toBe('figures/result.svg')
+    expect([...backend.uploads.values()][0].expectedVersionId).toBeNull()
+    const upload = await backend.api().begin({ path: 'paper.qmd', size: 2, mediaType: 'text/markdown', expectedVersionId: 'file-before' })
+    const chosen = selectedFile(2)
+    await expect(backend.api().transfer(chosen.source, upload.path, { uploadId: upload.id, expectedVersionId: 'file-after' })).rejects.toThrow(/different online version/)
+    expect(chosen.reads).toEqual([])
+  })
+
+  it('validates current heads while supporting older non-sync catalogues', async () => {
+    const backend = server()
+    const snapshot = { files: [], uploads: [], quota: { limitBytes: PROJECT_FILE_QUOTA_BYTES, usedBytes: 0, reservedBytes: 0 } }
+    const fetch = vi.spyOn(backend.service, 'authenticatedFetch')
+    fetch.mockResolvedValueOnce(Response.json({ ...snapshot, heads: [{ path: 'figures/result.svg', versionId: 'deleted-previous', deleted: true }] }))
+    expect((await backend.api().catalogue()).heads).toEqual([{ path: 'figures/result.svg', versionId: 'deleted-previous', deleted: true }])
+    fetch.mockResolvedValueOnce(Response.json({ ...snapshot, heads: [{ path: 'paper.qmd', versionId: 'file-not-listed', deleted: false }] }))
+    await expect(backend.api().catalogue()).rejects.toThrow(/unavailable in the file catalogue/)
+    fetch.mockResolvedValueOnce(Response.json(snapshot))
+    expect((await backend.api().catalogue()).heads).toBeUndefined()
+  })
+
 })

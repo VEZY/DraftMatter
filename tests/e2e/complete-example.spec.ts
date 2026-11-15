@@ -11,31 +11,31 @@ test.describe('built-in complete example', () => {
     await expect(tour).toContainText('Find any tool in seconds')
     await expect(tour).toContainText('Press ⌘P (Ctrl+P on Windows and Linux)')
     await expect(page.locator('.command-button')).toHaveClass(/example-tour-target/)
-    await expect(tour.locator('.example-tour-progress > span')).toHaveCount(6)
+    await expect(tour.locator('.example-tour-progress > span')).toHaveCount(8)
   })
 
-  test('keeps Code, Review, and Export prioritized across header breakpoints', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 })
+  test('prioritizes action search and keeps compact tools accessible across header breakpoints', async ({ page }) => {
     await page.goto('/draft')
-
-    const code = page.locator('.topbar-code-workspace')
-    await expect(code).toBeVisible()
-    await expect(code.locator('.code-workspace-label-full')).toBeVisible()
-    await expect(page.locator('.topbar').getByRole('button', { name: /^Review,/ })).toBeVisible()
-    await expect(page.locator('.topbar').getByRole('button', { name: 'Export' })).toBeVisible()
-    const wideHeaderGap = await page.locator('.topbar').evaluate((header) => {
-      const saveState = header.querySelector('.document-state')!.getBoundingClientRect()
-      const codeWorkspace = header.querySelector('.topbar-code-workspace')!.getBoundingClientRect()
-      return codeWorkspace.left - saveState.right
-    })
-    expect(wideHeaderGap).toBeGreaterThanOrEqual(18)
-
-    await page.setViewportSize({ width: 1024, height: 768 })
-    await expect(code).toBeVisible()
-    await expect(code.locator('.code-workspace-label-short')).toBeVisible()
-    await expect(code.locator('.code-workspace-label-full')).toBeHidden()
-    await expect(page.locator('.topbar').getByRole('button', { name: /^Review,/ })).toBeVisible()
-    await expect(page.locator('.topbar').getByRole('button', { name: 'Export' })).toBeVisible()
+    for (const width of [1440, 1024, 880]) {
+      await page.setViewportSize({ width, height: 900 })
+      const code = page.locator('.topbar-code-workspace')
+      const finder = page.getByRole('button', { name: 'Open command menu', exact: true })
+      await expect(code).toBeVisible()
+      await expect(code).toHaveAttribute('data-tooltip', /^Code & computation/)
+      await expect(finder).toContainText('Find a tool or action')
+      await expect(page.locator('.topbar').getByRole('button', { name: /^Review,/ })).toBeVisible()
+      await expect(page.getByRole('button', { name: 'Export', exact: true })).toBeVisible()
+      const layout = await page.locator('.topbar').evaluate((header) => {
+        const brand = header.querySelector('.brand-block')!.getBoundingClientRect()
+        const search = header.querySelector('.writing-command')!.getBoundingClientRect()
+        const actions = header.querySelector('.topbar-actions')!.getBoundingClientRect()
+        const code = header.querySelector('.topbar-code-workspace')!.getBoundingClientRect()
+        return { searchWidth: search.width, codeWidth: code.width, before: search.left - brand.right, after: actions.left - search.right }
+      })
+      expect(layout.searchWidth).toBeGreaterThan(layout.codeWidth * 3)
+      expect(layout.before).toBeGreaterThanOrEqual(8)
+      expect(layout.after).toBeGreaterThanOrEqual(8)
+    }
   })
 
   test('keeps long-outline click and keyboard navigation inside their panels', async ({ page }) => {

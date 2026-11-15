@@ -1,7 +1,7 @@
-# Private project data files
+# Private project files
 
 The collaboration dialog's data-files panel lets invited collaborators share
-research data independently of the manuscript. Files are inert downloads: never
+selected ordinary project files independently of the live manuscript. Files are inert downloads: never
 extracted, executed, or included in the live Yjs document.
 
 ## Access and quota
@@ -98,3 +98,21 @@ The new Rust module passes its formatting check. The repository-wide
 `cargo fmt --check` still reports formatting differences in pre-existing modules;
 those unrelated files were not reformatted as part of this feature. No live server
 or production identity provider has been deployed or qualified by these checks.
+
+## Selective synchronization and version heads
+
+Migration `012_selective_project_sync.sql` adds a current head for each ordinary
+project-relative path. Manuscript and preview state still use live collaboration;
+selected ordinary files use these immutable file versions. Upload reservations
+record the observed head, and completion compares that identity under the project
+transaction lock. A concurrent publication returns HTTP 409 without replacing the
+current head. Completed retries never reset a newer head. Deleting the current
+version creates a fresh tombstone identity so an older upload cannot silently
+recreate a deleted file. Previous versions remain subject to normal retention and
+quota controls.
+
+The former `data/`-only path restriction is replaced by a shared ordinary-file
+policy. Private metadata, credentials, dependency folders and unsafe portable
+paths remain blocked. The desktop automatic-sync transfer limit is 32 MiB; the
+existing manual multipart transport retains its 1 GB project quota and boundaries.
+The server must be upgraded before clients can use selective synchronization.

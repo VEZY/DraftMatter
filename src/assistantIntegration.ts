@@ -10,6 +10,7 @@ import { access, mkdir, readFile, unlink, writeFile } from 'node:fs/promises'
 import { constants } from 'node:fs'
 import { delimiter, dirname, extname, join, resolve } from 'node:path'
 import { homedir } from 'node:os'
+import { codexRegistration } from './codexRegistration'
 import { sha256 } from './kernelExecution'
 import { DRAFTMATTER_AGENT_SKILL } from './agentProjectEnablement'
 
@@ -161,16 +162,9 @@ function expectedMcp(options: AssistantIntegrationOptions) {
   return { command, args }
 }
 
-function tomlBlock(client: 'codex' | 'vibe', options: AssistantIntegrationOptions) {
+function vibeTomlBlock(options: AssistantIntegrationOptions) {
   const mcp = expectedMcp(options)
   const args = mcp.args.map(tomlString).join(', ')
-  if (client === 'codex') {
-    return `${TOML_START}
-[mcp_servers.draftmatter]
-command = ${tomlString(mcp.command)}
-args = [${args}]
-${TOML_END}`
-  }
   return `${TOML_START}
 [[mcp_servers]]
 name = "draftmatter"
@@ -336,11 +330,11 @@ async function configState(client: DraftMatterAssistantClient, options: Assistan
   const existing = await optionalRead(path)
   try {
     if (definition.configKind === 'toml-codex') {
-      const transformed = transformManagedBlock(existing, tomlBlock('codex', options), false, false)
+      const transformed = codexRegistration(existing ?? '', expectedMcp(options), false, false)
       return { path, installed: Boolean(transformed.installed), current: Boolean(transformed.current) }
     }
     if (definition.configKind === 'toml-vibe') {
-      const transformed = transformManagedBlock(existing, tomlBlock('vibe', options), false, false)
+      const transformed = transformManagedBlock(existing, vibeTomlBlock(options), false, false)
       return { path, installed: Boolean(transformed.installed), current: Boolean(transformed.current) }
     }
     const transformed = jsonRegistration(existing, path, definition.configKind === 'json-copilot' ? 'copilot' : 'claude', options, false, false)
@@ -462,7 +456,7 @@ async function prepareConfigChange(
   client: DraftMatterAssistantClient,
   operation: AssistantConnectionOperation,
   options: AssistantIntegrationOptions,
-  managedRevision?: string | null,
+  priorReceipt?: AssistantConnectionReceipt,
 ): Promise<FileChange> {
   const definition = DEFINITIONS[client]
   const home = resolve(options.homeDir ?? homedir())
@@ -470,13 +464,17 @@ async function prepareConfigChange(
   const current = await optionalRead(path)
   const remove = operation === 'remove'
   const currentRevision = current === undefined ? null : await sha256(current)
+  const managedRevision = priorReceipt?.configRevision
   const replaceManaged = managedRevision !== undefined && managedRevision === currentRevision
   const repair = operation === 'repair' || replaceManaged
   try {
     const transformed = definition.configKind === 'toml-codex'
-      ? transformManagedBlock(current, tomlBlock('codex', options), remove, repair)
+      ? codexRegistration(current ?? '', expectedMcp(options), remove, repair, priorReceipt && {
+          command: priorReceipt.bundledCommand,
+          args: [...priorReceipt.bundledArgs, 'mcp', '--stdio'],
+        })
       : definition.configKind === 'toml-vibe'
-        ? transformManagedBlock(current, tomlBlock('vibe', options), remove, repair)
+        ? transformManagedBlock(current, vibeTomlBlock(options), remove, repair)
         : jsonRegistration(current, path, definition.configKind === 'json-copilot' ? 'copilot' : 'claude', options, remove, repair)
     if ('conflict' in transformed && transformed.conflict) {
       return { path, content: current ?? null, current, plan: { path, action: 'conflict', kind: 'mcp-registration', message: transformed.conflict } }
@@ -610,6 +608,9 @@ async function applyFileChanges(changes: FileChange[]) {
   try {
     for (const change of changes) {
       if (change.plan.action === 'unchanged') continue
+      if (await optionalRead(change.path) !== change.current) {
+        throw new Error(`${change.path} changed during setup. Review the current settings and retry.`)
+      }
       await mkdir(dirname(change.path), { recursive: true })
       if (change.content === null) {
         try {
@@ -624,6 +625,7 @@ async function applyFileChanges(changes: FileChange[]) {
     }
   } catch (error) {
     for (const change of applied.reverse()) {
+      if (await optionalRead(change.path) !== (change.content ?? undefined)) continue
       if (change.current === undefined) {
         await unlink(change.path).catch(() => undefined)
       } else {
@@ -637,6 +639,7 @@ async function applyFileChanges(changes: FileChange[]) {
 async function rollbackFileChanges(changes: FileChange[]) {
   for (const change of [...changes].reverse()) {
     if (change.plan.action === 'unchanged') continue
+    if (await optionalRead(change.path) !== (change.content ?? undefined)) continue
     if (change.current === undefined) {
       await unlink(change.path).catch(() => undefined)
     } else {
@@ -658,7 +661,9 @@ export async function planAssistantConnection(options: AssistantIntegrationOptio
   let priorReceipt: AssistantConnectionReceipt | undefined
   try {
     const parsed = receiptCurrent ? JSON.parse(receiptCurrent) as AssistantConnectionReceipt : undefined
-    if (parsed?.schemaVersion === RECEIPT_SCHEMA && parsed.client === options.client && Array.isArray(parsed.files)) priorReceipt = parsed
+    if (parsed?.schemaVersion === RECEIPT_SCHEMA && parsed.client === options.client && Array.isArray(parsed.files)
+      && typeof parsed.bundledCommand === 'string' && Array.isArray(parsed.bundledArgs)
+      && parsed.bundledArgs.every((arg) => typeof arg === 'string')) priorReceipt = parsed
   } catch {
     // A malformed receipt never grants ownership; Repair remains explicit.
   }
@@ -721,7 +726,7 @@ export async function planAssistantConnection(options: AssistantIntegrationOptio
   } else {
     configPath = DEFINITIONS[options.client].configPath(home)
     skillPath = DEFINITIONS[options.client].skillPath(home)
-    config = await prepareConfigChange(options.client, options.operation, options, priorReceipt?.configRevision)
+    config = await prepareConfigChange(options.client, options.operation, options, priorReceipt)
     skill = await prepareSkillChanges(options.client, options.operation, options, priorRevisions)
   }
   const managedChanges = [config, ...skill, ...pluginChanges]
@@ -732,7 +737,7 @@ export async function planAssistantConnection(options: AssistantIntegrationOptio
         schemaVersion: RECEIPT_SCHEMA,
         client: options.client,
         draftmatterVersion: packageMetadata.version,
-        bundledCommand: resolve(options.bundledCommand),
+        bundledCommand: expectedMcp(options).command,
         bundledArgs: options.bundledArgs ?? [],
         registrationMethod: useCodexPlugin ? 'codex-plugin' : 'global-config',
         configPath,

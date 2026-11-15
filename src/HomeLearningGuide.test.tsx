@@ -27,8 +27,10 @@ describe('Home learning guide', () => {
 
     expect(container.querySelector('h2')?.textContent).toBe('Explore a complete research paper.')
     expect(container.querySelectorAll('.home-learning-topics li')).toHaveLength(4)
-    expect(container.textContent).toContain('Produce reproducible results')
-    expect(container.textContent).toContain('Desktop computes. Browser collaboration reviews.')
+    expect(container.textContent).toContain('Add figures, tables, and equations')
+    expect(container.textContent).toContain('Drop an image into the paper')
+    expect(container.textContent).toContain('Write in your browser. Compute on desktop.')
+    expect(container.textContent).toContain('Code is optional.')
     expect(container.querySelector('[aria-pressed]')).toBeNull()
     expect(container.textContent).not.toContain('steps complete')
 

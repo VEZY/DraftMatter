@@ -43,14 +43,14 @@ export function ProgrammingLanguages({ onBack }: { onBack: () => void }) {
         <section className="languages-intro">
           <span className="home-kicker">Programming languages</span>
           <h1>Code that belongs to the project.</h1>
-          <p>DraftMatter runs Julia, Python, and R cells in the desktop app while keeping source, environments, and retained results with the research project. It detects the languages used by the manuscript and prepares only those environments.</p>
+          <p>Computation is optional. You can write, cite, review, and add existing images without running code. For figures, tables, or values from code, DraftMatter runs Julia, Python, and R in the desktop app and keeps the source and saved results with your project. Choose Run; if a language needs setup, DraftMatter prepares it before continuing your computation.</p>
         </section>
 
         <section className="languages-boundary" aria-labelledby="languages-boundary-title">
           <Icon name="info" size={20} />
           <div>
             <h2 id="languages-boundary-title">Execution happens in the desktop app.</h2>
-            <p>The browser can edit and review code and display retained results, but it cannot start programs on your computer. Open a local copy in DraftMatter Desktop to run cells, manage project packages, or use the shared language terminal.</p>
+            <p>The browser lets you inspect code, display saved results, and keep writing and reviewing the paper. To edit or run code, open a local copy in DraftMatter Desktop. Saved figures, tables, and values remain visible to collaborators online.</p>
           </div>
         </section>
 
@@ -70,7 +70,7 @@ export function ProgrammingLanguages({ onBack }: { onBack: () => void }) {
 └── language environment files…`}</pre>
             <div className="languages-project-points">
               <article><Icon name="code" size={18} /><div><h3>Use your regular IDE</h3><p>Open the same folder in VS Code, Positron, RStudio, or another editor. You can edit manuscript prose, code cells, scripts, data, and environment files there.</p></div></article>
-              <article><Icon name="branch" size={18} /><div><h3>Use Git normally</h3><p>Initialize, branch, commit, pull, merge, and push this folder like any other repository—through DraftMatter, your IDE, or the command line.</p></div></article>
+              <article><Icon name="branch" size={18} /><div><h3>Use Git normally</h3><p>If you want Git history, set up this folder with your preferred Git client, IDE, or command line. DraftMatter does not configure or manage the repository.</p></div></article>
               <article><Icon name="focus" size={18} /><div><h3>External edits appear automatically</h3><p>DraftMatter checks the open manuscript and reloads clean external changes within a few seconds. If both DraftMatter and your IDE have unsaved changes, it stops and asks you to resolve the conflict instead of overwriting either copy.</p></div></article>
             </div>
           </div>
@@ -84,7 +84,7 @@ export function ProgrammingLanguages({ onBack }: { onBack: () => void }) {
           <ol>
             <li><span>1</span><div><strong>DraftMatter detects the languages in the manuscript.</strong><p>Nothing is downloaded for languages the project does not use.</p></div></li>
             <li><span>2</span><div><strong>You trust the local project once.</strong><p>Trust permits code execution and environment changes for that project. DraftMatter remembers the choice on this computer.</p></div></li>
-            <li><span>3</span><div><strong>The project environment is checked and restored.</strong><p>Existing runtimes and lockfiles are preferred. Live setup output and errors appear in the terminal’s Project tab. Manuscript cells still run only when you ask.</p></div></li>
+            <li><span>3</span><div><strong>DraftMatter prepares the language, then continues your run.</strong><p>Existing installations and package lockfiles are preferred. Python can be downloaded when needed; Julia and R need to be installed first. Setup progress and errors appear in the terminal’s Project tab. Choose Prepare environments in Code &amp; computation if you want to set up languages without running manuscript code. Manuscript cells still run only when you ask.</p></div></li>
           </ol>
         </section>
 

@@ -11,6 +11,7 @@ import { parseStructuredManuscript } from './structuredManuscript'
 import { publicationImageDimensions, publicationImageType, resolvePublicationImage, validatePublicationAssets, type PublicationAssetOptions } from './publicationAssets'
 import { publicationOfficeMath } from './publicationMath'
 import { isSafePortableLinkDestination } from './portableLink'
+import { parseMarkdownImage } from './imageMarkdown'
 
 export interface DocxExportDiagnostic {
   code: 'figure-reference' | 'raw-source'
@@ -130,9 +131,15 @@ function imageParagraph(source: string, description: string, options: DocxRender
   if (!asset) return undefined
   const type = publicationImageType(asset.bytes)
   const ordinal = options.images.filter((image) => !image.relationshipId.startsWith('rIdSvg')).length + 1
-  const primaryBytes = type.extension === 'svg' ? asset.fallbackPng ?? asset.bytes : asset.bytes
+  const needsRaster = type.extension === 'svg' || type.extension === 'webp'
+  const primaryBytes = needsRaster ? asset.fallbackPng ?? asset.bytes : asset.bytes
   if (type.extension === 'svg' && !asset.fallbackPng && options.requireAssets) throw new Error(`Figure needs a PNG fallback for Word. Prepare the SVG before exporting: ${source}.`)
+  if (type.extension === 'webp' && !asset.fallbackPng) {
+    if (options.requireAssets) throw new Error(`Figure needs a PNG fallback for Word. Prepare the WebP before exporting: ${source}.`)
+    return undefined
+  }
   const primaryType = publicationImageType(primaryBytes)
+  if (type.extension === 'webp' && primaryType.extension !== 'png') throw new Error(`WebP figure needs a valid PNG fallback for Word: ${source}.`)
   const relationshipId = `rIdImage${ordinal}`
   options.images.push({ name: `image${ordinal}.${primaryType.extension}`, bytes: primaryBytes, mimeType: primaryType.mimeType, relationshipId })
   let extension = ''
@@ -199,25 +206,25 @@ function documentBody(source: string, diagnostics: DocxExportDiagnostic[], optio
       index = equation.end + (caption ? 1 : 0)
       continue
     }
-    const figure = line.match(/^\s*!\[([^\]]*)\]\((<[^>]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)(?:\{([^}]*)\})?\s*$/)
+    const figure = parseMarkdownImage(line)
     if (figure) {
-      const attributes = figure[3]?.trim()
+      const attributes = figure.attributes?.trim()
       const unnumbered = isExplicitlyUnnumbered(attributes)
       const number = unnumbered ? undefined : ++counters.figure
       const caption = parseTableCaptionLine(lines[index + 1] ?? '')
-      const source = figure[2].startsWith('<') ? figure[2].slice(1, -1) : figure[2]
+      const source = figure.source
       const embedded = /^data:image\//i.test(source)
       const reference = embedded ? 'embedded image not included in native DOCX' : source
-      const captionText = caption?.captionMarkdown || figure[1]
-      const drawing = imageParagraph(source, figure[1], options)
+      const captionText = caption?.captionMarkdown || figure.alt
+      const drawing = imageParagraph(source, figure.alt, options)
       if (drawing) parts.push(drawing)
       parts.push(paragraphWithFootnotes(`${number ? `Figure ${number}. ` : ''}${stripInlineMarkdown(captionText, options)}${drawing ? '' : ` — ${reference}`}`, resolvedFootnotes.numbers, 'Caption', undefined, options))
       if (!drawing) diagnostics.push({
         code: 'figure-reference',
         level: 'warning',
         message: embedded
-          ? `Figure “${figure[1]}” uses an embedded data image. Reinsert it in Word if a self-contained DOCX is required.`
-          : `Figure “${figure[1]}” remains a portable path reference (${source}). Embed it in Word after export if a self-contained DOCX is required.`,
+          ? `Figure “${figure.alt}” uses an embedded data image. Reinsert it in Word if a self-contained DOCX is required.`
+          : `Figure “${figure.alt}” remains a portable path reference (${source}). Embed it in Word after export if a self-contained DOCX is required.`,
       })
       index += caption ? 2 : 1
       continue

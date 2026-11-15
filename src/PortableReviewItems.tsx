@@ -120,6 +120,7 @@ export function PortableReviewItems({
   const [compose, setCompose] = useState<'comment' | 'suggestion' | null>(null)
   const [commentTarget, setCommentTarget] = useState<{ quote: string; occurrence: number } | null>(null)
   const [collapsedThreadIds, setCollapsedThreadIds] = useState<string[]>([])
+  const [expandedResolvedThreadIds, setExpandedResolvedThreadIds] = useState<string[]>([])
   const [replyingThreadId, setReplyingThreadId] = useState<string>()
   const [quote, setQuote] = useState('')
   const [selectedOccurrence, setSelectedOccurrence] = useState<number>()
@@ -174,6 +175,14 @@ export function PortableReviewItems({
       return retained.length === current.length && retained.every((id, index) => id === current[index]) ? current : retained
     })
   }, [batchableChangeIds])
+
+  useEffect(() => {
+    const resolved = new Set(document.threads.filter((thread) => thread.status === 'resolved').map((thread) => thread.id))
+    setExpandedResolvedThreadIds((current) => {
+      const retained = current.filter((id) => resolved.has(id))
+      return retained.length === current.length ? current : retained
+    })
+  }, [document.threads])
 
   useEffect(() => {
     if (compose === 'suggestion' && typeof composerRef.current?.scrollIntoView === 'function') composerRef.current.scrollIntoView({ block: 'nearest' })
@@ -294,6 +303,8 @@ export function PortableReviewItems({
     if (!canDecide) return
     try {
       const result = setReviewThreadStatus(document, threadId, status)
+      setCollapsedThreadIds((current) => current.filter((id) => id !== threadId))
+      setExpandedResolvedThreadIds((current) => current.filter((id) => id !== threadId))
       apply(result.document.source, status === 'open' ? 'Comment thread reopened' : status === 'resolved' ? 'Comment thread resolved' : 'Comment thread removed from the active queue')
     } catch (error) {
       fail(error)
@@ -461,21 +472,28 @@ export function PortableReviewItems({
 
         const thread = document.threads.find((candidate) => candidate.id === item.id)!
         const recovery = recoveryByAnchor.get(item.anchorId)
-        const collapsed = collapsedThreadIds.includes(item.id)
+        const resolved = thread.status === 'resolved'
+        const collapsed = resolved ? !expandedResolvedThreadIds.includes(item.id) : collapsedThreadIds.includes(item.id)
         const contentId = `review-comment-content-${item.id}`
         return (
           <div className={`comment-card portable-review-card portable-comment-bubble ${active ? 'active' : ''} ${thread.status === 'resolved' ? 'resolved' : ''} ${collapsed ? 'collapsed' : ''}`} id={`review-item-${item.id}`} data-review-balloon={item.id} data-review-balloon-anchor={item.anchorId} key={item.id} onClick={() => setActiveId(item.id)}>
             <div className="portable-comment-header">
               <div className="comment-author"><span className="avatar avatar-clay avatar-small">{initials(item.authorName)}</span><span><strong>{item.authorName}</strong><small><ReviewTimestamp value={thread.createdAt} verb="Created" fallback={item.kind === 'unplaced-thread' ? 'Location needs attention' : 'Comment'} /></small></span></div>
-              <button className="portable-comment-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} comment by ${item.authorName}`} aria-expanded={!collapsed} aria-controls={contentId} onClick={(event) => { event.stopPropagation(); if (collapsed) setActiveId(item.id); setCollapsedThreadIds((current) => collapsed ? current.filter((id) => id !== item.id) : [...current, item.id]) }}><Icon name="chevronDown" size={15} /></button>
+              {resolved && <div className="portable-comment-resolved-actions"><span className="portable-comment-resolved-label"><Icon name="check" size={12} /> Resolved</span>{canDecide && item.kind !== 'unplaced-thread' && <button className="portable-comment-reopen" aria-label="Reopen comment" onClick={() => changeThreadStatus(item.id, 'open')}>Reopen</button>}</div>}
+              <button className="portable-comment-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} comment by ${item.authorName}`} aria-expanded={!collapsed} aria-controls={collapsed ? undefined : contentId} onClick={(event) => {
+                event.stopPropagation()
+                if (collapsed) setActiveId(item.id)
+                if (resolved) setExpandedResolvedThreadIds((current) => collapsed ? [...current, item.id] : current.filter((id) => id !== item.id))
+                else setCollapsedThreadIds((current) => collapsed ? current.filter((id) => id !== item.id) : [...current, item.id])
+              }}><Icon name="chevronDown" size={15} /></button>
             </div>
             {!collapsed && <div className="portable-comment-content" id={contentId}>
               {thread.messageRecords.map((message, index) => index === 0
                 ? <p className="portable-comment-body" key={`${item.id}-${index}`}>{message.content}</p>
                 : <div className="reply-message portable-comment-reply" key={`${item.id}-${index}`}><span className="avatar avatar-sage avatar-small">{initials(authors.get(message.authorId ?? '') ?? message.authorId ?? 'A')}</span><div><div className="portable-comment-reply-meta"><strong>{authors.get(message.authorId ?? '') ?? message.authorId ?? 'Author'}</strong>{message.timestamp && <small><ReviewTimestamp value={message.timestamp} fallback="" /></small>}</div><p>{message.content}</p></div></div>)}
               {item.kind !== 'unplaced-thread' && (canComment && thread.status === 'open' || canDecide) && <div className="portable-thread-actions">
-                {canComment && thread.status === 'open' && <button className="portable-comment-reply-button" onClick={() => { setActiveId(item.id); setReply(''); setReplyingThreadId(item.id) }}>Reply</button>}
-                {canDecide && <><button className="resolve-button" aria-label={thread.status === 'resolved' ? 'Reopen comment' : 'Resolve comment'} onClick={() => changeThreadStatus(item.id, thread.status === 'resolved' ? 'open' : 'resolved')}><Icon name="check" size={14} /> {thread.status === 'resolved' ? 'Reopen' : 'Resolve'}</button><button className="portable-delete-thread" aria-label="Delete comment" onClick={() => changeThreadStatus(item.id, 'deleted')}><Icon name="x" size={13} /> Delete</button></>}
+                {canComment && thread.status === 'open' && replyingThreadId !== item.id && <button className="portable-comment-reply-button" onClick={() => { setActiveId(item.id); setReply(''); setReplyingThreadId(item.id) }}>Reply</button>}
+                {canDecide && <>{!resolved && <button className="resolve-button" aria-label="Resolve comment" onClick={() => changeThreadStatus(item.id, 'resolved')}><Icon name="check" size={14} /> Resolve</button>}<button className="portable-delete-thread" aria-label="Delete comment" onClick={() => changeThreadStatus(item.id, 'deleted')}><Icon name="x" size={13} /> Delete</button></>}
               </div>}
               {canComment && replyingThreadId === item.id && thread.status === 'open' && item.kind !== 'unplaced-thread' && (
                 <div className="reply-box"><input autoFocus value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') sendReply(item.id); if (event.key === 'Escape') { setReply(''); setReplyingThreadId(undefined) } }} placeholder="Reply…" aria-label={`Reply to ${item.authorName}`} /><button onClick={() => sendReply(item.id)} disabled={!reply.trim()} aria-label="Send reply"><Icon name="arrowRight" size={15} /></button></div>
@@ -495,9 +513,14 @@ export function PortableReviewItems({
 
       {compose && (
         <div className={`portable-review-composer ${compose === 'comment' ? 'portable-comment-composer' : ''}`} ref={composerRef} role="group" aria-label={compose === 'comment' ? 'New comment' : 'New suggestion'} data-review-balloon={compose === 'comment' ? 'new-comment' : undefined} data-review-balloon-target-top={compose === 'comment' && Number.isFinite(composerAnchorTop) ? composerAnchorTop : undefined}>
-          <strong>{compose === 'comment' ? 'New comment' : 'Suggest replacement'}</strong>
+          {compose === 'suggestion' && <strong>Suggest replacement</strong>}
           {compose === 'suggestion' && <label><span>Exact manuscript text</span><input value={quote} onChange={(event) => { setQuote(event.target.value); setSelectedOccurrence(undefined) }} placeholder="Paste the selected text" /></label>}
-          <label><span>{compose === 'comment' ? 'Comment' : 'Replacement'}</span><textarea value={body} onChange={(event) => setBody(event.target.value)} rows={3} /></label>
+          <label>{compose === 'suggestion' && <span>Replacement</span>}<textarea aria-label={compose === 'comment' ? 'Comment' : undefined} placeholder={compose === 'comment' ? 'Write a comment…' : undefined} aria-keyshortcuts={compose === 'comment' ? 'Meta+Enter Control+Enter' : undefined} value={body} onChange={(event) => setBody(event.target.value)} onKeyDown={(event) => {
+            if (compose === 'comment' && event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.nativeEvent.isComposing) {
+              event.preventDefault()
+              if (body.trim()) create()
+            }
+          }} rows={3} /></label>
           <div><button onClick={() => { setCompose(null); setCommentTarget(null); setBody('') }}>Cancel</button><button className="primary-button" onClick={create} disabled={!body.trim()}>{compose === 'comment' ? 'Add comment' : 'Add'}</button></div>
         </div>
       )}

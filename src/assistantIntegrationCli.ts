@@ -30,7 +30,11 @@ function bundledLaunch() {
     } catch {
       // Invalid development overrides fall back to no extra arguments.
     }
-    return { bundledCommand: override, bundledArgs }
+    // Desktop development runs this installer with Node. Codex started from
+    // Finder need not inherit the same PATH (e.g. an nvm installation).
+    const bundledCommand = override === 'node' && bundledArgs.length && /^node(?:\.exe)?$/iu.test(basename(process.execPath))
+      ? process.execPath : override
+    return { bundledCommand, bundledArgs }
   }
   if (/^node(?:\.exe)?$/iu.test(basename(process.execPath))) {
     return {

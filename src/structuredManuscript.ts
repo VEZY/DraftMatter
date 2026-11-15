@@ -11,6 +11,7 @@ import { manuscriptSchema } from './manuscriptSchema'
 import { parseReviewMarkup } from './reviewMarkup'
 import { isPipeTableSeparator, parseTableCaptionLine, pipeTableAlignments, pipeTableCells } from './tableSyntax'
 import type { CitationItem, DocumentDiagnostic } from './types'
+import { parseMarkdownImage, standaloneImagePattern } from './imageMarkdown'
 
 interface SourceLine {
   raw: string
@@ -198,7 +199,7 @@ function isBlockStart(lines: SourceLine[], index: number) {
     || /^\s*(?:[-+*]|\d+[.)])\s+/.test(value)
     || /^\s*\[\^[^\]]+\]:/.test(value)
     || /^\s*\$\$/.test(value)
-    || /^\s*!\[[^\]]*\]\([^)]+\)/.test(value)
+    || standaloneImagePattern.test(value)
     || /^\s*(?:---+|\*\*\*+)\s*$/.test(value)
     || /^\s*</.test(value)
     || /\{\{<\s*/.test(value)
@@ -436,16 +437,16 @@ function parseBlocks(
       continue
     }
 
-    const image = value.match(/^\s*!\[([^\]]*)\]\(([^)\s]+)(?:\s+["']([^"']*)["'])?\)(?:\s*\{([^}\r\n]+)\})?\s*$/)
+    const image = parseMarkdownImage(value)
     if (image) {
       const imageId = id('image', lines[index].raw)
-      const sourceAttributes = image[4] || null
+      const sourceAttributes = image.attributes
       const label = sourceAttributes?.match(/(?:^|\s)#([a-zA-Z][\w.:-]*)/)?.[1] ?? null
       const content = [manuscriptSchema.nodes.image.createChecked({
         id: imageId,
-        src: image[2],
-        alt: image[1],
-        title: image[3] || null,
+        src: image.source,
+        alt: image.alt,
+        title: image.title,
         label,
         sourceAttributes,
       })]
@@ -653,13 +654,16 @@ function serializeBlock(node: ProseMirrorNode, ending: string, index = 0): strin
     const image = node.firstChild
     const caption = node.childCount > 1 ? node.child(1) : undefined
     if (!image) return ''
-    const title = image.attrs.title ? ` "${image.attrs.title}"` : ''
+    const source = String(image.attrs.src).replace(/[\r\n]/g, ' ')
+    const destination = /[\s()<>\\]/.test(source) ? `<${source.replace(/([\\<>])/g, '\\$1')}>` : source
+    const alt = escapeText(String(image.attrs.alt).replace(/[\r\n]/g, ' ')).replace(/[<>&]/g, '\\$&')
+    const title = image.attrs.title ? ` "${String(image.attrs.title).replace(/[\r\n]/g, ' ').replace(/([\\"&])/g, '\\$1')}"` : ''
     const attributes = image.attrs.sourceAttributes
       ? `{${image.attrs.sourceAttributes}}`
       : image.attrs.label
         ? `{#${image.attrs.label}}`
         : ''
-    return `![${image.attrs.alt}](${image.attrs.src}${title})${attributes}${caption ? `${ending}: ${serializeInlineContent(caption, ending)}` : ''}`
+    return `![${alt}](${destination}${title})${attributes}${caption ? `${ending}: ${serializeInlineContent(caption, ending)}` : ''}`
   }
   if (node.type === manuscriptSchema.nodes.footnote_definition) return `[^${node.attrs.label}]: ${node.attrs.contentMarkdown}`
   if (node.type === manuscriptSchema.nodes.table) return serializeTable(node, ending)

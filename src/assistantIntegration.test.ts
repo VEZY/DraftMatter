@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
-import { inspectAssistantConnections, planAssistantConnection } from './assistantIntegration'
+import { inspectAssistantConnection, inspectAssistantConnections, planAssistantConnection } from './assistantIntegration'
 
 async function fixture() {
   const homeDir = await mkdtemp(join(tmpdir(), 'draftmatter-assistants-'))
@@ -59,6 +59,22 @@ describe('device-wide assistant connections', () => {
     }
     expect(await readFile(join(options.homeDir, '.codex', 'config.toml'), 'utf8')).toContain('[mcp_servers.draftmatter]')
     expect(await readFile(join(options.homeDir, '.vibe', 'config.toml'), 'utf8')).toContain('name = "draftmatter"')
+  })
+
+  it('updates a moved Codex launch command after Codex inserts its own server inside the markers', async () => {
+    const options = await fixture()
+    await planAssistantConnection({ ...options, client: 'codex', operation: 'install', apply: true })
+    const path = join(options.homeDir, '.codex', 'config.toml')
+    const original = (await readFile(path, 'utf8')).replace('# draftmatter-assistant:end',
+      '[mcp_servers.other]\ncommand = "other"\n[mcp_servers.other.env]\nSETTING = "keep"\n# draftmatter-assistant:end')
+    await writeFile(path, original)
+    expect(await inspectAssistantConnection('codex', options)).toMatchObject({ mcpCurrent: true })
+    const moved = { ...options, bundledCommand: options.bundledCommand + '-moved' }
+    const result = await planAssistantConnection({ ...moved, client: 'codex', operation: 'update', apply: true })
+    expect(result.statusAfter).toMatchObject({ connected: true })
+    expect(await readFile(path, 'utf8')).toBe(original.replace(options.bundledCommand, moved.bundledCommand))
+    await planAssistantConnection({ ...moved, client: 'codex', operation: 'repair', apply: true })
+    expect(await readFile(path, 'utf8')).toBe(original.replace(options.bundledCommand, moved.bundledCommand))
   })
 
   it('uses the Codex plugin when plugin management is available', async () => {

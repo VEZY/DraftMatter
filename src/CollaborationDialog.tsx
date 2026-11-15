@@ -1,9 +1,9 @@
 import type { ProjectResources } from './sharedEditor/projectResources'
 import { signInDesktop, usesDesktopIdentity } from './collaboration/oidcDesktop'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { CollaborationAccessPanel } from './CollaborationAccessPanel'
 import { CollaborationReviewPanel } from './CollaborationReviewPanel'
-import { ProjectFilesPanel } from './ProjectFilesPanel'
+import { ProjectFilesPanel, type ProjectFilesPanelProps } from './ProjectFilesPanel'
 import {
   CollaborationServiceClient,
   type CollaborationAccessToken,
@@ -27,6 +27,8 @@ import {
 } from './sharedEditor'
 import { DEFAULT_USER_SETTINGS, type LocalAuthorIdentity } from './userSettings'
 
+export type CollaborationFileService = ProjectFilesPanelProps
+
 export interface CollaborationDialogProps {
   open: boolean
   source: string
@@ -43,6 +45,8 @@ export interface CollaborationDialogProps {
   loadResources?: (preferLocal?: boolean) => Promise<ProjectResources>
   resourceRevision?: unknown
   onResources?: (resources: ProjectResources) => void
+  /** Exact live source last materialized by guarded local synchronization. */
+  localSyncSource?: string
   onSaveGuardChange?: (guard: (() => Promise<boolean>) | null) => void
   prepareCheckpointSource?: (source: string) => string
   canUseBrowserSignIn?: boolean
@@ -52,11 +56,17 @@ export interface CollaborationDialogProps {
   launch?: CollaborationProjectLaunch
   onConnected?: () => void
   onKeepLocalSeparate?: () => void
+  onFileServiceChange?: (service: CollaborationFileService | null) => void
+  onOpenProjectFiles?: () => void
 }
 
 function portableId(value: string, fallback: string) {
   const normalized = value.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9_.:-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80)
   return /^[a-z]/.test(normalized) ? normalized : fallback
+}
+
+function accountPresence(profile: CollaborationSessionProfile) {
+  return { userId: profile.userId, name: profile.displayName?.trim() || profile.email?.trim() || profile.userId }
 }
 
 export function CollaborationDialog({
@@ -74,6 +84,7 @@ export function CollaborationDialog({
   checkpointTarget,
   loadResources,
   onResources,
+  localSyncSource,
   onSaveGuardChange,
   prepareCheckpointSource,
   canUseBrowserSignIn = true,
@@ -83,6 +94,8 @@ export function CollaborationDialog({
   launch,
   onConnected,
   onKeepLocalSeparate,
+  onFileServiceChange,
+  onOpenProjectFiles,
 }: CollaborationDialogProps) {
   const [url, setUrl] = useState('https://')
   const [workspaceId, setWorkspaceId] = useState('')
@@ -91,6 +104,8 @@ export function CollaborationDialog({
   const [userId, setUserId] = useState(localAuthor.id)
   const [name, setName] = useState(localAuthor.name)
   const [status, setStatus] = useState<CollaborationClientStatus>('disconnected')
+  const [connectionReady, setConnectionReady] = useState(false)
+  const [renewingSession, setRenewingSession] = useState(false)
   const [activeRole, setActiveRole] = useState<WorkspaceRole | null>(null)
   const [detail, setDetail] = useState('')
   const [collaborators, setCollaborators] = useState<ActiveCollaborator[]>([])
@@ -117,7 +132,25 @@ export function CollaborationDialog({
   const launchStartedRef = useRef('')
   const checkpointedSourceRef = useRef(source)
   const connectionPendingRef = useRef(false)
+  const changingAccountRef = useRef(false)
   const mountedRef = useRef(true)
+  const onFileServiceChangeRef = useRef(onFileServiceChange)
+  onFileServiceChangeRef.current = onFileServiceChange
+  const connected = status === 'connected' && connectionReady
+  const activeWorkspace = workspaces.find((workspace) => workspace.id === workspaceId)
+  const activeProject = projects.find((project) => project.id === projectId)
+  const projectRole = activeRole ?? activeProject?.role ?? activeWorkspace?.role
+  const activeProjectWorkspace = useMemo(() => activeWorkspace && projectRole ? {
+    id: activeWorkspace.id, name: activeWorkspace.name, createdAt: activeWorkspace.createdAt, role: projectRole,
+  } : undefined, [activeWorkspace?.id, activeWorkspace?.name, activeWorkspace?.createdAt, projectRole])
+  const fileService = useMemo<CollaborationFileService | null>(() => connected && serviceClient && activeProjectWorkspace && profile && activeRole ? {
+    client: serviceClient, workspace: activeProjectWorkspace, currentUserId: profile.userId, projectId,
+  } : null, [connected, serviceClient, activeProjectWorkspace, profile?.userId, projectId, activeRole])
+
+  useEffect(() => {
+    onFileServiceChangeRef.current?.(fileService)
+  // Callback identity may change on every parent render; the service identity must stay stable.
+  }, [fileService, Boolean(onFileServiceChange)])
 
   useEffect(() => {
     if (!launch) return
@@ -126,7 +159,7 @@ export function CollaborationDialog({
     setServiceClient(launch.client)
     setProfile(launch.profile)
     setUserId(launch.profile.userId)
-    if (launch.profile.displayName) setName(launch.profile.displayName)
+    setName(accountPresence(launch.profile).name)
     setWorkspaces(launch.workspaces)
     setWorkspaceId(launch.workspaceId)
     setProjects(launch.projects)
@@ -135,15 +168,21 @@ export function CollaborationDialog({
   }, [launch])
 
   useEffect(() => {
-    if (profile || status !== 'disconnected') return
+    if (launch || profile || status !== 'disconnected') return
     setUserId(localAuthor.id)
     setName(localAuthor.name)
-  }, [localAuthor.id, localAuthor.name, profile, status])
+  }, [launch, localAuthor.id, localAuthor.name, profile, status])
 
   const updateCheckpointState = (next: boolean) => {
     setUncheckpointed(next)
     onCheckpointStateChange?.(next)
   }
+
+  useEffect(() => {
+    if (localSyncSource === undefined || localSyncSource !== source || !clientRef.current) return
+    checkpointedSourceRef.current = localSyncSource
+    updateCheckpointState(false)
+  }, [localSyncSource, source])
 
   const updateStatus = (next: CollaborationClientStatus, message = '') => {
     setStatus(next)
@@ -156,7 +195,7 @@ export function CollaborationDialog({
     setServiceClient(client)
     setProfile(nextProfile)
     setUserId(nextProfile.userId)
-    if (nextProfile.displayName) setName(nextProfile.displayName)
+    setName(accountPresence(nextProfile).name)
     setWorkspaces(available)
     const nextWorkspaceId = available.some((workspace) => workspace.id === preferredWorkspaceId) ? preferredWorkspaceId : available[0]?.id ?? ''
     setWorkspaceId(nextWorkspaceId)
@@ -306,6 +345,7 @@ export function CollaborationDialog({
       onSessionStateChange?.(false)
       onRoleChange?.(null)
       onCheckpointStateChange?.(false)
+      onFileServiceChangeRef.current?.(null)
     }
   }, [])
 
@@ -358,42 +398,51 @@ export function CollaborationDialog({
       setActiveRole(role)
       const canBootstrap = openRemoteWithoutBootstrap ? false : launch ? launch.canBootstrap === true : role === 'owner'
       let connectionEstablished = false
+      let connectedClient: HocuspocusCollaborationClient | null = null
+      const isCurrentConnection = () => mountedRef.current && (!connectionEstablished || clientRef.current === connectedClient)
       const client = await HocuspocusCollaborationClient.connect({
         url: urls.websocketUrl,
         workspaceId,
         projectId,
         token: accessToken,
         resourceProvider: canBootstrap && loadResources ? () => loadResources(true) : undefined,
-        onResources,
-        onRecoveryWarning: setRecoveryWarning,
+        onResources: (resources) => { if (isCurrentConnection()) onResources?.(resources) },
+        onRecoveryWarning: (message) => { if (isCurrentConnection()) setRecoveryWarning(message) },
         bootstrapSource: launch?.bootstrapSource ?? source,
         canBootstrap,
         requireEmptyForBootstrap: openRemoteWithoutBootstrap ? false : launch?.requireEmptyForBootstrap,
-        presence: { userId, name, color: '#617f73' },
+        presence: { ...(profile ? accountPresence(profile) : { userId, name }), color: '#617f73' },
         onStatus: (next, message) => {
+          if (!isCurrentConnection()) return
           updateStatus(next, message)
           if (next !== 'connected' || !connectionEstablished) return
           void apiClient.listProjects(workspaceId).then((nextProjects) => {
+            if (!isCurrentConnection()) return
             setProjects(nextProjects)
             const nextRole = nextProjects.find((project) => project.id === projectId)?.role
             if (!nextRole) throw new Error('Your access to this manuscript is no longer available.')
             setActiveRole(nextRole)
             onRoleChange?.(nextRole)
           }).catch((error) => {
+            if (!isCurrentConnection()) return
             setActiveRole(null)
             onRoleChange?.(null)
             setDetail(error instanceof Error ? error.message : String(error))
           })
         },
         onPortableSource: (nextSource) => {
+          if (!isCurrentConnection()) return
           updateCheckpointState(nextSource !== checkpointedSourceRef.current)
           onRemoteSource(nextSource)
         },
-        onCollaborators: setCollaborators,
+        onCollaborators: (people) => { if (isCurrentConnection()) setCollaborators(people) },
       })
       if (!mountedRef.current) { client.destroy(); return }
+      connectedClient = client
       connectionEstablished = true
       clientRef.current = client
+      setConnectionReady(true)
+      setRenewingSession(false)
       onSaveGuardChange?.(() => client.flushRecovery())
       onRoleChange?.(role)
       onEditorBindingChange?.(client.editorBinding)
@@ -407,6 +456,7 @@ export function CollaborationDialog({
       onSaveGuardChange?.(null)
       onEditorBindingChange?.(null)
       setActiveRole(null)
+      setConnectionReady(false)
       onRoleChange?.(null)
       onSessionStateChange?.(false)
       const message = error instanceof Error ? error.message : String(error)
@@ -442,6 +492,8 @@ export function CollaborationDialog({
     onEditorBindingChange?.(null)
     clientRef.current?.destroy()
     clientRef.current = null
+    setConnectionReady(false)
+    setRenewingSession(false)
     setCollaborators([])
     setActiveRole(null)
     onRoleChange?.(null)
@@ -449,6 +501,48 @@ export function CollaborationDialog({
     onSessionStateChange?.(false)
     updateCheckpointState(false)
     updateStatus('disconnected')
+  }
+
+  const changeAccount = async () => {
+    if (connectionPendingRef.current || changingAccountRef.current) return
+    changingAccountRef.current = true
+    const previous = clientRef.current
+    const previousServiceState = serviceState
+    setServiceState('loading')
+    try {
+      if (previous?.flushRecovery && !await previous.flushRecovery()) {
+        setDetail('Your offline recovery could not be saved. Keep this session open and retry before changing accounts.')
+        setServiceState(previousServiceState)
+        return
+      }
+      if (!mountedRef.current || clientRef.current !== previous) return
+      // Clear the identity before destroying its transport so late callbacks
+      // cannot reactivate the expired session. Its durable journal is retained.
+      clientRef.current = null
+      previous?.destroy()
+      if (previous) setRenewingSession(true)
+      onSaveGuardChange?.(null)
+      onEditorBindingChange?.(null)
+      setConnectionReady(false)
+      setCollaborators([])
+      setActiveRole(null)
+      onRoleChange?.(null)
+      // Keep the manuscript in collaboration mode while renewing credentials:
+      // returning to ordinary local autosave is an explicit Leave operation.
+      updateStatus('disconnected')
+      setServiceClient(null)
+      setServiceState('idle')
+      setProfile(null)
+      setWorkspaces([])
+      setProjects([])
+      setToken('')
+      accessTokenRef.current = null
+    } catch (error) {
+      if (mountedRef.current) {
+        setDetail(error instanceof Error ? error.message : String(error))
+        setServiceState(previousServiceState)
+      }
+    } finally { changingAccountRef.current = false }
   }
 
   const shareUpdatedResources = async () => {
@@ -492,10 +586,6 @@ export function CollaborationDialog({
   }
 
   if (!open) return null
-  const connected = status === 'connected' && Boolean(clientRef.current)
-  const activeWorkspace = workspaces.find((workspace) => workspace.id === workspaceId)
-  const activeProject = projects.find((project) => project.id === projectId)
-  const activeProjectWorkspace = activeWorkspace ? { ...activeWorkspace, role: activeRole ?? activeProject?.role ?? activeWorkspace.role } : undefined
   const canCheckpoint = activeRole === 'owner'
 
   return (
@@ -520,7 +610,9 @@ export function CollaborationDialog({
             <div className="collaboration-note"><Icon name="check" size={16} /><span>Offline edits reconnect through Yjs. Incompatible review decisions pause checkpointing until they are explicitly resolved.</span></div>
             {loadResources && (activeRole === 'owner' || activeRole === 'editor') && <div className="collaboration-checkpoint"><span><strong>Figures and references</strong><small>Share an updated local snapshot explicitly. Joining and typing keep the existing shared resources.</small></span><button onClick={() => void shareUpdatedResources()} disabled={sharingResources}>{sharingResources ? 'Sharing…' : 'Share updated figures & references'}</button></div>}
             {serviceClient && activeProjectWorkspace && profile && <CollaborationReviewPanel client={serviceClient} workspace={activeProjectWorkspace} projectId={projectId} currentUserId={profile.userId} />}
-            {serviceClient && activeProjectWorkspace && profile && <ProjectFilesPanel client={serviceClient} workspace={activeProjectWorkspace} projectId={projectId} currentUserId={profile.userId} />}
+            {fileService && (onOpenProjectFiles
+              ? <div className="collaboration-checkpoint"><span><strong>Project files</strong><small>Browse shared data and saved file versions in the project workspace.</small></span><button onClick={onOpenProjectFiles}>Browse project files</button></div>
+              : <ProjectFilesPanel {...fileService} />)}
             {serviceClient && activeWorkspace?.role === 'owner' && profile && <CollaborationAccessPanel client={serviceClient} workspace={activeWorkspace} projectId={projectId} currentUserId={profile.userId} projects={projects} />}
             <div className={`collaboration-checkpoint ${uncheckpointed ? 'pending' : ''}`}>
               <span><strong>{checkpointMode === 'working-tree' ? 'Owner-controlled working tree' : 'Portable owner copy'}</strong><small>{canCheckpoint ? (checkpointMode === 'working-tree' ? `Write deterministic review state to ${checkpointTarget}. Git remains a separate explicit action.` : `Download deterministic review state as ${checkpointTarget}.`) : 'Only this manuscript’s owner can materialize the live state as a portable checkpoint.'}</small></span>
@@ -537,7 +629,7 @@ export function CollaborationDialog({
             {canUseBrowserSignIn && !serviceClient && <div className="collaboration-oidc"><span><Icon name="users" size={16} /><span><strong>Workspace account</strong><small>Authorization Code + PKCE · no password is shared with DraftMatter</small></span></span><button type="button" onClick={() => void signIn()} disabled={serviceState === 'loading' || url === 'https://' || url === 'wss://'}>{serviceState === 'loading' ? 'Opening sign-in…' : 'Sign in securely'}</button></div>}
 
             {serviceClient ? <div className="collaboration-workspace-browser">
-              <div className="collaboration-account"><Icon name="check" size={15} /><span><strong>{profile?.displayName ?? profile?.email ?? profile?.userId ?? 'Authenticated account'}</strong><small>{workspaces.length ? `${workspaces.length} accessible workspace${workspaces.length === 1 ? '' : 's'}` : 'No workspace yet · create one below'}</small></span><button type="button" onClick={() => { setServiceClient(null); setServiceState('idle'); setProfile(null); setWorkspaces([]); setProjects([]); setToken(''); accessTokenRef.current = null }}>Change</button></div>
+              <div className="collaboration-account"><Icon name="check" size={15} /><span><strong>{profile?.displayName ?? profile?.email ?? profile?.userId ?? 'Authenticated account'}</strong><small>{workspaces.length ? `${workspaces.length} accessible workspace${workspaces.length === 1 ? '' : 's'}` : 'No workspace yet · create one below'}</small></span><button type="button" disabled={serviceState === 'loading' || connectionPendingRef.current} onClick={() => void changeAccount()}>Change</button></div>
               {workspaces.length > 0 && <div className="collaboration-fields"><label><span>Workspace</span><select value={workspaceId} onChange={(event) => void chooseWorkspace(event.target.value)} required>{workspaces.map((workspace) => <option value={workspace.id} key={workspace.id}>{workspace.name} · {workspace.role}</option>)}</select></label><label><span>Project</span><select value={projectId} onChange={(event) => setProjectId(event.target.value)} required>{projects.map((project) => <option value={project.id} key={project.id}>{project.name}</option>)}</select><small>{projects.length ? 'Joining synchronizes this portable manuscript.' : 'Create a project to publish this manuscript.'}</small></label></div>}
               <div className="collaboration-browser-actions"><button type="button" onClick={() => setCreateMode(createMode === 'workspace' ? null : 'workspace')}><Icon name="plus" size={13} />Workspace</button><button type="button" onClick={() => setCreateMode(createMode === 'project' ? null : 'project')} disabled={!workspaceId}><Icon name="plus" size={13} />Project</button></div>
               {createMode === 'workspace' && <div className="collaboration-create-row"><label><span>Workspace name</span><input value={newWorkspaceName} onChange={(event) => { setNewWorkspaceName(event.target.value); setNewWorkspaceId(portableId(event.target.value, 'workspace')) }} placeholder="Forest systems lab" /></label><label><span>Portable ID</span><input value={newWorkspaceId} onChange={(event) => setNewWorkspaceId(event.target.value)} autoCapitalize="none" spellCheck={false} /></label><button type="button" onClick={() => void createWorkspace()} disabled={!newWorkspaceName.trim()}>Create</button></div>}
@@ -548,7 +640,7 @@ export function CollaborationDialog({
             <div className="collaboration-fields"><label><span>Your name</span><input value={name} onChange={(event) => setName(event.target.value)} required /></label><label><span>Author ID</span><input value={userId} onChange={(event) => setUserId(event.target.value)} autoCapitalize="none" spellCheck={false} required readOnly={Boolean(profile)} /><small>{profile ? 'Bound to the authenticated account.' : 'Used for portable review attribution.'}</small></label></div>
             {detail && <div className="collaboration-error" role="alert">{detail}</div>}
             {bootstrapCollision && <div className="collaboration-bootstrap-recovery"><strong>Choose which draft to keep open</strong><p>The remote draft already contains content. The local manuscript was not uploaded or replaced.</p><div><button type="button" onClick={() => setOpenRemoteWithoutBootstrap(true)}>Open remote draft</button><button type="button" onClick={() => { onKeepLocalSeparate?.(); onClose() }}>Keep local project separate</button></div></div>}
-            <footer><button type="button" className="secondary" onClick={onClose}>Cancel</button><button type="submit" disabled={status === 'connecting' || !workspaceId || !projectId || (!token && !serviceClient)}>{status === 'connecting' ? 'Connecting…' : projects.length === 0 && serviceClient ? 'Create a project first' : 'Join workspace'}</button></footer>
+            <footer><button type="button" className="secondary" onClick={onClose}>Cancel</button>{(clientRef.current || renewingSession) && <button type="button" className="secondary" disabled={serviceState === 'loading' || connectionPendingRef.current} onClick={() => void disconnect()}>Leave session</button>}<button type="submit" disabled={status === 'connecting' || !workspaceId || !projectId || (!token && !serviceClient)}>{status === 'connecting' ? 'Connecting…' : projects.length === 0 && serviceClient ? 'Create a project first' : 'Join workspace'}</button></footer>
           </form>
         )}
       </div>

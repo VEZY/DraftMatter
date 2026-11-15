@@ -47,28 +47,38 @@ fn run_assistant_cli(arguments: &[String]) -> Result<Value, HostError> {
             "Could not start the bundled DraftMatter assistant installer: {error}"
         ))
     })?;
-    let stdout = String::from_utf8(output.stdout).map_err(|_| {
-        HostError::Integration(
-            "The bundled DraftMatter assistant installer returned non-UTF-8 output.".to_string(),
-        )
-    })?;
-    let value = serde_json::from_str::<Value>(stdout.trim()).map_err(|error| {
-        HostError::Integration(format!(
-            "The bundled DraftMatter assistant installer returned invalid status: {error}"
-        ))
-    })?;
-    if !output.status.success() && output.status.code() != Some(2) {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(HostError::Integration(if stderr.trim().is_empty() {
-            format!(
-                "The bundled DraftMatter assistant installer exited with status {}.",
-                output.status
-            )
-        } else {
-            stderr.trim().to_string()
-        }));
+    assistant_cli_result(output.status.code(), &output.stdout, &output.stderr)
+}
+
+fn assistant_cli_result(
+    code: Option<i32>,
+    stdout: &[u8],
+    stderr: &[u8],
+) -> Result<Value, HostError> {
+    let parsed = serde_json::from_slice::<Value>(stdout);
+    // A conflict is a structured plan with exact paths and recovery advice.
+    if matches!(code, Some(0 | 2))
+        || (code == Some(73)
+            && parsed
+                .as_ref()
+                .is_ok_and(|v| v["ok"] == false && v["results"].is_array()))
+    {
+        return parsed.map_err(|error| HostError::Integration(format!(
+            "The bundled DraftMatter assistant installer returned invalid status: {error}. Check the installation and retry."
+        )));
     }
-    Ok(value)
+    let stderr = String::from_utf8_lossy(stderr);
+    let detail = parsed
+        .as_ref()
+        .ok()
+        .and_then(|v| v["error"]["message"].as_str())
+        .or_else(|| (!stderr.trim().is_empty()).then(|| stderr.trim()))
+        .unwrap_or("The installer returned no diagnostic.");
+    Err(HostError::Integration(format!(
+        "Assistant installer failed ({}): {detail}",
+        code.map(|n| n.to_string())
+            .unwrap_or_else(|| "terminated".into())
+    )))
 }
 
 fn bundled_cli_command() -> Result<Command, HostError> {
@@ -161,6 +171,18 @@ mod tests {
         assert!(
             path.ends_with("draftmatter.js") || path.ends_with(executable_name("draftmatter-mcp"))
         );
+    }
+
+    #[test]
+    fn preserves_conflict_plans_and_real_installer_errors() {
+        let plan = serde_json::json!({"ok": false, "results": [{"conflicts": [{"message": "Changed outside DraftMatter"}]}]});
+        assert_eq!(
+            assistant_cli_result(Some(73), plan.to_string().as_bytes(), b"").unwrap(),
+            plan
+        );
+        let error =
+            assistant_cli_result(Some(1), b"", b"permission denied: config.toml").unwrap_err();
+        assert!(error.to_string().contains("permission denied: config.toml"));
     }
 
     #[test]

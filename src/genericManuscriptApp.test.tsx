@@ -137,6 +137,7 @@ describe('generic portable manuscript app workflow', () => {
       editor.dispatchEvent(new Event('input', { bubbles: true }))
     })
     await click('Apply source')
+    await act(async () => container.querySelector<HTMLButtonElement>('.project-switcher')!.click())
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Learn DraftMatter"]')!.click())
     expect(leave).toHaveBeenCalledOnce()
     expect(localStorage.getItem('draftmatter.structured-source.v1')).toBe(next)

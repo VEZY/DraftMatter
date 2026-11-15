@@ -3,6 +3,7 @@
 import { act, createRef } from 'react'
 import { createRoot } from 'react-dom/client'
 import { EditorState } from 'prosemirror-state'
+import { EditorView } from 'prosemirror-view'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
 import { EditorView as CodeMirrorView } from '@codemirror/view'
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness'
@@ -63,6 +64,16 @@ Check this statement.
 `
 
 const shortSource = '# Node commands\n\nPlace content here.\n'
+
+function figureTransferEvent(type: 'drop' | 'dragover' | 'paste', files: File[]) {
+  const event = new MouseEvent(type, { bubbles: true, cancelable: true, clientX: 40, clientY: 100 })
+  const transfer = {
+    files, types: ['Files'], items: files.map((file) => ({ kind: 'file', type: file.type })),
+    dropEffect: 'none', getData: () => '',
+  }
+  Object.defineProperty(event, type === 'paste' ? 'clipboardData' : 'dataTransfer', { value: transfer })
+  return event
+}
 
 describe('portable block reordering', () => {
   const reorderSource = `# Study
@@ -282,7 +293,7 @@ describe('full structured manuscript editor', () => {
     expect(container.querySelector<HTMLTableCellElement>('th:nth-child(2)')?.dataset.alignment).toBe('right')
     expect(container.querySelector('.structured-code-editor .cm-content')?.textContent).toBe('print("before")')
     expect(container.querySelector<HTMLElement>('.structured-code-editor')?.hidden).toBe(true)
-    expect(container.querySelector('.structured-code-summary')?.textContent).toBe('Source stays outside the manuscript · 1 line')
+    expect(container.querySelector('.structured-code-summary')?.textContent).toBe('Source saved with the manuscript · 1 line')
     expect(container.querySelector<HTMLButtonElement>('.structured-code-toggle')?.getAttribute('aria-expanded')).toBe('false')
     const codeMoveHandle = [...container.querySelectorAll<HTMLButtonElement>('.structured-block-drag-handle')]
       .find((handle) => handle.dataset.blockId === 'cell-growth')
@@ -313,6 +324,151 @@ describe('full structured manuscript editor', () => {
     expect(selectReview).toHaveBeenCalledWith('dm-comment', 'dm-comment')
     expect(openReviewMenu).toHaveBeenCalledWith({ quote: 'Growth', occurrence: 0 }, { x: 24, y: 36 })
     expect(asset).toHaveBeenCalledWith('figures/growth.svg')
+  })
+
+  it('imports dropped images at the pointer, preserving text around the figure and stable numbering', async () => {
+    const changed: string[] = []
+    const manuscript = '# Study\n\nBefore after.\n\nEnd.\n'
+    const parsed = parseStructuredManuscript(manuscript).document
+    let position = 0
+    parsed.forEach((node, offset) => { if (node.textContent === 'Before after.') position = offset + 1 + 'Before '.length })
+    vi.spyOn(EditorView.prototype, 'posAtCoords').mockReturnValue({ pos: position, inside: -1 })
+    const files = [new File(['image'], 'growth.png', { type: 'image/png' })]
+    const importer = vi.fn(async () => [{ source: 'figures/growth.png', alt: 'Growth', caption: 'Growth response.' }])
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={manuscript} onChange={(next) => changed.push(next)} onImportFigures={importer} />,
+    ))
+    const editor = container.querySelector('[role="textbox"]')!
+    const event = figureTransferEvent('drop', files)
+    await act(async () => { editor.dispatchEvent(event) })
+
+    expect(event.defaultPrevented).toBe(true)
+    expect(importer).toHaveBeenCalledWith(files)
+    expect(changed.at(-1)).toContain('Before \n\n![Growth](figures/growth.png){#fig-growth-response}\n: Growth response.\n\nafter.')
+    expect(changed.at(-1)).not.toContain('data:image')
+    expect(container.querySelector('img')?.getAttribute('src')).toBe('figures/growth.png')
+    expect(container.querySelector('.structured-figure-caption')?.textContent).toBe('Figure 1. Growth response.')
+  })
+
+  it('refreshes asynchronously restored manual and retained figures without changing manuscript source', async () => {
+    const changed = vi.fn()
+    const manuscript = `# Study
+
+![Manual](figures/manual.png){#fig-manual}
+
+\`\`\`python {#cell-result .execute output="figure"}
+print("result")
+\`\`\`
+
+<!-- dm-output:start cell="cell-result" run="sha256:one" -->
+![Retained](figures/retained.png){#fig-retained}
+<!-- dm-output:end -->
+`
+    let loaded = false
+    const resolveAssetUrl = (path: string) => loaded ? `data:image/png;base64,restored-${path}` : path
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={manuscript} onChange={changed} resolveAssetUrl={resolveAssetUrl} assetResolutionRevision={0} />,
+    ))
+    expect([...container.querySelectorAll('img')].map((image) => image.getAttribute('src'))).toEqual(['figures/manual.png', 'figures/retained.png'])
+    loaded = true
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={manuscript} onChange={changed} resolveAssetUrl={resolveAssetUrl} assetResolutionRevision={1} />,
+    ))
+    expect([...container.querySelectorAll('img')].map((image) => image.getAttribute('src'))).toEqual(['data:image/png;base64,restored-figures/manual.png', 'data:image/png;base64,restored-figures/retained.png'])
+    expect(changed).not.toHaveBeenCalled()
+  })
+
+  it('keeps an asynchronous image drop anchored through edits and inserts multiple images in order', async () => {
+    const changed: string[] = []
+    const editorRef = createRef<StructuredManuscriptEditorHandle>()
+    const manuscript = '# Study\n\nBefore after.\n'
+    const parsed = parseStructuredManuscript(manuscript).document
+    let paragraphStart = 0
+    parsed.forEach((node, offset) => { if (node.textContent === 'Before after.') paragraphStart = offset + 1 })
+    let activeView: EditorView | undefined
+    vi.spyOn(EditorView.prototype, 'posAtCoords').mockImplementation(function (this: EditorView) {
+      activeView = this
+      return { pos: paragraphStart + 'Before '.length, inside: -1 }
+    })
+    let finishImport!: (figures: { source: string; alt: string }[]) => void
+    const importer = vi.fn(() => new Promise<{ source: string; alt: string }[]>((resolve) => { finishImport = resolve }))
+    await act(async () => root.render(
+      <StructuredManuscriptEditor ref={editorRef} source={manuscript} onChange={(next) => changed.push(next)} onImportFigures={importer} />,
+    ))
+    const editor = container.querySelector('[role="textbox"]')!
+    const files = [new File(['a'], 'one.png', { type: 'image/png' }), new File(['b'], 'two.svg')]
+    await act(async () => { editor.dispatchEvent(figureTransferEvent('drop', files)) })
+    expect(container.querySelector('.structured-manuscript-editor')?.getAttribute('aria-busy')).toBe('true')
+    await act(async () => { activeView!.dispatch(activeView!.state.tr.insertText('New ', paragraphStart)) })
+    await act(async () => { finishImport([{ source: 'figures/one.png', alt: 'Result' }, { source: 'figures/two.svg', alt: 'Result' }]) })
+
+    const portable = changed.at(-1)!
+    expect(portable).toContain('New Before \n\n![Result](figures/one.png){#fig-result}')
+    expect(portable.indexOf('figures/one.png')).toBeLessThan(portable.indexOf('figures/two.svg'))
+    expect(portable.indexOf('figures/two.svg')).toBeLessThan(portable.indexOf('after.'))
+    expect(portable).toContain('{#fig-result-2}')
+    expect(container.querySelector('.structured-manuscript-editor')?.hasAttribute('aria-busy')).toBe(false)
+    await act(async () => { expect(editorRef.current?.undo()).toBe(true) })
+    expect(changed.at(-1)).toContain('New Before after.')
+    expect(changed.at(-1)).not.toContain('figures/')
+  })
+
+  it('does not insert a pending figure into a replacement manuscript', async () => {
+    const changed = vi.fn()
+    let finishImport!: (figures: { source: string; alt: string }[]) => void
+    const importer = vi.fn(() => new Promise<{ source: string; alt: string }[]>((resolve) => { finishImport = resolve }))
+    vi.spyOn(EditorView.prototype, 'posAtCoords').mockReturnValue({ pos: 0, inside: -1 })
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={shortSource} onChange={changed} onImportFigures={importer} />,
+    ))
+    await act(async () => { container.querySelector('[role="textbox"]')!.dispatchEvent(figureTransferEvent('drop', [new File(['image'], 'growth.png', { type: 'image/png' })])) })
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={'# Replacement paper\n\nDifferent work.\n'} onChange={changed} onImportFigures={importer} />,
+    ))
+    await act(async () => { finishImport([{ source: 'figures/growth.png', alt: 'Growth' }]) })
+    expect(changed).not.toHaveBeenCalled()
+    expect(container.querySelector('h1')?.textContent).toBe('Replacement paper')
+    expect(container.querySelector('img')).toBeNull()
+  })
+
+  it('does not insert failed imports or import into a read-only manuscript', async () => {
+    const changed = vi.fn()
+    const report = vi.fn()
+    const importer = vi.fn(async () => { throw new Error('Figure exceeds the project limit.') })
+    vi.spyOn(EditorView.prototype, 'posAtCoords').mockReturnValue({ pos: 0, inside: -1 })
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={shortSource} onChange={changed} onImportFigures={importer} onFigureImportError={report} />,
+    ))
+    const image = new File(['image'], 'growth.png', { type: 'image/png' })
+    await act(async () => { container.querySelector('[role="textbox"]')!.dispatchEvent(figureTransferEvent('drop', [image])) })
+    expect(report).toHaveBeenLastCalledWith('Figure exceeds the project limit.')
+    expect(changed).not.toHaveBeenCalled()
+
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={shortSource} onChange={changed} onImportFigures={importer} onFigureImportError={report} readOnly />,
+    ))
+    const event = figureTransferEvent('drop', [image])
+    await act(async () => { container.querySelector('[role="textbox"]')!.dispatchEvent(event) })
+    expect(event.defaultPrevented).toBe(true)
+    expect(importer).toHaveBeenCalledTimes(1)
+    expect(report).toHaveBeenLastCalledWith('You need editing access to insert a figure.')
+  })
+
+  it('rejects non-image file drops and imports clipboard images using the same asset flow', async () => {
+    const changed: string[] = []
+    const report = vi.fn()
+    const importer = vi.fn(async () => [{ source: 'figures/pasted.png', alt: 'Pasted figure' }])
+    await act(async () => root.render(
+      <StructuredManuscriptEditor source={shortSource} onChange={(next) => changed.push(next)} onImportFigures={importer} onFigureImportError={report} />,
+    ))
+    const editor = container.querySelector('[role="textbox"]')!
+    await act(async () => { editor.dispatchEvent(figureTransferEvent('drop', [new File(['notes'], 'notes.txt', { type: 'text/plain' })])) })
+    expect(importer).not.toHaveBeenCalled()
+    expect(report).toHaveBeenLastCalledWith('Drop image files to insert figures: PNG, JPEG, GIF, WebP, or SVG.')
+    const image = new File(['image'], 'clipboard.png', { type: 'image/png' })
+    await act(async () => { editor.dispatchEvent(figureTransferEvent('paste', [image])) })
+    expect(importer).toHaveBeenCalledWith([image])
+    expect(changed.at(-1)).toContain('![Pasted figure](figures/pasted.png){#fig-pasted-figure}')
   })
 
   it('offers keyboard-accessible move handles and moves a whole section', async () => {

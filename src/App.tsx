@@ -1,9 +1,13 @@
 import { prepareCollaborationCheckpointSource, referencedBibliographyPaths } from './collaborationProjectSnapshot'
 import { createStoredZip } from './zipArchive'
+import * as Y from 'yjs'
+import { createPortableProjectBundle } from './portableProjectBundle'
+import { prepareFigureFiles } from './figureImport'
+import { BROWSER_ASSET_SCOPE_KEY, readBrowserProjectImages, saveBrowserProjectImages } from './browserProjectAssets'
 import { readBrowserPublicationAssets } from './browserPublicationAssets'
 import { preparePublicationCitations } from './publicationCitations'
 import { publicationAssetPaths, preparePublicationAssetsForDocx, type PublicationAsset } from './publicationAssets'
-import { base64ToBytes, sharedImage, publishProjectResources, type ProjectResources } from './sharedEditor/projectResources'
+import { base64ToBytes, sharedImage, publishProjectResources, readProjectResources, PROJECT_RESOURCES_ROOT, MAX_SHARED_IMAGE_BYTES, type ProjectResources, type SharedProjectImage } from './sharedEditor/projectResources'
 import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
@@ -41,6 +45,7 @@ import {
 import { assignCollisionSafeCitekeys, CITATION_INTAKE_MAX_BYTES, previewCitationIntake, type CitationIntakePreview } from './citationIntake'
 import { CrossrefSearchSession, crossrefCandidateToCitationRecord, crossrefDuplicateCitekeys, type CrossrefCandidate } from './crossref'
 import { DEFAULT_ACQUISITION_BIBLIOGRAPHY, canonicalizeAcquisitionRecord, citationRecordToAcquisitionCsl, ensureBibliographyReference, persistedAcquisitionRecord } from './citationAcquisition'
+import { canonicalizeSyncPreview, serializeSyncReferences } from './projectSyncReferences'
 import { createDesktopKernelExecutionTransport } from './kernelExecutionTransport'
 import { extractExecutableCells, isPanelManagedCell, isSetupCell, type ExecutableCell, type ExecutionLanguage } from './executionCells'
 import { ExecutionFreshnessTracker, parseExecutionManifest, serializeExecutionManifest, type CleanRunCertification, type ExecutionCellFreshness, type ExecutionManifest } from './executionFreshness'
@@ -55,7 +60,6 @@ import { discoverRuntimeInventory, healthyKernelsFor, runtimeExecutableForKernel
 import { PortableReviewItems } from './PortableReviewItems'
 import { AlignedReviewRail } from './AlignedReviewRail'
 import { SelectionCommentButton } from './SelectionCommentButton'
-import { GitHistoryPanel } from './GitHistoryPanel'
 import { ProjectChecksDialog, ProjectDiagnostics, prioritizeProjectDiagnostics, type ProjectCheckAction } from './ProjectDiagnostics'
 import { buildReviewQueue } from './reviewQueue'
 import { projectPortableReviewSource } from './reviewProjector'
@@ -69,7 +73,10 @@ import { SubmissionPackageDialog } from './SubmissionPackageDialog'
 import { saveGeneratedFileInBrowser, type GeneratedFileExport } from './fileExport'
 import { InsertBlockDialog, type InsertBlockKind, type InsertBlockRequest } from './InsertBlockDialog'
 import { LinkDialog } from './LinkDialog'
-import { CollaborationDialog } from './CollaborationDialog'
+import { CollaborationDialog, type CollaborationFileService } from './CollaborationDialog'
+import { ProjectFilesWorkspace } from './ProjectFilesWorkspace'
+import { useProjectSynchronization } from './useProjectSynchronization'
+import { SelectiveSyncPanel } from './SelectiveSyncPanel'
 import type { CollaborationCheckpoint, CollaborationClientStatus, CollaborativeEditorBinding } from './sharedEditor'
 import { motionAwareScrollBehavior } from './accessibility'
 import { normalizeProjectRelativePath, projectFilePath } from './projectPaths'
@@ -161,7 +168,7 @@ function executionObjectPresentation(cell: ExecutableCell) {
 }
 
 type SetupActivityStatus = 'running' | 'succeeded' | 'failed'
-type SetupOrigin = 'user' | 'project-open'
+type SetupOrigin = 'user' | 'project-setup'
 
 interface SetupActivity {
   id: string
@@ -236,6 +243,8 @@ function publicationAuthorDraft(author: Partial<PublicationAuthor> = {}, sourceI
 const kernelSelections: Partial<Record<ExecutionLanguage, JupyterKernelProbe>> = {}
 const kernelExecutionManager = createKernelExecutionManager(createDesktopKernelExecutionTransport(desktopHost, (language) => kernelSelections[language]))
 const kernelExecution = createTrustedKernelExecution(desktopHost, kernelExecutionManager)
+
+const kernelConsoleLanguages: ExecutionLanguage[] = ['python', 'r', 'julia']
 
 function initialKernelConsoleStatuses(): KernelConsoleStatuses {
   return { python: 'not-started', r: 'not-started', julia: 'not-started' }
@@ -578,6 +587,7 @@ export interface AppProps {
   saveBeforeLeaveRef?: EditorSaveGuard
   collaborationLaunch?: CollaborationProjectLaunch
   desktopProjectLaunch?: ProjectSnapshot
+  selectedManuscriptPath?: string
   onNavigateHome?: () => void
   initialExperience?: 'complete-example' | 'browser-new'
   startExampleTour?: boolean
@@ -604,7 +614,7 @@ format:
 Start writing here.
 `
 
-function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, onNavigateHome, initialExperience, startExampleTour = false, startCollaborationOnMount = false, browserDocumentLaunch, onOpenLearn, onOpenAiLearn, onOpenLanguages }: AppProps = {}) {
+function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, selectedManuscriptPath, onNavigateHome, initialExperience, startExampleTour = false, startCollaborationOnMount = false, browserDocumentLaunch, onOpenLearn, onOpenAiLearn, onOpenLanguages }: AppProps = {}) {
   const collaborationSession = useOptionalCollaborationSession()
   const collaborativeProject = collaborationLaunch?.projects.find((project) => project.id === collaborationLaunch.projectId)
   const collaborativeInitialSource = collaborationLaunch
@@ -647,7 +657,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const [suggestionMode, setSuggestionMode] = useState(false)
   const [reviewAuthorFilter, setReviewAuthorFilter] = useState('all')
   const [activeReviewId, setActiveReviewId] = useState<string>()
-  const [activeNav, setActiveNav] = useState<'manuscript' | 'review' | 'sources' | 'history'>('manuscript')
+  const [activeNav, setActiveNav] = useState<'manuscript' | 'review' | 'sources'>('manuscript')
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [reviewOptionsOpen, setReviewOptionsOpen] = useState(false)
   const [commentComposerOpen, setCommentComposerOpen] = useState(false)
@@ -690,6 +700,19 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const [saveProblem, setSaveProblem] = useState('')
   const [toast, setToast] = useState('')
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
+  const [projectFilesOpen, setProjectFilesOpen] = useState(false)
+  const [collaborationFileService, setCollaborationFileService] = useState<CollaborationFileService | null>(null)
+  const [localSyncSource, setLocalSyncSource] = useState<string>()
+  const [browserAssetScope, setBrowserAssetScope] = useState(() => initialExperience === 'browser-new' || browserDocumentLaunch
+    ? crypto.randomUUID() : localStorage.getItem(BROWSER_ASSET_SCOPE_KEY) ?? crypto.randomUUID())
+  const [browserProjectImages, setBrowserProjectImages] = useState<SharedProjectImage[]>([])
+  const [browserAssetsLoading, setBrowserAssetsLoading] = useState(true)
+  const [browserAssetsProblem, setBrowserAssetsProblem] = useState('')
+  const figureImportQueueRef = useRef<Promise<unknown>>(Promise.resolve())
+  const figureImportAllowedRef = useRef(false)
+  const browserProjectImagesRef = useRef<SharedProjectImage[]>([])
+  const browserAssetScopeRef = useRef(browserAssetScope)
+  browserAssetScopeRef.current = browserAssetScope
   const [exampleTourOpen, setExampleTourOpen] = useState(startExampleTour)
   const [builtInProject, setBuiltInProject] = useState<'complete-example' | null>(() =>
     initialExperience !== 'browser-new' && localStorage.getItem(BUILT_IN_PROJECT_KEY) === 'complete-example' ? 'complete-example' : null
@@ -713,7 +736,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const [recoveryOpen, setRecoveryOpen] = useState(false)
   const [collaborationOpen, setCollaborationOpen] = useState(Boolean(collaborationLaunch))
   const [startCollaborationOpen, setStartCollaborationOpen] = useState(false)
-  const [desktopProject, setDesktopProject] = useState<ProjectSnapshot | null>(desktopProjectLaunch ?? null)
+  const [desktopProject, setDesktopProject] = useState<ProjectSnapshot | null>(null)
   const [dismissedInitialCollaboration, setDismissedInitialCollaboration] = useState(false)
   const [linkedCollaborationLaunch, setLinkedCollaborationLaunch] = useState<CollaborationProjectLaunch | null>(null)
   const initialExperienceOpenedRef = useRef(false)
@@ -722,6 +745,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const [collaborationSessionActive, setCollaborationSessionActive] = useState(false)
   const [collaborationRole, setCollaborationRole] = useState<WorkspaceRole | null>(null)
   const [collaborativeEditorBinding, setCollaborativeEditorBinding] = useState<CollaborativeEditorBinding | null>(null)
+  const figureCollaborationBindingRef = useRef(collaborativeEditorBinding)
+  figureCollaborationBindingRef.current = collaborativeEditorBinding
   const [collaborationUncheckpointed, setCollaborationUncheckpointed] = useState(false)
   const activeCollaborationLaunch = linkedCollaborationLaunch ?? (!dismissedInitialCollaboration ? collaborationLaunch : undefined)
   const [filename, setFilename] = useState(initialProjectMeta.filename)
@@ -757,8 +782,27 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const [citationQuery, setCitationQuery] = useState('')
   const [citationAcquisitionState, setCitationAcquisitionState] = useState<'idle' | 'saving'>('idle')
   const [desktopSession, setDesktopSession] = useState<DesktopSession | null>(null)
+  const assetResolutionRevision = useMemo(() => ({ browserProjectImages, sharedImages: sharedResources.images, root: desktopSession?.root, builtInProject }), [browserProjectImages, sharedResources.images, desktopSession?.root, builtInProject])
+  useEffect(() => {
+    let cancelled = false
+    if (collaborationSessionActive && !activeCollaborationLaunch && !desktopSession) { setBrowserAssetsLoading(false); return }
+    browserProjectImagesRef.current = []
+    setBrowserProjectImages([])
+    if (desktopSession || activeCollaborationLaunch) { setBrowserAssetsLoading(false); return }
+    setBrowserAssetsLoading(true)
+    setBrowserAssetsProblem('')
+    void readBrowserProjectImages(browserAssetScope).then((images) => {
+      if (cancelled) return
+      browserProjectImagesRef.current = images
+      setBrowserProjectImages(images)
+    }).catch((error) => { if (!cancelled) { setBrowserAssetsProblem(readableError(error)); setToast(`Project figures could not be restored: ${readableError(error)}. Reload before adding figures.`) } })
+      .finally(() => { if (!cancelled) setBrowserAssetsLoading(false) })
+    return () => { cancelled = true }
+  }, [browserAssetScope, desktopSession?.root, activeCollaborationLaunch, collaborationSessionActive])
   const [draftRevision, setDraftRevision] = useState(0)
   const [projectBusy, setProjectBusy] = useState(false)
+  const [openProblem, setOpenProblem] = useState('')
+  const [awaitingDesktopLaunch, setAwaitingDesktopLaunch] = useState(Boolean(desktopProjectLaunch))
   const [createProjectOpen, setCreateProjectOpen] = useState(false)
   const [newProjectParent, setNewProjectParent] = useState('')
   const [newProjectName, setNewProjectName] = useState('')
@@ -809,7 +853,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const [executionTrustOpen, setExecutionTrustOpen] = useState(false)
   const [executionTrustWarning, setExecutionTrustWarning] = useState('')
   const [executionTrustBusy, setExecutionTrustBusy] = useState(false)
-  const [executionTrustPurpose, setExecutionTrustPurpose] = useState<'run' | 'packages' | 'format' | 'formatter-setup' | 'console' | 'kernel-setup' | 'project-open'>('run')
+  const [executionTrustPurpose, setExecutionTrustPurpose] = useState<'run' | 'packages' | 'format' | 'formatter-setup' | 'console' | 'kernel-setup' | 'project-setup'>('run')
   const [kernelSetupLanguage, setKernelSetupLanguage] = useState<ExecutionLanguage>()
   const [kernelSetupBusy, setKernelSetupBusy] = useState(false)
   const [formatterSetupLanguage, setFormatterSetupLanguage] = useState<Exclude<ExecutionLanguage, 'julia'>>()
@@ -860,9 +904,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const pendingExecutionCommandRef = useRef<ExecutionCommand | undefined>(undefined)
   const pendingConsoleRef = useRef<{ language: ExecutionLanguage; code: string; resolve: (result: NormalizedExecutionResult) => void; reject: (error: Error) => void } | undefined>(undefined)
   const setupActivityIdRef = useRef<string | undefined>(undefined)
-  const automaticSetupSignatureRef = useRef('')
   const pendingSetupLanguagesRef = useRef<ExecutionLanguage[]>([])
-  const automaticSetupRunningRef = useRef(false)
+  const projectSetupRunningRef = useRef(false)
   const executionActiveCellRef = useRef<string | undefined>(undefined)
   const executionActiveLanguageRef = useRef<ExecutionLanguage | undefined>(undefined)
   const kernelCellFailureSequenceRef = useRef(0)
@@ -917,6 +960,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
 
   const activeCollaborationCapabilities = collaborationRole ? workspaceRoleCapabilities(collaborationRole) : null
   const canEditManuscript = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.edit)
+  figureImportAllowedRef.current = canEditManuscript
   const canCommentReview = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.comment)
   const canSuggestReview = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.suggest)
   const canDecideReview = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.decide)
@@ -932,7 +976,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
 
   const writeRecoverySnapshot = (nextDraft: DraftState, nextFilename: string, source: string, savedAt?: string) => {
     try {
-      const next = saveRecoverySnapshot(localStorage, nextDraft, nextFilename, source, savedAt)
+      const next = saveRecoverySnapshot(localStorage, nextDraft, nextFilename, source, savedAt, !desktopSessionRef.current && !collaborationSessionActiveRef.current ? browserAssetScopeRef.current : undefined)
       setRecoveries(next)
       return next
     } catch (error) {
@@ -1342,6 +1386,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       localStorage.setItem(LOCAL_DRAFT_KEY, JSON.stringify({ ...draftRef.current, lastSavedAt: new Date().toISOString() }))
       localStorage.setItem(STRUCTURED_SOURCE_KEY, manuscriptSourceRef.current)
       localStorage.setItem(STRUCTURED_MODE_KEY, String(structuredMode))
+      if (!desktopSessionRef.current && !collaborationSessionActiveRef.current) localStorage.setItem(BROWSER_ASSET_SCOPE_KEY, browserAssetScopeRef.current)
       if (!desktopSessionRef.current) setSaveState('saved')
       return true
     } catch (error) {
@@ -1454,7 +1499,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     let disposed = false
 
     const checkExternalStatus = async () => {
-      if (disposed || externalCheckRunningRef.current || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current) return
+      if (disposed || collaborationSessionActiveRef.current || externalCheckRunningRef.current || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current) return
       externalCheckRunningRef.current = true
       try {
         const expected = desktopSessionRef.current
@@ -1470,7 +1515,12 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
           replaceDesktopSession(next)
           setFilename(status.path.split('/').at(-1) ?? status.path)
           setToast(`Manuscript moved in the project · ${status.path}`)
-          void desktopHost.setMainDocument(current.root, status.path).catch((error) => {
+          void desktopHost.setMainDocument(current.root, status.path, current.path).then((project) => {
+            if (desktopSessionRef.current?.root === current.root && desktopSessionRef.current.path === status.path) {
+              setDesktopProject(project)
+              rememberLocalProject(localStorage, project)
+            }
+          }).catch((error) => {
             setToast(normaliseHostFailure(error).message)
           })
           return
@@ -1735,6 +1785,11 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (projectBusy || (awaitingDesktopLaunch && !pendingProject)) return
+      if (pendingProject) {
+        if (event.key === 'Escape') closeManuscriptPicker()
+        return
+      }
       const target = event.target as HTMLElement | null
       const nativeTextField = target?.tagName === 'INPUT' || target?.isContentEditable
       const modifier = event.metaKey || event.ctrlKey
@@ -1767,7 +1822,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
         setProjectMenuOpen(false)
         setCreateProjectOpen(false)
         setLocalExecutionCopyOpen(false)
-        setPendingProject(null)
         setEnvironmentOpen(false)
         setLinkDialogOpen(false)
         if (!juliaPackageBusy) setJuliaPackagesOpen(false)
@@ -1777,17 +1831,34 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
         setSourceOpen(false)
         setSourceEditing(false)
         setExecutionWorkspaceOpen(false)
+        setProjectFilesOpen(false)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [canRedo, canUndo, draft, executionTrustBusy, juliaPackageBusy])
+  }, [canRedo, canUndo, draft, executionTrustBusy, juliaPackageBusy, pendingProject, projectBusy, awaitingDesktopLaunch])
 
   useEffect(() => {
     if (!commandOpen) return
     setCommandQuery('')
     setCommandActiveIndex(0)
   }, [commandOpen])
+
+  useEffect(() => {
+    if (!projectFilesOpen) return
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const dialog = document.querySelector<HTMLElement>('.project-files-workspace-dialog')
+    const controls = () => [...(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, a[href]') ?? [])].filter((element) => !element.closest('details:not([open])') || element.tagName === 'SUMMARY')
+    const frame = requestAnimationFrame(() => (dialog?.querySelector<HTMLInputElement>('input[type="search"]') ?? controls()[0])?.focus())
+    const trap = (event: KeyboardEvent) => {
+      if (event.key !== 'Tab') return
+      const elements = controls()
+      const target = event.shiftKey ? elements.at(-1) : elements[0]
+      if (target && (event.shiftKey && document.activeElement === elements[0] || !event.shiftKey && document.activeElement === elements.at(-1))) { event.preventDefault(); target.focus() }
+    }
+    dialog?.addEventListener('keydown', trap)
+    return () => { cancelAnimationFrame(frame); dialog?.removeEventListener('keydown', trap); if (previous?.isConnected) previous.focus() }
+  }, [projectFilesOpen])
 
   useEffect(() => {
     if (!focusMode) return
@@ -1879,7 +1950,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const codeCellRunAboveEnabled = Object.fromEntries(executableCells.flatMap((cell, index) => (
     index === 0
       ? []
-      : [[cell.id, !runtimeInventory || executableCells.slice(0, index).every((candidate) => executionEnvironmentAvailable(candidate))]]
+      : [[cell.id, !executionPlanBusy]]
   )))
   const executionViews = buildExecutionAvailability({
     cells: executableCells,
@@ -1901,10 +1972,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const unavailableSelectedKernelName = selectedKernelNames[selectedEnvironmentLanguage] && !selectedEnvironmentKernel
     ? selectedKernelNames[selectedEnvironmentLanguage]
     : undefined
-  const configuredConsoleLanguages = (['python', 'r', 'julia'] as const).filter((language) =>
-    Boolean(selectedKernelNames[language]) || executableCells.some((cell) => cell.language === language),
-  )
-  if (!configuredConsoleLanguages.length) configuredConsoleLanguages.push(selectedEnvironmentLanguage)
   const terminalLauncherLanguage = kernelCellFailure?.language ?? primaryCell?.language ?? selectedEnvironmentLanguage
   const terminalKernelStatus = kernelConsoleStatuses[terminalLauncherLanguage]
   const terminalLauncherStatus = setupActivity?.status === 'running'
@@ -2158,6 +2225,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   }
 
   const checkpointCollaboration = async (checkpoint: CollaborationCheckpoint) => {
+    if (selectiveSync.active && (!selectiveSync.snapshot || selectiveSync.snapshot.busy || selectiveSync.snapshot.stale
+      || selectiveSync.snapshot.rows.some((row) => row.tracked && ['conflict', 'local-missing', 'remote-missing', 'error', 'too-large'].includes(row.state)))) {
+      throw new Error('Review selective synchronization in Files before writing a project checkpoint. Resolve conflicting copies or stop following those paths first.')
+    }
     const referencedImages = new Set(publicationAssetPaths(checkpoint.source))
     const checkpointImages = sharedResources.images.filter((image) => referencedImages.has(image.path))
     const parsed = parsePortableDocument(checkpoint.source, initialDraft)
@@ -2235,56 +2306,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     await operation
   }
 
-  const restoreGitCheckpoint = async (hash: string, paths: string[]) => {
-    const session = desktopSessionRef.current
-    if (!session) throw new Error('The desktop project is no longer open.')
-    if (collaborationSessionActiveRef.current) throw new Error('Create a portable collaboration checkpoint before restoring local Git history.')
-    if (desktopSaveBlockedRef.current) throw new Error(saveProblem || 'Resolve the external manuscript change before restoring Git history.')
-
-    const operation = desktopSaveQueueRef.current.then(async () => {
-      let current = desktopSessionRef.current
-      if (!current || current.root !== session.root) throw new Error('The desktop project changed before restoration began.')
-      const restoresOpenManuscript = paths.includes(current.path)
-      if (restoresOpenManuscript) {
-        setSaveState('saving')
-        writeRecoverySnapshot(draft, filename, manuscriptSourceRef.current)
-        try {
-          const saved = await desktopHost.saveDocument({
-            root: current.root,
-            path: current.path,
-            content: manuscriptSourceRef.current,
-            expectedHash: current.hash,
-          })
-          current = { ...current, hash: saved.hash, savedRevision: draftRevisionRef.current }
-          replaceDesktopSession(current)
-          setSaveState('saved')
-        } catch (error) {
-          const failure = normaliseHostFailure(error)
-          if (failure.kind === 'conflict') preserveDesktopConflict(failure.message)
-          else {
-            setSaveProblem(failure.message)
-            setSaveState('error')
-          }
-          throw error
-        }
-      }
-
-      await desktopHost.gitRestoreCheckpoint({ root: current.root, hash, paths })
-      if (!restoresOpenManuscript) return
-      const document = await desktopHost.readDocument(current.root, current.path)
-      const parsed = parsePortableDocument(document.content, initialDraft)
-      replaceManuscriptSource(document.content)
-      resetDraftHistory(parsed.draft)
-      resetDraftRevision()
-      replaceDesktopSession({ ...current, hash: document.hash, savedRevision: 0 })
-      setDiagnostics(parsed.diagnostics)
-      setSaveProblem('')
-      setSaveState('saved')
-    })
-    desktopSaveQueueRef.current = operation.catch(() => undefined)
-    await operation
-  }
-
   const scrollTo = (id: string) => {
     document.getElementById(id)?.scrollIntoView({ behavior: motionAwareScrollBehavior(), block: 'start' })
   }
@@ -2352,6 +2373,47 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     setInsertBlockKind(kind)
   }
 
+  const importFigureFiles = (files: File[]) => {
+    const session = desktopSessionRef.current
+    const binding = collaborativeEditorBinding
+    const scope = browserAssetScopeRef.current
+    const operation = figureImportQueueRef.current.catch(() => undefined).then(async () => {
+      if (!canEditManuscript) throw new Error('Your role does not allow inserting figures.')
+      if (!session && !binding && browserAssetsLoading) throw new Error('Project figures are still loading. Try again in a moment.')
+      if (!session && !binding && browserAssetsProblem) throw new Error('Existing project figures could not be restored. Reload before adding figures so saved images are preserved.')
+      const prepared = await prepareFigureFiles(files)
+      const unchanged = () => desktopSessionRef.current?.root === session?.root && desktopSessionRef.current?.path === session?.path && browserAssetScopeRef.current === scope && figureCollaborationBindingRef.current === binding && figureImportAllowedRef.current
+      if (!unchanged()) throw new Error('The project changed before the figures could be added. Drop them into the current manuscript again.')
+      const images = prepared.map((file) => file.image)
+      // Validate the complete online update before creating any local files.
+      if (binding) {
+        const staged = new Y.Doc()
+        try {
+          Y.applyUpdate(staged, Y.encodeStateAsUpdate(binding.document))
+          publishProjectResources(staged, { images, citations: [] })
+        } finally { staged.destroy() }
+      }
+      if (session) await desktopHost.seedProjectFiles(session.root, prepared.map((file) => ({ path: file.path, bytes: [...file.bytes] })))
+      else if (!binding) {
+        const next = await saveBrowserProjectImages(scope, images)
+        if (!unchanged()) throw new Error('The manuscript changed while saving its figures. The saved files remain in the previous project.')
+        browserProjectImagesRef.current = next
+        setBrowserProjectImages(next)
+        if (!saveBrowserCopy()) throw new Error('The browser could not save this manuscript. The imported image is retained; free browser storage before inserting it.')
+      }
+      if (binding) {
+        if (!unchanged() || figureCollaborationBindingRef.current !== binding) throw new Error('The collaboration session changed while adding figures.')
+        publishProjectResources(binding.document, { images, citations: [] })
+        setSharedResources((current) => ({ ...current, images: [...new Map([...current.images, ...images].map((image) => [image.path, image])).values()] }))
+      }
+      if (!unchanged()) throw new Error('The project changed while saving the figures. The files remain in the previous project.')
+      setToast(`${prepared.length === 1 ? 'Figure added' : `${prepared.length} figures added`} · ${binding ? 'shared with this manuscript' : session ? 'saved in figures/' : 'saved in this browser'}`)
+      return prepared.map((file) => ({ source: file.path, alt: file.alt }))
+    })
+    figureImportQueueRef.current = operation
+    return operation
+  }
+
   const applyBlockStyle = (style: string) => {
     const commands: Record<string, { label: string; run: (editor: StructuredManuscriptEditorHandle) => boolean }> = {
       paragraph: { label: 'Body text', run: (editor) => editor.setParagraph() },
@@ -2385,6 +2447,29 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     runStructuredCommand((editor) => editor.setLink(href, title), 'Add link')
   )
 
+  const insertProjectFigure = async (path: string, alt?: string, caption?: string, label?: string) => {
+    const session = desktopSessionRef.current
+    const binding = figureCollaborationBindingRef.current
+    try {
+      if (!figureImportAllowedRef.current) return false
+      if (binding && !sharedResources.images.some((image) => image.path === path)) {
+        let image = browserProjectImagesRef.current.find((candidate) => candidate.path === path)
+        if (!image && session) {
+          const [asset] = await desktopHost.readProjectAssets(session.root, [path])
+          if (asset) image = sharedImage(path, Uint8Array.from(asset.bytes))
+        }
+        if (!image) throw new Error('Choose an available project image so it can be shared with the manuscript.')
+        if (!figureImportAllowedRef.current || figureCollaborationBindingRef.current !== binding || desktopSessionRef.current?.root !== session?.root || desktopSessionRef.current?.path !== session?.path) return false
+        publishProjectResources(binding.document, { images: [image], citations: [] })
+        setSharedResources((current) => ({ ...current, images: [...current.images.filter((candidate) => candidate.path !== path), image!] }))
+      }
+      const description = alt ?? path.split('/').at(-1)?.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ') ?? 'Figure'
+      const inserted = runStructuredCommand((editor) => editor.insertFigure(path, description, caption, label), 'Insert figure')
+      if (inserted) setToast(binding ? 'Figure inserted and shared with the manuscript' : 'Figure inserted · numbering follows the manuscript')
+      return inserted
+    } catch (error) { setToast(`The figure could not be inserted: ${readableError(error)}`); return false }
+  }
+
   const insertStructuredRequest = (request: InsertBlockRequest) => {
     if (request.kind === 'section') {
       const inserted = runStructuredCommand((editor) => editor.insertHeading(request.title, request.level, request.label), 'Add section')
@@ -2392,9 +2477,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       return inserted
     }
     if (request.kind === 'figure') {
-      const inserted = runStructuredCommand((editor) => editor.insertFigure(request.source, request.alt, request.caption, request.label), 'Insert figure')
-      if (inserted) setToast('Figure inserted · portable project path retained')
-      return inserted
+      return insertProjectFigure(request.source, request.alt, request.caption, request.label)
     }
     if (request.kind === 'table') {
       const inserted = runStructuredCommand((editor) => editor.insertTable(request.rows, request.columns, request.caption, request.label), 'Insert table')
@@ -2652,11 +2735,11 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
 
   const prepareTrustedProjectLanguages = async (languages: ExecutionLanguage[]) => {
     const session = desktopSessionRef.current
-    if (!session || automaticSetupRunningRef.current || languages.length === 0) return
-    automaticSetupRunningRef.current = true
+    if (!session || projectSetupRunningRef.current || languages.length === 0) return false
+    projectSetupRunningRef.current = true
     try {
       let inventory = await discoverExecutionEnvironments()
-      if (!inventory || desktopSessionRef.current?.root !== session.root) return
+      if (!inventory || desktopSessionRef.current?.root !== session.root) return false
 
       for (const language of languages) {
         const healthyKernels = healthyKernelsFor(inventory, language)
@@ -2668,13 +2751,13 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
             'Checking the Julia project',
             'Inspecting Project.toml, Manifest.toml, and the active Julia environment…',
             'julia',
-            'project-open',
+            'project-setup',
           )
           try {
             const environment = await desktopHost.listJuliaPackages(session.root, taskId)
             if (desktopSessionRef.current?.root !== session.root) {
               finishSetupActivity(taskId, 'failed', 'The project changed before the Julia environment check finished.')
-              return
+              return false
             }
             setJuliaEnvironment(environment)
             const hasProjectIJulia = environment.packages.some((dependency) => dependency.name.toLocaleLowerCase() === 'ijulia')
@@ -2688,20 +2771,25 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
             ready = false
           }
         }
-        if (ready) continue
+        if (ready) {
+          kernelSelections[language] = kernelSelections[language]
+            ?? healthyKernels.find((kernel) => kernel.displayName.includes('DraftMatter'))
+            ?? healthyKernels[0]
+          continue
+        }
 
         const runtime = inventory.executables[language]
         if ((runtime.health !== 'available' || !runtime.executable) && language !== 'python') {
           setSelectedEnvironmentLanguage(language)
           setExecutionProblem(runtimeInstallationGuidance(language))
           setEnvironmentOpen(true)
-          return
+          return false
         }
         setSelectedEnvironmentLanguage(language)
-        const updated = await setupKernelIntegrationTrusted(language, inventory, 'project-open')
+        const updated = await setupKernelIntegrationTrusted(language, inventory, 'project-setup')
         if (!updated) {
           setEnvironmentOpen(true)
-          return
+          return false
         }
         inventory = updated
       }
@@ -2709,47 +2797,51 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
         const kernel = kernelSelections[language]
         return kernel ? [[language, kernel.name]] : []
       }))
-      if (await persistExecutionPreferences(detectedKernels)) setExecutionProblem('')
+      if (desktopSessionRef.current?.root !== session.root || !await persistExecutionPreferences(detectedKernels)) return false
+      setSelectedKernelNames(detectedKernels)
+      setExecutionProblem('')
       setToast(`${languages.map(runtimeName).join(', ')} ${languages.length === 1 ? 'environment is' : 'environments are'} ready`)
+      return true
     } finally {
-      automaticSetupRunningRef.current = false
+      projectSetupRunningRef.current = false
     }
   }
 
-  const ensureProjectLanguageSetup = async (languages: ExecutionLanguage[]) => {
+  const ensureProjectLanguageSetup = async (languages: ExecutionLanguage[], command?: ExecutionCommand) => {
     const session = desktopSessionRef.current
-    if (!session || languages.length === 0) return
+    if (!session || languages.length === 0 || projectSetupRunningRef.current) return
+    pendingExecutionCommandRef.current = command
     try {
       let trust = await desktopHost.executionTrustStatus(session.root)
       if (!trust.trusted && trustedProjectRoots(localStorage).has(session.root)) {
         trust = await desktopHost.trustProjectForSession(session.root, EXECUTION_TRUST_ACKNOWLEDGEMENT)
       }
+      if (desktopSessionRef.current?.root !== session.root || desktopSessionRef.current.path !== session.path) {
+        pendingExecutionCommandRef.current = undefined
+        return
+      }
       if (!trust.trusted) {
         pendingSetupLanguagesRef.current = languages
-        setExecutionTrustPurpose('project-open')
-        setExecutionTrustWarning(`${trust.warning} DraftMatter detected ${languages.map(runtimeName).join(', ')} code and can prepare the required project environments now.`)
+        setExecutionTrustPurpose('project-setup')
+        const setupDetails = languages.map((language) => language === 'python'
+          ? 'Python: use an existing installation or download a managed Python, then prepare this project’s packages.'
+          : language === 'r'
+            ? 'R: use your installed R and restore this project’s packages in an isolated library.'
+            : 'Julia: use your installed Julia and restore this project’s packages.').join(' ')
+        setExecutionTrustWarning(`${trust.warning} ${setupDetails} ${command ? 'When preparation finishes, DraftMatter will run the computation you requested.' : 'Preparation does not run manuscript computations.'}`)
         setExecutionTrustOpen(true)
         return
       }
-      await prepareTrustedProjectLanguages(languages)
+      const ready = await prepareTrustedProjectLanguages(languages)
+      pendingExecutionCommandRef.current = undefined
+      if (ready && command && desktopSessionRef.current?.root === session.root && desktopSessionRef.current.path === session.path) await runExecutionCommandTrusted(command)
     } catch (error) {
+      pendingExecutionCommandRef.current = undefined
       const message = normaliseHostFailure(error).message
       setExecutionProblem(message)
       setToast(message)
     }
   }
-
-  const executableLanguageSignature = [...new Set(executableCells.map((cell) => cell.language))].sort().join(',')
-  useEffect(() => {
-    const root = desktopSession?.root
-    if (!root || !executableLanguageSignature) return
-    const signature = `${root}\u0000${executableLanguageSignature}`
-    if (automaticSetupSignatureRef.current === signature) return
-    automaticSetupSignatureRef.current = signature
-    const languages = executableLanguageSignature.split(',') as ExecutionLanguage[]
-    const timeout = window.setTimeout(() => void ensureProjectLanguageSetup(languages), 250)
-    return () => window.clearTimeout(timeout)
-  }, [desktopSession?.root, executableLanguageSignature])
 
   const resetKernelSessions = async () => {
     executionAbortRef.current?.abort()
@@ -3060,6 +3152,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const requestExecution = async (command: ExecutionCommand) => {
     setCommandOpen(false)
     const session = desktopSessionRef.current
+    if (projectSetupRunningRef.current || executionPlanBusyRef.current) return
     if (!desktopHost.available || !session) {
       setToast('Code execution is available only in an opened desktop project')
       return
@@ -3076,14 +3169,12 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       return
     }
     const inventory = runtimeInventory ?? await discoverExecutionEnvironments()
-    if (!inventory) return
+    if (!inventory || desktopSessionRef.current?.root !== session.root || desktopSessionRef.current.path !== session.path) return
     const unavailableCells = targets.filter((cell) => !executionEnvironmentAvailable(cell, inventory))
     const unavailable = [...new Set(unavailableCells.map((cell) => cell.language))]
     if (unavailable.length) {
-      const details = unavailableCells.map((cell) => `No healthy ${runtimeName(cell.language)} Jupyter kernel is selected.`).join(' ')
       setSelectedEnvironmentLanguage(unavailable[0])
-      setEnvironmentOpen(true)
-      setExecutionProblem(details || `${unavailable.map(runtimeName).join(', ')} execution environment${unavailable.length === 1 ? ' is' : 's are'} unavailable.`)
+      await ensureProjectLanguageSetup(unavailable, command)
       return
     }
     try {
@@ -3407,7 +3498,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     }
     if (executionTrustPurpose === 'kernel-setup') setKernelSetupLanguage(undefined)
     if (executionTrustPurpose === 'formatter-setup') setFormatterSetupLanguage(undefined)
-    if (executionTrustPurpose === 'project-open') pendingSetupLanguagesRef.current = []
+    if (executionTrustPurpose === 'project-setup') pendingSetupLanguagesRef.current = []
+    pendingExecutionCommandRef.current = undefined
     setExecutionTrustOpen(false)
   }
 
@@ -3418,12 +3510,20 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     try {
       const trust = await desktopHost.trustProjectForSession(session.root, EXECUTION_TRUST_ACKNOWLEDGEMENT)
       if (!trust.trusted) throw new Error('The project was not trusted for execution.')
+      if (desktopSessionRef.current?.root !== session.root || desktopSessionRef.current.path !== session.path) {
+        pendingSetupLanguagesRef.current = []
+        pendingExecutionCommandRef.current = undefined
+        return
+      }
       rememberProjectTrust(localStorage, session.root)
       setExecutionTrustOpen(false)
-      if (executionTrustPurpose === 'project-open') {
+      if (executionTrustPurpose === 'project-setup') {
         const languages = pendingSetupLanguagesRef.current
+        const command = pendingExecutionCommandRef.current
         pendingSetupLanguagesRef.current = []
-        await prepareTrustedProjectLanguages(languages)
+        pendingExecutionCommandRef.current = undefined
+        const ready = await prepareTrustedProjectLanguages(languages)
+        if (ready && command && desktopSessionRef.current?.root === session.root && desktopSessionRef.current.path === session.path) await runExecutionCommandTrusted(command)
         return
       }
       if (executionTrustPurpose === 'packages') {
@@ -3465,6 +3565,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       if (command) await runExecutionCommandTrusted(command)
     } catch (error) {
       const message = normaliseHostFailure(error).message
+      pendingExecutionCommandRef.current = undefined
       if (executionTrustPurpose === 'console') {
         pendingConsoleRef.current?.reject(error instanceof Error ? error : new Error(message))
         pendingConsoleRef.current = undefined
@@ -3632,6 +3733,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   }
 
   const download = (kind: 'reviewed' | 'final' | 'original' | 'report') => {
+    if (kind === 'reviewed' && (builtInProject === 'complete-example' || browserProjectImages.length || sharedResources.images.length)) {
+      void downloadProjectCopy()
+      return
+    }
     const base = filename.replace(/\.(qmd|md)$/i, '')
     if (kind === 'report') {
       queueFileExport({
@@ -3677,6 +3782,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       return assets.map((asset) => ({ path: asset.path, bytes: Uint8Array.from(asset.bytes) }))
     }
     const known = paths.flatMap((path) => {
+      const browser = browserProjectImages.find((image) => image.path === path)
+      if (browser) return [{ path, bytes: base64ToBytes(browser.base64), mimeType: browser.mimeType }]
       const shared = sharedResources.images.find((image) => image.path === path)
       if (shared) return [{ path, bytes: base64ToBytes(shared.base64), mimeType: shared.mimeType }]
       if (path === 'figures/generated/fig-canopy.svg' && !collaborationLaunch) return [{ path, bytes: new TextEncoder().encode(sampleFigure), mimeType: 'image/svg+xml' }]
@@ -3690,6 +3797,27 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const loadSharedProjectResources = async (preferLocal = false): Promise<ProjectResources> => {
     const assets = await readPublicationAssets(manuscriptSource, preferLocal)
     return { images: assets.map((asset) => sharedImage(asset.path, asset.bytes)), citations }
+  }
+
+  const downloadProjectCopy = async () => {
+    try {
+      const files = new Map<string, string | Uint8Array>()
+      if (builtInProject === 'complete-example') for (const file of completeExampleProjectFiles) files.set(file.path, file.content)
+      for (const image of [...browserProjectImages, ...sharedResources.images]) files.set(image.path, base64ToBytes(image.base64))
+      for (const asset of await readPublicationAssets(manuscriptSource)) files.set(asset.path, asset.bytes)
+      const bibliography = citations.length ? {
+        path: 'references.json',
+        content: JSON.stringify(citations.map((record) => citationRecordToAcquisitionCsl(record, 'references.json')), null, 2) + '\n',
+      } : undefined
+      const source = bibliography ? prepareCollaborationCheckpointSource(manuscriptSource, citations, bibliography.path) : manuscriptSource
+      queueFileExport({
+        suggestedName: `${filename.replace(/\.(qmd|md)$/i, '')}.project.zip`,
+        bytes: createPortableProjectBundle({ projectName, manuscriptPath: filename, source, files: [...files].map(([path, content]) => ({ path, content })), bibliography, citationStyle, citationLocale }),
+        mimeType: 'application/zip',
+        formatLabel: 'project with figures and references',
+        successMessage: 'Project copy downloaded · extract the ZIP and open its folder in DraftMatter desktop',
+      })
+    } catch (error) { setToast(`The project copy could not be prepared: ${readableError(error)}`) }
   }
   const applySharedProjectResources = (resources: ProjectResources) => {
     setSharedResources(resources)
@@ -3937,6 +4065,9 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       return
     }
     replaceDesktopSession(null)
+    setDesktopProject(null)
+    browserAssetScopeRef.current = crypto.randomUUID()
+    setBrowserAssetScope(browserAssetScopeRef.current)
     setSharedResources({ images: [], citations: [] })
     setDismissedInitialCollaboration(true)
     setLinkedCollaborationLaunch(null)
@@ -4031,13 +4162,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
 
   const applyDesktopProject = async (project: ProjectSnapshot, announce = true, selectedPath?: string, remember = true, reloadDisk = false) => {
     if (liveDocumentSwitchBlocked()) return false
-    if (!reloadDisk && (sourceEditing || draftRevisionRef.current !== 0) && !await flushDraftBeforeLeave()) return false
-    const previousRevision = draftRevisionRef.current
-    automaticSetupSignatureRef.current = ''
-    pendingSetupLanguagesRef.current = []
     const mainPath = resolveMainDocument(project, selectedPath)
     if (!mainPath) {
-      if (project.documents.length > 1 && !selectedPath) {
+      if (selectedPath !== undefined) throw new Error(`The selected manuscript is unavailable in this folder: ${selectedPath}`)
+      if (project.documents.length > 1) {
         setPendingProject({ project, announce })
         setProjectMenuOpen(false)
         return
@@ -4045,6 +4173,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       throw new Error('This folder does not contain a Markdown or Quarto manuscript.')
     }
 
+    if (!reloadDisk && (desktopSessionRef.current || sourceEditing || draftRevisionRef.current !== 0) && !await flushDraftBeforeLeave()) return false
+    const previousRevision = draftRevisionRef.current
     const document = await desktopHost.readDocument(project.root, mainPath)
     let citedBibliographies: string[] = []
     try { citedBibliographies = referencedBibliographyPaths(document.content, mainPath) } catch { /* Unsupported source remains editable; checkpoint preparation reports its precise diagnostic. */ }
@@ -4058,8 +4188,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       desktopHost.readCitationCache(project.root),
       desktopHost.readExecutionManifests(project.root).catch(() => []),
     ])
-    if (mainPath !== project.config.mainDocument) await desktopHost.setMainDocument(project.root, mainPath)
-    const parsed = parsePortableDocument(document.content, initialDraft)
+    const displayName = mainPath.split('/').at(-1) ?? mainPath
+    const parsed = parsePortableDocument(document.content, { ...initialDraft, title: displayName })
     const manifestResults = manifestSnapshots.map((snapshot) => ({ snapshot, ...parseExecutionManifest(snapshot.content) }))
     const validManifests = manifestResults.flatMap(({ manifest }) => manifest ? [manifest] : [])
     const executionTracker = await ExecutionFreshnessTracker.create(parsed.executableCells, validManifests)
@@ -4092,12 +4222,24 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       ? parseCitationLock(lockSnapshot.content)
       : { lock: buildCitationLock([]), diagnostics: [] }
     const projectLock = buildCitationLock(projectCitations.filter((record) => record.source !== 'sample'), lockResult.lock)
-    const displayName = mainPath.split('/').at(-1) ?? mainPath
     await resetKernelSessions()
     if (!reloadDisk && draftRevisionRef.current !== previousRevision) {
       setToast('The manuscript changed while opening the project. Open it again after finishing your edit.')
       return false
     }
+    if (selectedPath !== undefined || mainPath !== project.config.mainDocument) project = await desktopHost.setMainDocument(project.root, mainPath)
+    pendingSetupLanguagesRef.current = []
+    if (desktopSessionRef.current?.root !== project.root || desktopSessionRef.current.path !== mainPath) {
+      setOutlineQuery('')
+      setStructuredOutline([])
+      setActiveOutlineId(undefined)
+    }
+    setSourceEditing(false)
+    setSourceOpen(false)
+    setStructuredCitationSelection(null)
+    setCitationOpen(false)
+    setStructuredReviewSelection(null)
+    setActiveReviewId(undefined)
     setSelectedKernelNames(executionKernelNamesFromProject(project.config.execution))
     setSelectedEnvironmentPaths(Object.fromEntries((['python', 'r', 'julia'] as const).flatMap((language) => {
       const environment = project.config.execution?.[language]?.environment
@@ -4147,6 +4289,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     setLinkedCollaborationLaunch(null)
     replaceDesktopSession({ root: project.root, path: mainPath, hash: document.hash, savedRevision: 0 })
     setDesktopProject(project)
+    setAwaitingDesktopLaunch(false)
     replaceManuscriptSource(document.content)
     setStructuredMode(true)
     resetDraftHistory(openedDraft)
@@ -4182,12 +4325,13 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   useEffect(() => {
     if (!desktopProjectLaunch || desktopProjectOpenedRef.current === desktopProjectLaunch.root) return
     desktopProjectOpenedRef.current = desktopProjectLaunch.root
-    void applyDesktopProject(desktopProjectLaunch, false).catch((error) => {
-      setToast(`Could not open the local project · ${readableError(error)}`)
-    })
+    setProjectBusy(true)
+    void applyDesktopProject(desktopProjectLaunch, false, selectedManuscriptPath).catch((error) => {
+      setOpenProblem(normaliseHostFailure(error).message)
+    }).finally(() => setProjectBusy(false))
   // This route-owned project is opened once; applyDesktopProject owns subsequent editor state.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [desktopProjectLaunch])
+  }, [desktopProjectLaunch, selectedManuscriptPath])
 
   useEffect(() => {
     if (!startCollaborationOnMount || !desktopProject || desktopProject.config.collaboration) return
@@ -4427,8 +4571,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
         bytes: [...encoder.encode(file.content)],
       })))
     }
-    if (sharedResources.images.length) {
-      await desktopHost.seedProjectFiles(project.root, sharedResources.images.map((image) => ({ path: image.path, bytes: [...base64ToBytes(image.base64)] })))
+    const copiedImages = [...new Map([...browserProjectImages, ...sharedResources.images].map((image) => [image.path, image])).values()]
+      .filter((image) => builtInProject !== 'complete-example' || !completeExampleProjectFiles.some((file) => file.path === image.path))
+    if (copiedImages.length) {
+      await desktopHost.seedProjectFiles(project.root, copiedImages.map((image) => ({ path: image.path, bytes: [...base64ToBytes(image.base64)] })))
     }
     if (activeCollaborationLaunch) {
       await desktopHost.setCollaborationLink(project.root, {
@@ -4469,13 +4615,36 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     }
   }
 
-  const chooseMainDocument = async (path: string) => {
-    if (!pendingProject || projectBusy) return
+  const closeManuscriptPicker = () => {
+    if (projectBusy) return
+    setPendingProject(null)
+    setOpenProblem('')
+    if (awaitingDesktopLaunch) onNavigateHome?.()
+  }
+
+  const switchManuscript = async () => {
+    if (!desktopSession || projectBusy || liveDocumentSwitchBlocked()) return
     setProjectBusy(true)
+    setOpenProblem('')
     try {
-      await applyDesktopProject(pendingProject.project, pendingProject.announce, path)
+      const project = await desktopHost.openProject(desktopSession.root)
+      setPendingProject({ project, announce: true })
+      setProjectMenuOpen(false)
     } catch (error) {
       setToast(normaliseHostFailure(error).message)
+    } finally {
+      setProjectBusy(false)
+    }
+  }
+
+  const chooseMainDocument = async (path: string) => {
+    if (!pendingProject || projectBusy) return
+    setOpenProblem('')
+    setProjectBusy(true)
+    try {
+      if (!await applyDesktopProject(pendingProject.project, pendingProject.announce, path)) setPendingProject(null)
+    } catch (error) {
+      setOpenProblem(normaliseHostFailure(error).message)
     } finally {
       setProjectBusy(false)
     }
@@ -4506,6 +4675,16 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   }
 
   const restoreSnapshot = (snapshot: RecoverySnapshot) => {
+    if (collaborationSessionActiveRef.current) {
+      setRecoveryOpen(false)
+      setCollaborationOpen(true)
+      setToast('Leave online collaboration before restoring a local recovery snapshot. Use Files to resolve differences between the current local and online copies.')
+      return
+    }
+    if (!writeRecoverySnapshot(draftRef.current, filename, manuscriptSourceRef.current)) {
+      setToast('The current draft could not be preserved. Free local recovery storage before restoring an older version.')
+      return
+    }
     replaceBuiltInProject(null)
     replaceManuscriptSource(snapshot.source)
     setStructuredMode(true)
@@ -4514,6 +4693,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       setCurrentRevision(draftRevisionRef.current + 1)
       if (!desktopSaveBlockedRef.current) setSaveState('saving')
     } else {
+      browserAssetScopeRef.current = snapshot.browserAssetScope ?? crypto.randomUUID()
+      setBrowserAssetScope(browserAssetScopeRef.current)
       setFilename(snapshot.filename)
       setProjectName(snapshot.filename.replace(/\.(qmd|md)$/i, '').replaceAll(/[-_]+/g, ' '))
       setSaveState('saving')
@@ -4942,7 +5123,141 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     if (root) void openDesktopProject(root, false)
   }, [])
 
+  const syncPreparedSource = () => {
+    const binding = figureCollaborationBindingRef.current
+    if (!binding) throw new Error('Reconnect the shared manuscript before synchronizing it.')
+    const records = readProjectResources(binding.document).citations
+    const prefix = '../'.repeat(Math.max(0, (desktopSessionRef.current?.path.split('/').length ?? 1) - 1))
+    return prepareCollaborationCheckpointSource(manuscriptSourceRef.current, records, prefix + DEFAULT_ACQUISITION_BIBLIOGRAPHY)
+  }
+  const syncPreviewFiles = async () => {
+    const binding = figureCollaborationBindingRef.current
+    if (!binding) return []
+    const resources = readProjectResources(binding.document)
+    return [
+      ...resources.images.map((image) => ({ path: image.path, bytes: base64ToBytes(image.base64) })),
+      ...(resources.citations.length ? [{ path: DEFAULT_ACQUISITION_BIBLIOGRAPHY, bytes: serializeSyncReferences(resources.citations) }] : []),
+    ]
+  }
+  const syncLocalApplied = async (path: string, result?: { hash: string }) => {
+    const session = desktopSessionRef.current
+    if (!session) return
+    const binding = figureCollaborationBindingRef.current
+    const isCurrent = () => desktopSessionRef.current?.root === session.root
+      && desktopSessionRef.current.path === session.path && figureCollaborationBindingRef.current === binding
+    const [verified] = await desktopHost.inspectProjectSyncFiles(session.root, [path])
+    if (!isCurrent() || result && verified?.hash !== result.hash) return
+    const synchronizedHash = result?.hash ?? verified?.hash
+    if (path === session.path) {
+      const document = await desktopHost.readDocument(session.root, session.path)
+      if (!isCurrent()) return
+      if (result && await projectAssetHash(new TextEncoder().encode(document.content)) !== result.hash) return
+      if (!isCurrent() || desktopSessionRef.current?.hash !== session.hash) return
+      const matchesLive = document.content === syncPreparedSource()
+      replaceDesktopSession({ ...session, hash: document.hash, savedRevision: matchesLive ? draftRevisionRef.current : session.savedRevision })
+      desktopSaveBlockedRef.current = false
+      setSaveProblem('')
+      if (matchesLive) { setSaveState('saved'); setLocalSyncSource(manuscriptSourceRef.current) }
+    }
+    // Owner checkpoints retain their independent expected-hash guard after an automatic file update.
+    const baseline = collaborationBaselineRef.current
+    const previous = await baseline
+    const canUpdateBaseline = () => isCurrent() && collaborationBaselineRef.current === baseline
+    if (canUpdateBaseline() && previous?.root === session.root) {
+      if (/\.(?:png|jpe?g|gif|webp|svg|tiff?|pdf|eps)$/i.test(path)) {
+        try {
+          const [file] = await desktopHost.inspectProjectSyncFiles(session.root, [path])
+          if (canUpdateBaseline() && file?.hash === synchronizedHash) collaborationBaselineRef.current = Promise.resolve({ ...previous, assets: { ...previous.assets, [path]: file?.hash ?? null } })
+        } catch { /* The next guarded checkpoint reports an unavailable asset. */ }
+      } else if (path === DEFAULT_ACQUISITION_BIBLIOGRAPHY) {
+        const bibliography = await desktopHost.readBibliography(session.root, path)
+        if (await projectAssetHash(new TextEncoder().encode(bibliography.content)) !== synchronizedHash || !canUpdateBaseline()) return
+        citationBibliographyRef.current = { path, hash: bibliography.hash }
+        collaborationBaselineRef.current = Promise.resolve({ ...previous, bibliographyHash: bibliography.hash })
+      }
+    }
+  }
+  const selectiveSync = useProjectSynchronization({
+    project: desktopProject,
+    manuscriptPath: desktopSession?.path,
+    service: collaborationFileService,
+    connected: collaborationStatus === 'connected' && Boolean(collaborativeEditorBinding),
+    defaultFigurePaths: () => [...publicationAssetPaths(manuscriptSourceRef.current), ...sharedResources.images.map((image) => image.path)],
+    defaultBibliographyPaths: () => [...referencedBibliographyPaths(manuscriptSourceRef.current, desktopSessionRef.current?.path), ...(sharedResources.citations.length ? [DEFAULT_ACQUISITION_BIBLIOGRAPHY] : [])],
+    getPreviews: syncPreviewFiles,
+    canonicalizePreview: canonicalizeSyncPreview,
+    getManuscript: () => {
+      const session = desktopSessionRef.current
+      const binding = figureCollaborationBindingRef.current
+      if (!session || !binding?.publishPortableSource) return undefined
+      return {
+        path: session.path,
+        read: async () => new TextEncoder().encode(syncPreparedSource()),
+        write: async (bytes: Uint8Array, expectedVersionId: string) => {
+          const observed = manuscriptSourceRef.current
+          const preparedBefore = syncPreparedSource()
+          const before = new TextEncoder().encode(preparedBefore)
+          const token = `live-text:${(await projectAssetHash(before)).slice(7)}`
+          if (expectedVersionId !== token || observed !== manuscriptSourceRef.current || session.root !== desktopSessionRef.current?.root || session.path !== desktopSessionRef.current?.path || binding !== figureCollaborationBindingRef.current || !figureImportAllowedRef.current || preparedBefore !== syncPreparedSource()) throw new Error('The online manuscript changed. Refresh the conflict before choosing a version.')
+          const requested = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+          const records = readProjectResources(binding.document).citations
+          const prefix = '../'.repeat(Math.max(0, session.path.split('/').length - 1))
+          const prepared = prepareCollaborationCheckpointSource(requested, records, prefix + DEFAULT_ACQUISITION_BIBLIOGRAPHY)
+          const published = binding.publishPortableSource!(prepared) ?? prepared
+          applyCollaborativeSource(published)
+          const actual = new TextEncoder().encode(syncPreparedSource())
+          return { versionId: `live-text:${(await projectAssetHash(actual)).slice(7)}`, bytes: actual }
+        },
+      }
+    },
+    publishPreview: async (path, bytes, expectedHash) => {
+      if (path.startsWith('sync-conflicts/') || /\.conflict-(?:local|online)-[a-f0-9]+(?:\.|$)/i.test(path)) return
+      const binding = figureCollaborationBindingRef.current
+      const session = desktopSessionRef.current
+      if (!binding || !figureImportAllowedRef.current) throw new Error('Reconnect with editing access before sharing updated previews.')
+      const proposedPreview = path === DEFAULT_ACQUISITION_BIBLIOGRAPHY ? await canonicalizeSyncPreview(path, bytes) : undefined
+      const observed = (await syncPreviewFiles()).find((file) => file.path === path)
+      const observedHash = observed ? await projectAssetHash(observed.bytes) : null
+      const stillCurrent = (await syncPreviewFiles()).find((file) => file.path === path)
+      if (!figureImportAllowedRef.current || session?.root !== desktopSessionRef.current?.root || session?.path !== desktopSessionRef.current?.path || observedHash !== expectedHash || binding !== figureCollaborationBindingRef.current || (observed ? !stillCurrent || observed.bytes.length !== stillCurrent.bytes.length || !observed.bytes.every((value, index) => value === stillCurrent.bytes[index]) : Boolean(stillCurrent))) throw new Error('The shared preview or editing access changed during synchronization. Both copies are preserved; refresh before resolving it.')
+      if (path === DEFAULT_ACQUISITION_BIBLIOGRAPHY) {
+        const parsed = parseBibliographyFile(path, new TextDecoder('utf-8', { fatal: true }).decode(bytes), 'project-file')
+        if (parsed.diagnostics.some((diagnostic) => diagnostic.level === 'error')) throw new Error('The reference file needs repair before its metadata can be shared.')
+        const stage = new Y.Doc()
+        try { publishProjectResources(stage, { images: readProjectResources(binding.document).images, citations: parsed.records }) } finally { stage.destroy() }
+        const keep = new Set(parsed.records.map((record) => `citation:${record.citekey}`))
+        binding.document.transact(() => {
+          const map = binding.document.getMap(PROJECT_RESOURCES_ROOT)
+          for (const key of map.keys()) if (key.startsWith('citation:') && !keep.has(key)) map.delete(key)
+          publishProjectResources(binding.document, { images: [], citations: parsed.records })
+        }, 'draftmatter-synchronized-references')
+      } else if (/\.(?:png|jpe?g|gif|webp|svg)$/i.test(path)) {
+        if (bytes.byteLength > MAX_SHARED_IMAGE_BYTES) {
+          if (observed) throw new Error('The file version is preserved online, but this figure exceeds the 2 MB preview limit. Reduce it before updating the manuscript preview.')
+          return
+        }
+        publishProjectResources(binding.document, { images: [sharedImage(path, bytes)], citations: [] })
+      }
+      applySharedProjectResources(readProjectResources(binding.document))
+      return proposedPreview
+    },
+    onLocalApplied: syncLocalApplied,
+  })
+  const synchronizationProblems = selectiveSync.snapshot?.rows.filter((row) => row.tracked && ['conflict', 'local-missing', 'remote-missing', 'error', 'too-large'].includes(row.state)).length ?? 0
+
   const commandEntries: CommandPaletteEntry[] = [
+    {
+      id: 'project-files', label: 'Browse project files', description: 'Find figures, data, and files available locally or online', keywords: 'files folder image figure data shared online local sync',
+      icon: <span className="command-icon"><Icon name="folder" size={17} /></span>, action: () => { setCommandOpen(false); setProjectFilesOpen(true) },
+    },
+    {
+      id: 'export', label: 'Export manuscript', description: 'Download a Word document, PDF, web page, or project copy', keywords: 'publish download print docx pdf html',
+      icon: <span className="command-icon"><Icon name="download" size={17} /></span>, action: () => { setCommandOpen(false); setExportOpen(true) },
+    },
+    ...(onOpenLearn ? [{
+      id: 'learn', label: 'Learn DraftMatter', description: 'Get help with writing, figures, references, and collaboration', keywords: 'help guide tutorial',
+      icon: <span className="command-icon"><Icon name="info" size={17} /></span>, action: () => { setCommandOpen(false); void leaveEditor(onOpenLearn) },
+    }] : []),
     {
       id: 'focus-mode',
       label: focusMode ? 'Leave focus mode' : 'Enter focus mode',
@@ -5078,7 +5393,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     {
       id: 'figure-cell',
       label: 'Add reproducible figure',
-      description: desktopSession ? 'Create a hidden computation whose figure is published' : 'View-only in the browser · desktop project required',
+      description: desktopSession ? 'Generate a figure from optional project code' : 'Optional computation · desktop project required',
       keywords: 'execute python r julia source figure',
       icon: <span className="command-icon"><Icon name="code" size={17} /></span>,
       disabled: !canEditManuscript || !desktopSession,
@@ -5087,7 +5402,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     {
       id: 'table-cell',
       label: 'Add reproducible table',
-      description: desktopSession ? 'Create a hidden computation whose table is published' : 'View-only in the browser · desktop project required',
+      description: desktopSession ? 'Generate a table from optional project code' : 'Optional computation · desktop project required',
       keywords: 'execute python r julia source table dataframe data frame',
       icon: <span className="command-icon"><Icon name="table" size={17} /></span>,
       disabled: !canEditManuscript || !desktopSession,
@@ -5152,6 +5467,18 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
         : executionSummaryStatus === 'running'
           ? 'Running'
           : 'Needs run'
+  const collaborationConnectionPending = collaborationSessionActive && collaborationStatus !== 'connected'
+  const documentSaveLabel = collaborationConnectionPending
+    ? collaborationStatus === 'connecting' ? 'Connecting to collaboration…' : 'Collaboration offline · check connection'
+    : collaborationUncheckpointed
+    ? 'Live changes · checkpoint needed'
+    : saveState === 'saving'
+      ? desktopSession ? 'Saving to project…' : 'Saving locally…'
+      : saveState === 'conflict'
+        ? 'External change detected'
+        : saveState === 'error'
+          ? 'Save paused'
+          : desktopSession ? 'Saved to project' : collaborationSessionActive ? 'Online collaboration connected' : 'Saved locally in this browser'
   const renderExecutionCellRow = (cell: ExecutableCell) => {
     const index = executableCells.findIndex((candidate) => candidate.id === cell.id)
     const state = executionCellStates.find((candidate) => candidate.cellId === cell.id)
@@ -5170,10 +5497,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
         </div>
         <div className="execution-cell-actions">
           {desktopSession ? <>
-            {index > 0 && <button className="subtle" onClick={() => void requestExecution({ kind: 'above', cellId: cell.id })} disabled={executionPlanBusy || Boolean(runtimeInventory && executableCells.slice(0, index).some((candidate) => !executionEnvironmentAvailable(candidate)))}>Run above</button>}
+            {index > 0 && <button className="subtle" onClick={() => void requestExecution({ kind: 'above', cellId: cell.id })} disabled={executionPlanBusy}>Run above</button>}
             {executionActiveCell === cell.id
               ? <button onClick={() => void interruptExecution(cell.language)}><Icon name="close" size={13} /> Interrupt</button>
-              : <button className="run-button" onClick={() => void requestExecution({ kind: 'cell', cellId: cell.id })} disabled={executionPlanBusy || Boolean(runtimeInventory && view && !view.executionEnabled)}><Icon name="play" size={13} /> Run</button>}
+              : <button className="run-button" onClick={() => void requestExecution({ kind: 'cell', cellId: cell.id })} disabled={executionPlanBusy}><Icon name="play" size={13} /> Run</button>}
           </> : <span className="execution-cell-view-only"><Icon name="eye" size={13} /> {executionBoundaryKind === 'template' ? 'Template · copy to run' : executionBoundaryKind === 'shared-desktop' ? 'Local copy required' : executionBoundaryKind === 'shared-browser' ? 'Online · view only' : 'Browser view only'}</span>}
         </div>
         {managed && (
@@ -5196,8 +5523,41 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     )
   }
 
+  const manuscriptPicker = pendingProject && (
+    <div className="modal-backdrop manuscript-picker-backdrop" onMouseDown={closeManuscriptPicker}>
+      <div className="manuscript-picker-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Choose main manuscript">
+        <div className="create-project-head">
+          <span className="project-file-icon"><Icon name="document" size={18} /></span>
+          <div><span className="eyebrow">Project manuscript</span><h2>Choose the document to open</h2><p>Choose the manuscript for {pendingProject.project.config.name}. DraftMatter will open it next time.</p></div>
+          <button className="icon-button" disabled={projectBusy} autoFocus onClick={closeManuscriptPicker} aria-label="Close manuscript chooser"><Icon name="close" /></button>
+        </div>
+        <div className="manuscript-choice-list">
+          {pendingProject.project.documents.map((document) => (
+            <button key={document.path} onClick={() => void chooseMainDocument(document.path)} disabled={projectBusy || (desktopSession?.root === pendingProject.project.root && desktopSession.path === document.path)}>
+              <span className="project-file-icon"><Icon name="document" size={16} /></span>
+              <span><strong>{document.path}</strong><small>{Math.max(1, Math.round(document.bytes / 1024))} KB · modified {new Date(document.modifiedMs).toLocaleString()}</small></span>
+              {desktopSession?.root === pendingProject.project.root && desktopSession.path === document.path ? <span>Active</span> : <Icon name="arrowRight" size={15} />}
+            </button>
+          ))}
+        </div>
+        {projectBusy && <p role="status">Opening manuscript…</p>}
+        {openProblem && <p className="create-project-problem" role="alert">{openProblem}</p>}
+        <div className="manuscript-picker-footer"><Icon name="folder" size={14} /><span title={pendingProject.project.root}>{pendingProject.project.root}</span></div>
+      </div>
+    </div>
+  )
+
+  if (awaitingDesktopLaunch) {
+    if (manuscriptPicker) return manuscriptPicker
+    return <main className="home-route-status">{openProblem
+      ? <section><h1>Could not open manuscript</h1><p role="alert">{openProblem}</p><button onClick={onNavigateHome}>Return to Home</button></section>
+      : <span role="status">Opening manuscript…</span>}</main>
+  }
+
   return (
-    <div className={`app-shell ${focusMode ? 'focus-mode' : ''}`}>
+    <>
+    {manuscriptPicker}
+    <div inert={projectBusy || Boolean(pendingProject)} className={`app-shell ${focusMode ? 'focus-mode' : ''}`}>
       <svg className="app-sketch-defs" aria-hidden="true">
         <defs>
           <filter id="app-pencil-wobble" x="-8%" y="-8%" width="116%" height="116%" colorInterpolationFilters="sRGB">
@@ -5228,10 +5588,11 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
           <span className="topbar-divider" />
           <div className="project-switcher-wrap">
             <button className={`project-switcher ${projectMenuOpen ? 'active' : ''}`} onClick={() => setProjectMenuOpen((open) => !open)} aria-expanded={projectMenuOpen}>
-              <span className="project-dot" />
-              <span className="project-switcher-name">{projectName}</span>
+              <span className={`project-dot ${collaborationUncheckpointed || collaborationConnectionPending ? 'checkpoint-needed' : saveState}`} title={documentSaveLabel} />
+              <span className="project-switcher-name" title={desktopSession?.path}>{projectName}{desktopSession && <small>{filename}</small>}</span>
               <Icon name="chevronDown" size={14} />
             </button>
+            <span className="document-state visually-hidden" aria-live="polite">{documentSaveLabel}</span>
             {projectMenuOpen && (
               <div className="project-menu popover">
                 <div className="project-menu-current">
@@ -5253,6 +5614,9 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
                   ) : (
                     <button onClick={() => fileInputRef.current?.click()}><Icon name="document" size={16} /><span><strong>Open manuscript…</strong><small>DraftMatter manuscript, up to 5 MB</small></span></button>
                   )}
+                  <button onClick={() => { setProjectMenuOpen(false); setProjectFilesOpen(true) }}><Icon name="folder" size={16} /><span><strong>Browse project files</strong><small>Figures, data, local and online copies</small></span></button>
+                  <button aria-label="Enter focus mode" onClick={() => { setProjectMenuOpen(false); setFocusMode(true) }}><Icon name="focus" size={16} /><span><strong>Enter focus mode</strong><small>Keep only the paper and writing tools</small></span></button>
+                  {onOpenLearn && <button aria-label="Learn DraftMatter" onClick={() => { setProjectMenuOpen(false); void leaveEditor(onOpenLearn) }}><Icon name="info" size={16} /><span><strong>Learn DraftMatter</strong><small>Writing, figures, references, and collaboration</small></span></button>}
                   <button className="project-menu-example" onClick={() => void openCompleteExample()} disabled={projectBusy}><Icon name="spark" size={16} /><span><strong>Open complete example</strong><small>Citations, review, figures, tables, Python, R, and Julia</small></span></button>
                   {desktopProject && collaborationSession && <button onClick={() => { setProjectMenuOpen(false); desktopProject.config.collaboration ? setCollaborationOpen(true) : setStartCollaborationOpen(true) }}><Icon name="users" size={16} /><span><strong>{desktopProject.config.collaboration ? collaborationRole === 'owner' ? 'Invite people' : 'Collaboration details' : 'Start collaboration'}</strong><small>{desktopProject.config.collaboration ? `${desktopProject.config.collaboration.workspaceId} · ${desktopProject.config.collaboration.projectId}` : 'Link this local manuscript to an online workspace'}</small></span></button>}
                   <button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={16} /><span><strong>Attach bibliography…</strong><small>BibTeX, CSL JSON, RIS, or EndNote · {citations.length} indexed</small></span></button>
@@ -5268,46 +5632,29 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
           </div>
         </div>
 
-        <div className="document-state" aria-live="polite">
-          <span className={`save-indicator ${collaborationUncheckpointed ? 'checkpoint-needed' : saveState}`} />
-          {collaborationUncheckpointed
-            ? 'Live changes · checkpoint needed'
-            : saveState === 'saving'
-            ? desktopSession ? 'Saving to project…' : 'Saving locally…'
-            : saveState === 'conflict'
-              ? 'External change detected'
-              : saveState === 'error'
-                ? 'Save paused'
-                : desktopSession ? 'Saved to project' : 'Saved locally'}
-        </div>
+        <button className="command-button writing-command" onClick={() => setCommandOpen(true)} aria-label="Open command menu" title={`Find a tool or action (${commandUsesMetaKey ? 'Command' : 'Control'} P)`}>
+          <Icon name="search" size={17} />
+          <span className="writing-command-label">Find a tool or action…</span>
+          <span className="shortcut">{commandUsesMetaKey ? <><Icon name="command" size={12} />P</> : 'Ctrl+P'}</span>
+        </button>
 
         <div className="topbar-actions">
           <div className="topbar-primary-workspaces">
             {structuredMode && <button
-              className={`topbar-code-workspace ${executionWorkspaceOpen ? 'active' : ''} ${desktopSession ? '' : 'browser-view-only'}`.trim()}
+              data-tooltip={`Code & computation · ${codeWorkspaceState}`} className={`topbar-code-workspace compact-tool ${executionWorkspaceOpen ? 'active' : ''} ${desktopSession ? '' : 'browser-view-only'}`.trim()}
               aria-label={desktopSession ? 'Open Code and computation' : executionBoundaryKind === 'template' ? 'Open example code and project copy options' : executionBoundaryKind === 'shared-desktop' ? 'Open shared code and local project copy options' : 'Open browser view-only code and desktop instructions'}
               aria-expanded={executionWorkspaceOpen}
               onClick={() => setExecutionWorkspaceOpen(true)}
               title={desktopSession ? 'Open Code & computation' : executionBoundaryKind === 'template' ? 'Example code · make a project copy to execute' : executionBoundaryKind === 'shared-desktop' ? 'Shared code · create a local project copy to execute' : 'Code is view-only in the browser · open for desktop instructions'}
             >
-              <Icon name={desktopSession ? 'code' : executionBoundaryKind === 'template' ? 'spark' : 'eye'} size={15} />
-              <span className="code-workspace-label"><span className="code-workspace-label-full">Code &amp; computation</span><span className="code-workspace-label-short">Code</span></span>
-              <span className="code-workspace-state">{codeWorkspaceState}</span>
-              {executableCells.length > 0 && <span className="count-badge" aria-hidden="true">{executableCells.length}</span>}
+              <Icon name="code" size={15} />
+              <span className="visually-hidden">Code &amp; computation · {codeWorkspaceState}</span>
             </button>}
-            <button className={`collaboration-toggle ${collaborationStatus}`} onClick={() => desktopProject && collaborationSession && !desktopProject.config.collaboration ? setStartCollaborationOpen(true) : setCollaborationOpen(true)} aria-label={desktopProject && collaborationSession && !desktopProject.config.collaboration ? 'Start collaboration' : 'Open online collaboration'}>
+            <button className="icon-button compact-tool" aria-label="Browse project files" data-tooltip={synchronizationProblems ? `Project files · ${synchronizationProblems} synchronization issues` : selectiveSync.snapshot?.error ? 'Project files · synchronization needs attention' : 'Project files'} onClick={() => setProjectFilesOpen(true)}><Icon name="folder" size={17} />{(synchronizationProblems > 0 || selectiveSync.snapshot?.error) && <span className="sync-attention-count" aria-hidden="true">{synchronizationProblems || '!'}</span>}</button>
+            <button data-tooltip={collaborationStatus === 'connected' ? 'Online collaboration · connected' : 'Share and collaborate'} className={`collaboration-toggle compact-tool ${collaborationStatus}`} onClick={() => desktopProject && collaborationSession && !desktopProject.config.collaboration ? setStartCollaborationOpen(true) : setCollaborationOpen(true)} aria-label={desktopProject && collaborationSession && !desktopProject.config.collaboration ? 'Start collaboration' : 'Open online collaboration'}>
               <Icon name="users" size={16} />
-              <span>{collaborationStatus === 'connected' ? `Live${collaborationRole ? ` · ${collaborationRole[0].toUpperCase()}${collaborationRole.slice(1)}` : ''}` : desktopProject?.config.collaboration ? 'Reconnect' : desktopProject && collaborationSession ? 'Start collaboration' : 'Collaborate'}</span>
               <i />
             </button>
-          </div>
-          <div className="topbar-utilities" aria-label="Workspace utilities">
-            <button className="icon-button command-button" onClick={() => setCommandOpen(true)} aria-label="Open command menu" title={`Open command menu (${commandUsesMetaKey ? 'Command' : 'Control'} P)`}>
-              <Icon name="search" />
-              <span className="shortcut">{commandUsesMetaKey ? <><Icon name="command" size={12} />P</> : 'Ctrl+P'}</span>
-            </button>
-            <button className="icon-button focus-mode-toggle" onClick={() => setFocusMode(true)} aria-label="Enter focus mode" title="Focus mode"><Icon name="focus" size={17} /></button>
-            {onOpenLearn && <button className="icon-button" onClick={() => void leaveEditor(onOpenLearn)} aria-label="Learn DraftMatter" title="Learn DraftMatter"><Icon name="info" size={17} /></button>}
           </div>
           <div className="topbar-completion-actions">
             <button className={`review-toggle ${activeNav === 'review' ? 'active' : ''}`} onClick={showReviewPanel} aria-label={`Review, ${totalOpenReviewCount} open item${totalOpenReviewCount === 1 ? '' : 's'}`}>
@@ -5316,10 +5663,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
               {totalOpenReviewCount > 0 && <span className="count-badge" aria-hidden="true">{totalOpenReviewCount}</span>}
             </button>
             <div className="export-wrap">
-            <button className="primary-button" onClick={() => setExportOpen((open) => !open)}>
-              <Icon name="download" size={16} />
-              Export
-              <Icon name="chevronDown" size={13} />
+            <button className="icon-button compact-tool export-trigger" aria-label="Export" aria-expanded={exportOpen} data-tooltip="Export manuscript" onClick={() => setExportOpen((open) => !open)}>
+              <Icon name="download" size={17} />
             </button>
             {exportOpen && (
               <div className="popover export-menu">
@@ -5384,7 +5729,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
             <button className={activeNav === 'manuscript' ? 'active' : ''} onClick={() => setActiveNav('manuscript')} data-label="Manuscript" aria-label="Manuscript" aria-current={activeNav === 'manuscript' ? 'page' : undefined}><Icon name="document" /></button>
             <button className={activeNav === 'review' ? 'active' : ''} onClick={showReviewPanel} data-label="Review" aria-label={`Review, ${totalOpenReviewCount} open item${totalOpenReviewCount === 1 ? '' : 's'}`} aria-current={activeNav === 'review' ? 'page' : undefined}><Icon name="message" />{totalOpenReviewCount > 0 && <span className="rail-notice" aria-hidden="true">{totalOpenReviewCount}</span>}</button>
             <button className={activeNav === 'sources' ? 'active' : ''} onClick={() => { setActiveNav('sources'); openCitationPicker() }} data-label="Sources" aria-label="Sources" aria-current={activeNav === 'sources' ? 'page' : undefined}><Icon name="book" /></button>
-            <button className={activeNav === 'history' ? 'active' : ''} onClick={() => setActiveNav('history')} data-label="History" aria-label="History" aria-current={activeNav === 'history' ? 'page' : undefined}><Icon name="history" /></button>
+            <button onClick={() => setRecoveryOpen(true)} data-label="Recovery history" aria-label="Open local recovery history" aria-haspopup="dialog" aria-expanded={recoveryOpen}><Icon name="history" /></button>
           </div>
           <div className="rail-footer-actions">
             {desktopSession && !kernelConsoleOpen && (
@@ -5405,9 +5750,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
           </div>
         </nav>
 
-        {leftPanelOpen && (activeNav === 'history' ? (
-          <GitHistoryPanel root={desktopSession?.root} manuscriptPath={desktopSession?.path} onNotice={setToast} onRestoreCheckpoint={restoreGitCheckpoint} />
-        ) : (
+        {leftPanelOpen && (
           <aside className="left-panel" aria-label="Manuscript outline">
             <div className="panel-heading-row">
               <div>
@@ -5510,7 +5853,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
               <button onClick={openSourceInspector}><Icon name="code" size={15} /> View source</button>
             </div>
           </aside>
-        ))}
+        )}
 
         <main className="editor-area" ref={editorAreaRef}>
           <div className="format-toolbar" aria-label="Formatting toolbar">
@@ -5552,9 +5895,11 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('table') }}><Icon name="table" size={15} /><span><strong>Table</strong><small>Editable rows and columns</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('equation-inline') }}><span className="toolbar-symbol">∑</span><span><strong>Equation</strong><small>Inline or display mathematics</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('cross-reference') }}><Icon name="link" size={15} /><span><strong>Cross-reference</strong><small>Figure, table, equation, or section</small></span></button>
+                <details className="toolbar-computation-options"><summary><Icon name="code" size={14} />Optional computations<Icon name="chevronDown" size={12} /></summary>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('published-value') }}><span className="toolbar-symbol">123</span><span><strong>Published value</strong><small>Statistic or model result in text</small></span></button>
                 <button disabled={!desktopSession} title={!desktopSession ? 'Code is view-only in the browser. Open this project in DraftMatter desktop to add a computation.' : undefined} onClick={() => { setInsertMenuOpen(false); openInsertBlock('figure-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible figure</strong><small>{desktopSession ? 'Visible code block and retained figure' : 'DraftMatter desktop required'}</small></span></button>
                 <button disabled={!desktopSession} title={!desktopSession ? 'Code is view-only in the browser. Open this project in DraftMatter desktop to add a computation.' : undefined} onClick={() => { setInsertMenuOpen(false); openInsertBlock('table-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible table</strong><small>{desktopSession ? 'Visible code block and retained table' : 'DraftMatter desktop required'}</small></span></button>
+                </details>
               </div>}
             </div>
             <span className="toolbar-divider" />
@@ -5592,7 +5937,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
               </div>
             )}
             <div className="paper-meta-row">
-              <div className="paper-meta">RESEARCH MANUSCRIPT</div>
+              {desktopSession ? <div className="active-manuscript">
+                <strong title={desktopSession.path}>{desktopSession.path}</strong>
+                <button type="button" onClick={() => void switchManuscript()} disabled={projectBusy} aria-haspopup="dialog">Switch manuscript…</button>
+              </div> : <div className="paper-meta">RESEARCH MANUSCRIPT</div>}
               <button
                 className="publication-authors-trigger"
                 onClick={openPublicationAuthors}
@@ -5634,6 +5982,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
               </>
             )}
             <StructuredManuscriptEditor
+              key={desktopSession ? JSON.stringify([desktopSession.root, desktopSession.path]) : 'portable'}
               ref={structuredEditorRef}
               source={structuredEditorSource}
               onChange={updateStructuredManuscript}
@@ -5650,6 +5999,9 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
               suggestionAuthor={activeReviewAuthor}
               onSuggestionCapture={(message) => setToast(message)}
               onCopyReference={copyPortableReference}
+              onImportFigures={importFigureFiles}
+              onFigureImportError={setToast}
+              assetResolutionRevision={assetResolutionRevision}
               citationLabels={structuredCitationLabels}
               codeCellStatuses={Object.fromEntries(executionCellStates.map((state) => [state.cellId, state.status] as const))}
               codeCellActionsEnabled={Boolean(desktopSession) && !executionPlanBusy}
@@ -5670,6 +6022,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
               readOnly={Boolean(structuredReviewProjection) || !canEditManuscript}
               resolveAssetUrl={(path) => sharedResources.images.some((image) => image.path === path)
                 ? (() => { const image = sharedResources.images.find((item) => item.path === path)!; return `data:${image.mimeType};base64,${image.base64}` })()
+                : browserProjectImages.some((image) => image.path === path)
+                ? (() => { const image = browserProjectImages.find((item) => item.path === path)!; return `data:${image.mimeType};base64,${image.base64}` })()
                 : desktopSession
                 ? projectArtifactUrl(desktopSession.root, path) ?? 'data:,'
                 : builtInProject === 'complete-example'
@@ -5784,7 +6138,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
                   <div className="code-cell-actions">
                     {draft.cellStatus === 'running'
                       ? <button className="run-button interrupt" onClick={() => void interruptExecution()}><Icon name="close" size={13} /> Interrupt</button>
-                      : <button className="run-button" onClick={() => void runCell()} disabled={!desktopSession || runtimeDiscoveryState === 'discovering' || Boolean(runtimeInventory && primaryCell && !executionEnvironmentAvailable(primaryCell))} title={!desktopSession ? 'Execution is available only in a trusted desktop project.' : undefined}><Icon name="play" size={14} /> {runtimeDiscoveryState === 'discovering' ? 'Checking…' : 'Run'}</button>}
+                      : <button className="run-button" onClick={() => void runCell()} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'} title={!desktopSession ? 'Execution is available only in a trusted desktop project.' : undefined}><Icon name="play" size={14} /> {runtimeDiscoveryState === 'discovering' ? 'Checking…' : 'Run'}</button>}
                     <button className="icon-button subtle" onClick={() => void discoverExecutionEnvironments(true)} aria-label="Execution environments and options" disabled={!desktopSession} title={!desktopSession ? 'Browser collaborators can inspect code and retained output but cannot run it.' : undefined}><Icon name="more" /></button>
                   </div>
                 </div>
@@ -5914,14 +6268,16 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
               {desktopSession ? <div className="code-workspace-toolbar">
                 <button className="subtle" onClick={() => setupCell ? revealPanelManagedCell(setupCell.id) : openInsertBlock('setup-cell')} disabled={!canEditManuscript}><Icon name={setupCell ? 'code' : 'plus'} size={12} /> {setupCell ? 'Edit setup' : 'Add setup'}</button>
                 <button className="subtle" onClick={() => openInsertBlock('values-cell')} disabled={!canEditManuscript}><Icon name="plus" size={12} /> Add values</button>
+                <button className="subtle" onClick={() => openInsertBlock('figure-cell')} disabled={!canEditManuscript}><Icon name="image" size={12} /> Add figure from code</button>
                 <button className="subtle" onClick={() => openInsertBlock('table-cell')} disabled={!canEditManuscript}><Icon name="table" size={12} /> Add reproducible table</button>
                 {[...new Set(executableCells.map((cell) => cell.language))].map((language) => (
-                  <button className="subtle" key={language} onClick={() => void requestExecution({ kind: 'language', language })} disabled={executionPlanBusy || Boolean(runtimeInventory && executableCells.filter((cell) => cell.language === language).some((cell) => !executionEnvironmentAvailable(cell)))}>
+                  <button className="subtle" key={language} onClick={() => void requestExecution({ kind: 'language', language })} disabled={executionPlanBusy}>
                     <Icon name="play" size={12} /> Run {runtimeName(language)}
                   </button>
                 ))}
-                <button className="subtle" onClick={() => void requestExecution({ kind: 'clean-all' })} disabled={executionPlanBusy || Boolean(runtimeInventory && executableCells.some((cell) => !executionEnvironmentAvailable(cell)))}><Icon name="history" size={13} /> Clean run</button>
+                <button className="subtle" onClick={() => void requestExecution({ kind: 'clean-all' })} disabled={executionPlanBusy}><Icon name="history" size={13} /> Clean run</button>
                 {executableCells.some((cell) => cell.language === 'julia') && <button className="subtle" onClick={() => void openJuliaPackages()} disabled={juliaPackageBusy}><Icon name="plus" size={12} /> Julia packages</button>}
+                {executableCells.length > 0 && <button className="subtle" onClick={() => void ensureProjectLanguageSetup([...new Set(executableCells.map((cell) => cell.language))])} disabled={projectSetupRunningRef.current}>Prepare environments</button>}
                 <button className="subtle" onClick={() => void discoverExecutionEnvironments(true)} aria-label="Execution environments and options"><Icon name="more" size={14} /> Environments</button>
               </div> : <section className={`execution-browser-boundary ${executionBoundaryKind}`} role="note" aria-label="How to enable code execution">
                 <div className="execution-browser-boundary-heading">
@@ -6108,6 +6464,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
           onInsert={insertStructuredRequest}
           publishedValues={retainedPublishedValues}
           semanticObjects={semanticObjects}
+          onImportFigure={async (file) => (await importFigureFiles([file]))[0]}
+          availableFigures={[...new Set([...browserProjectImages.map((image) => image.path), ...sharedResources.images.map((image) => image.path), ...(builtInProject === 'complete-example' ? completeExampleProjectFiles.filter((file) => file.path.startsWith('figures/')).map((file) => file.path) : [])])].map((path) => ({ path }))}
         />
       )}
 
@@ -6208,7 +6566,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
           <div className="execution-trust-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="execution-trust-title">
             <div className="execution-dialog-head">
               <span className="execution-shield"><Icon name="code" size={19} /></span>
-              <div><span className="eyebrow">Local project trust</span><h2 id="execution-trust-title">{executionTrustPurpose === 'project-open' ? 'Trust and prepare this project?' : executionTrustPurpose === 'packages' ? 'Manage this project’s Julia packages?' : executionTrustPurpose === 'format' ? 'Format this project’s code?' : executionTrustPurpose === 'formatter-setup' ? `Install the ${formatterSetupLanguage === 'python' ? 'Ruff' : 'styler'} formatter?` : executionTrustPurpose === 'console' ? 'Run code in the shared kernel terminal?' : executionTrustPurpose === 'kernel-setup' ? `Set up ${runtimeName(kernelSetupLanguage ?? selectedEnvironmentLanguage)} integration?` : 'Run this project’s code?'}</h2></div>
+              <div><span className="eyebrow">Local project trust</span><h2 id="execution-trust-title">{executionTrustPurpose === 'project-setup' ? pendingExecutionCommandRef.current ? 'Prepare computation and run?' : 'Trust and prepare this project?' : executionTrustPurpose === 'packages' ? 'Manage this project’s Julia packages?' : executionTrustPurpose === 'format' ? 'Format this project’s code?' : executionTrustPurpose === 'formatter-setup' ? `Install the ${formatterSetupLanguage === 'python' ? 'Ruff' : 'styler'} formatter?` : executionTrustPurpose === 'console' ? 'Run code in the shared kernel terminal?' : executionTrustPurpose === 'kernel-setup' ? `Set up ${runtimeName(kernelSetupLanguage ?? selectedEnvironmentLanguage)} integration?` : 'Run this project’s code?'}</h2></div>
               <button className="icon-button" onClick={cancelExecutionTrust} disabled={executionTrustBusy} aria-label="Close execution trust dialog"><Icon name="close" /></button>
             </div>
             <div className="execution-trust-body">
@@ -6218,7 +6576,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
             </div>
             <div className="execution-dialog-actions">
               <button onClick={cancelExecutionTrust} disabled={executionTrustBusy}>Cancel</button>
-              <button className="primary-button" onClick={() => void confirmExecutionTrust()} disabled={executionTrustBusy}>{executionTrustBusy ? 'Trusting…' : executionTrustPurpose === 'project-open' ? 'Trust project and continue' : executionTrustPurpose === 'run' || executionTrustPurpose === 'console' ? 'Trust project and run' : executionTrustPurpose === 'kernel-setup' ? 'Trust project and set up' : 'Trust project'}</button>
+              <button className="primary-button" onClick={() => void confirmExecutionTrust()} disabled={executionTrustBusy}>{executionTrustBusy ? 'Trusting…' : executionTrustPurpose === 'project-setup' ? pendingExecutionCommandRef.current ? 'Trust project, prepare and run' : 'Trust project and continue' : executionTrustPurpose === 'run' || executionTrustPurpose === 'console' ? 'Trust project and run' : executionTrustPurpose === 'kernel-setup' ? 'Trust project and set up' : 'Trust project'}</button>
             </div>
           </div>
         </div>
@@ -6363,11 +6721,34 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
         />
       )}
 
+      {projectFilesOpen && <div className="modal-backdrop project-files-workspace-backdrop" onMouseDown={() => setProjectFilesOpen(false)}>
+        <div className="project-files-workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="project-files-workspace-title" onMouseDown={(event) => event.stopPropagation()}>
+          <ProjectFilesWorkspace
+            project={desktopProject}
+            currentManuscriptPath={desktopSession?.path ?? filename}
+            source={manuscriptSource}
+            browserImages={browserProjectImages}
+            sharedImages={sharedResources.images}
+            builtInFiles={builtInProject === 'complete-example' ? [...completeExampleProjectFiles, { path: 'references.json', content: completeExampleReferences }] : []}
+            location={desktopSession ? 'local' : collaborationSessionActive ? 'online' : builtInProject === 'complete-example' ? 'example' : 'browser'}
+            projectName={projectName}
+            collaborationFileContext={collaborationFileService}
+            synchronizationPanel={selectiveSync.active ? <SelectiveSyncPanel model={selectiveSync} /> : desktopProject ? <div className="selective-sync-disconnected"><strong>Keep selected files in sync</strong><p>Connect this project to its collaboration server to synchronize the manuscript, figures, and references. Choose additional files after connecting.</p><button onClick={() => { setProjectFilesOpen(false); if (!desktopProject.config.collaboration && collaborationSession) setStartCollaborationOpen(true); else setCollaborationOpen(true) }}>Connect project…</button></div> : undefined}
+            onClose={() => setProjectFilesOpen(false)}
+            onInsertFigure={canEditManuscript ? (path) => { setProjectFilesOpen(false); void insertProjectFigure(path) } : undefined}
+            onOpenFile={desktopProject ? (path) => { setProjectFilesOpen(false); if (!liveDocumentSwitchBlocked()) void applyDesktopProject(desktopProject, true, path).catch((error) => setToast(readableError(error))) } : undefined}
+          />
+        </div>
+      </div>}
+
       <CollaborationDialog
         open={collaborationOpen}
         source={manuscriptSource}
         loadResources={loadSharedProjectResources}
         onResources={applySharedProjectResources}
+        localSyncSource={localSyncSource}
+        onFileServiceChange={setCollaborationFileService}
+        onOpenProjectFiles={() => { setCollaborationOpen(false); setProjectFilesOpen(true) }}
         onSaveGuardChange={(guard) => { collaborationSaveGuardRef.current = guard }}
         launch={activeCollaborationLaunch}
         onClose={() => setCollaborationOpen(false)}
@@ -6401,28 +6782,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
             setLinkedCollaborationLaunch(null)
           }}
         />
-      )}
-
-      {pendingProject && (
-        <div className="modal-backdrop manuscript-picker-backdrop" onMouseDown={() => setPendingProject(null)}>
-          <div className="manuscript-picker-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Choose main manuscript">
-            <div className="create-project-head">
-              <span className="project-file-icon"><Icon name="document" size={18} /></span>
-              <div><span className="eyebrow">Project manuscript</span><h2>Choose the document to open</h2><p>The configured main manuscript is unavailable. DraftMatter will remember your choice for this project.</p></div>
-              <button className="icon-button" onClick={() => setPendingProject(null)} aria-label="Close manuscript chooser"><Icon name="close" /></button>
-            </div>
-            <div className="manuscript-choice-list">
-              {pendingProject.project.documents.map((document) => (
-                <button key={document.path} onClick={() => void chooseMainDocument(document.path)} disabled={projectBusy}>
-                  <span className="project-file-icon"><Icon name="document" size={16} /></span>
-                  <span><strong>{document.path}</strong><small>{Math.max(1, Math.round(document.bytes / 1024))} KB · modified {new Date(document.modifiedMs).toLocaleString()}</small></span>
-                  <Icon name="arrowRight" size={15} />
-                </button>
-              ))}
-            </div>
-            <div className="manuscript-picker-footer"><Icon name="folder" size={14} /><span title={pendingProject.project.root}>{pendingProject.project.root}</span></div>
-          </div>
-        </div>
       )}
 
       {localExecutionCopyOpen && (
@@ -6777,7 +7136,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
           <div className="source-drawer" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Portable source inspector">
             <div className="source-drawer-head"><div><span className="eyebrow">Portable source</span><h2>{sourceEditing ? 'Edit reviewed source' : 'Projection inspector'}</h2></div><button className="icon-button" onClick={closeSourceInspector} aria-label="Close source inspector"><Icon name="close" /></button></div>
             <div className="source-tabs" role="tablist" aria-label="Source projection">
-              <button role="tab" aria-selected={sourceTab === 'reviewed'} className={sourceTab === 'reviewed' ? 'active' : ''} onClick={() => setSourceTab('reviewed')} disabled={sourceEditing}>Reviewed .qmd</button>
+              <button role="tab" aria-selected={sourceTab === 'reviewed'} className={sourceTab === 'reviewed' ? 'active' : ''} onClick={() => setSourceTab('reviewed')} disabled={sourceEditing}>Reviewed .{filename.split('.').at(-1)}</button>
               <button role="tab" aria-selected={sourceTab === 'final'} className={sourceTab === 'final' ? 'active' : ''} onClick={() => setSourceTab('final')} disabled={sourceEditing}>Clean final</button>
               <button role="tab" aria-selected={sourceTab === 'original'} className={sourceTab === 'original' ? 'active' : ''} onClick={() => setSourceTab('original')} disabled={sourceEditing}>Original</button>
             </div>
@@ -6859,7 +7218,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
         <div hidden={!kernelConsoleOpen}>
           <KernelConsole
             key={desktopSession.root}
-            languages={configuredConsoleLanguages}
+            languages={kernelConsoleLanguages}
             projectLabel={desktopSession.root.split(/[\\/]/).filter(Boolean).at(-1) ?? 'project'}
             preferredLanguage={kernelConsolePreferredLanguage}
             preferredLanguageEpoch={kernelConsolePreferredLanguageEpoch}
@@ -6905,6 +7264,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
         <button className="quick-cite" onClick={() => openCitationPicker()} aria-label="Insert citation" disabled={!canEditManuscript}><span>@</span> Cite</button>
       )}
     </div>
+    </>
   )
 }
 

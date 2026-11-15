@@ -9,6 +9,11 @@ import {
 import { Icon } from './Icon'
 import './assistantConnections.css'
 
+function connectionError(error: unknown) {
+  if (typeof error === 'object' && error !== null && 'message' in error && typeof error.message === 'string') return error.message
+  return typeof error === 'string' ? error : 'The desktop host returned no error message.'
+}
+
 export function AssistantConnectionsDialog({
   open,
   onClose,
@@ -31,7 +36,7 @@ export function AssistantConnectionsDialog({
     try {
       setStatus(await desktopHost.assistantConnectionsStatus())
     } catch (error) {
-      setProblem(error instanceof Error ? error.message : String(error))
+      setProblem(`${connectionError(error)} Reopen this panel to check again.`)
     } finally {
       setBusy(false)
     }
@@ -53,19 +58,25 @@ export function AssistantConnectionsDialog({
     setNotice('')
     try {
       const result = await desktopHost.assistantConnectionAction(client, operation, apply)
-      if (apply && result.ok) {
+      if (!result.ok) {
+        const conflicts = result.results.flatMap((entry) => entry.conflicts.map((c) => `${c.path}: ${c.message}`))
+        setProblem(conflicts.join(' ') || 'No changes were applied. Review the connection details and retry.')
+        setPreview(undefined)
+      } else if (apply) {
         const nextStatus = await desktopHost.assistantConnectionsStatus()
         setStatus(nextStatus)
         setPreview(undefined)
         const name = nextStatus.clients.find((candidate) => candidate.client === client)?.name ?? 'Your assistant'
         setNotice(operation === 'remove'
           ? `${name} is no longer connected to DraftMatter.`
-          : `${name} is connected. If it was already open, reopen it once to show the DraftMatter tools.`)
+          : client === 'codex'
+            ? 'Codex is configured. Open a new chat in the enabled project folder to load the DraftMatter tools. You can leave the Codex app open.'
+            : `${name} is connected. If it was already open, reopen it once to show the DraftMatter tools.`)
       } else {
         setPreview(result)
       }
     } catch (error) {
-      setProblem(`DraftMatter could not update this connection. ${error instanceof Error ? error.message : String(error)}`)
+      setProblem(`DraftMatter could not update this connection. ${connectionError(error)} Check the connection details and retry.`)
     } finally {
       setBusy(false)
     }

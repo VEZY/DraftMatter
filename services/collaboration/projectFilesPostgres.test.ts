@@ -10,6 +10,39 @@ import { PROJECT_FILE_CHUNK_BYTES, PROJECT_FILE_QUOTA_BYTES } from '../../src/co
 const databaseUrl = process.env.DM_TEST_POSTGRES_URL
 
 describe('project file quota on real PostgreSQL', () => {
+  it.skipIf(!databaseUrl)('publishes only one concurrent head across independent pools and repeatable-read session defaults', async () => {
+    const target = new URL(databaseUrl!)
+    if (!target.pathname.startsWith('/draftmatter_test_')) throw new Error('The integration test requires a dedicated draftmatter_test_* database.')
+    const pools = [0, 1].map(() => new Pool({ connectionString: databaseUrl, ssl: false, max: 1 }))
+    const workspaceId = `sync-heads-${randomUUID()}`
+    const storage = new MemoryProjectFileStorage()
+    let services: PostgresProjectFileService[] = []
+    try {
+      await runCollaborationMigrations(pools[0])
+      const workspaces = new PostgresWorkspaceService({ pool: pools[0], identity: { async verify(token) { return { userId: token, sessionId: `sync-session-${token}` } } } })
+      await workspaces.createWorkspace('sync-owner', { id: workspaceId, name: 'Disposable head CAS race' })
+      await workspaces.createProject('sync-owner', workspaceId, { id: 'paper', name: 'Selective sync race' })
+      const invitation = await workspaces.createInvitation('sync-owner', workspaceId, { role: 'editor' })
+      await workspaces.acceptInvitation('sync-editor', invitation.token)
+      for (const pool of pools) await pool.query('SET SESSION CHARACTERISTICS AS TRANSACTION ISOLATION LEVEL REPEATABLE READ')
+      services = pools.map((pool) => new PostgresProjectFileService({ pool, storage, authorization: { authorizeProject: workspaces.authorizeProjectFileTransfer.bind(workspaces) } }))
+      const scope = { workspaceId, projectId: 'paper' }, path = 'paper.qmd'
+      const base = await services[0].begin('sync-owner', scope, { path, size: 0, mediaType: 'text/markdown', expectedVersionId: null })
+      await services[0].complete('sync-owner', scope, base.id)
+      const tokens = ['sync-owner', 'sync-editor']
+      const uploads = await Promise.all(services.map((service, index) => service.begin(tokens[index], scope, { path, size: 0, mediaType: 'text/markdown', expectedVersionId: base.id })))
+      const results = await Promise.allSettled(services.map((service, index) => service.complete(tokens[index], scope, uploads[index].id)))
+      expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+      expect((results.find((result) => result.status === 'rejected') as PromiseRejectedResult).reason).toMatchObject({ code: 'file-version-conflict', status: 409 })
+      const winner = results.findIndex((result) => result.status === 'fulfilled')
+      expect((await services[0].list('sync-owner', scope)).heads).toEqual([{ path, versionId: uploads[winner].id, deleted: false }])
+    } finally {
+      await services[0]?.deleteWorkspaceFiles(workspaceId).catch(() => undefined)
+      await pools[0].query('DELETE FROM draftmatter_workspaces WHERE id = $1', [workspaceId]).catch(() => undefined)
+      await Promise.all(pools.map((pool) => pool.end()))
+    }
+  }, 30_000)
+
   it.skipIf(!databaseUrl || !process.env.DM_TEST_S3_ENDPOINT)('completes a resumed multipart upload against the real local S3 fixture and verifies ranged downloads', async () => {
     const target = new URL(databaseUrl!)
     const endpoint = new URL(process.env.DM_TEST_S3_ENDPOINT!)

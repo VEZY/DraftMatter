@@ -41,6 +41,15 @@ retained model output
 `
 
 describe('native HTML export', () => {
+  it('embeds figures with escaped alt text and a spaced filename, retaining the hover title', () => {
+    const path = 'figures/Growth (A).png'
+    const html = renderNativeHtmlExport('Context.\n![Growth \\[A\\]](<figures/Growth (A).png> "A \\"quoted\\" title"){#fig-growth}\n: Response.\n', {
+      assets: [{ path, bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) }], requireAssets: true,
+    })
+    expect(html).toContain('alt="Growth [A]" title="A &quot;quoted&quot; title"')
+    expect(html).toContain('src="data:image/png;base64,')
+    expect(html).toContain('<strong>Figure 1.</strong> Response.')
+  })
   it('renders a representative clean article with semantic, script-free structure', () => {
     const html = renderNativeHtmlExport(cleanArticle, {
       bibliography: [{ id: 'vezy2020', value: 'Vezy et al. (2020). DynACof.' }],

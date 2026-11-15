@@ -90,7 +90,7 @@ function DemoSourcePanel({
         <span>PY</span>
         <div>
           <strong>Python source</strong>
-          <small>Source stays outside the manuscript · {lines.length} lines</small>
+          <small>Source saved with the manuscript · {lines.length} lines</small>
         </div>
       </div>
       <ol aria-label={label}>

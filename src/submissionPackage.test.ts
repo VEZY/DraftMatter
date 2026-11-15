@@ -54,6 +54,12 @@ const options = {
 }
 
 describe('journal submission package', () => {
+  it('collects escaped figure alt text and spaced image paths for submission packaging', () => {
+    const manuscript = source.replace('![Canopy response](figures/canopy.svg)', '![Canopy \\[A\\]](<figures/canopy (A).svg> "A \\"quoted\\" title")')
+    expect(submissionProjectAssetPaths(manuscript)).toEqual(['figures/canopy (A).svg'])
+    const analysis = analyzeSubmission(manuscript, [citation], options)
+    expect(analysis.figures[0]).toMatchObject({ alt: 'Canopy [A]', source: 'figures/canopy (A).svg', packagedPath: 'figures/Figure1-canopy-A-.svg' })
+  })
   it('analyses portable submission metadata and project figures', () => {
     const analysis = analyzeSubmission(source, [citation], options)
     expect(analysis.errors).toBe(0)

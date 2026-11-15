@@ -79,12 +79,38 @@ describe('rendered local execution workflow', () => {
     container.remove()
   })
 
+  it('offers all three terminal languages and action search before setup without running or trusting project code', async () => {
+    await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 150)) })
+    expect(container.querySelector('[aria-label="Open command menu"]')?.textContent).toContain('Find a tool or action')
+    const launcher = container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel terminal"]')!
+    expect(launcher).not.toBeNull()
+    await act(async () => launcher.click())
+    const terminal = container.querySelector<HTMLElement>('[aria-label="Shared kernel terminal"]')!
+    for (const language of ['Python', 'R', 'Julia']) {
+      const tab = [...terminal.querySelectorAll<HTMLButtonElement>('[role="tab"]')]
+        .find((button) => button.textContent?.startsWith(language))!
+      expect(tab, `${language} tab is offered before setup`).toBeTruthy()
+      await act(async () => tab.click())
+      expect(tab.getAttribute('aria-selected')).toBe('true')
+      expect(terminal.querySelector(`[aria-label="${language} terminal input"]`)).not.toBeNull()
+    }
+    expect(desktopHost.probeRuntime).not.toHaveBeenCalled()
+    expect(desktopHost.discoverJupyterKernels).not.toHaveBeenCalled()
+    expect(desktopHost.trustProjectForSession).not.toHaveBeenCalled()
+    expect(desktopHost.executeKernel).not.toHaveBeenCalled()
+    expect(container.querySelector('[aria-labelledby="execution-trust-title"]')).toBeNull()
+  })
+
   it('prepares detected code after one project-trust prompt, then executes and materializes the result', async () => {
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 350))
     })
 
     expect(desktopHost.executeKernel).not.toHaveBeenCalled()
+    expect(desktopHost.probeRuntime).not.toHaveBeenCalled()
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
+    const prepare = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Prepare environments')!
+    await act(async () => prepare.click())
     const trustDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="execution-trust-title"]')!
     expect(trustDialog.textContent).toContain('Local execution is not a sandbox')
     expect(trustDialog.textContent).toContain('Trust and prepare this project')
@@ -101,6 +127,7 @@ describe('rendered local execution workflow', () => {
     expect(desktopHost.probeRuntime).toHaveBeenCalledTimes(3)
     expect(desktopHost.setExecutionPreferences).toHaveBeenCalled()
 
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close Code and computation"]')!.click())
     const run = container.querySelector<HTMLButtonElement>('[aria-label="Run Reproducible figure (python)"]')!
     await act(async () => run.click())
     await act(async () => {

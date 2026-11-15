@@ -33,10 +33,10 @@ export const ONBOARDING_TASKS: OnboardingTask[] = [
   { id: 'author-profile', label: 'Complete the author profile', detail: 'Add the name and identifiers used for attribution.', roles: ['owner', 'editor'] },
   { id: 'organize-sections', label: 'Edit or reorganize sections', detail: 'Shape the manuscript outline around the research story.', roles: ['owner', 'editor'] },
   { id: 'add-citation', label: 'Add a citation', detail: 'Connect a claim to a durable scholarly source.', roles: ['owner', 'editor'] },
-  { id: 'reproducible-output', label: 'Insert a reproducible figure or table', detail: 'Keep code private while publishing its retained output.', roles: ['owner', 'editor'], desktopOnly: true },
+  { id: 'reproducible-output', label: 'Try a figure or table from code (optional)', detail: 'Keep source code with the project and share the saved result.', roles: ['owner', 'editor'], desktopOnly: true },
   { id: 'review-change', label: 'Add a comment or suggestion', detail: 'Leave a precise, attributed review item.', roles: ['owner', 'editor', 'commenter'] },
   { id: 'invite-collaborator', label: 'Invite a collaborator', detail: 'Share only the access role this person needs.', roles: ['owner'] },
-  { id: 'run-computation', label: 'Run a computation', detail: 'Refresh a retained figure, table, or value on desktop.', roles: ['owner', 'editor'], desktopOnly: true },
+  { id: 'run-computation', label: 'Run a computation (optional)', detail: 'Refresh a saved figure, table, or value in the desktop app.', roles: ['owner', 'editor'], desktopOnly: true },
   { id: 'export-checkpoint', label: 'Export or create an owner checkpoint', detail: 'Materialize a clean, portable result.', roles: ['owner'] },
 ]
 

@@ -10,7 +10,7 @@ const steps: ReadonlyArray<{
 }> = [
   {
     title: 'Explore a finished paper',
-    detail: 'This complete example combines citations, figures, tables, computed values, review, and code from Python, R, and Julia in one manuscript.',
+    detail: 'Explore writing, citations, figures, tables, equations, and review in one manuscript. Code is optional; you can write a complete paper without running it.',
     target: '.structured-manuscript',
   },
   {
@@ -24,20 +24,30 @@ const steps: ReadonlyArray<{
     target: '[aria-label="Sources"]',
   },
   {
-    title: 'Add a reproducible figure',
-    detail: 'On desktop, choose Insert → Reproducible figure, select a language, and add the code that produces the retained figure.',
+    title: 'Add a figure',
+    detail: 'Choose Insert → Figure to pick an image, or drop an image directly into the manuscript. Add a caption and a description. Figures, editable tables, and equation previews work in the browser too.',
+    target: '[aria-label="Insert"]',
+  },
+  {
+    title: 'Find your project files',
+    detail: 'Use the folder icon to open Files. Find images and data, see each image’s current figure number, and check which files are on this computer, in this browser, or shared online. Moving a figure changes its number, not its filename.',
+    target: '[aria-label="Browse project files"]',
+  },
+  {
+    title: 'Optional: create a figure from code',
+    detail: 'In a local desktop copy, choose Insert → Optional computations → Reproducible figure, select a language, and add your code. Choose Run; DraftMatter helps prepare the language before continuing the computation.',
     target: '[aria-label="Insert"]',
     desktopOnly: true,
   },
   {
-    title: 'Add a package',
-    detail: 'In a local desktop project, open Code to manage the project environment and add packages for Python, R, or Julia.',
+    title: 'Optional: manage analysis packages',
+    detail: 'Open Code & computation in a local desktop project to manage packages for Python, R, or Julia. Writing, inserting images, and editing tables do not need this setup.',
     target: '.topbar-code-workspace',
     desktopOnly: true,
   },
   {
-    title: 'Insert a computed value',
-    detail: 'Publish a named value from a code cell, then choose Insert → Published value to place the current result in the text.',
+    title: 'Optional: insert a computed value',
+    detail: 'Publish a named value from a code cell, then use Published value to place its saved result in the text. Collaborators can read it online without running the code.',
     target: '[aria-label="Insert"]',
     desktopOnly: true,
   },

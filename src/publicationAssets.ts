@@ -1,5 +1,6 @@
 import { normalizeProjectRelativePath } from './projectPaths'
 import { projectComputationsForPublication } from './publicationComputation'
+import { parseMarkdownImage } from './imageMarkdown'
 
 export interface PublicationAsset {
   path: string
@@ -20,8 +21,10 @@ const MAX_PUBLICATION_ASSETS_BYTES = 100 * 1024 * 1024
 
 export function publicationAssetPaths(source: string) {
   const paths = new Set<string>()
-  for (const match of projectComputationsForPublication(source).matchAll(/^\s*!\[[^\]\r\n]*\]\((<[^>\r\n]+>|[^)\s]+)(?:\s+["'][^"']*["'])?\)/gm)) {
-    const target = match[1].replace(/^<|>$/g, '')
+  for (const line of projectComputationsForPublication(source).split(/\r\n|[\r\n]/)) {
+    const image = parseMarkdownImage(line)
+    if (!image) continue
+    const target = image.source
     if (/^(?:data:|https?:\/\/)/i.test(target)) continue
     const path = normalizeProjectRelativePath(target)
     if (!path) throw new Error(`Figure path must stay inside the project: ${target}.`)
@@ -46,6 +49,7 @@ export function publicationImageType(bytes: Uint8Array) {
   if (bytes[0] === 0x89 && new TextDecoder().decode(bytes.slice(1, 8)) === 'PNG\r\n\x1a\n') return { mimeType: 'image/png', extension: 'png' }
   if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return { mimeType: 'image/jpeg', extension: 'jpeg' }
   if (/^GIF8[79]a$/.test(new TextDecoder().decode(bytes.slice(0, 6)))) return { mimeType: 'image/gif', extension: 'gif' }
+  if (bytes.length >= 12 && new TextDecoder().decode(bytes.slice(0, 4)) === 'RIFF' && new TextDecoder().decode(bytes.slice(8, 12)) === 'WEBP') return { mimeType: 'image/webp', extension: 'webp' }
   const text = new TextDecoder().decode(bytes)
   if (/^\s*(?:<\?xml[^>]*>\s*)?<svg(?:[\s>]|\/>)/i.test(text)) {
     if (/<!DOCTYPE|<!ENTITY|@import|<\s*(?:script|foreignObject|iframe|object|embed|animate\w*|set)\b|\bon[a-z]+\s*=|(?:href|src)\s*=\s*["'](?!#)|url\(\s*(?!#)/i.test(text)) {
@@ -53,7 +57,7 @@ export function publicationImageType(bytes: Uint8Array) {
     }
     return { mimeType: 'image/svg+xml', extension: 'svg' }
   }
-  throw new Error('Publication figures must be PNG, JPEG, GIF, or inert SVG images.')
+  throw new Error('Publication figures must be PNG, JPEG, GIF, WebP, or inert SVG images.')
 }
 
 export function publicationBytesDataUrl(bytes: Uint8Array) {
@@ -64,7 +68,7 @@ export function publicationBytesDataUrl(bytes: Uint8Array) {
 }
 
 export function embeddedPublicationImage(source: string): PublicationAsset | undefined {
-  const match = source.match(/^data:image\/(?:png|jpeg|gif|svg\+xml)(;base64)?,(.*)$/is)
+  const match = source.match(/^data:image\/(?:png|jpeg|gif|webp|svg\+xml)(;base64)?,(.*)$/is)
   if (!match) return undefined
   if (match[2].length > MAX_PUBLICATION_ASSET_BYTES * 4) throw new Error('Embedded figure exceeds the publication size limit.')
   let bytes: Uint8Array
@@ -90,6 +94,42 @@ export function resolvePublicationImage(source: string, options: PublicationAsse
   return undefined
 }
 
+/** Read canvas dimensions without decoding pixels. RIFF/VP8X/VP8L layouts:
+ * https://developers.google.com/speed/webp/docs/riff_container
+ * VP8 key-frame dimensions: RFC 6386, section 9.1. */
+function webpDimensions(bytes: Uint8Array) {
+  const malformed = () => new Error('WebP figure has a malformed or incomplete image header.')
+  if (bytes.length < 20) throw malformed()
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
+  const end = view.getUint32(4, true) + 8
+  if (end < 20 || end > bytes.length || end % 2 !== 0) throw malformed()
+  const uint24 = (offset: number) => bytes[offset] + bytes[offset + 1] * 256 + bytes[offset + 2] * 65536
+  let offset = 12
+  while (offset + 8 <= end) {
+    const type = new TextDecoder().decode(bytes.subarray(offset, offset + 4))
+    const size = view.getUint32(offset + 4, true)
+    const payload = offset + 8
+    const next = payload + size + (size % 2)
+    if (next > end || (size % 2 && bytes[payload + size] !== 0)) throw malformed()
+    if (type === 'VP8X') {
+      if (size < 10) throw malformed()
+      return { width: uint24(payload + 4) + 1, height: uint24(payload + 7) + 1 }
+    }
+    if (type === 'VP8 ') {
+      if (size < 10 || (bytes[payload] & 1) !== 0 || bytes[payload + 3] !== 0x9d || bytes[payload + 4] !== 0x01 || bytes[payload + 5] !== 0x2a) throw malformed()
+      return { width: view.getUint16(payload + 6, true) & 0x3fff, height: view.getUint16(payload + 8, true) & 0x3fff }
+    }
+    if (type === 'VP8L') {
+      if (size < 5 || bytes[payload] !== 0x2f) throw malformed()
+      const bits = view.getUint32(payload + 1, true)
+      if (bits >>> 29 !== 0) throw malformed()
+      return { width: (bits & 0x3fff) + 1, height: ((bits >>> 14) & 0x3fff) + 1 }
+    }
+    offset = next
+  }
+  throw malformed()
+}
+
 export function publicationImageDimensions(bytes: Uint8Array): { width: number; height: number } {
   const type = publicationImageType(bytes).extension
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
@@ -97,6 +137,7 @@ export function publicationImageDimensions(bytes: Uint8Array): { width: number; 
   let height = 400
   if (type === 'png' && bytes.length >= 24) { width = view.getUint32(16); height = view.getUint32(20) }
   if (type === 'gif' && bytes.length >= 10) { width = view.getUint16(6, true); height = view.getUint16(8, true) }
+  if (type === 'webp') ({ width, height } = webpDimensions(bytes))
   if (type === 'jpeg') {
     let offset = 2
     while (offset + 8 < bytes.length && bytes[offset] === 0xff) {
@@ -119,17 +160,18 @@ export function publicationImageDimensions(bytes: Uint8Array): { width: number; 
   return { width, height }
 }
 
-/** Rasterize trusted, bounded in-memory SVGs without fetching external resources. */
+/** Rasterize bounded in-memory SVG/WebP assets without fetching external resources. */
 export async function preparePublicationAssetsForDocx(assets: PublicationAsset[], source?: string) {
   assets = [...assets]
-  for (const match of (source ?? '').matchAll(/^\s*!\[[^\]\r\n]*\]\((data:image\/[^)\s]+)\)/gm)) {
-    const embedded = embeddedPublicationImage(match[1])
+  for (const line of (source ?? '').split(/\r\n|[\r\n]/)) {
+    const image = parseMarkdownImage(line)
+    const embedded = image && embeddedPublicationImage(image.source)
     if (embedded && !assets.some((asset) => asset.path === embedded.path)) assets.push(embedded)
   }
   validatePublicationAssets(assets)
   const prepared: PublicationAsset[] = []
   for (const asset of assets) {
-    if (publicationImageType(asset.bytes).extension !== 'svg' || asset.fallbackPng) { prepared.push(asset); continue }
+    if (!['svg', 'webp'].includes(publicationImageType(asset.bytes).extension) || asset.fallbackPng) { prepared.push(asset); continue }
     if (typeof document === 'undefined') { prepared.push(asset); continue }
     const dimensions = publicationImageDimensions(asset.bytes)
     const scale = Math.min(2, 2400 / Math.max(dimensions.width, dimensions.height))

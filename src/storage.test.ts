@@ -50,6 +50,14 @@ describe('local storage and recovery journal', () => {
     expect(snapshots[7].title).toBe('Version 2')
   })
 
+  it('retains the browser image catalogue identity with a recovered manuscript', () => {
+    const storage = memoryStorage()
+    const source = reviewedProjection(initialDraft)
+    saveRecoverySnapshot(storage, initialDraft, 'paper.qmd', source, '2026-07-14T10:00:00.000Z', 'first-project-images')
+    saveRecoverySnapshot(storage, initialDraft, 'paper.qmd', source, '2026-07-14T10:01:00.000Z', 'second-project-images')
+    expect(readRecoverySnapshots(storage).map((snapshot) => snapshot.browserAssetScope)).toEqual(['second-project-images', 'first-project-images'])
+  })
+
   it('ignores malformed or tampered recovery entries', () => {
     const storage = memoryStorage()
     const valid = saveRecoverySnapshot(storage, initialDraft, 'paper.qmd', reviewedProjection(initialDraft), '2026-07-14T10:00:00.000Z')[0]

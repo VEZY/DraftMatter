@@ -1,10 +1,11 @@
 // @vitest-environment jsdom
 import { act } from 'react'
 import { createRoot } from 'react-dom/client'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { CollaborationDialog } from './CollaborationDialog'
-import { HocuspocusCollaborationClient, type CollaborativeEditorBinding } from './sharedEditor'
+import { HocuspocusCollaborationClient, type CollaborationClientOptions, type CollaborativeEditorBinding } from './sharedEditor'
 import { CollaborationServiceClient } from './collaboration/serviceClient'
+import type { CollaborationProjectLaunch } from './collaboration/sessionContext'
 
 function input(container: HTMLElement, label: string) {
   const field = [...container.querySelectorAll('label')].find((candidate) => candidate.querySelector('span')?.textContent === label)?.querySelector('input')
@@ -18,6 +19,8 @@ function change(field: HTMLInputElement, value: string) {
   field.dispatchEvent(new Event('input', { bubbles: true }))
 }
 
+beforeEach(() => { (globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true })
+
 afterEach(() => {
   vi.restoreAllMocks()
   vi.unstubAllGlobals()
@@ -26,6 +29,174 @@ afterEach(() => {
 })
 
 describe('collaboration dialog', () => {
+  it('uses the verified launch presence even when the initial local author is a different identity', async () => {
+    const project = { id: 'paper', workspaceId: 'forest', name: 'Shared paper', role: 'editor' as const, createdAt: '2026-07-15T00:00:00.000Z' }
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ projects: [project] })))
+    const connect = vi.spyOn(HocuspocusCollaborationClient, 'connect').mockImplementation(async () => ({ publishPortableSource: (source: string) => source, destroy: vi.fn(), editorBinding: {} } as unknown as HocuspocusCollaborationClient))
+    const client = new CollaborationServiceClient('https://collab.example.test', 'verified-token')
+    const launch: CollaborationProjectLaunch = { client, serviceUrl: 'https://collab.example.test', token: 'verified-token', profile: { userId: 'oidc-account-42', displayName: 'Bob Researcher' }, workspaces: [{ id: 'forest', name: 'Forest lab', role: 'editor', createdAt: project.createdAt }], projects: [project], workspaceId: 'forest', projectId: 'paper' }
+    const container = document.createElement('div'), root = createRoot(container)
+    await act(async () => root.render(<CollaborationDialog open source="# Draft" launch={launch} localAuthor={{ id: 'dm-local-author', name: 'Unrelated local author' }} onClose={vi.fn()} onRemoteSource={vi.fn()} onStatus={vi.fn()} onCheckpoint={vi.fn()} checkpointMode="download" checkpointTarget="paper.qmd" onOpenProjectFiles={vi.fn()} />))
+    expect(connect).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ presence: { userId: 'oidc-account-42', name: 'Bob Researcher', color: '#617f73' } }))
+    await act(async () => root.unmount())
+  })
+
+  it('retires an expired realtime session before joining with a renewed token and ignores its late callbacks', async () => {
+    const project = { id: 'paper', workspaceId: 'forest', name: 'Shared paper', role: 'editor' as const, createdAt: '2026-07-15T00:00:00.000Z' }
+    const workspace = { id: 'forest', name: 'Forest lab', role: 'editor' as const, createdAt: project.createdAt }
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ projects: [project] })))
+    vi.spyOn(CollaborationServiceClient.prototype, 'getSession').mockResolvedValue({ userId: 'account-42', displayName: 'Researcher' })
+    vi.spyOn(CollaborationServiceClient.prototype, 'listWorkspaces').mockResolvedValue([workspace])
+    vi.spyOn(CollaborationServiceClient.prototype, 'listProjects').mockResolvedValue([project])
+    const first = { publishPortableSource: (source: string) => source, destroy: vi.fn(), flushRecovery: vi.fn(async () => true), editorBinding: { user: { id: 'first' } } }
+    const second = { publishPortableSource: (source: string) => source, destroy: vi.fn(), flushRecovery: vi.fn(async () => true), editorBinding: { user: { id: 'second' } } }
+    let expired!: CollaborationClientOptions
+    const connect = vi.spyOn(HocuspocusCollaborationClient, 'connect').mockImplementation(async (options) => {
+      options.onStatus?.('connected')
+      if (!expired) { expired = options; return first as unknown as HocuspocusCollaborationClient }
+      return second as unknown as HocuspocusCollaborationClient
+    })
+    const onRemoteSource = vi.fn(), onStatus = vi.fn(), onSessionStateChange = vi.fn(), onEditorBindingChange = vi.fn(), onRoleChange = vi.fn()
+    const container = document.createElement('div'), root = createRoot(container)
+    const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent === label)!
+    await act(async () => root.render(<CollaborationDialog open source="# Draft" onClose={vi.fn()} onRemoteSource={onRemoteSource} onStatus={onStatus} onSessionStateChange={onSessionStateChange} onEditorBindingChange={onEditorBindingChange} onRoleChange={onRoleChange} onCheckpoint={vi.fn()} checkpointMode="working-tree" checkpointTarget="paper.qmd" onOpenProjectFiles={vi.fn()} />))
+    await act(async () => { change(input(container, 'Service URL'), 'https://collab.example.test'); change(input(container, 'Short-lived access token'), 'expired-token') })
+    await act(async () => button('Use access token').click())
+    await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    await act(async () => { expired.onStatus?.('error', 'The short-lived token expired.'); expired.onStatus?.('disconnected') })
+    expect(button('Leave session')).toBeDefined()
+    await act(async () => button('Change').click())
+    expect(first.flushRecovery).toHaveBeenCalledOnce()
+    expect(first.destroy).toHaveBeenCalledOnce()
+    expect(first.flushRecovery.mock.invocationCallOrder[0]).toBeLessThan(first.destroy.mock.invocationCallOrder[0])
+    expect(onEditorBindingChange).toHaveBeenLastCalledWith(null)
+    expect(onRoleChange).toHaveBeenLastCalledWith(null)
+    expect(onSessionStateChange).not.toHaveBeenCalledWith(false)
+    expect(button('Leave session')).toBeDefined()
+    await act(async () => change(input(container, 'Short-lived access token'), 'renewed-token'))
+    await act(async () => button('Use access token').click())
+    await act(async () => container.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true })))
+    expect(connect).toHaveBeenCalledTimes(2)
+    expect(connect).toHaveBeenLastCalledWith(expect.objectContaining({ token: 'renewed-token', workspaceId: 'forest', projectId: 'paper' }))
+    expect(onEditorBindingChange).toHaveBeenLastCalledWith(second.editorBinding)
+    expect(container.textContent).toContain('Working together')
+    const events = onStatus.mock.calls.length
+    await act(async () => { expired.onStatus?.('disconnected'); expired.onPortableSource?.('# Obsolete source'); expired.onCollaborators?.([{ clientId: 1, userId: 'old', name: 'Obsolete person' }]) })
+    expect(onStatus).toHaveBeenCalledTimes(events)
+    expect(onRemoteSource).not.toHaveBeenCalledWith('# Obsolete source')
+    expect(container.textContent).not.toContain('Obsolete person')
+    expect(container.textContent).toContain('Working together')
+    await act(async () => root.unmount())
+  })
+
+  it('preserves an expired session when offline recovery fails and lets an explicitly retired session be left', async () => {
+    const project = { id: 'paper', workspaceId: 'forest', name: 'Shared paper', role: 'editor' as const, createdAt: '2026-07-15T00:00:00.000Z' }
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ projects: [project] })))
+    const flushRecovery = vi.fn(async () => false), destroy = vi.fn()
+    let options!: CollaborationClientOptions
+    vi.spyOn(HocuspocusCollaborationClient, 'connect').mockImplementation(async (next) => { options = next; return { publishPortableSource: (source: string) => source, flushRecovery, destroy, editorBinding: {} } as unknown as HocuspocusCollaborationClient })
+    const client = new CollaborationServiceClient('https://collab.example.test', 'expired-token')
+    const launch: CollaborationProjectLaunch = { client, serviceUrl: 'https://collab.example.test', token: 'expired-token', profile: { userId: 'account-42' }, workspaces: [{ id: 'forest', name: 'Forest lab', role: 'editor', createdAt: project.createdAt }], projects: [project], workspaceId: 'forest', projectId: 'paper' }
+    const onSessionStateChange = vi.fn(), onEditorBindingChange = vi.fn()
+    const container = document.createElement('div'), root = createRoot(container)
+    const button = (label: string) => [...container.querySelectorAll<HTMLButtonElement>('button')].find((node) => node.textContent === label)!
+    await act(async () => root.render(<CollaborationDialog open source="# Draft" launch={launch} onClose={vi.fn()} onRemoteSource={vi.fn()} onStatus={vi.fn()} onSessionStateChange={onSessionStateChange} onEditorBindingChange={onEditorBindingChange} onCheckpoint={vi.fn()} checkpointMode="working-tree" checkpointTarget="paper.qmd" onOpenProjectFiles={vi.fn()} />))
+    await act(async () => options.onStatus?.('disconnected'))
+    await act(async () => button('Change').click())
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('offline recovery could not be saved')
+    expect(destroy).not.toHaveBeenCalled()
+    expect(onEditorBindingChange).not.toHaveBeenCalledWith(null)
+    expect(onSessionStateChange).not.toHaveBeenCalledWith(false)
+    flushRecovery.mockResolvedValue(true)
+    await act(async () => button('Change').click())
+    expect(destroy).toHaveBeenCalledOnce()
+    await act(async () => button('Leave session').click())
+    expect(onSessionStateChange).toHaveBeenLastCalledWith(false)
+    expect(button('Leave session')).toBeUndefined()
+    await act(async () => root.unmount())
+  })
+
+  it('exposes a stable connected file service outside the modal and clears it when leaving', async () => {
+    const project = { id: 'paper', workspaceId: 'forest', name: 'Shared paper', role: 'editor' as const, createdAt: '2026-07-15T00:00:00.000Z' }
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ projects: [project] })))
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    let finish!: (client: HocuspocusCollaborationClient) => void
+    const pending = new Promise<HocuspocusCollaborationClient>((resolve) => { finish = resolve })
+    vi.spyOn(HocuspocusCollaborationClient, 'connect').mockImplementation((options) => {
+      options.onStatus?.('connected')
+      return pending
+    })
+    const client = new CollaborationServiceClient('https://collab.example.test', 'short-lived')
+    const launch: CollaborationProjectLaunch = {
+      client, serviceUrl: 'https://collab.example.test', token: 'short-lived',
+      profile: { userId: 'account-42', displayName: 'Researcher' },
+      workspaces: [{ id: 'forest', name: 'Forest lab', role: 'owner', createdAt: '2026-07-15T00:00:00.000Z' }],
+      projects: [project], workspaceId: 'forest', projectId: 'paper',
+    }
+    const onFileServiceChange = vi.fn()
+    const onOpenProjectFiles = vi.fn()
+    const props = {
+      launch, onClose: vi.fn(), onRemoteSource: vi.fn(), onStatus: vi.fn(), onCheckpoint: vi.fn(),
+      checkpointMode: 'download' as const, checkpointTarget: 'paper.qmd', onOpenProjectFiles,
+    }
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<CollaborationDialog open source="# Draft" {...props} onFileServiceChange={(service) => onFileServiceChange(service)} />))
+    expect(onFileServiceChange.mock.calls).toEqual([[null]])
+    const destroy = vi.fn()
+    await act(async () => {
+      finish({ publishPortableSource: (nextSource: string) => nextSource, flushRecovery: async () => true, destroy, editorBinding: {} } as unknown as HocuspocusCollaborationClient)
+      await pending
+    })
+    const service = onFileServiceChange.mock.calls.at(-1)![0]
+    expect(service).toEqual({ client, workspace: { ...launch.workspaces[0], role: 'editor' }, projectId: 'paper', currentUserId: 'account-42' })
+    expect(container.querySelector('.project-files-panel')).toBeNull()
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Browse project files')!.click())
+    expect(onOpenProjectFiles).toHaveBeenCalledOnce()
+
+    const notifications = onFileServiceChange.mock.calls.length
+    await act(async () => root.render(<CollaborationDialog open={false} source="# Draft\n\nWriting continues." {...props} onFileServiceChange={(nextService) => onFileServiceChange(nextService)} />))
+    expect(destroy).not.toHaveBeenCalled()
+    expect(onFileServiceChange).toHaveBeenCalledTimes(notifications)
+    expect(onFileServiceChange.mock.calls.at(-1)![0]).toBe(service)
+
+    await act(async () => root.render(<CollaborationDialog open source="# Draft\n\nWriting continues." {...props} onOpenProjectFiles={undefined} onFileServiceChange={(nextService) => onFileServiceChange(nextService)} />))
+    expect(container.querySelector('.project-files-panel')).not.toBeNull()
+    expect(onFileServiceChange).toHaveBeenCalledTimes(notifications)
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Leave session')!.click())
+    expect(onFileServiceChange).toHaveBeenLastCalledWith(null)
+    expect(destroy).toHaveBeenCalledOnce()
+    await act(async () => root.unmount())
+    expect(onFileServiceChange).toHaveBeenLastCalledWith(null)
+  })
+
+  it('updates the exposed project file permissions after collaboration reauthorization', async () => {
+    const project = { id: 'paper', workspaceId: 'forest', name: 'Shared paper', role: 'editor' as const, createdAt: '2026-07-15T00:00:00.000Z' }
+    const client = new CollaborationServiceClient('https://collab.example.test', 'short-lived')
+    vi.spyOn(client, 'listProjects').mockResolvedValue([{ ...project, role: 'commenter' }])
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ projects: [project] })))
+    let reauthorize!: () => void
+    vi.spyOn(HocuspocusCollaborationClient, 'connect').mockImplementation(async (options) => {
+      reauthorize = () => options.onStatus?.('connected')
+      return { publishPortableSource: (nextSource: string) => nextSource, destroy: vi.fn(), editorBinding: {} } as unknown as HocuspocusCollaborationClient
+    })
+    const launch: CollaborationProjectLaunch = {
+      client, serviceUrl: 'https://collab.example.test', token: 'short-lived',
+      profile: { userId: 'account-42' },
+      workspaces: [{ id: 'forest', name: 'Forest lab', role: 'owner', createdAt: '2026-07-15T00:00:00.000Z' }],
+      projects: [project], workspaceId: 'forest', projectId: 'paper',
+    }
+    const onFileServiceChange = vi.fn()
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<CollaborationDialog open source="# Draft" launch={launch} onClose={vi.fn()} onRemoteSource={vi.fn()} onStatus={vi.fn()} onCheckpoint={vi.fn()} checkpointMode="download" checkpointTarget="paper.qmd" onFileServiceChange={onFileServiceChange} onOpenProjectFiles={vi.fn()} />))
+    expect(onFileServiceChange.mock.calls.at(-1)![0].workspace.role).toBe('editor')
+    await act(async () => reauthorize())
+    expect(onFileServiceChange.mock.calls.at(-1)![0].workspace.role).toBe('commenter')
+    await act(async () => root.unmount())
+    expect(onFileServiceChange).toHaveBeenLastCalledWith(null)
+  })
+
   it('prepares portable bibliography source only for an explicit owner checkpoint', async () => {
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(Response.json({ projects: [{ id: 'paper', workspaceId: 'forest', name: 'Paper', role: 'owner', createdAt: '2026-07-15T00:00:00.000Z' }] })))
     const original = '---\nbibliography: old.bib\n---\n# Paper\n'

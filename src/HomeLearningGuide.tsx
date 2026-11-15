@@ -3,7 +3,7 @@ import { Icon } from './Icon'
 const homeLearningTopics = [
   ['Write and organize', 'Shape the paper with sections and movable blocks while keeping the manuscript central.', 'document'],
   ['Cite sources', 'Insert citations with durable bibliography metadata and an automatic References section.', 'book'],
-  ['Produce reproducible results', 'Create figures, tables, and in-text values from R, Python, or Julia without publishing the code.', 'code'],
+  ['Add figures, tables, and equations', 'Drop an image into the paper, edit table cells directly, or type an equation and see its preview as you write.', 'image'],
   ['Review and collaborate', 'Comment, suggest revisions, invite focused roles, and keep a portable checkpoint of the work.', 'users'],
 ] as const
 
@@ -33,8 +33,8 @@ export function HomeLearningGuide({ onStartTour }: { onStartTour: () => void }) 
       <aside className="home-learning-boundary">
         <Icon name="info" size={18} />
         <div>
-          <strong>Desktop computes. Browser collaboration reviews.</strong>
-          <span>Run R, Python, and Julia from a trusted desktop project. Browser collaborators can keep writing, commenting, and reviewing retained results.</span>
+          <strong>Write in your browser. Compute on desktop.</strong>
+          <span>Code is optional. If you use R, Python, or Julia, run it from a trusted desktop project. Collaborators can keep writing and reviewing saved results online.</span>
         </div>
       </aside>
     </section>
@@ -43,7 +43,7 @@ export function HomeLearningGuide({ onStartTour }: { onStartTour: () => void }) 
 
 const homeTrustTopics = [
   ['Portable Markdown', 'The manuscript stays readable and editable outside DraftMatter.', 'document'],
-  ['Local computation', 'R, Python, and Julia run from a trusted project on your computer.', 'code'],
+  ['Local computation', 'Optional R, Python, and Julia code runs from a trusted project on your computer.', 'code'],
   ['Reviews inside Markdown', 'Comments and suggested changes are stored directly inside the Markdown manuscript.', 'message'],
 ] as const
 
@@ -53,7 +53,7 @@ export function HomeTrustGuide({ onStartTour }: { onStartTour: () => void }) {
       <div className="home-learning-intro">
         <span className="home-kicker">A workflow you can inspect</span>
         <h2 id="home-trust-title">The paper remains yours.</h2>
-        <p>Explore the complete example to see writing, computation, citations, and review working together in one portable manuscript.</p>
+        <p>Explore the complete example to see writing, figures, citations, and review working together. Add computation when your research needs it.</p>
         <div className="home-learning-action">
           <button className="home-primary" onClick={onStartTour}><Icon name="spark" size={16} />Start guided tour</button>
           <small>Short, skippable, and safe to explore.</small>

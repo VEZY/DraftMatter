@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto'
+import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
+import { join } from 'node:path'
+import { tmpdir } from 'node:os'
 import type { Pool } from 'pg'
 import { DataType, newDb } from 'pg-mem'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -14,14 +17,23 @@ const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('he
 const cleanups: Array<() => Promise<unknown>> = []
 afterEach(async () => { for (const cleanup of cleanups.splice(0).reverse()) await cleanup() })
 
-async function fixture(storage = new MemoryProjectFileStorage(), totalQuotaBytes?: number) {
+async function fixture(storage = new MemoryProjectFileStorage(), totalQuotaBytes?: number, migrationsThrough?: string) {
   const memory = newDb({ autoCreateForeignKeyIndices: true, noAstCoverageCheck: true })
   memory.public.registerOperator({ operator: '~', left: DataType.text, right: DataType.text, returns: DataType.bool, implementation: (value, pattern) => new RegExp(pattern).test(value) })
   memory.public.registerFunction({ name: 'pg_advisory_xact_lock', args: [DataType.integer, DataType.integer], returns: DataType.integer, implementation: () => 1 })
   memory.public.registerFunction({ name: 'char_length', args: [DataType.text], returns: DataType.integer, implementation: (value) => value.length })
   const adapter = memory.adapters.createPg(), pool = new adapter.Pool()
   cleanups.push(() => pool.end())
-  await runCollaborationMigrations(pool)
+  let migrations: string | undefined
+  if (migrationsThrough) {
+    migrations = await mkdtemp(join(tmpdir(), 'draftmatter-sync-migration-'))
+    cleanups.push(() => rm(migrations!, { recursive: true, force: true }))
+    const original = new URL('./migrations/', import.meta.url)
+    for (const name of await readdir(original)) {
+      if (/^\d+_[a-z0-9_]+\.sql$/.test(name) && name.slice(0, name.indexOf('_')) <= migrationsThrough) await writeFile(join(migrations, name), await readFile(new URL(name, original)))
+    }
+  }
+  await runCollaborationMigrations(pool, migrations)
   let now = Date.parse('2026-11-11T12:00:00Z'), nextId = 0
   const workspaces = new PostgresWorkspaceService({ pool, identity: { async verify(token) { return { userId: token, sessionId: `session-${token}` } } } })
   for (const workspaceId of [scope.workspaceId, otherScope.workspaceId]) {
@@ -300,10 +312,89 @@ describe('durable shared project files', () => {
     expect((await files.list('owner', scope)).quota.reservedBytes).toBe(0)
   })
 
-  it('confines paths to data without private metadata, OS paths, traversal or ambiguous portable names', () => {
-    for (const path of ['x.csv', '.env', 'src/x.ts', 'data', '/data/x.csv', 'data//x.csv', 'data/../x.csv', 'data/./x.csv', 'data/.git/config', 'data/.DraftMatter/private', 'data/x\u0000.csv', 'data\\x.csv', 'data/CON.txt', 'data/trailing.', 'data/trailing ', 'C:/data/x.csv']) {
+  it('accepts selected ordinary project paths while excluding private metadata and dependency folders', () => {
+    for (const path of ['.env', '.env.production', '/data/x.csv', 'data//x.csv', 'data/../x.csv', 'data/./x.csv', 'data/.git/config', 'data/.DraftMatter/private', 'data/x\u0000.csv', 'data\\x.csv', 'data/CON.txt', 'data/trailing.', 'data/trailing ', 'C:/data/x.csv', '.ssh/id_rsa', '.aws/credentials', '.codex/config.toml', '.agents/private.json', '.venv/bin/python', 'node_modules/pkg/index.js', 'renv/library/package/file', 'renv/cache/file', 'renv/staging/file']) {
       expect(() => validateProjectFilePath(path), path).toThrow()
     }
-    expect(validateProjectFilePath('data/terrain/été.csv')).toBe('data/terrain/été.csv')
+    for (const path of ['paper.qmd', 'references.bib', 'figures/result.svg', 'src/analysis.py', 'data/terrain/été.csv', 'uv.lock']) expect(validateProjectFilePath(path)).toBe(path)
+  })
+
+  it('publishes one of two concurrent edits from the same base and retains the losing upload and old bytes', async () => {
+    const { files, makeService, storage } = await fixture()
+    const path = 'paper.qmd'
+    const baseBytes = new Uint8Array([1, 2])
+    const base = await files.begin('owner', scope, { path, size: 2, mediaType: 'text/markdown', expectedVersionId: null })
+    await files.putPart('owner', scope, base.id, 1, baseBytes, sha(baseBytes))
+    await files.complete('owner', scope, base.id)
+    const contenders = await Promise.all(['owner', 'editor'].map(async (token, index) => {
+      const bytes = new Uint8Array([index + 3, index + 4])
+      const upload = await files.begin(token, scope, { path, size: 2, mediaType: 'text/markdown', expectedVersionId: base.id })
+      await files.putPart(token, scope, upload.id, 1, bytes, sha(bytes))
+      return { token, upload, bytes }
+    }))
+    const completes = vi.spyOn(storage, 'complete')
+    const results = await Promise.allSettled(contenders.map(({ token, upload }, index) => (index ? makeService() : files).complete(token, scope, upload.id)))
+    const winningIndex = results.findIndex((result) => result.status === 'fulfilled')
+    expect(results.filter((result) => result.status === 'fulfilled')).toHaveLength(1)
+    expect((results[1 - winningIndex] as PromiseRejectedResult).reason).toMatchObject({ code: 'file-version-conflict', status: 409 })
+    expect(completes).toHaveBeenCalledTimes(1)
+    const winner = contenders[winningIndex], loser = contenders[1 - winningIndex]
+    expect((await files.list('reader', scope)).heads).toEqual([{ path, versionId: winner.upload.id, deleted: false }])
+    expect((await files.list(loser.token, scope)).uploads).toEqual([expect.objectContaining({ id: loser.upload.id, expectedVersionId: base.id })])
+    expect((await files.readPart('reader', scope, base.id, 1)).bytes).toEqual(baseBytes)
+    expect((await files.readPart('reader', scope, winner.upload.id, 1)).bytes).toEqual(winner.bytes)
+    await files.cancel(loser.token, scope, loser.upload.id)
+    const newest = await files.begin('owner', scope, { path, size: 0, mediaType: 'text/markdown', expectedVersionId: winner.upload.id })
+    await files.complete('owner', scope, newest.id)
+    // Retrying an acknowledged old completion never moves the head backwards.
+    await files.complete(winner.token, scope, winner.upload.id)
+    expect((await files.list('reader', scope)).heads).toEqual([{ path, versionId: newest.id, deleted: false }])
+  })
+
+  it('changes the head token on deletion and refuses stale recreation even after storage cleanup', async () => {
+    const { files } = await fixture()
+    const path = 'figures/plot.svg'
+    const first = await files.begin('owner', scope, { path, size: 0, mediaType: 'image/svg+xml', expectedVersionId: null })
+    await files.complete('owner', scope, first.id)
+    const stale = await files.begin('editor', scope, { path, size: 0, mediaType: 'image/svg+xml', expectedVersionId: first.id })
+    await files.deleteVersion('owner', scope, first.id)
+    const [tombstone] = (await files.list('reader', scope)).heads!
+    expect(tombstone).toMatchObject({ path, deleted: true })
+    expect(tombstone.versionId).not.toBe(first.id)
+    await expect(files.complete('editor', scope, stale.id)).rejects.toMatchObject({ code: 'file-version-conflict' })
+    await expect(files.begin('owner', scope, { path, size: 0, mediaType: 'image/svg+xml', expectedVersionId: null })).rejects.toMatchObject({ code: 'file-version-conflict' })
+    const restored = await files.begin('owner', scope, { path, size: 0, mediaType: 'image/svg+xml', expectedVersionId: tombstone.versionId })
+    await files.complete('owner', scope, restored.id)
+    await files.deleteVersion('owner', scope, first.id)
+    expect((await files.list('reader', scope)).heads).toEqual([{ path, versionId: restored.id, deleted: false }])
+  })
+
+  it('guards legacy uploads against a newer synchronization publication and rejects inconsistent resume bases', async () => {
+    const { files } = await fixture()
+    const legacy = await files.begin('owner', scope, { path: 'data/observations.csv', size: 0, mediaType: 'text/csv' })
+    expect(legacy.expectedVersionId).toBeNull()
+    const newer = await files.begin('editor', scope, { path: legacy.path, size: 0, mediaType: 'text/csv', expectedVersionId: null })
+    await files.complete('editor', scope, newer.id)
+    await expect(files.complete('owner', scope, legacy.id)).rejects.toMatchObject({ code: 'file-version-conflict', status: 409 })
+    await expect(files.begin('owner', scope, { path: legacy.path, size: 0, mediaType: 'text/csv', expectedVersionId: newer.id })).rejects.toMatchObject({ status: 409 })
+    expect((await files.list('reader', scope)).heads).toEqual([{ path: legacy.path, versionId: newer.id, deleted: false }])
+    await files.cancel('owner', scope, legacy.id)
+    const retry = await files.begin('owner', scope, { path: legacy.path, size: 0, mediaType: 'text/csv', expectedVersionId: newer.id })
+    await files.complete('owner', scope, retry.id)
+    expect((await files.list('reader', scope)).files).toHaveLength(2)
+  })
+
+  it('migrates existing version history to current heads without reviving an older deleted path', async () => {
+    const { pool, files } = await fixture(undefined, undefined, '011')
+    await pool.query(`INSERT INTO draftmatter_project_files(workspace_id, project_id, id, path, size, media_type, created_by, created_at, updated_at, state, object_key) VALUES
+      ('forest','paper','file-old','data/old.csv',0,'text/csv','owner','2026-11-10T12:00:00Z','2026-11-10T12:00:00Z','ready','old'),
+      ('forest','paper','file-deleted','data/old.csv',0,'text/csv','owner','2026-11-11T12:00:00Z','2026-11-11T12:00:00Z','deleted','deleted'),
+      ('forest','paper','file-current','data/current.csv',0,'text/csv','owner','2026-11-11T12:00:00Z','2026-11-11T12:00:00Z','ready','current')`)
+    expect((await runCollaborationMigrations(pool)).applied).toEqual(['012'])
+    expect((await files.list('reader', scope)).heads).toEqual([
+      { path: 'data/current.csv', versionId: 'file-current', deleted: false },
+      { path: 'data/old.csv', versionId: 'deleted-file-deleted', deleted: true },
+    ])
+    await expect(files.begin('owner', scope, { path: 'data/old.csv', size: 0, mediaType: 'text/csv', expectedVersionId: null })).rejects.toMatchObject({ code: 'file-version-conflict' })
   })
 })

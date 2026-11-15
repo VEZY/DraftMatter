@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react'
 import { defaultKeymap, history as codeHistory, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { defaultHighlightStyle, StreamLanguage, syntaxHighlighting } from '@codemirror/language'
 import { Compartment, EditorState as CodeMirrorState } from '@codemirror/state'
@@ -7,10 +7,10 @@ import { julia } from '@codemirror/legacy-modes/mode/julia'
 import { python } from '@codemirror/legacy-modes/mode/python'
 import { r } from '@codemirror/legacy-modes/mode/r'
 import { setBlockType, toggleMark, wrapIn } from 'prosemirror-commands'
-import { history, redo as historyRedo, undo as historyUndo } from 'prosemirror-history'
+import { closeHistory, history, redo as historyRedo, undo as historyUndo } from 'prosemirror-history'
 import { keymap } from 'prosemirror-keymap'
 import { wrapInList } from 'prosemirror-schema-list'
-import type { Mark as ProseMirrorMark, Node as ProseMirrorNode } from 'prosemirror-model'
+import { Fragment, Slice, type Mark as ProseMirrorMark, type Node as ProseMirrorNode } from 'prosemirror-model'
 import { EditorState, NodeSelection, type Command, type Transaction } from 'prosemirror-state'
 import { tableEditing } from 'prosemirror-tables'
 import { Decoration, DecorationSet, EditorView, type MarkView, type NodeView } from 'prosemirror-view'
@@ -37,6 +37,7 @@ import { isPipeTableSeparator, parseTableCaptionLine } from './tableSyntax'
 import { crossReferenceChoices, groupedCrossReferenceChoices, type CrossReferenceChoice } from './crossReferencePicker'
 import { resolveSemanticReference } from './referenceIntegrity'
 import { isSafePortableLinkDestination } from './portableLink'
+import { normalizeProjectRelativePath } from './projectPaths'
 import {
   isExplicitlyUnnumbered,
   numberedCrossReferenceLabel,
@@ -243,6 +244,14 @@ export interface StructuredManuscriptEditorHandle {
   source: () => string
 }
 
+/** An imported asset is retained by the project; the manuscript stores its path. */
+export interface ImportedFigure {
+  source: string
+  alt: string
+  caption?: string
+  label?: string
+}
+
 export interface StructuredManuscriptEditorProps {
   source: string
   onChange: (source: string) => void
@@ -260,6 +269,10 @@ export interface StructuredManuscriptEditorProps {
   onSuggestionCapture?: (message: string, error?: boolean) => void
   onCopyReference?: (label: string) => void
   resolveAssetUrl?: (path: string) => string
+  /** Change only when retained asset URLs change, including asynchronous loads. */
+  assetResolutionRevision?: unknown
+  onImportFigures?: (files: File[]) => Promise<ImportedFigure[]>
+  onFigureImportError?: (message: string) => void
   citationLabels?: Record<string, string>
   codeCellStatuses?: Record<string, ExecutionFreshnessStatus>
   codeCellActionsEnabled?: boolean
@@ -319,6 +332,38 @@ function insertBlock(view: EditorView, node: ProseMirrorNode) {
   const { $from, to } = view.state.selection
   const position = $from.depth > 0 ? $from.after(1) : to
   view.dispatch(view.state.tr.insert(position, node).scrollIntoView())
+}
+
+const FIGURE_FILE_TYPES = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/svg+xml'])
+
+function isFigureFile(file: File) {
+  return FIGURE_FILE_TYPES.has(file.type.toLowerCase())
+    || (!file.type && /\.(?:png|jpe?g|gif|webp|svg)$/i.test(file.name))
+}
+
+function hasTransferredFiles(transfer: DataTransfer | null) {
+  return Boolean(transfer && (transfer.files.length || [...(transfer.types ?? [])].includes('Files')
+    || [...(transfer.items ?? [])].some((item) => item.kind === 'file')))
+}
+
+function importedFigureNode(figure: ImportedFigure, labels: Set<string>) {
+  if (normalizeProjectRelativePath(figure.source) !== figure.source || !isSafePortableLinkDestination(figure.source)) {
+    throw new Error('The imported figure needs a file inside the project.')
+  }
+  const requestedLabel = figure.label?.trim().replace(/^#/, '')
+  if (requestedLabel && (!isFriendlyObjectLabelForKind('figure', requestedLabel) || !isCrossReferenceTarget(requestedLabel))) {
+    throw new Error('The imported figure has an invalid reference label.')
+  }
+  const label = requestedLabel && !semanticLabelIsInUse(labels, requestedLabel)
+    ? requestedLabel
+    : friendlyObjectLabel('figure', requestedLabel || figure.caption?.trim() || figure.alt.trim() || figure.source, labels)
+  labels.add(label)
+  const children = [manuscriptSchema.nodes.image.createChecked({
+    id: randomId('image'), src: figure.source, alt: figure.alt, title: null,
+    label, sourceAttributes: `#${label}`,
+  })]
+  if (figure.caption) children.push(manuscriptSchema.nodes.caption.createChecked({ id: randomId('caption') }, manuscriptSchema.text(figure.caption)))
+  return manuscriptSchema.nodes.figure.createChecked({ id: randomId('figure') }, children)
 }
 
 function selectedReviewText(view: EditorView, source?: string, metadata?: StructuredManuscriptMetadata): StructuredReviewSelection | null {
@@ -976,7 +1021,7 @@ function codeCellNodeView(
     status.textContent = viewOnly ? viewOnlyLabel() : codeCellStatusLabel(presentedStatus)
     summary.textContent = viewOnly
       ? `${viewOnlySummary()} · ${lines} ${lines === 1 ? 'line' : 'lines'}`
-      : `Source stays outside the manuscript · ${lines} ${lines === 1 ? 'line' : 'lines'}`
+      : `Source saved with the manuscript · ${lines} ${lines === 1 ? 'line' : 'lines'}`
     summary.hidden = expanded
     editorHost.hidden = !expanded
     editorHost.id = `dm-code-${cellId.replace(/[^a-zA-Z0-9_.:-]+/g, '-')}`
@@ -3077,7 +3122,8 @@ function imageNodeView(
     updateObjectReferenceButton(references, view, figureLabel, descriptor.textContent)
     edit.disabled = !isEditable()
     edit.setAttribute('aria-label', figureLabel ? `Edit figure ${figureLabel}` : 'Edit figure')
-    image.src = resolveAssetUrl(sourcePath)
+    const resolvedSource = resolveAssetUrl(sourcePath)
+    if (image.getAttribute('src') !== resolvedSource) image.src = resolvedSource
     image.alt = String(node.attrs.alt ?? '')
     if (imageTitle) image.title = imageTitle
     else image.removeAttribute('title')
@@ -3488,6 +3534,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   onSuggestionCapture,
   onCopyReference,
   resolveAssetUrl,
+  assetResolutionRevision,
+  onImportFigures,
+  onFigureImportError,
   citationLabels,
   codeCellStatuses,
   codeCellActionsEnabled = false,
@@ -3532,6 +3581,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const reviewSelectionSignatureRef = useRef('')
   const draggedBlockIdRef = useRef<string | undefined>(undefined)
   const resolveAssetUrlRef = useRef(resolveAssetUrl)
+  const onImportFiguresRef = useRef(onImportFigures)
+  const onFigureImportErrorRef = useRef(onFigureImportError)
+  const pendingFigureImportsRef = useRef(new Set<{ view: EditorView; position: number; cancelled: boolean }>())
   const codeCellStatusesRef = useRef(codeCellStatuses)
   const codeCellActionsEnabledRef = useRef(codeCellActionsEnabled)
   const codeCellBrowserViewOnlyRef = useRef(codeCellBrowserViewOnly)
@@ -3565,6 +3617,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   onSuggestionCaptureRef.current = onSuggestionCapture
   onCopyReferenceRef.current = onCopyReference
   resolveAssetUrlRef.current = resolveAssetUrl
+  onImportFiguresRef.current = onImportFigures
+  onFigureImportErrorRef.current = onFigureImportError
   codeCellStatusesRef.current = codeCellStatuses
   codeCellActionsEnabledRef.current = codeCellActionsEnabled
   codeCellBrowserViewOnlyRef.current = codeCellBrowserViewOnly
@@ -4058,7 +4112,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     },
   }))
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!hostRef.current) return
     const host = hostRef.current
     const parsed = parseStructuredManuscript(sourceRef.current)
@@ -4105,6 +4159,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     const hidePointerTarget = () => {
       dropIndicator.hidden = true
       dropTargetHighlight.hidden = true
+      dropIndicator.style.height = ''
     }
     const showPointerTarget = (editorView: EditorView, sourceId: string, clientX: number, clientY: number, fallback: EventTarget | null) => {
       const target = pointerTarget(editorView, sourceId, clientX, clientY, fallback)
@@ -4125,6 +4180,72 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       dropTargetHighlight.style.height = `${target.bounds.height}px`
       dropTargetHighlight.hidden = false
       dropIndicator.hidden = false
+    }
+    const figureDropPosition = (editorView: EditorView, event: DragEvent) => {
+      // Resolve the pointer rather than the previous text selection. This also
+      // allows a figure to split a paragraph at the actual drop location.
+      try {
+        const hit = editorView.posAtCoords({ left: event.clientX, top: event.clientY })
+        if (hit && (editorView.state.doc.resolve(hit.pos).parent.isTextblock || editorView.state.doc.resolve(hit.pos).depth === 0)) return hit.pos
+      } catch { /* Some WebViews cannot resolve text coordinates at a block edge. */ }
+      const target = structuredBlockDropTarget(editorView.state.doc, event.target)
+      if (target) {
+        const bounds = target.element.getBoundingClientRect()
+        return event.clientY > bounds.top + bounds.height / 2
+          ? target.range.start + target.range.node.nodeSize
+          : target.range.start
+      }
+      return editorView.state.doc.content.size
+    }
+    const showFigureDropTarget = (editorView: EditorView, event: DragEvent) => {
+      hidePointerTarget()
+      try {
+        const coordinates = editorView.coordsAtPos(figureDropPosition(editorView, event))
+        const bounds = host.getBoundingClientRect()
+        dropIndicator.style.left = `${Math.max(0, coordinates.left - bounds.left)}px`
+        dropIndicator.style.top = `${coordinates.top - bounds.top}px`
+        dropIndicator.style.width = '3px'
+        dropIndicator.style.height = `${Math.max(16, coordinates.bottom - coordinates.top)}px`
+        dropIndicator.dataset.placement = 'figure'
+        dropIndicatorLabel.textContent = 'Insert figure here'
+        dropIndicator.hidden = false
+      } catch { /* Import still works if this WebView cannot draw a caret. */ }
+    }
+    const importFiguresAt = async (editorView: EditorView, files: File[], position: number) => {
+      const reportError = (message: string) => onFigureImportErrorRef.current?.(message)
+      if (readOnlyRef.current) {
+        reportError('You need editing access to insert a figure.')
+        return
+      }
+      if (!files.length || files.some((file) => !isFigureFile(file))) {
+        reportError('Drop image files to insert figures: PNG, JPEG, GIF, WebP, or SVG.')
+        return
+      }
+      const importer = onImportFiguresRef.current
+      if (!importer) {
+        reportError('Open a project before importing figure files.')
+        return
+      }
+      const bookmark = { view: editorView, position, cancelled: false }
+      pendingFigureImportsRef.current.add(bookmark)
+      host.setAttribute('aria-busy', 'true')
+      try {
+        const figures = await importer(files)
+        if (bookmark.cancelled || viewRef.current !== editorView) return
+        if (readOnlyRef.current) throw new Error('Editing access changed before the figure could be inserted. The imported file remains in the project.')
+        if (!figures.length) return
+        const labels = semanticLabelsInUse(editorView.state.doc)
+        const nodes = figures.map((figure) => importedFigureNode(figure, labels))
+        pendingFigureImportsRef.current.delete(bookmark)
+        const transaction = editorView.state.tr.replaceRange(bookmark.position, bookmark.position, new Slice(Fragment.fromArray(nodes), 0, 0))
+        editorView.dispatch(closeHistory(transaction).scrollIntoView())
+        editorView.focus()
+      } catch (error) {
+        if (!bookmark.cancelled) reportError(error instanceof Error ? error.message : 'The figure could not be imported. Try again.')
+      } finally {
+        pendingFigureImportsRef.current.delete(bookmark)
+        if (![...pendingFigureImportsRef.current].some((pending) => pending.view === editorView)) host.removeAttribute('aria-busy')
+      }
     }
     const view = new EditorView(host, {
       state: editorState(parsed.document, collaboration),
@@ -4176,6 +4297,12 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           return false
         },
         dragover: (editorView, event) => {
+          if (hasTransferredFiles(event.dataTransfer)) {
+            event.preventDefault()
+            if (event.dataTransfer) event.dataTransfer.dropEffect = readOnlyRef.current ? 'none' : 'copy'
+            if (!readOnlyRef.current) showFigureDropTarget(editorView, event)
+            return true
+          }
           const sourceId = draggedBlockIdRef.current
             || event.dataTransfer?.getData('application/x-draftmatter-block')
             || event.dataTransfer?.getData('text/plain')
@@ -4186,6 +4313,12 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           return true
         },
         drop: (editorView, event) => {
+          if (hasTransferredFiles(event.dataTransfer)) {
+            event.preventDefault()
+            hidePointerTarget()
+            void importFiguresAt(editorView, [...(event.dataTransfer?.files ?? [])], figureDropPosition(editorView, event))
+            return true
+          }
           const sourceId = draggedBlockIdRef.current
             || event.dataTransfer?.getData('application/x-draftmatter-block')
             || event.dataTransfer?.getData('text/plain')
@@ -4197,6 +4330,17 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           const placement: StructuredBlockMovePlacement = event.clientY > bounds.top + bounds.height / 2 ? 'after' : 'before'
           moveBlock(editorView, sourceId, targetId, placement)
           draggedBlockIdRef.current = undefined
+          return true
+        },
+        dragleave: (_editorView, event) => {
+          if (!(event.relatedTarget instanceof Node) || !host.contains(event.relatedTarget)) hidePointerTarget()
+          return false
+        },
+        paste: (editorView, event) => {
+          const files = [...(event.clipboardData?.files ?? [])]
+          if (!files.some(isFigureFile)) return false
+          event.preventDefault()
+          void importFiguresAt(editorView, files, editorView.state.selection.from)
           return true
         },
       },
@@ -4289,6 +4433,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           onSuggestionCaptureRef.current?.('The text suggestion was captured first. Repeat the separate formatting action.')
           return
         }
+        if (transaction.docChanged) {
+          for (const pending of pendingFigureImportsRef.current) {
+            if (pending.view === view) pending.position = transaction.mapping.map(pending.position, 1)
+          }
+        }
         const next = view.state.apply(transaction)
         view.updateState(next)
         refreshSemanticPresentation(view)
@@ -4321,6 +4470,10 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     refreshFootnotePresentation(view)
     emitReviewSelection(view)
     return () => {
+      for (const pending of pendingFigureImportsRef.current) {
+        if (pending.view === view) { pending.cancelled = true; pendingFigureImportsRef.current.delete(pending) }
+      }
+      host.removeAttribute('aria-busy')
       if (pendingSuggestionRef.current) window.clearTimeout(pendingSuggestionRef.current.timeout)
       pendingSuggestionRef.current = undefined
       document.querySelectorAll('.structured-heading-dialog-backdrop, .structured-link-dialog-backdrop').forEach((dialog) => dialog.remove())
@@ -4338,7 +4491,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     if (view && pendingSuggestionRef.current) finishPendingSuggestion(view)
   }, [suggestionMode])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     sourceRef.current = source
     if (source === loadedSourceRef.current) return
     const view = viewRef.current
@@ -4353,6 +4506,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       if (collaborationRef.current) {
         reconcileCollaborativeProseMirrorDocument(collaborationRef.current, parsed.document)
       } else {
+        for (const pending of pendingFigureImportsRef.current) pending.cancelled = true
         view.updateState(editorState(parsed.document))
         refreshSemanticPresentation(view)
       }
@@ -4375,6 +4529,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   useEffect(() => {
     viewRef.current?.dispatch(viewRef.current.state.tr.setMeta('dm-decoration-refresh', true))
   }, [publicationByline])
+
+  useEffect(() => {
+    const view = viewRef.current
+    if (view) refreshSemanticPresentation(view)
+  }, [assetResolutionRevision])
 
   useEffect(() => {
     const view = viewRef.current

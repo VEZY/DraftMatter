@@ -52,7 +52,7 @@ test.describe('DM-P1-07 accessibility baseline', () => {
     await expect(page.locator('.editor-area')).toHaveCSS('scroll-behavior', 'auto')
 
     const motionDurations = await page.evaluate(() => {
-      const saveIndicator = document.querySelector<HTMLElement>('.save-indicator')!
+      const saveIndicator = document.querySelector<HTMLElement>('.project-dot')!
       const chart = document.createElement('div')
       chart.className = 'chart-wrap'
       document.body.append(chart)

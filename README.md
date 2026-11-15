@@ -2,7 +2,7 @@
 
 **Write the paper. Keep it reproducible.**
 
-DraftMatter is a local-first research writing application that brings the manuscript, citations, executable results, review, collaboration, and version history into one calm workspace. Underneath the rendered writing experience, the manuscript remains a portable Markdown or Quarto text file that can live beside its code, data, and bibliography in an ordinary Git repository.
+DraftMatter is a local-first research writing application that brings the manuscript, citations, executable results, review, collaboration, and local recovery into one calm workspace. Underneath the rendered writing experience, the manuscript remains a portable Markdown or Quarto text file that can live beside its code, data, and bibliography in an ordinary folder, with optional Git managed through your own tools.
 
 > [!IMPORTANT]
 > DraftMatter has a certified local MVP and a repository-owned collaboration beta foundation. It is still an alpha product: public desktop releases still require platform installation checks; an operated hosted collaboration service still requires external deployment, security, privacy, and support gates. See the [product register](./draftmatter-app-design.md) and [implementation evidence](./docs/implementation-evidence.md).
@@ -18,7 +18,7 @@ DraftMatter puts the readable paper back at the center of the project:
 | Figures, tables, and values are copied out of analysis files | Python, R, and Julia cells publish results directly into the manuscript |
 | Citations are collected and formatted in separate tools | Crossref, Zotero, bibliography import, in-text citations, and the reference section share one workflow |
 | Comments and tracked changes live in another review copy | Attributed suggestions and discussion stay anchored to portable manuscript source |
-| The document format hides or fragments version history | The manuscript is plain text with rendered/source Git diffs and explicit checkpoints |
+| The document format hides the research project | The manuscript is plain text beside its figures, bibliography, and data; Git remains an optional external tool |
 | Code makes the working file hard to read | Authors see a calm paper; code stays collapsed and publication exports contain results, not machinery |
 
 DraftMatter does not replace your languages, IDE, Git client, or project structure. It gives the research manuscript the writing and review experience it deserves without severing it from those tools.
@@ -77,19 +77,19 @@ DraftMatter does not replace your languages, IDE, Git client, or project structu
 - Co-edit and review live with owner, editor, commenter, and viewer roles.
 - Converge offline edits after reconnecting, including explicit handling of concurrent review decisions.
 - Use one-use guest invitations, project-level role overrides, revocation, and an owner activity audit.
-- Create an owner-controlled portable checkpoint before writing collaborative state back to the local project.
+- Synchronize the manuscript, figures, and references with a linked desktop folder by default; choose additional files individually and resolve concurrent changes without replacing either copy silently.
+- Keep explicit owner checkpoints and portable downloads available alongside selective synchronization.
 - Keep browser collaborators away from filesystem, process, execution, Git, and external-renderer capabilities by design.
 - Run the collaboration service on the included self-hosted stack; the service boundary remains provider-neutral.
 
-### Plain text and real version control
+### Plain text and optional external version control
 
-- Keep the manuscript, code, data, bibliography, and generated assets in one repository.
+- Keep the manuscript, code, data, bibliography, and generated assets in one ordinary project folder.
 - Open the same text file in DraftMatter, your preferred IDE, or any Markdown/Quarto-aware tool.
 - Recover from interrupted writes and keep bounded local draft history.
 - Detect external edits, renames, deletions, and dirty-buffer conflicts without overwriting work.
-- Inspect source or rendered semantic Git diffs.
-- Stage selected paths, create named checkpoints, and use guarded branch, fetch, pull, push, and remote workflows.
-- Keep Git actions explicit: opening or saving a manuscript never commits or contacts a remote.
+- Use Git if you choose: initialize and manage the repository through your Git client, IDE, or command line.
+- DraftMatter does not probe, initialize, stage, commit, or contact Git remotes during normal project work. Its local recovery journal is independent of Git.
 
 ### Clean publication outputs
 
@@ -112,14 +112,14 @@ research-project/
 └── figures/               # retained publication outputs
 ```
 
-DraftMatter renders `paper.qmd` as the everyday writing surface. On desktop, trusted cells can use the project’s Python, R, and Julia environments and materialize publication-ready outputs. Review and citation metadata round-trip with the portable source. Git can version the entire project, and clean export removes the authoring machinery from the deliverable.
+DraftMatter renders `paper.qmd` as the everyday writing surface. On desktop, trusted cells can use the project’s Python, R, and Julia environments and materialize publication-ready outputs. Review and citation metadata round-trip with the portable source. An externally managed Git repository can version the project, and clean export removes the authoring machinery from the deliverable.
 
 The browser and desktop surfaces intentionally have different boundaries:
 
 | Surface | Intended use |
 | --- | --- |
 | Browser build | Portable manuscript editing and review, the complete example, and optional online collaboration. No local filesystem, process execution, Git, or external renderers. |
-| Tauri desktop | Local project folders, citation acquisition, explicitly trusted Python/R/Julia execution, retained outputs, recovery, Git, and optional Pandoc/Quarto adapters. |
+| Tauri desktop | Local project folders, citation acquisition, explicitly trusted Python/R/Julia execution, retained outputs, recovery, and optional Pandoc/Quarto adapters. |
 
 ## Run locally
 
@@ -207,6 +207,7 @@ Production desktop installers are built from version tags as draft GitHub releas
 
 ## Project documentation
 
+- [Writing, figures, and project files](./docs/writing-and-files.md)
 - [Product and architecture brief](./draftmatter-app-design.md)
 - [Implementation evidence](./docs/implementation-evidence.md)
 - [Complete example and dogfood matrix](./docs/alpha-dogfood-matrix.md)

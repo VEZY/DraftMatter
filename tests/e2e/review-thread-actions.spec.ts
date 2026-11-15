@@ -14,7 +14,7 @@ test.describe('DM-P4-01 review thread actions', () => {
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe('@fig-canopy-result')
   })
 
-  test('persists reply and resolve activity timestamps across reload', async ({ page }) => {
+  test('persists replies and timestamps while resolving to a compact thread that can be inspected and reopened after reload', async ({ page }) => {
     await page.goto('/draft')
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Manuscript comments' })
@@ -22,9 +22,13 @@ test.describe('DM-P4-01 review thread actions', () => {
     const createdAt = await comment.locator('.comment-author time').getAttribute('datetime')
 
     await comment.getByRole('button', { name: 'Reply', exact: true }).click()
+    await expect(comment.getByRole('button', { name: 'Reply', exact: true })).toHaveCount(0)
+    await expect(comment.getByRole('textbox', { name: /^Reply to / })).toBeFocused()
     await comment.getByRole('textbox', { name: /^Reply to / }).fill('The interval is now included.')
     await comment.getByRole('textbox', { name: /^Reply to / }).press('Enter')
     await expect(comment).toContainText('The interval is now included.')
+    await expect(comment.getByRole('textbox', { name: /^Reply to / })).toHaveCount(0)
+    await expect(comment.getByRole('button', { name: 'Reply', exact: true })).toBeVisible()
     await expect(comment.locator('.comment-author time')).toHaveAttribute('datetime', createdAt!)
     await expect(comment.locator('.portable-comment-reply time')).toHaveAttribute('datetime', /^\d{4}-\d{2}-\d{2}T/)
 
@@ -35,17 +39,41 @@ test.describe('DM-P4-01 review thread actions', () => {
     expect(replied.match(/data-name="Remi Vezy"/g)).toHaveLength(1)
 
     await comment.getByRole('button', { name: 'Resolve comment' }).click()
-    await expect(comment.getByRole('button', { name: 'Reopen comment' })).toBeVisible()
+    await expect(comment).toHaveClass(/resolved/)
+    await expect(comment.locator('.portable-comment-resolved-label')).toHaveText('Resolved')
+    await expect(comment.locator('.portable-comment-header').getByRole('button', { name: 'Reopen comment' })).toBeVisible()
+    await expect(comment.getByRole('button', { name: /^Expand comment by / })).toHaveAttribute('aria-expanded', 'false')
+    await expect(comment.locator('.portable-comment-body')).toBeHidden()
+    await expect(comment.getByRole('button', { name: 'Reply', exact: true })).toHaveCount(0)
     await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toMatch(/#dm-comment-01 \.dm-thread[^}]*data-status="resolved"[^}]*data-updated=/)
 
     await page.reload()
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const reopenedReview = page.getByRole('complementary', { name: 'Manuscript comments' })
     const reopenedComment = reopenedReview.locator('#review-item-dm-comment-01')
+    await expect(reopenedComment).toHaveClass(/resolved/)
+    await expect(reopenedComment.locator('.portable-comment-resolved-label')).toHaveText('Resolved')
+    await expect(reopenedComment.locator('.portable-comment-body')).toBeHidden()
+    await expect(reopenedComment.getByRole('button', { name: /^Expand comment by / })).toHaveAttribute('aria-expanded', 'false')
+    const reopen = reopenedComment.locator('.portable-comment-header').getByRole('button', { name: 'Reopen comment' })
+    await expect(reopen).toBeVisible()
+
+    await reopenedComment.getByRole('button', { name: /^Expand comment by / }).click()
     await expect(reopenedComment).toContainText('The interval is now included.')
     await expect(reopenedComment.locator('.portable-comment-reply').getByText('Remi Vezy', { exact: true })).toBeVisible()
-    await expect(reopenedComment.getByRole('button', { name: 'Reopen comment' })).toBeVisible()
-    await reopenedComment.getByRole('button', { name: 'Reopen comment' }).click()
+    await expect(reopenedComment).toHaveClass(/resolved/)
+    await expect(reopenedComment.getByRole('button', { name: 'Reply', exact: true })).toHaveCount(0)
+    expect(await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toMatch(/#dm-comment-01 \.dm-thread[^}]*data-status="resolved"/)
+
+    await reopenedComment.getByRole('button', { name: /^Collapse comment by / }).click()
+    await expect(reopenedComment.locator('.portable-comment-body')).toBeHidden()
+    await reopen.click()
+    await expect(reopenedComment).not.toHaveClass(/resolved/)
+    await expect(reopenedComment.locator('.portable-comment-resolved-label')).toHaveCount(0)
+    await expect(reopenedComment.locator('.portable-comment-body')).toBeVisible()
+    await expect(reopenedComment).toContainText('The interval is now included.')
+    await expect(reopenedComment.getByRole('button', { name: /^Collapse comment by / })).toHaveAttribute('aria-expanded', 'true')
+    await expect(reopenedComment.getByRole('button', { name: 'Reply', exact: true })).toBeVisible()
     await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toMatch(/#dm-comment-01 \.dm-thread[^}]*data-status="open"[^}]*data-updated=/)
   })
 

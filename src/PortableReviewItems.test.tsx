@@ -34,6 +34,12 @@ async function input(element: HTMLInputElement | HTMLTextAreaElement, value: str
   })
 }
 
+async function keydown(element: Element, options: KeyboardEventInit) {
+  const event = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...options })
+  await act(async () => { element.dispatchEvent(event) })
+  return event
+}
+
 describe('portable review panel items', () => {
   let container: HTMLDivElement
   let root: ReturnType<typeof createRoot>
@@ -366,6 +372,37 @@ describe('portable review panel items', () => {
     expect(parsed.threads[0].anchorContext?.quote).toBe('First target')
   })
 
+  it.each(['metaKey', 'ctrlKey'] as const)('publishes a comment with %s + Enter, preserving ordinary typing and composition', async (modifier) => {
+    const source = '# Results\n\nA target phrase.\n'
+    const apply = vi.fn()
+    await act(async () => root.render(<PortableReviewItems source={source} selectedTarget={{ quote: 'target phrase', occurrence: 0 }} openCommentRequest={1} showFooter={false} onApply={apply} />))
+    const composer = container.querySelector<HTMLElement>('[aria-label="New comment"]')!
+    const textarea = composer.querySelector('textarea')!
+    expect(composer.querySelector('strong, label > span')).toBeNull()
+    expect(textarea.getAttribute('aria-label')).toBe('Comment')
+    expect(textarea.placeholder).toBe('Write a comment…')
+
+    const empty = await keydown(textarea, { key: 'Enter', [modifier]: true })
+    expect(empty.defaultPrevented).toBe(true)
+    expect(apply).not.toHaveBeenCalled()
+    expect(container.querySelector('[role="alert"]')).toBeNull()
+
+    await input(textarea, 'First line\nSecond line')
+    const plainEnter = await keydown(textarea, { key: 'Enter' })
+    expect(plainEnter.defaultPrevented).toBe(false)
+    const composing = await keydown(textarea, { key: 'Enter', [modifier]: true, isComposing: true })
+    expect(composing.defaultPrevented).toBe(false)
+    expect(apply).not.toHaveBeenCalled()
+
+    const publish = await keydown(textarea, { key: 'Enter', [modifier]: true })
+    expect(publish.defaultPrevented).toBe(true)
+    expect(apply).toHaveBeenCalledTimes(1)
+    const thread = parseReviewMarkup(apply.mock.calls[0][0]).threads[0]
+    expect(thread.messages).toEqual(['First line\nSecond line'])
+    expect(thread.anchorContext?.quote).toBe('target phrase')
+    expect(container.querySelector('.portable-comment-composer')).toBeNull()
+  })
+
   it('preserves an exact whitespace selection and refuses to silently relocate a stale selection', async () => {
     const manuscript = '# Results\n\nA  spaced target  remains.\n'
     const apply = vi.fn()
@@ -434,17 +471,29 @@ describe('portable review panel items', () => {
     await click(button(container.querySelector('.portable-thread-actions')!, 'Reply'))
     const reply = container.querySelector<HTMLInputElement>('.reply-box input')!
     expect(reply).toBe(document.activeElement)
+    expect(container.querySelector('.portable-comment-reply-button')).toBeNull()
     await input(reply, 'The uncertainty is included.')
     await click(container.querySelector('[aria-label="Send reply"]')!)
     expect(parseReviewMarkup(latestSource).threads[0].messages).toEqual(['Check this result.', 'The uncertainty is included.'])
     expect(text(container.querySelector('.portable-comment-reply-meta'))).toContain('Remi Vezy')
     expect(container.querySelector('.portable-comment-reply time')).not.toBeNull()
+    expect(container.querySelector('.portable-comment-reply-button')).not.toBeNull()
     await click(container.querySelector('[aria-label="Resolve comment"]')!)
     expect(parseReviewMarkup(latestSource).threads[0].status).toBe('resolved')
-    expect(container.querySelector('.comment-card.resolved')).not.toBeNull()
+    expect(container.querySelector('.comment-card.resolved.collapsed')).not.toBeNull()
+    expect(container.querySelector('.portable-comment-body')).toBeNull()
     expect(container.querySelector('.portable-comment-reply-button')).toBeNull()
+    const resolvedSource = latestSource
+    await click(container.querySelector('[aria-label="Expand comment by Alice Martin"]')!)
+    expect(text(container.querySelector('.portable-comment-body'))).toBe('Check this result.')
+    expect(container.querySelector('.comment-card.resolved')).not.toBeNull()
+    expect(latestSource).toBe(resolvedSource)
+    await click(container.querySelector('[aria-label="Collapse comment by Alice Martin"]')!)
     await click(container.querySelector('[aria-label="Reopen comment"]')!)
     expect(parseReviewMarkup(latestSource).threads[0].status).toBe('open')
+    expect(container.querySelector('.comment-card.resolved, .comment-card.collapsed')).toBeNull()
+    expect(text(container.querySelector('.portable-comment-body'))).toBe('Check this result.')
+    expect(container.querySelector('.portable-comment-reply-button')).not.toBeNull()
     await click(container.querySelector('[aria-label="Delete comment"]')!)
     expect(container.querySelector('.comment-card')).toBeNull()
     expect(parseReviewMarkup(latestSource).threads[0]).toMatchObject({ status: 'deleted', messages: ['Check this result.', 'The uncertainty is included.'] })

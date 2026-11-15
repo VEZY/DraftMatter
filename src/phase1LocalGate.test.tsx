@@ -4,7 +4,9 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { DraftMatterApplication } from './DraftMatterApplication'
 import { desktopHost, type ProjectSnapshot } from './desktopHost'
+import { readLocalProjectRecents } from './localProjectCatalogue'
 import { readRecoverySnapshots } from './storage'
 
 const projectParent = '/research'
@@ -125,37 +127,9 @@ describe('DM-P1-GATE local project workflow', () => {
       persistedHash = 'document-2'
       return { path: request.path, hash: persistedHash, bytes: request.content.length, recoveryPath: '.draftmatter/recovery/paper-document-1.qmd' }
     })
-    vi.spyOn(desktopHost, 'gitStatus').mockResolvedValue({
-      gitAvailable: true,
-      gitVersion: 'git version 2.50.0',
-      repository: true,
-      repositoryRoot: projectRoot,
-      projectPrefix: '',
-      branch: 'main',
-      detached: false,
-      ahead: 0,
-      behind: 0,
-      entries: [],
-    })
-    vi.spyOn(desktopHost, 'gitBranches').mockResolvedValue({ current: 'main', detached: false, branches: [{ name: 'main', current: true }], remotes: [] })
-    vi.spyOn(desktopHost, 'gitHistory').mockResolvedValue([{ hash: '1234567890abcdef1234567890abcdef12345678', shortHash: '12345678', authoredAt: '2026-07-16T10:00:00+02:00', author: 'Ada', message: 'Earlier draft' }])
-    vi.spyOn(desktopHost, 'gitCheckpointDiff').mockResolvedValue({ hash: '1234567890abcdef1234567890abcdef12345678', text: '@@ -1 +1 @@\n-current\n+earlier\n', truncated: false, files: ['paper.qmd'] })
-    vi.spyOn(desktopHost, 'gitRestoreCheckpoint').mockImplementation(async () => {
-      persistedSource = externalSource
-      persistedHash = 'checkpoint-restored'
-      return {
-        gitAvailable: true,
-        gitVersion: 'git version 2.50.0',
-        repository: true,
-        repositoryRoot: projectRoot,
-        projectPrefix: '',
-        branch: 'main',
-        detached: false,
-        ahead: 0,
-        behind: 0,
-        entries: [{ path: 'paper.qmd', kind: 'modified', indexStatus: ' ', worktreeStatus: 'M', staged: false, unstaged: true, conflicted: false, binary: false }],
-      }
-    })
+    for (const method of ['gitStatus', 'gitInitialize', 'gitBranches', 'gitHistory', 'gitCheckpointDiff', 'gitRestoreCheckpoint'] as const) {
+      vi.spyOn(desktopHost, method).mockRejectedValue(new Error('Git is managed outside DraftMatter'))
+    }
 
     container = document.createElement('div')
     document.body.append(container)
@@ -215,6 +189,116 @@ describe('DM-P1-GATE local project workflow', () => {
     expect(persistedSource).toBe(originalSource)
     expect(readRecoverySnapshots(localStorage)[0].source).toBe(editedSource)
     expect(container.textContent).toContain('The external copy changed.')
+  })
+
+  it('opens the picked file from Home, supersedes the previous main document and reopens it from recents', async () => {
+    window.history.replaceState({}, '', '/')
+    const path = 'MAD_paper.md'
+    const root = '/research/28-MAD'
+    let snapshot: ProjectSnapshot = {
+      ...project, root,
+      config: { ...project.config, name: 'MAD', mainDocument: 'MAD_conceptual_framework.md' },
+      documents: ['MAD_conceptual_framework.md', path].map((name) => ({ ...project.documents[0], path: name })),
+    }
+    const pick = vi.spyOn(desktopHost, 'pickManuscript').mockResolvedValueOnce(null).mockResolvedValue({ root, path })
+    vi.mocked(desktopHost.openProject).mockImplementation(async () => snapshot)
+    const remember = vi.spyOn(desktopHost, 'setMainDocument').mockImplementation(async (_root, mainDocument) => {
+      snapshot = { ...snapshot, config: { ...snapshot.config, mainDocument } }
+      return snapshot
+    })
+    const run = vi.spyOn(desktopHost, 'executeKernel')
+    await act(async () => appRoot.render(<DraftMatterApplication />))
+    const openPaper = () => act(async () => buttonWithText(container, 'Open existing paper').click())
+    const waitForPaper = async () => {
+      for (let i = 0; i < 100 && !container.querySelector('.active-manuscript'); i++) await flush(10)
+      expect(container.querySelector('.active-manuscript strong')?.textContent).toBe(path)
+      expect(container.querySelector('.manuscript-picker-dialog')).toBeNull()
+    }
+
+    await openPaper()
+    expect(desktopHost.openProject).not.toHaveBeenCalled()
+    await openPaper()
+    await waitForPaper()
+    expect(desktopHost.openProject).toHaveBeenCalledWith(root)
+    expect(desktopHost.pickProjectFolder).not.toHaveBeenCalled()
+    expect(desktopHost.readDocument).toHaveBeenCalledExactlyOnceWith(root, path)
+    expect(remember).toHaveBeenCalledExactlyOnceWith(root, path)
+    await act(async () => container.querySelector<HTMLElement>('[aria-label="DraftMatter home"]')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('.home-local-open')!.click())
+    await waitForPaper()
+    expect(desktopHost.readDocument).toHaveBeenLastCalledWith(root, path)
+    expect(pick).toHaveBeenCalledTimes(2)
+    expect(remember).toHaveBeenCalledTimes(1)
+    expect(run).not.toHaveBeenCalled()
+    expect(desktopHost.saveDocument).not.toHaveBeenCalled()
+    window.history.replaceState({}, '', '/')
+  })
+
+  it('chooses, switches and reopens a manuscript without editing its source or running its code', async () => {
+    const papers = ['MAD_conceptual_framework.md', 'MAD_paper.md']
+    let snapshot: ProjectSnapshot = {
+      ...project,
+      config: { ...project.config, name: 'MAD', mainDocument: '' },
+      documents: papers.map((path) => ({ ...project.documents[0], path })),
+    }
+    const sources = ['# Framework\n', '# Main paper\n\n```python {#calculation .execute}\nprint(42)\n```\n']
+    vi.mocked(desktopHost.openProject).mockImplementation(async () => snapshot)
+    vi.mocked(desktopHost.readDocument).mockImplementation(async (_root, path) => ({
+      path, content: sources[papers.indexOf(path)], hash: path, modifiedMs: 1,
+    }))
+    const choose = vi.spyOn(desktopHost, 'setMainDocument').mockImplementation(async (_root, mainDocument) => {
+      snapshot = { ...snapshot, config: { ...snapshot.config, mainDocument } }
+      return snapshot
+    })
+    const run = vi.spyOn(desktopHost, 'executeKernel')
+    const probe = vi.spyOn(desktopHost, 'probeRuntime')
+    const open = async () => {
+      await act(async () => appRoot.render(<App desktopProjectLaunch={snapshot} />))
+      await flush()
+    }
+    const click = async (label: string) => {
+      await act(async () => buttonWithText(container, label).click())
+      await vi.waitFor(() => expect(container.querySelector('.manuscript-picker-dialog [role="status"]')).toBeNull())
+    }
+    const expectPaper = (path: string, heading: string) => {
+      expect(container.querySelector('.project-switcher-name small')?.textContent).toBe(path)
+      expect(container.querySelector('.structured-manuscript-editor h1')?.textContent).toBe(heading)
+      expect(container.querySelector('.outline-tree button span')?.textContent).toBe(heading)
+      expect(readLocalProjectRecents(localStorage)[0].mainDocument).toBe(path)
+    }
+
+    await open()
+    expect(container.querySelector('.manuscript-picker-dialog')).not.toBeNull()
+    expect(container.querySelector('.app-shell')).toBeNull()
+    expect(desktopHost.readDocument).not.toHaveBeenCalled()
+    await click(papers[1])
+    expectPaper(papers[1], 'Main paper')
+
+    await click('Switch manuscript')
+    choose.mockRejectedValueOnce(new Error('Could not save project configuration'))
+    await click(papers[0])
+    expect(container.querySelector('[role="alert"]')?.textContent).toContain('Could not save project configuration')
+    expectPaper(papers[1], 'Main paper')
+    await click(papers[0])
+    expectPaper(papers[0], 'Framework')
+
+    await act(async () => appRoot.unmount())
+    appRoot = createRoot(container)
+    await open()
+    expect(container.querySelector('.manuscript-picker-dialog')).toBeNull()
+    expectPaper(papers[0], 'Framework')
+    await flush(400)
+    expect(run).not.toHaveBeenCalled()
+    expect(probe).not.toHaveBeenCalled()
+    expect(desktopHost.saveDocument).not.toHaveBeenCalled()
+
+    await editSource('# Edited framework\n')
+    await click('Switch manuscript')
+    vi.mocked(desktopHost.saveDocument).mockRejectedValueOnce({ kind: 'conflict', message: 'External edit' })
+    await click(papers[1])
+    expectPaper(papers[0], 'Edited framework')
+    expect(choose).toHaveBeenCalledTimes(3)
+    expect(desktopHost.saveDocument).toHaveBeenCalledWith(expect.objectContaining({ path: papers[0], content: '# Edited framework\n' }))
   })
 
   it('creates, edits, autosaves, reopens identical source, and exposes recovery', async () => {
@@ -351,32 +435,36 @@ describe('DM-P1-GATE local project workflow', () => {
     expect(readRecoverySnapshots(localStorage).some((snapshot) => snapshot.source === editedSource)).toBe(true)
   })
 
-  it('flushes the open manuscript and reloads an explicitly restored Git checkpoint', async () => {
+  it('opens local recovery from History and restores a saved version without managing Git', async () => {
     localStorage.setItem('draftmatter.last-project-root.v1', projectRoot)
-    vi.spyOn(window, 'confirm').mockReturnValue(true)
     await act(async () => appRoot.render(<App />))
     await flush(50)
+    await editSource(editedSource)
+    await flush(1_000)
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close source inspector"]')!.click())
+    const writesBeforeHistory = vi.mocked(desktopHost.saveDocument).mock.calls.length
 
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="History"]')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open local recovery history"]')!.click())
     await flush()
-    const history = container.querySelector<HTMLElement>('.git-history-browser')!
-    await act(async () => buttonWithText(history, 'Rendered').click())
-    await flush()
-    await act(async () => buttonWithText(container, 'Restore clean files').click())
-    await flush(50)
+    const history = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Recovery history"]')!
+    expect(history).not.toBeNull()
+    expect(history.textContent).toContain('Stored only on this device')
+    expect(container.querySelector('.git-history-browser')).toBeNull()
+    expect(container.textContent).not.toContain('Restore clean files')
+    expect(desktopHost.saveDocument).toHaveBeenCalledTimes(writesBeforeHistory)
+    expect(persistedSource).toBe(editedSource)
 
-    expect(desktopHost.saveDocument).toHaveBeenCalledWith(expect.objectContaining({
-      root: projectRoot,
-      path: 'paper.qmd',
-      content: originalSource,
-      expectedHash: 'document-1',
-    }))
-    expect(desktopHost.gitRestoreCheckpoint).toHaveBeenCalledWith({
-      root: projectRoot,
-      hash: '1234567890abcdef1234567890abcdef12345678',
-      paths: ['paper.qmd'],
-    })
-    expect(container.querySelector('.structured-manuscript-editor')?.textContent).toContain('Changed safely in another editor.')
-    expect(container.querySelector('.toast')?.textContent).toContain('Restored 1 file from 12345678')
+    const original = readRecoverySnapshots(localStorage).find((snapshot) => snapshot.source === originalSource)!
+    const restore = [...history.querySelectorAll<HTMLButtonElement>('.recovery-list > button')]
+      .find((button) => button.textContent?.includes(original.sourceHash))!
+    await act(async () => restore.click())
+    await flush(1_000)
+
+    expect(persistedSource).toBe(originalSource)
+    expect(container.querySelector('.structured-manuscript-editor')?.textContent).toContain('First observation.')
+    expect(readRecoverySnapshots(localStorage).some((snapshot) => snapshot.source === editedSource)).toBe(true)
+    for (const method of ['gitStatus', 'gitInitialize', 'gitBranches', 'gitHistory', 'gitCheckpointDiff', 'gitRestoreCheckpoint'] as const) {
+      expect(desktopHost[method]).not.toHaveBeenCalled()
+    }
   })
 })

@@ -40,6 +40,49 @@ retained model output
 `
 
 describe('native DOCX export', () => {
+  it('embeds a PNG fallback for WebP and keeps its true canvas aspect ratio', () => {
+    const webp = new Uint8Array(30)
+    webp.set(new TextEncoder().encode('RIFF'), 0)
+    webp.set(new TextEncoder().encode('WEBPVP8 '), 8)
+    const view = new DataView(webp.buffer)
+    view.setUint32(4, 22, true); view.setUint32(16, 10, true)
+    webp.set([0x9d, 0x01, 0x2a], 23)
+    view.setUint16(26, 37, true); view.setUint16(28, 11, true)
+    const png = new Uint8Array(24)
+    png.set([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])
+    new DataView(png.buffer).setUint32(16, 37); new DataView(png.buffer).setUint32(20, 11)
+    const result = renderDocxExport('![Wide figure](figures/wide.webp){#fig-wide}\n', {
+      assets: [{ path: 'figures/wide.webp', bytes: webp, fallbackPng: png }], requireAssets: true,
+    })
+    const readable = new TextDecoder().decode(result.bytes)
+    expect(readable).toContain('word/media/image1.png')
+    expect(readable).toContain('ContentType="image/png"')
+    expect(readable).not.toContain('image1.webp')
+    expect(readable).not.toContain('ContentType="image/webp"')
+    expect(readable).toContain('<wp:extent cx="352425" cy="104775"/>')
+    expect(result.diagnostics).toEqual([])
+  })
+
+  it('requires a prepared PNG for a complete WebP Word export', () => {
+    const webp = new Uint8Array(12)
+    webp.set(new TextEncoder().encode('RIFF'), 0); webp.set(new TextEncoder().encode('WEBP'), 8)
+    const source = '![Figure](figures/figure.webp)\n'
+    expect(() => renderDocxExport(source, { assets: [{ path: 'figures/figure.webp', bytes: webp }], requireAssets: true })).toThrow('Prepare the WebP')
+    const referenced = renderDocxExport(source, { assets: [{ path: 'figures/figure.webp', bytes: webp }] })
+    expect(referenced.diagnostics).toEqual([expect.objectContaining({ code: 'figure-reference' })])
+    expect(new TextDecoder().decode(referenced.bytes)).not.toContain('word/media/image1.webp')
+  })
+
+  it('embeds figures with escaped alt text and filenames containing spaces and parentheses', () => {
+    const result = renderDocxExport('![Growth \\[A\\]](<figures/Growth (A).png> "A \\"quoted\\" title"){#fig-growth}\n: Response.\n', {
+      assets: [{ path: 'figures/Growth (A).png', bytes: Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]) }], requireAssets: true,
+    })
+    const readable = new TextDecoder().decode(result.bytes)
+    expect(readable).toContain('descr="Growth [A]"')
+    expect(readable).toContain('word/media/image1.png')
+    expect(readable).toContain('Figure 1. Response.')
+    expect(result.diagnostics).toEqual([])
+  })
   it('builds deterministic clean OOXML with document styles and real tables', () => {
     const options = {
       citationLabels: { '[@vezy2020]': '(Vezy et al., 2020)' },

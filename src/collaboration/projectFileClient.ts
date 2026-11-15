@@ -1,6 +1,5 @@
 import type { CollaborationServiceClient } from './serviceClient'
-import { PROJECT_FILE_CHUNK_BYTES, PROJECT_FILE_QUOTA_BYTES, type BeginProjectFileUpload, type ProjectFile, type ProjectFileCatalogue, type ProjectFilePart, type ProjectFileUpload } from './projectFiles'
-import { normalizeProjectRelativePath } from '../projectPaths'
+import { PROJECT_FILE_CHUNK_BYTES, PROJECT_FILE_QUOTA_BYTES, isSyncProjectFilePath, type BeginProjectFileUpload, type ProjectFile, type ProjectFileCatalogue, type ProjectFilePart, type ProjectFileUpload } from './projectFiles'
 
 export interface ProjectFileProgress {
   phase: 'verifying' | 'uploading' | 'completing'
@@ -17,6 +16,7 @@ export interface ProjectFileSource {
 export interface ProjectFileTransferOptions {
   signal?: AbortSignal
   uploadId?: string
+  expectedVersionId?: string | null
   onProgress?: (progress: ProjectFileProgress) => void
   onUpload?: (upload: ProjectFileUpload) => void
 }
@@ -31,11 +31,15 @@ export async function projectFilePartHash(bytes: Uint8Array): Promise<string> {
 }
 
 function validateSize(size: number) {
-  if (!Number.isSafeInteger(size) || size < 0 || size > PROJECT_FILE_QUOTA_BYTES) throw new Error('Choose a data file no larger than 1 GB.')
+  if (!Number.isSafeInteger(size) || size < 0 || size > PROJECT_FILE_QUOTA_BYTES) throw new Error('Choose a project file no larger than 1 GB.')
 }
 
 function validatePath(path: string) {
-  if (!path.startsWith('data/') || normalizeProjectRelativePath(path) !== path || /[\u0000-\u001f\u007f]/.test(path) || path.length > 1024) throw new Error('Use a portable file path inside data/, such as data/observations.csv.')
+  if (!isSyncProjectFilePath(path)) throw new Error('Use an ordinary relative project path outside private metadata, credentials, and dependency folders.')
+}
+
+function validVersion(value: unknown): value is string | null {
+  return value === null || typeof value === 'string' && /^[A-Za-z][A-Za-z0-9_.:-]{0,255}$/.test(value)
 }
 
 function expectedPartSize(file: Pick<ProjectFile, 'size' | 'chunkSize'>, partNumber: number) {
@@ -48,6 +52,7 @@ function validateMetadata<T extends ProjectFile | ProjectFileUpload>(file: T, co
   if (!file || typeof file.id !== 'string' || !file.id || typeof file.createdBy !== 'string' || typeof file.path !== 'string' || typeof file.mediaType !== 'string' || typeof file.createdAt !== 'string') throw new Error('The service returned an invalid file record.')
   validatePath(file.path)
   validateSize(file.size)
+  if ('expectedVersionId' in file && !validVersion(file.expectedVersionId)) throw new Error('The service returned an invalid upload base version.')
   if (file.chunkSize !== PROJECT_FILE_CHUNK_BYTES || !Array.isArray(file.parts) || file.parts.length > Math.ceil(PROJECT_FILE_QUOTA_BYTES / PROJECT_FILE_CHUNK_BYTES)) throw new Error('The service returned an unsupported file layout.')
   const numbers = new Set<number>()
   for (const part of file.parts) {
@@ -110,12 +115,22 @@ export class ProjectFileClient {
       validateMetadata(upload, false)
       if (upload.createdBy !== this.currentUserId) throw new Error('The upload belongs to another account. Refresh the project file list.')
     })
+    if (result.heads !== undefined) {
+      if (!Array.isArray(result.heads)) throw new Error('The service returned invalid current file versions.')
+      const paths = new Set<string>()
+      for (const head of result.heads) {
+        if (!head || typeof head.path !== 'string' || !isSyncProjectFilePath(head.path) || typeof head.versionId !== 'string' || !validVersion(head.versionId) || typeof head.deleted !== 'boolean' || paths.has(head.path)) throw new Error('The service returned invalid current file versions.')
+        if (!head.deleted && !result.files.some((file) => file.id === head.versionId && file.path === head.path)) throw new Error('A current online version is unavailable in the file catalogue. Refresh before synchronizing.')
+        paths.add(head.path)
+      }
+    }
     return result
   }
 
   async begin(request: BeginProjectFileUpload, signal?: AbortSignal): Promise<ProjectFileUpload> {
     validatePath(request.path)
     validateSize(request.size)
+    if (Object.prototype.hasOwnProperty.call(request, 'expectedVersionId') && !validVersion(request.expectedVersionId)) throw new Error('Use the exact observed server file version or null.')
     return validateMetadata(await this.json<ProjectFileUpload>('/uploads', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(request), signal }), false)
   }
 
@@ -151,8 +166,11 @@ export class ProjectFileClient {
     validateSize(file.size)
     validatePath(path)
     abortIfNeeded(signal)
-    let upload = options.uploadId ? await this.uploadStatus(options.uploadId, signal) : await this.begin({ path, size: file.size, mediaType: file.type || 'application/octet-stream' }, signal)
+    const guarded = Object.prototype.hasOwnProperty.call(options, 'expectedVersionId')
+    if (guarded && !validVersion(options.expectedVersionId)) throw new Error('Use the exact observed server file version or null.')
+    let upload = options.uploadId ? await this.uploadStatus(options.uploadId, signal) : await this.begin({ path, size: file.size, mediaType: file.type || 'application/octet-stream', ...(guarded ? { expectedVersionId: options.expectedVersionId } : {}) }, signal)
     if (upload.createdBy !== this.currentUserId || upload.path !== path || upload.size !== file.size) throw new Error('Choose the original file for this upload. Its path or size does not match.')
+    if (guarded && upload.expectedVersionId !== options.expectedVersionId) throw new Error('This upload belongs to a different online version. Refresh and resolve the conflict before resuming it.')
     onUpload?.(upload)
     const uploadId = upload.id
     const count = Math.ceil(upload.size / upload.chunkSize)

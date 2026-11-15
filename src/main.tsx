@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import 'katex/dist/katex.min.css'
 import { DraftMatterApplication } from './DraftMatterApplication'
 import './styles.css'
+import './writingWorkspace.css'
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

@@ -196,6 +196,7 @@ describe('desktop host adapter', () => {
     const host = createDesktopHost(invoke, picker, false)
 
     await expect(host.pickProjectFolder()).resolves.toBeNull()
+    await expect(host.pickManuscript()).resolves.toBeNull()
     await expect(host.agentIntegrationStatus('/project')).rejects.toMatchObject({ kind: 'integration' })
     await expect(host.executionTrustStatus('/project')).rejects.toMatchObject({ kind: 'integration' })
     await expect(host.trustProjectForSession('/project', 'run-project-code-with-user-permissions')).rejects.toMatchObject({ kind: 'integration' })
@@ -247,6 +248,7 @@ describe('desktop host adapter', () => {
 
     expect(resolveMainDocument(multiple)).toBeNull()
     expect(resolveMainDocument(multiple, 'notes.md')).toBe('notes.md')
+    expect(resolveMainDocument({ ...multiple, documents: [multiple.documents[0]] }, 'gone.md')).toBeNull()
     expect(resolveMainDocument({ ...multiple, documents: [multiple.documents[0]] })).toBe('article.qmd')
   })
 })

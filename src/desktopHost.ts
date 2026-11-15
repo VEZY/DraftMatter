@@ -1,5 +1,6 @@
 import { invoke, isTauri } from '@tauri-apps/api/core'
-import { open } from '@tauri-apps/plugin-dialog'
+import { basename, dirname } from '@tauri-apps/api/path'
+import { open, type OpenDialogOptions } from '@tauri-apps/plugin-dialog'
 import { CrossrefTransportError, type CrossrefRequest, type CrossrefWork } from './crossref'
 import type { JupyterKernelInventory, RuntimeExecutableProbe, RuntimeLanguage } from './runtimeDiscovery'
 import { EXECUTION_TRUST_ACKNOWLEDGEMENT, type ExecutionTrustStatus } from './executionTrust'
@@ -161,6 +162,72 @@ export interface ProjectAsset {
 export interface ProjectSeedFile {
   path: string
   bytes: number[]
+}
+
+export interface ProjectFileInventory {
+  files: Array<{ path: string; bytes: number; modifiedMs: number }>
+  truncated: boolean
+}
+
+export interface ProjectSyncScope {
+  serviceUrl: string
+  workspaceId: string
+  projectId: string
+}
+
+export interface ProjectSyncBaseline {
+  localHash: string | null
+  remoteVersionId: string | null
+}
+
+export interface ProjectSyncState {
+  schemaVersion: 1
+  scope: ProjectSyncScope
+  trackedPaths: string[]
+  excludedPaths: string[]
+  paused: boolean
+  baselines: Record<string, ProjectSyncBaseline>
+}
+
+export interface ProjectSyncStateSnapshot {
+  state: ProjectSyncState
+  revision: string | null
+}
+
+export interface SaveProjectSyncStateRequest {
+  root: string
+  scope: ProjectSyncScope
+  state: ProjectSyncState
+  expectedRevision: string | null
+}
+
+export interface ProjectSyncFileSnapshot {
+  path: string
+  exists: boolean
+  bytes: number
+  hash: string | null
+  modifiedMs: number | null
+  tooLarge: boolean
+}
+
+export interface ProjectSyncFileBytes {
+  path: string
+  bytes: number[]
+  hash: string
+}
+
+export interface ApplyProjectSyncFileRequest {
+  root: string
+  path: string
+  bytes: number[]
+  expectedHash: string | null
+}
+
+export interface ApplyProjectSyncFileResult {
+  path: string
+  bytes: number
+  hash: string
+  recoveryPath: string | null
 }
 
 export interface SaveDocumentRequest {
@@ -524,7 +591,7 @@ export interface HostFailure {
 }
 
 type InvokeBridge = <T>(command: string, args?: Record<string, unknown>) => Promise<T>
-type DirectoryPicker = (options: { directory: true; multiple: false; title: string }) => Promise<string | string[] | null>
+type SinglePathPicker = (options: OpenDialogOptions & { multiple: false }) => Promise<string | null>
 
 function staleDesktopHostFailure(message: string): HostFailure | undefined {
   const match = message.match(/command\s+([a-z][a-z0-9_]*)\s+not found/i)
@@ -572,7 +639,7 @@ function abortError() {
 
 export function resolveMainDocument(project: ProjectSnapshot, selectedPath?: string) {
   const paths = new Set(project.documents.map((entry) => entry.path))
-  if (selectedPath && paths.has(selectedPath)) return selectedPath
+  if (selectedPath !== undefined) return paths.has(selectedPath) ? selectedPath : null
   if (paths.has(project.config.mainDocument)) return project.config.mainDocument
   if (project.documents.length === 1) return project.documents[0].path
   return null
@@ -580,7 +647,7 @@ export function resolveMainDocument(project: ProjectSnapshot, selectedPath?: str
 
 export function createDesktopHost(
   invokeBridge: InvokeBridge = invoke,
-  directoryPicker: DirectoryPicker = open as DirectoryPicker,
+  pickPath: SinglePathPicker = open,
   available = isTauri(),
 ) {
   const executionUnavailable = () => Promise.reject<never>({
@@ -607,8 +674,20 @@ export function createDesktopHost(
     available,
     async pickProjectFolder(title = 'Choose a DraftMatter project folder') {
       if (!available) return null
-      const selected = await directoryPicker({ directory: true, multiple: false, title })
-      return Array.isArray(selected) ? selected[0] ?? null : selected
+      return pickPath({ directory: true, multiple: false, title })
+    },
+    async pickManuscript() {
+      if (!available) return null
+      const file = await pickPath({
+        title: 'Open existing paper',
+        directory: false,
+        multiple: false,
+        filters: [{ name: 'Markdown and Quarto manuscripts', extensions: ['md', 'qmd'] }],
+        fileAccessMode: 'scoped',
+      })
+      if (!file) return null
+      const [root, path] = await Promise.all([dirname(file), basename(file)])
+      return { root, path }
     },
     openProject(root: string) {
       return invokeBridge<ProjectSnapshot>('open_project', { root })
@@ -658,6 +737,24 @@ export function createDesktopHost(
     readProjectAssets(root: string, paths: string[]) {
       return invokeBridge<ProjectAsset[]>('read_project_assets', { root, paths })
     },
+    listProjectFiles(root: string) {
+      return invokeBridge<ProjectFileInventory>('list_project_files', { root })
+    },
+    readProjectSyncState(root: string, scope: ProjectSyncScope) {
+      return invokeBridge<ProjectSyncStateSnapshot>('read_project_sync_state', { root, scope })
+    },
+    saveProjectSyncState(request: SaveProjectSyncStateRequest) {
+      return invokeBridge<ProjectSyncStateSnapshot>('save_project_sync_state', { request })
+    },
+    inspectProjectSyncFiles(root: string, paths: string[]) {
+      return invokeBridge<ProjectSyncFileSnapshot[]>('inspect_project_sync_files', { root, paths })
+    },
+    readProjectSyncFile(root: string, path: string, expectedHash: string) {
+      return invokeBridge<ProjectSyncFileBytes>('read_project_sync_file', { root, path, expectedHash })
+    },
+    applyProjectSyncFile(request: ApplyProjectSyncFileRequest) {
+      return invokeBridge<ApplyProjectSyncFileResult>('apply_project_sync_file', { request })
+    },
     seedProjectFiles(root: string, files: ProjectSeedFile[]) {
       return invokeBridge<string[]>('seed_project_files', { root, files })
     },
@@ -704,8 +801,8 @@ export function createDesktopHost(
     documentStatus(root: string, path: string, expectedHash: string) {
       return invokeBridge<DocumentStatus>('document_status', { root, path, expectedHash })
     },
-    setMainDocument(root: string, path: string) {
-      return invokeBridge<ProjectSnapshot>('set_main_document', { root, path })
+    setMainDocument(root: string, path: string, renamedFrom?: string) {
+      return invokeBridge<ProjectSnapshot>('set_main_document', { root, path, ...(renamedFrom ? { renamedFrom } : {}) })
     },
     setCitationPreferences(root: string, style: ProjectConfig['citationStyle'], locale: ProjectConfig['citationLocale']) {
       return invokeBridge<ProjectSnapshot>('set_citation_preferences', { root, style, locale })

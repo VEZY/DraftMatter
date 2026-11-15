@@ -18,11 +18,10 @@ import {
   type CollaborationProjectLaunch,
   type CollaborationSessionProviderProps,
 } from './collaboration/sessionContext'
-import { desktopHost, type ProjectSnapshot } from './desktopHost'
+import { desktopHost, normaliseHostFailure, type ProjectSnapshot } from './desktopHost'
 import {
   forgetLocalProject,
   readLocalProjectRecents,
-  rememberLocalProject,
   type LocalProjectRecent,
 } from './localProjectCatalogue'
 import './home.css'
@@ -34,7 +33,7 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
   const session = useCollaborationSession()
   const [route, setRoute] = useState<ApplicationRoute>(() => parseApplicationRoute(window.location))
   const [launch, setLaunch] = useState<CollaborationProjectLaunch | null>(null)
-  const [localLaunch, setLocalLaunch] = useState<ProjectSnapshot | null>(null)
+  const [localLaunch, setLocalLaunch] = useState<{ project: ProjectSnapshot; selectedPath?: string } | null>(null)
   const [startCollaborationRoot, setStartCollaborationRoot] = useState('')
   const [newDraftOpen, setNewDraftOpen] = useState(false)
   const [newDraftLocation, setNewDraftLocation] = useState<'collaborative' | 'local'>('collaborative')
@@ -84,13 +83,22 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
     navigate({ destination: 'collaborative-editor', workspaceId: nextLaunch.workspaceId, projectId: nextLaunch.projectId })
   }
 
-  const openLocalDraft = (project: ProjectSnapshot, startCollaboration = false) => {
-    setLocalProjects(rememberLocalProject(localStorage, project))
+  const openLocalDraft = (project: ProjectSnapshot, startCollaboration = false, selectedPath?: string) => {
     setLocalProblem('')
     setStartCollaborationRoot(startCollaboration ? project.root : '')
-    setLocalLaunch(project)
+    setLocalLaunch({ project, selectedPath })
     setNewDraftOpen(false)
     navigate({ destination: 'local-editor', localProjectId: project.root, ...(startCollaboration ? { startCollaboration: true } : {}) })
+  }
+
+  const openLocalPaper = async () => {
+    setLocalProblem('')
+    try {
+      const selected = await desktopHost.pickManuscript()
+      if (selected) openLocalDraft(await desktopHost.openProject(selected.root), false, selected.path)
+    } catch (error) {
+      setLocalProblem(normaliseHostFailure(error).message)
+    }
   }
 
   const openLocalProject = async (recent?: LocalProjectRecent) => {
@@ -113,6 +121,7 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
         onOpenDraft={openDraft}
         onNewDraft={() => { setNewDraftLocation('collaborative'); setNewDraftOpen(true) }}
         onNewLocalDraft={() => { setNewDraftLocation('local'); setNewDraftOpen(true) }}
+        onOpenLocalPaper={() => void openLocalPaper()}
         onOpenLocalProject={() => void openLocalProject()}
         onOpenLocalRecent={(project) => void openLocalProject(project)}
         onForgetLocalRecent={(project) => setLocalProjects(forgetLocalProject(localStorage, project.root))}
@@ -155,11 +164,18 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
 
   useEffect(() => {
     if (route.destination !== 'local-editor' || localLaunch || !desktopHost.available || route.localProjectId === 'open') return
-    void desktopHost.openProject(route.localProjectId).then((project) => openLocalDraft(project, route.startCollaboration === true)).catch((error) => {
+    let active = true
+    void desktopHost.openProject(route.localProjectId).then((project) => {
+      if (!active) return
+      setStartCollaborationRoot(route.startCollaboration ? project.root : '')
+      setLocalLaunch({ project })
+    }).catch((error) => {
+      if (!active) return
       setLocalProjects(forgetLocalProject(localStorage, route.localProjectId))
       setLocalProblem(error instanceof Error ? error.message : String(error))
       navigate({ destination: 'home' }, true)
     })
+    return () => { active = false }
   // The URL provides the durable local project identity after a desktop reload.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localLaunch, route])
@@ -183,8 +199,9 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
   }
 
   if (route.destination === 'local-editor') {
+    if (!localLaunch && desktopHost.available && route.localProjectId !== 'open') return <main className="home-route-status" role="status">Opening manuscript…</main>
     if (!localLaunch) return <main className="home-route-status"><section><h1>Open the local project from Home</h1><p>DraftMatter needs permission to read a project folder on this computer.</p><button onClick={() => navigate({ destination: 'home' })}>Return to Home</button></section></main>
-    return <App saveBeforeLeaveRef={saveBeforeLeaveRef} desktopProjectLaunch={localLaunch} startCollaborationOnMount={startCollaborationRoot === localLaunch.root} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLocalProjects(readLocalProjectRecents(localStorage)); setStartCollaborationRoot(''); setLocalLaunch(null); navigate({ destination: 'home' }) }} />
+    return <App key={localLaunch.project.root} saveBeforeLeaveRef={saveBeforeLeaveRef} desktopProjectLaunch={localLaunch.project} selectedManuscriptPath={localLaunch.selectedPath} startCollaborationOnMount={startCollaborationRoot === localLaunch.project.root} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLocalProjects(readLocalProjectRecents(localStorage)); setStartCollaborationRoot(''); setLocalLaunch(null); navigate({ destination: 'home' }) }} />
   }
 
   if (route.destination === 'example') return <App saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience="complete-example" onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />
