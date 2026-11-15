@@ -18,6 +18,8 @@ import { AssistantConnectionsDialog } from './AssistantConnectionsDialog'
 import { parsePortableDocument, parseReviewMarkup } from './sharedEditor'
 import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
+import { ManuscriptOutlineTree, type ManuscriptOutlineItem } from './ManuscriptOutlineTree'
+import './writingWorkspace.css'
 import { ExampleTour } from './ExampleTour'
 import { ManuscriptTextEditor } from './ManuscriptTextEditor'
 import { StructuredManuscriptEditor, type StructuredManuscriptEditorHandle, type StructuredOutlineItem, type StructuredReviewSelection } from './StructuredManuscriptEditor'
@@ -657,12 +659,11 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const [suggestionMode, setSuggestionMode] = useState(false)
   const [reviewAuthorFilter, setReviewAuthorFilter] = useState('all')
   const [activeReviewId, setActiveReviewId] = useState<string>()
-  const [activeNav, setActiveNav] = useState<'manuscript' | 'review' | 'sources'>('manuscript')
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [reviewOptionsOpen, setReviewOptionsOpen] = useState(false)
   const [commentComposerOpen, setCommentComposerOpen] = useState(false)
   const [composerAnchorTop, setComposerAnchorTop] = useState<number>()
-  const [leftPanelOpen, setLeftPanelOpen] = useState(true)
+  const [leftPanelOpen, setLeftPanelOpen] = useState(() => typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 1121px)').matches)
   const [focusMode, setFocusMode] = useState(false)
   const [insertMenuOpen, setInsertMenuOpen] = useState(false)
   const [executionWorkspaceOpen, setExecutionWorkspaceOpen] = useState(false)
@@ -1781,12 +1782,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       }
       if (modifier && event.shiftKey && event.key.toLowerCase() === 'c') {
         event.preventDefault()
-        setCitationPickerItems(citationItemsForDraft(draft))
-        setCitationActiveIndex(0)
-        setCitationQuery('')
-        setCitationOpen(false)
         setCommandOpen(false)
-        setCitationSearchOpen(true)
+        openCitationPicker()
       }
       if (event.key === 'Escape') {
         setCommandOpen(false)
@@ -1805,12 +1802,11 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         setSourceOpen(false)
         setSourceEditing(false)
         setExecutionWorkspaceOpen(false)
-        setProjectFilesOpen(false)
       }
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [canRedo, canUndo, draft, executionTrustBusy, juliaPackageBusy, pendingProject, projectBusy, awaitingDesktopLaunch])
+  }, [canRedo, canUndo, draft, executionTrustBusy, juliaPackageBusy, pendingProject, projectBusy, awaitingDesktopLaunch, structuredMode, structuredCitationSelection])
 
   useEffect(() => {
     if (!commandOpen) return
@@ -1818,21 +1814,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     setCommandActiveIndex(0)
   }, [commandOpen])
 
-  useEffect(() => {
-    if (!projectFilesOpen) return
-    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null
-    const dialog = document.querySelector<HTMLElement>('.project-files-workspace-dialog')
-    const controls = () => [...(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, a[href]') ?? [])].filter((element) => !element.closest('details:not([open])') || element.tagName === 'SUMMARY')
-    const frame = requestAnimationFrame(() => (dialog?.querySelector<HTMLInputElement>('input[type="search"]') ?? controls()[0])?.focus())
-    const trap = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab') return
-      const elements = controls()
-      const target = event.shiftKey ? elements.at(-1) : elements[0]
-      if (target && (event.shiftKey && document.activeElement === elements[0] || !event.shiftKey && document.activeElement === elements.at(-1))) { event.preventDefault(); target.focus() }
-    }
-    dialog?.addEventListener('keydown', trap)
-    return () => { cancelAnimationFrame(frame); dialog?.removeEventListener('keydown', trap); if (previous?.isConnected) previous.focus() }
-  }, [projectFilesOpen])
 
   useEffect(() => {
     if (!focusMode) return
@@ -1885,7 +1866,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const demoMarcusChange = reviewDocument.changes.find((change) => change.id === 'dm-c02')
   const demoCommentThread = reviewDocument.threads.find((thread) => thread.id === 'dm-comment-01')
   const demoReviewAvailable = !collaborationSessionActive && Boolean(demoAliceChange && demoMarcusChange && demoCommentThread)
-  const totalOpenReviewCount = allReviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
   const reviewProposalStatus = reviewProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
   const executableCells = useMemo(() => extractExecutableCells(executionSource).cells, [executionSource])
   const sharedManuscript = Boolean(activeCollaborationLaunch || collaborationSessionActive)
@@ -3934,9 +3914,18 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     } catch (error) { setToast(`Submission preparation blocked · ${readableError(error)}`) }
   }
 
+  const openProjectFiles = () => {
+    setProjectFilesOpen(true)
+    setLeftPanelOpen(true)
+  }
+
+  const toggleNavigationPanel = (files: boolean) => {
+    setLeftPanelOpen(!leftPanelOpen || projectFilesOpen !== files)
+    setProjectFilesOpen(files)
+  }
+
   const showReviewPanel = () => {
     setFocusMode(false)
-    setActiveNav('review')
     setRightPanelOpen(true)
   }
 
@@ -4679,6 +4668,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   }
 
   const openCitationPicker = (intent: 'insert' | 'edit' = 'insert') => {
+    setInsertMenuOpen(false)
+    setCommandOpen(false)
     const editingStructuredCitation = structuredMode && intent === 'edit' && structuredCitationSelection
     setCitationPickerTarget(editingStructuredCitation ? 'structured-citation' : structuredMode ? 'structured-selection' : 'legacy-cluster')
     setCitationPickerItems(editingStructuredCitation ? editingStructuredCitation.items : structuredMode ? [] : citationItemsForDraft(draft))
@@ -4702,7 +4693,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     setProjectChecksOpen(false)
     if (action === 'source') openSourceInspector()
     else if (action === 'citations') {
-      setActiveNav('sources')
       openCitationPicker()
     } else if (action === 'computation') setExecutionWorkspaceOpen(true)
     else setExportOpen(true)
@@ -5222,7 +5212,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const commandEntries: CommandPaletteEntry[] = [
     {
       id: 'project-files', label: 'Browse project files', description: 'Find figures, data, and files available locally or online', keywords: 'files folder image figure data shared online local sync',
-      icon: <span className="command-icon"><Icon name="folder" size={17} /></span>, action: () => { setCommandOpen(false); setProjectFilesOpen(true) },
+      icon: <span className="command-icon"><Icon name="folder" size={17} /></span>, action: () => { setCommandOpen(false); openProjectFiles() },
     },
     {
       id: 'export', label: 'Export manuscript', description: 'Download a Word document, PDF, web page, or project copy', keywords: 'publish download print docx pdf html',
@@ -5547,7 +5537,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       {focusMode && <button className="focus-mode-exit" onClick={() => setFocusMode(false)} aria-label="Leave focus mode"><Icon name="focus" size={15} /> Leave focus</button>}
       <header className="topbar">
         <div className="brand-block">
-          <button className="icon-button panel-toggle" aria-label={leftPanelOpen ? 'Hide manuscript outline' : 'Show manuscript outline'} aria-pressed={leftPanelOpen} onClick={() => setLeftPanelOpen((open) => !open)}>
+          <button className="icon-button panel-toggle" aria-label={leftPanelOpen ? 'Hide navigation panel' : 'Show navigation panel'} aria-pressed={leftPanelOpen} onClick={() => setLeftPanelOpen((open) => !open)}>
             <Icon name="panelLeft" />
           </button>
           <div className={`wordmark ${onNavigateHome ? 'wordmark-action' : ''}`} aria-label="DraftMatter home" role={onNavigateHome ? 'button' : undefined} tabIndex={onNavigateHome ? 0 : undefined} onClick={() => void leaveEditor(onNavigateHome)} onKeyDown={onNavigateHome ? (event) => {
@@ -5588,14 +5578,14 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
                   ) : (
                     <button onClick={() => fileInputRef.current?.click()}><Icon name="document" size={16} /><span><strong>Open manuscript…</strong><small>DraftMatter manuscript, up to 5 MB</small></span></button>
                   )}
-                  <button onClick={() => { setProjectMenuOpen(false); setProjectFilesOpen(true) }}><Icon name="folder" size={16} /><span><strong>Browse project files</strong><small>Figures, data, local and online copies</small></span></button>
+                  <button onClick={() => { setProjectMenuOpen(false); openProjectFiles() }}><Icon name="folder" size={16} /><span><strong>Browse project files</strong><small>Figures, data, local and online copies</small></span></button>
                   <button aria-label="Enter focus mode" onClick={() => { setProjectMenuOpen(false); setFocusMode(true) }}><Icon name="focus" size={16} /><span><strong>Enter focus mode</strong><small>Keep only the paper and writing tools</small></span></button>
                   {onOpenLearn && <button aria-label="Learn DraftMatter" onClick={() => { setProjectMenuOpen(false); void leaveEditor(onOpenLearn) }}><Icon name="info" size={16} /><span><strong>Learn DraftMatter</strong><small>Writing, figures, references, and collaboration</small></span></button>}
                   <button className="project-menu-example" onClick={() => void openCompleteExample()} disabled={projectBusy}><Icon name="spark" size={16} /><span><strong>Open complete example</strong><small>Citations, review, figures, tables, Python, R, and Julia</small></span></button>
                   {desktopProject && collaborationSession && <button onClick={() => { setProjectMenuOpen(false); desktopProject.config.collaboration ? setCollaborationOpen(true) : setStartCollaborationOpen(true) }}><Icon name="users" size={16} /><span><strong>{desktopProject.config.collaboration ? collaborationRole === 'owner' ? 'Invite people' : 'Collaboration details' : 'Start collaboration'}</strong><small>{desktopProject.config.collaboration ? `${desktopProject.config.collaboration.workspaceId} · ${desktopProject.config.collaboration.projectId}` : 'Link this local manuscript to an online workspace'}</small></span></button>}
                   <button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={16} /><span><strong>Attach bibliography…</strong><small>BibTeX, CSL JSON, RIS, or EndNote · {citations.length} indexed</small></span></button>
                   <button onClick={createSnapshot}><Icon name="clock" size={16} /><span><strong>Save recovery snapshot</strong><small>Keep a private safety copy on this device</small></span></button>
-                  <button onClick={() => { setRecoveryOpen(true); setProjectMenuOpen(false) }}><Icon name="history" size={16} /><span><strong>Recovery history</strong><small>{recoveries.length ? `${recoveries.length} local version${recoveries.length === 1 ? '' : 's'}` : 'No local versions yet'}</small></span><span className="menu-count">{recoveries.length}</span></button>
+                  <button aria-label="Open local recovery history" onClick={() => { setRecoveryOpen(true); setProjectMenuOpen(false) }}><Icon name="history" size={16} /><span><strong>Recovery history</strong><small>{recoveries.length ? `${recoveries.length} local version${recoveries.length === 1 ? '' : 's'}` : 'No local versions yet'}</small></span><span className="menu-count">{recoveries.length}</span></button>
                   {desktopHost.available && <button onClick={openAssistantConnections}><Icon name="spark" size={16} /><span><strong>Connect AI assistants…</strong><small>Device-wide setup for Codex, Claude, Copilot, and Vibe</small></span></button>}
                   {desktopSession && <button onClick={openAgentIntegration}><Icon name="code" size={16} /><span><strong>AI for this project…</strong><small>Project enablement, execution trust, and request-scoped network access</small></span></button>}
                   <button onClick={() => download('reviewed')}><Icon name="download" size={16} /><span><strong>Download portable source</strong><small>Save {filename} to this computer</small></span></button>
@@ -5624,18 +5614,35 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
               <Icon name="code" size={15} />
               <span className="visually-hidden">Code &amp; computation · {codeWorkspaceState}</span>
             </button>}
-            <button className="icon-button compact-tool" aria-label="Browse project files" data-tooltip={synchronizationProblems ? `Project files · ${synchronizationProblems} synchronization issues` : selectiveSync.snapshot?.error ? 'Project files · synchronization needs attention' : 'Project files'} onClick={() => setProjectFilesOpen(true)}><Icon name="folder" size={17} />{(synchronizationProblems > 0 || selectiveSync.snapshot?.error) && <span className="sync-attention-count" aria-hidden="true">{synchronizationProblems || '!'}</span>}</button>
+
             <button data-tooltip={collaborationStatus === 'connected' ? 'Online collaboration · connected' : 'Share and collaborate'} className={`collaboration-toggle compact-tool ${collaborationStatus}`} onClick={() => desktopProject && collaborationSession && !desktopProject.config.collaboration ? setStartCollaborationOpen(true) : setCollaborationOpen(true)} aria-label={desktopProject && collaborationSession && !desktopProject.config.collaboration ? 'Start collaboration' : 'Open online collaboration'}>
               <Icon name="users" size={16} />
               <i />
             </button>
           </div>
           <div className="topbar-completion-actions">
-            <button className={`review-toggle ${activeNav === 'review' ? 'active' : ''}`} onClick={showReviewPanel} aria-label={`Review, ${totalOpenReviewCount} open item${totalOpenReviewCount === 1 ? '' : 's'}`}>
-              <Icon name="message" size={16} />
-              Review
-              {totalOpenReviewCount > 0 && <span className="count-badge" aria-hidden="true">{totalOpenReviewCount}</span>}
-            </button>
+            <div className="tracking-controls">
+            <button
+              className={`topbar-track-changes ${suggestionMode ? 'active' : ''}`}
+              aria-label={suggestionMode ? 'Turn off track changes' : 'Turn on track changes'}
+              aria-pressed={suggestionMode}
+              onClick={toggleTrackChanges}
+              disabled={!canSuggestReview || !structuredMode}
+              title="Record additions, deletions, formatting, and moved blocks as reviewable changes"
+            ><Icon name="spark" size={15} /><span>Track changes</span></button>
+            <div className="review-display-options-wrap">
+              <button aria-label="Review options" aria-haspopup="dialog" aria-expanded={reviewOptionsOpen} onClick={() => setReviewOptionsOpen((open) => !open)}><Icon name="chevronDown" size={13} /></button>
+              {reviewOptionsOpen && <div className="review-display-options review-display-options-popover popover" role="dialog" aria-label="Review options">
+                <div className="review-display-options-heading"><strong>Changes display</strong><button className="icon-button" aria-label="Close review options" onClick={() => setReviewOptionsOpen(false)}><Icon name="close" size={14} /></button></div>
+                <div className="tracked-changes-display-options" role="group" aria-label="Display tracked changes">
+                  <button type="button" className={markupView === 'simple' ? 'active' : ''} aria-pressed={markupView === 'simple'} onClick={() => setTrackedChangesDisplay('simple')}><Icon name="message" size={14} /><span>Margin notes</span></button>
+                  <button type="button" className={markupView === 'all' ? 'active' : ''} aria-pressed={markupView === 'all'} onClick={() => setTrackedChangesDisplay('all')}><Icon name="document" size={14} /><span>In text</span></button>
+                </div>
+                <label><span>Preview</span><select value={markupView} onChange={(event) => setMarkupView(event.target.value as MarkupView)} aria-label="Review display and preview"><option value="simple">Changes in margin</option><option value="all">Inline additions &amp; deletions</option><option value="original">Original</option><option value="final">Final preview</option></select></label>
+                <label><span>Author</span><select value={reviewAuthorFilter} onChange={(event) => setReviewAuthorFilter(event.target.value)} aria-label="Review author"><option value="all">All authors</option>{reviewDocument.authors.map((author) => <option value={author.id} key={author.id}>{author.name}</option>)}</select></label>
+              </div>}
+            </div>
+            </div>
             <div className="export-wrap">
             <button className="icon-button compact-tool export-trigger" aria-label="Export" aria-expanded={exportOpen} data-tooltip="Export manuscript" onClick={() => setExportOpen((open) => !open)}>
               <Icon name="download" size={17} />
@@ -5661,9 +5668,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
             </div>
           </div>
           <Avatar initials={currentAuthorInitials} label={activeReviewAuthor.name} />
-          <button className="icon-button mobile-panel-button" aria-label="Toggle review panel" onClick={() => setRightPanelOpen((open) => !open)}>
-            <Icon name="panelRight" />
-          </button>
+
         </div>
       </header>
       {desktopSession && (saveState === 'conflict' || saveState === 'error') && (
@@ -5700,10 +5705,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       <div className="workspace">
         <nav className="app-rail" aria-label="Workspace navigation">
           <div className="rail-items">
-            <button className={activeNav === 'manuscript' ? 'active' : ''} onClick={() => setActiveNav('manuscript')} data-label="Manuscript" aria-label="Manuscript" aria-current={activeNav === 'manuscript' ? 'page' : undefined}><Icon name="document" /></button>
-            <button className={activeNav === 'review' ? 'active' : ''} onClick={showReviewPanel} data-label="Review" aria-label={`Review, ${totalOpenReviewCount} open item${totalOpenReviewCount === 1 ? '' : 's'}`} aria-current={activeNav === 'review' ? 'page' : undefined}><Icon name="message" />{totalOpenReviewCount > 0 && <span className="rail-notice" aria-hidden="true">{totalOpenReviewCount}</span>}</button>
-            <button className={activeNav === 'sources' ? 'active' : ''} onClick={() => { setActiveNav('sources'); openCitationPicker() }} data-label="Sources" aria-label="Sources" aria-current={activeNav === 'sources' ? 'page' : undefined}><Icon name="book" /></button>
-            <button onClick={() => setRecoveryOpen(true)} data-label="Recovery history" aria-label="Open local recovery history" aria-haspopup="dialog" aria-expanded={recoveryOpen}><Icon name="history" /></button>
+            <button className={leftPanelOpen && projectFilesOpen ? 'active' : ''} onClick={() => toggleNavigationPanel(true)} data-label="Files" aria-label="Files" aria-pressed={leftPanelOpen && projectFilesOpen} aria-controls={leftPanelOpen ? "project-navigation-panel" : undefined}><Icon name="folder" />{(synchronizationProblems > 0 || selectiveSync.snapshot?.error) && <span className="rail-notice" aria-label="File synchronization needs attention">{synchronizationProblems || '!'}</span>}</button>
+            <button className={leftPanelOpen && !projectFilesOpen ? 'active' : ''} onClick={() => toggleNavigationPanel(false)} data-label="Outline" aria-label="Outline" aria-pressed={leftPanelOpen && !projectFilesOpen} aria-controls={leftPanelOpen ? "project-navigation-panel" : undefined}><Icon name="document" /></button>
           </div>
           <div className="rail-footer-actions">
             {desktopSession && !kernelConsoleOpen && (
@@ -5725,7 +5728,25 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         </nav>
 
         {leftPanelOpen && (
-          <aside className="left-panel" aria-label="Manuscript outline">
+          <aside id="project-navigation-panel" className={`left-panel ${projectFilesOpen ? 'files-sidebar' : 'outline-sidebar'}`} aria-label={projectFilesOpen ? 'Project files' : 'Manuscript outline'}>
+            {projectFilesOpen ? (
+          <ProjectFilesWorkspace
+            layout="sidebar"
+            project={desktopProject}
+            currentManuscriptPath={desktopSession?.path ?? filename}
+            source={manuscriptSource}
+            browserImages={browserProjectImages}
+            sharedImages={sharedResources.images}
+            builtInFiles={builtInProject === 'complete-example' ? [...completeExampleProjectFiles, { path: 'references.json', content: completeExampleReferences }] : []}
+            location={desktopSession ? 'local' : collaborationSessionActive ? 'online' : builtInProject === 'complete-example' ? 'example' : 'browser'}
+            projectName={projectName}
+            collaborationFileContext={collaborationFileService}
+            synchronizationPanel={selectiveSync.active ? <SelectiveSyncPanel model={selectiveSync} /> : desktopProject ? <div className="selective-sync-disconnected"><strong>Keep selected files in sync</strong><p>Connect this project to its collaboration server to synchronize the manuscript, figures, and references. Choose additional files after connecting.</p><button onClick={() => { setProjectFilesOpen(false); if (!desktopProject.config.collaboration && collaborationSession) setStartCollaborationOpen(true); else setCollaborationOpen(true) }}>Connect project…</button></div> : undefined}
+            onClose={() => setLeftPanelOpen(false)}
+            onInsertFigure={canEditManuscript ? (path) => { void insertProjectFigure(path) } : undefined}
+            onOpenFile={desktopProject ? (path) => { if (!liveDocumentSwitchBlocked()) void applyDesktopProject(desktopProject, true, path).catch((error) => setToast(readableError(error))) } : undefined}
+          />
+            ) : (<>
             <div className="panel-heading-row">
               <div>
                 <span className="eyebrow">Manuscript</span>
@@ -5777,31 +5798,19 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
             </div>
 
             <div className="outline-tree" ref={outlineTreeRef}>
-              {structuredMode ? <>
-                {visibleStructuredOutline.length ? visibleStructuredOutline.map((item) => (
-                  <button
-                    className={`${item.level === 1 ? 'outline-title' : ''} ${item.level > 2 ? 'outline-nested' : ''} ${item.id === activeOutlineId ? 'active' : ''}`.trim()}
-                    aria-current={item.id === activeOutlineId ? 'location' : undefined}
-                    onClick={() => { setOutlineOptionsOpen(false); setActiveOutlineId(item.id); structuredEditorRef.current?.scrollToNode(item.id) }}
-                    key={item.id}
-                  >
-                    <span>{item.title}</span><small>H{item.level}</small>
-                  </button>
-                )) : <p className="outline-empty">{structuredOutline.length ? 'No headings match these outline filters.' : 'Add a heading to build the outline.'}</p>}
-                <button className="add-section" onClick={() => { setOutlineOptionsOpen(false); addStructuredSection() }} disabled={!canEditManuscript}><Icon name="plus" size={15} /> Add section</button>
-              </> : <>
-                {visibleLegacyOutline.length ? visibleLegacyOutline.map((item) => (
-                  <button
-                    className={`${item.level === 1 ? 'outline-title' : ''} ${item.level > 2 ? 'outline-nested' : ''} ${item.id === activeOutlineId ? 'active' : ''}`.trim()}
-                    aria-current={item.id === activeOutlineId ? 'location' : undefined}
-                    key={item.id}
-                    onClick={() => { setOutlineOptionsOpen(false); setActiveOutlineId(item.id); scrollTo(item.id) }}
-                  >
-                    <span>{item.title}</span>{item.detail && <small>{item.detail}</small>}
-                  </button>
-                )) : <p className="outline-empty">No headings match these outline filters.</p>}
-                <button className="add-section" onClick={() => { setOutlineOptionsOpen(false); addStructuredSection() }} disabled={!canEditManuscript}><Icon name="plus" size={15} /> Add section</button>
-              </>}
+              <ManuscriptOutlineTree<ManuscriptOutlineItem>
+                items={structuredMode ? structuredOutline : legacyOutlineItems}
+                activeId={activeOutlineId}
+                query={outlineQuery}
+                maxDepth={outlineMaxDepth}
+                onSelect={(item) => {
+                  setOutlineOptionsOpen(false)
+                  setActiveOutlineId(item.id)
+                  if (structuredMode) structuredEditorRef.current?.scrollToNode(item.id)
+                  else scrollTo(item.id)
+                }}
+              />
+              <button className="add-section" onClick={() => { setOutlineOptionsOpen(false); addStructuredSection() }} disabled={!canEditManuscript}><Icon name="plus" size={15} /> Add section</button>
             </div>
 
             <div className="left-panel-spacer" />
@@ -5826,11 +5835,12 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
               <span>{words} words</span>
               <button onClick={openSourceInspector}><Icon name="code" size={15} /> View source</button>
             </div>
+            </>)}
           </aside>
         )}
 
         <main className="editor-area" ref={editorAreaRef}>
-          <div className="format-toolbar" aria-label="Formatting toolbar">
+          <div className={`format-toolbar ${insertMenuOpen || linkDialogOpen ? 'expanded' : ''}`} role="toolbar" aria-label="Formatting toolbar" onMouseDown={(event) => { if ((event.target as HTMLElement).closest('button')) event.preventDefault() }}>
             <label className="style-select">
               <span className="visually-hidden">Block style</span>
               <select
@@ -5862,9 +5872,11 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
             <button aria-label="Italic" onClick={() => runStructuredCommand((editor) => editor.toggleItalic(), 'Italic')} disabled={!canEditManuscript}><em>I</em></button>
             <button aria-label="Add link" aria-haspopup="dialog" aria-expanded={linkDialogOpen} onClick={addStructuredLink} disabled={!canEditManuscript}><Icon name="link" size={16} /></button>
             <span className="toolbar-divider" />
+            <button className="toolbar-cite-button" aria-label="Insert citation" aria-haspopup="dialog" title={`Insert citation from Zotero or project references (${commandUsesMetaKey ? '⌘' : 'Ctrl'}⇧C)`} onClick={() => openCitationPicker()} disabled={!canEditManuscript}><Icon name="quote" size={15} /><span>Cite</span></button>
             <div className="toolbar-insert-wrap">
               <button className="toolbar-insert-button" aria-label="Insert" aria-expanded={insertMenuOpen} onClick={() => setInsertMenuOpen((open) => !open)} disabled={!canEditManuscript}><Icon name="plus" size={15} /><span>Insert</span><Icon name="chevronDown" size={12} /></button>
               {insertMenuOpen && <div className="toolbar-insert-menu popover">
+                <button onClick={() => { setInsertMenuOpen(false); openCitationPicker() }}><Icon name="quote" size={15} /><span><strong>Citation</strong><small>Zotero or project references</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('figure') }}><Icon name="image" size={15} /><span><strong>Figure</strong><small>Image and caption</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('table') }}><Icon name="table" size={15} /><span><strong>Table</strong><small>Editable rows and columns</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('equation-inline') }}><span className="toolbar-symbol">∑</span><span><strong>Equation</strong><small>Inline or display mathematics</small></span></button>
@@ -5874,27 +5886,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
                 <button disabled={!desktopSession} title={!desktopSession ? 'Code is view-only in the browser. Open this project in DraftMatter desktop to add a computation.' : undefined} onClick={() => { setInsertMenuOpen(false); openInsertBlock('figure-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible figure</strong><small>{desktopSession ? 'Visible code block and retained figure' : 'DraftMatter desktop required'}</small></span></button>
                 <button disabled={!desktopSession} title={!desktopSession ? 'Code is view-only in the browser. Open this project in DraftMatter desktop to add a computation.' : undefined} onClick={() => { setInsertMenuOpen(false); openInsertBlock('table-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible table</strong><small>{desktopSession ? 'Visible code block and retained table' : 'DraftMatter desktop required'}</small></span></button>
                 </details>
-              </div>}
-            </div>
-            <span className="toolbar-divider" />
-            <button
-              className={`toolbar-track-changes ${suggestionMode ? 'active' : ''}`}
-              aria-label={suggestionMode ? 'Turn off track changes' : 'Turn on track changes'}
-              aria-pressed={suggestionMode}
-              onClick={toggleTrackChanges}
-              disabled={!canSuggestReview || !structuredMode}
-              title="Record additions, deletions, formatting, and moved blocks as reviewable changes"
-            ><Icon name="spark" size={15} /><span>Track changes</span></button>
-            <div className="review-display-options-wrap">
-              <button aria-label="Review options" aria-haspopup="dialog" aria-expanded={reviewOptionsOpen} onClick={() => setReviewOptionsOpen((open) => !open)}><Icon name="more" size={17} /></button>
-              {reviewOptionsOpen && <div className="review-display-options review-display-options-popover popover" role="dialog" aria-label="Review options">
-                <div className="review-display-options-heading"><strong>Review display</strong><button className="icon-button" aria-label="Close review options" onClick={() => setReviewOptionsOpen(false)}><Icon name="close" size={14} /></button></div>
-                <div className="tracked-changes-display-options" role="group" aria-label="Display tracked changes">
-                  <button type="button" className={markupView === 'simple' ? 'active' : ''} aria-pressed={markupView === 'simple'} onClick={() => setTrackedChangesDisplay('simple')}><Icon name="message" size={14} /><span>Margin notes</span></button>
-                  <button type="button" className={markupView === 'all' ? 'active' : ''} aria-pressed={markupView === 'all'} onClick={() => setTrackedChangesDisplay('all')}><Icon name="document" size={14} /><span>In text</span></button>
-                </div>
-                <label><span>Preview</span><select value={markupView} onChange={(event) => setMarkupView(event.target.value as MarkupView)} aria-label="Review display and preview"><option value="simple">Changes in margin</option><option value="all">Inline additions &amp; deletions</option><option value="original">Original</option><option value="final">Final preview</option></select></label>
-                <label><span>Author</span><select value={reviewAuthorFilter} onChange={(event) => setReviewAuthorFilter(event.target.value)} aria-label="Review author"><option value="all">All authors</option>{reviewDocument.authors.map((author) => <option value={author.id} key={author.id}>{author.name}</option>)}</select></label>
               </div>}
             </div>
             <span className="toolbar-divider" />
@@ -6695,25 +6686,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         />
       )}
 
-      {projectFilesOpen && <div className="modal-backdrop project-files-workspace-backdrop" onMouseDown={() => setProjectFilesOpen(false)}>
-        <div className="project-files-workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="project-files-workspace-title" onMouseDown={(event) => event.stopPropagation()}>
-          <ProjectFilesWorkspace
-            project={desktopProject}
-            currentManuscriptPath={desktopSession?.path ?? filename}
-            source={manuscriptSource}
-            browserImages={browserProjectImages}
-            sharedImages={sharedResources.images}
-            builtInFiles={builtInProject === 'complete-example' ? [...completeExampleProjectFiles, { path: 'references.json', content: completeExampleReferences }] : []}
-            location={desktopSession ? 'local' : collaborationSessionActive ? 'online' : builtInProject === 'complete-example' ? 'example' : 'browser'}
-            projectName={projectName}
-            collaborationFileContext={collaborationFileService}
-            synchronizationPanel={selectiveSync.active ? <SelectiveSyncPanel model={selectiveSync} /> : desktopProject ? <div className="selective-sync-disconnected"><strong>Keep selected files in sync</strong><p>Connect this project to its collaboration server to synchronize the manuscript, figures, and references. Choose additional files after connecting.</p><button onClick={() => { setProjectFilesOpen(false); if (!desktopProject.config.collaboration && collaborationSession) setStartCollaborationOpen(true); else setCollaborationOpen(true) }}>Connect project…</button></div> : undefined}
-            onClose={() => setProjectFilesOpen(false)}
-            onInsertFigure={canEditManuscript ? (path) => { setProjectFilesOpen(false); void insertProjectFigure(path) } : undefined}
-            onOpenFile={desktopProject ? (path) => { setProjectFilesOpen(false); if (!liveDocumentSwitchBlocked()) void applyDesktopProject(desktopProject, true, path).catch((error) => setToast(readableError(error))) } : undefined}
-          />
-        </div>
-      </div>}
+
 
       <CollaborationDialog
         open={collaborationOpen}
@@ -6722,7 +6695,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         onResources={applySharedProjectResources}
         localSyncSource={localSyncSource}
         onFileServiceChange={setCollaborationFileService}
-        onOpenProjectFiles={() => { setCollaborationOpen(false); setProjectFilesOpen(true) }}
+        onOpenProjectFiles={() => { setCollaborationOpen(false); openProjectFiles() }}
         onSaveGuardChange={(guard) => { collaborationSaveGuardRef.current = guard }}
         launch={activeCollaborationLaunch}
         onClose={() => setCollaborationOpen(false)}
@@ -7234,9 +7207,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
 
       {toast && <div className="toast" role="status"><Icon name="check" size={16} /> {toast}</div>}
 
-      {!citationSearchOpen && !commandOpen && (
-        <button className="quick-cite" onClick={() => openCitationPicker()} aria-label="Insert citation" disabled={!canEditManuscript}><span>@</span> Cite</button>
-      )}
+
     </div>
     </>
   )

@@ -6,6 +6,7 @@ import { ProjectFilesWorkspace, projectFilesManuscriptUsage } from './ProjectFil
 import { desktopHost, type ProjectSnapshot } from './desktopHost'
 import { CollaborationServiceClient } from './collaboration/serviceClient'
 import { sharedImage } from './sharedEditor/projectResources'
+import * as structuredManuscript from './structuredManuscript'
 
 vi.mock('./ProjectFilesPanel', () => ({ ProjectFilesPanel: ({ projectId }: { projectId: string }) => <div data-testid="data-files">Shared data versions for {projectId}</div> }))
 
@@ -97,5 +98,34 @@ describe('connected project files workspace', () => {
   it('counts generated results with ordinary figures and respects unnumbered images', () => {
     const source = '![Logo](figures/logo.svg){.unnumbered}\n\n![First](figures/a.svg){#fig-first}\n\n<!-- dm-output:start cell="result" run="sha256:test" -->\n![Generated](figures/result.svg){#fig-generated}\n<!-- dm-output:end -->\n'
     expect(projectFilesManuscriptUsage(source, 'paper.qmd').figureLabels).toEqual({ 'figures/logo.svg': ['Unnumbered figure'], 'figures/a.svg': ['Figure 1'], 'figures/result.svg': ['Figure 2'] })
+  })
+
+  it('keeps a sidebar tree current without parsing the manuscript or rereading inventory on each edit', async () => {
+    const parse = vi.spyOn(structuredManuscript, 'parseStructuredManuscript')
+    const close = vi.fn()
+    const render = (source: string) => act(async () => root.render(<ProjectFilesWorkspace layout="sidebar" project={project} currentManuscriptPath="paper.qmd" source={source} location="local" onClose={close} />))
+    await render('# Paper\n\nFirst version.')
+    expect(container.querySelector('.project-files-workspace-sidebar')).not.toBeNull()
+    expect(container.querySelector('[aria-label="Project file tree"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="Expand figures"]')).not.toBeNull()
+    expect(container.querySelector('.project-file-explorer-transfers')).toBeNull()
+    await render('# Paper\n\nFirst version. A new sentence.')
+    expect(parse).not.toHaveBeenCalled()
+    expect(desktopHost.listProjectFiles).toHaveBeenCalledTimes(1)
+    await act(async () => button('Close project files').click())
+    expect(close).toHaveBeenCalledTimes(1)
+  })
+
+  it('moves synchronization and data controls into the sidebar sharing section', async () => {
+    desktopHost.available = false
+    const client = new CollaborationServiceClient('https://collaboration.example.test', async () => 'token')
+    await act(async () => root.render(<ProjectFilesWorkspace layout="sidebar" project={null} currentManuscriptPath="paper.qmd" source="# Paper" location="online"
+      synchronizationPanel={<button>Compare shared copies</button>}
+      collaborationFileContext={{ client, workspace: { id: 'workspace-1', name: 'Team', role: 'editor', createdAt: '2026-11-13T10:00:00Z' }, projectId: 'project-1', currentUserId: 'alice' }} onClose={vi.fn()} />))
+    const sharing = container.querySelector<HTMLDetailsElement>('.project-file-explorer-transfers')!
+    expect(sharing.open).toBe(false)
+    expect(sharing.textContent).toContain('Compare shared copies')
+    expect(sharing.textContent).toContain('Shared data versions for project-1')
+    expect(container.querySelector('.project-file-tree')!.textContent).not.toContain('Compare shared copies')
   })
 })

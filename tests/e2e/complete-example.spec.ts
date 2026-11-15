@@ -23,7 +23,7 @@ test.describe('built-in complete example', () => {
       await expect(code).toBeVisible()
       await expect(code).toHaveAttribute('data-tooltip', /^Code & computation/)
       await expect(finder).toContainText('Find a tool or action')
-      await expect(page.locator('.topbar').getByRole('button', { name: /^Review,/ })).toBeVisible()
+      await expect(page.locator('.topbar').getByRole('button', { name: 'Turn on track changes', exact: true })).toBeVisible()
       await expect(page.getByRole('button', { name: 'Export', exact: true })).toBeVisible()
       const layout = await page.locator('.topbar').evaluate((header) => {
         const brand = header.querySelector('.brand-block')!.getBoundingClientRect()
@@ -48,6 +48,12 @@ test.describe('built-in complete example', () => {
 
     const outline = page.getByRole('complementary', { name: 'Manuscript outline' })
     const tree = outline.locator('.outline-tree')
+    await expect(page.locator('.project-switcher-name')).toHaveText('Complete example paper')
+    // Main sections start compact; exercise overflow after explicitly opening
+    // their subsections rather than depending on an initially expanded plan.
+    while (await tree.getByRole('button', { name: /^Expand / }).count()) {
+      await tree.getByRole('button', { name: /^Expand / }).first().click()
+    }
     await expect.poll(() => tree.evaluate((element) => element.scrollHeight > element.clientHeight)).toBe(true)
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollHeight)).toBe(await page.evaluate(() => window.innerHeight))
     await expect(page.locator('.editor-area')).toHaveCSS('scroll-behavior', 'auto')
@@ -96,7 +102,6 @@ test.describe('built-in complete example', () => {
     await expect(manuscript.locator('.structured-code-cell[data-language="julia"]')).toHaveCount(2)
     await expect(manuscript.locator('.structured-output-image img').first()).toHaveAttribute('src', /^data:image\/svg\+xml/)
 
-    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Manuscript comments' })
     await expect(review.getByText('drought treatment reduced canopy expansion by 18.4%', { exact: true })).toBeVisible()
     await expect(review.getByText('Please confirm that the ±3.0 cm² diagnostic threshold was fixed before the model check.', { exact: true })).toBeVisible()

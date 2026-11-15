@@ -82,7 +82,6 @@ test.describe('DM-P7-05 article-sized rendered dogfood', () => {
     await expect(renderedEditor.locator('.structured-code-editor').filter({ hasText: 'writeLines' })).toBeHidden()
     await expect(renderedEditor.getByText('@publish')).toHaveCount(0)
 
-    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Manuscript comments' })
     await expect(review.getByText('drought treatment reduced canopy expansion by 18.4%', { exact: true })).toBeVisible()
     await expect(review.getByText('Please confirm that the ±3.0 cm² diagnostic threshold was fixed before the model check.', { exact: true })).toBeVisible()
@@ -133,7 +132,6 @@ test.describe('DM-P7-05 article-sized rendered dogfood', () => {
     await expect(manuscript.locator('.structured-output-image')).toHaveCount(3)
     await expect(manuscript.locator('.structured-output-table')).toHaveCount(3)
     await expect(manuscript.locator('.structured-cross-reference[data-reference-status="valid"]')).toHaveCount(7)
-    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     await expect(review.getByText('Accepted', { exact: true })).toBeVisible()
     const resolvedComment = review.locator('.comment-card.resolved')
     await expect(resolvedComment.locator('.portable-comment-resolved-label')).toHaveText('Resolved')

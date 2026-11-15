@@ -8,10 +8,13 @@ import App from './App'
 describe('focused authoring workspace', () => {
   let container: HTMLDivElement
   let root: ReturnType<typeof createRoot>
+  let originalScrollIntoView: PropertyDescriptor | undefined
 
   beforeEach(() => {
     ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
     localStorage.clear()
+    originalScrollIntoView = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView')
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: () => undefined })
     container = document.createElement('div')
     document.body.append(container)
     root = createRoot(container)
@@ -20,6 +23,8 @@ describe('focused authoring workspace', () => {
   afterEach(async () => {
     await act(async () => root.unmount())
     container.remove()
+    if (originalScrollIntoView) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', originalScrollIntoView)
+    else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView')
   })
 
   it('shows margin comments by default while computation details stay closed', async () => {
@@ -37,22 +42,23 @@ describe('focused authoring workspace', () => {
     expect(container.querySelector<HTMLElement>('.code-workspace-drawer')).not.toBeNull()
   })
 
-  it('can hide and reopen comments without a review pane', async () => {
+  it('can hide comments and reopen them from their text without a review pane', async () => {
     await act(async () => root.render(<App />))
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Hide comments"]')!.click())
     expect(container.querySelector<HTMLElement>('.review-margin')?.hidden).toBe(true)
-    await act(async () => container.querySelector<HTMLButtonElement>('.topbar [aria-label^="Review,"]')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open comment at this text"]')!.click())
     expect(container.querySelector<HTMLElement>('.review-margin')?.hidden).toBe(false)
     expect(container.querySelector('.portable-comment-bubble')).not.toBeNull()
   })
 
-  it('leaves the margin empty for a paper without feedback and keeps review options in the toolbar', async () => {
+  it('leaves the margin empty for a paper without feedback and groups review options beside tracking in the header', async () => {
     localStorage.setItem('draftmatter.structured-source.v1', '# A quiet manuscript\n\nA paragraph without feedback.\n')
     localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     await act(async () => root.render(<App />))
     expect(container.querySelector<HTMLElement>('.review-margin')?.hidden).toBe(true)
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Review options"]')!.click())
-    expect(container.querySelector('.format-toolbar [role="dialog"][aria-label="Review options"]')).not.toBeNull()
+    expect(container.querySelector('.topbar .tracking-controls [role="dialog"][aria-label="Review options"]')).not.toBeNull()
+    expect(container.querySelector('.format-toolbar [aria-label="Review options"]')).toBeNull()
     expect(container.querySelector('.review-margin [aria-label="Review author"]')).toBeNull()
   })
 
@@ -69,10 +75,10 @@ describe('focused authoring workspace', () => {
 
   it('groups secondary insertions under one toolbar control', async () => {
     await act(async () => root.render(<App />))
-    expect(container.querySelectorAll('.format-toolbar > button[aria-label^="Insert "]')).toHaveLength(0)
+    expect([...container.querySelectorAll('.format-toolbar > button[aria-label^="Insert "]')].map((button) => button.getAttribute('aria-label'))).toEqual(['Insert citation'])
     await act(async () => container.querySelector<HTMLButtonElement>('.toolbar-insert-button')!.click())
     const labels = [...container.querySelectorAll('.toolbar-insert-menu strong')].map((item) => item.textContent)
-    expect(labels).toEqual(['Figure', 'Table', 'Equation', 'Cross-reference', 'Published value', 'Reproducible figure', 'Reproducible table'])
+    expect(labels).toEqual(['Citation', 'Figure', 'Table', 'Equation', 'Cross-reference', 'Published value', 'Reproducible figure', 'Reproducible table'])
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open browser view-only code and desktop instructions"]')!.click())
     expect(container.querySelector('.code-workspace-drawer')?.textContent).toContain('Open this portable manuscript as a DraftMatter desktop project')
     expect(container.querySelector('.code-workspace-drawer')?.textContent).toContain('Open project folder…')

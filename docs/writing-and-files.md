@@ -5,6 +5,26 @@ text, add citations, insert existing figures, edit tables, and preview equations
 in the browser or the desktop app. Computation is an optional way to connect
 figures, tables, and reported values to their analysis.
 
+## Write, cite, and review
+
+Place the cursor in the manuscript and choose **Cite** in the writing toolbar.
+Search the project references or, on desktop with Zotero open, your local Zotero
+library. Select the references and choose **Insert selected**. **⌘⇧C** on macOS
+or **Ctrl+Shift+C** on Windows and Linux opens the same picker at the cursor.
+**Insert → Citation** is another route to that picker.
+
+The toolbar groups text style, bold, italic, links, citations and insertions.
+It stays quiet while writing and becomes fully visible on hover or keyboard
+focus. Touch devices keep it visible.
+
+**Track changes** is in the main header. Its adjacent arrow opens **Changes
+display**, including margin or inline changes and original/final previews.
+Comments remain beside their text; select an anchor to open its conversation.
+
+Use **Outline** on the left for the manuscript plan. Main sections are visible
+by default; each arrow expands or collapses its subsections independently.
+Searching reveals matching headings and their parent sections.
+
 ## Add figures, tables, and equations
 
 - Choose **Insert → Figure** and pick an image, or drop an image directly into
@@ -18,15 +38,16 @@ figures, tables, and reported values to their analysis.
   Numbering follows the manuscript when you reorder its contents.
 
 Imported images receive a stable filename in `figures/`. DraftMatter does not
-rename the image to match its current figure number. The **Files** workspace
-shows both its filename and its current **Figure 1**, **Figure 2**, or other
-manuscript number.
+rename the image to match its current figure number. Figure numbers appear
+with the figures in the manuscript; the file tree keeps their stable names.
 
 ## Know where the files live
 
-Open the folder icon in the top bar to browse **Files**. It shows the current
-manuscript, available figures, references, and other known project files, with
-their locations.
+Choose **Files** on the left to browse folders without leaving the paper.
+Select a file to see its available actions: open another manuscript, insert an
+image, or download a copy. The current manuscript is marked in the tree. Search
+finds files inside closed folders. **Outline** switches the same pane back to
+the manuscript plan.
 
 | Workspace | Where a newly imported image is saved |
 | --- | --- |
@@ -42,8 +63,8 @@ available without Git.
 
 ## Synchronize a selected part of a local project
 
-Connect a local desktop project to its collaboration server, then open **Files**.
-The **Selective synchronization** panel follows the manuscript, figures, and
+Connect a local desktop project to its collaboration server, then open
+**Files → Sharing & transfers**. The **Selective synchronization** panel follows the manuscript, figures, and
 references by default. Select additional files individually. Explicit exclusions
 are remembered, including for default files. New default files are discovered
 when the project is compared again.
@@ -97,7 +118,7 @@ are shared with the paper. Other files, including analysis datasets, stay local
 until you explicitly select them for synchronization or upload a version. You do not need to put a dataset online just
 to insert a finished figure.
 
-To share additional files, open **Files → Shared data files**. Owners and editors
+To share additional files, open **Files → Sharing & transfers → Shared data files**. Owners and editors
 can choose a file and upload a version; collaborators with access can download
 shared versions. These transfers are separate from inserting a figure and can
 be paused and resumed. Uploading data makes a version available for download. A desktop collaborator
@@ -146,7 +167,7 @@ publication exports show the saved results.
 ## Existing Git users
 
 The old built-in Git workspace has been removed from normal project navigation.
-The history icon now opens DraftMatter's local recovery journal. Existing `.git`
+The project menu’s **Recovery history** opens DraftMatter's local recovery journal. Existing `.git`
 folders, commits, branches, configuration, and remotes are left untouched. Continue
 using them through your own Git tools; no migration or repository setup is needed
 to keep writing in DraftMatter.

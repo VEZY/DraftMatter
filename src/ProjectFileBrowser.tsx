@@ -1,8 +1,10 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Icon } from './Icon'
 import { buildProjectFileInventory, projectFileByteSize, projectFileKindLabel, type ProjectFileInventoryInput } from './projectFileInventory'
+import { ProjectFileExplorer } from './ProjectFileExplorer'
 
 export interface ProjectFileBrowserProps {
+  layout?: 'dialog' | 'sidebar'
   localFiles?: readonly ProjectFileInventoryInput[]
   onlineFiles?: readonly ProjectFileInventoryInput[]
   currentManuscriptPath: string
@@ -30,6 +32,7 @@ const usageLabels = { current: 'Current manuscript', referenced: 'Referenced in 
 
 /** Shows known file copies without treating file presence as synchronization or a Git commit. */
 export function ProjectFileBrowser({
+  layout = 'dialog',
   localFiles, onlineFiles, currentManuscriptPath, referencedPaths, figureLabels, location, projectName, rootPath,
   localInventoryComplete = false, onlineInventoryComplete = false, liveCollaboration = false,
   loading = false, problem, onRefresh, onRevealFolder, onOpenFile, onInsertFigure, onDownloadFile, downloadablePaths, children,
@@ -41,6 +44,11 @@ export function ProjectFileBrowser({
   const visible = files.filter((file) => (!search || file.path.toLocaleLowerCase().includes(search)) && (filter === 'all' || file[filter]))
   const localLabel = locationLabels[location]
   const hasOnlineFiles = files.some((file) => file.online)
+
+  if (layout === 'sidebar') return <ProjectFileExplorer files={files} {...{
+    currentManuscriptPath, projectName, location, rootPath, loading, problem, onRefresh, onRevealFolder,
+    onOpenFile, onInsertFigure, onDownloadFile, downloadablePaths, localInventoryComplete, onlineInventoryComplete, liveCollaboration, children,
+  }} />
 
   return <section className="project-file-browser" aria-label="Project files">
     <header className="project-file-browser-heading">

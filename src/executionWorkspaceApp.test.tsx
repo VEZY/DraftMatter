@@ -314,8 +314,8 @@ describe('shared Jupyter execution workspace', () => {
     expect(container.querySelector('.rail-terminal-button')?.getAttribute('data-label')).toBe('Terminal · Ready')
   })
 
-  it('keeps the quick citation launcher available in a desktop project', async () => {
-    const launcher = container.querySelector<HTMLButtonElement>('.quick-cite')
+  it('keeps the citation launcher in the writing toolbar in a desktop project', async () => {
+    const launcher = container.querySelector<HTMLButtonElement>('.toolbar-cite-button')
     expect(launcher).not.toBeNull()
     expect(launcher?.disabled).toBe(false)
 

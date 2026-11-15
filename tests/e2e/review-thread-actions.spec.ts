@@ -16,7 +16,6 @@ test.describe('DM-P4-01 review thread actions', () => {
 
   test('persists replies and timestamps while resolving to a compact thread that can be inspected and reopened after reload', async ({ page }) => {
     await page.goto('/draft')
-    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Manuscript comments' })
     const comment = review.locator('#review-item-dm-comment-01')
     const createdAt = await comment.locator('.comment-author time').getAttribute('datetime')
@@ -48,7 +47,6 @@ test.describe('DM-P4-01 review thread actions', () => {
     await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toMatch(/#dm-comment-01 \.dm-thread[^}]*data-status="resolved"[^}]*data-updated=/)
 
     await page.reload()
-    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const reopenedReview = page.getByRole('complementary', { name: 'Manuscript comments' })
     const reopenedComment = reopenedReview.locator('#review-item-dm-comment-01')
     await expect(reopenedComment).toHaveClass(/resolved/)
@@ -79,26 +77,22 @@ test.describe('DM-P4-01 review thread actions', () => {
 
   test('removes a sample comment from the active queue and reopens its deleted audit record', async ({ page }) => {
     await page.goto('/draft')
-    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Manuscript comments' })
     const topbar = page.locator('.topbar')
-    const rail = page.getByRole('navigation', { name: 'Workspace navigation' })
-    await expect(topbar.getByRole('button', { name: 'Review, 3 open items' })).toBeVisible()
-    await expect(rail.getByRole('button', { name: 'Review, 3 open items' })).toBeVisible()
+    await expect(topbar.getByRole('button', { name: 'Turn on track changes', exact: true })).toBeVisible()
+    await expect(review.locator('[id^="review-item-"]')).toHaveCount(3)
     await expect(review).not.toContainText('REVIEW 1 OF 3')
     await expect(review.getByText('Can we quantify this increase in the main text?')).toBeVisible()
 
     await review.locator('#review-item-dm-comment-01').getByRole('button', { name: 'Delete comment' }).click()
     await expect(review.getByText('Can we quantify this increase in the main text?')).toHaveCount(0)
-    await expect(topbar.getByRole('button', { name: 'Review, 2 open items' })).toBeVisible()
-    await expect(rail.getByRole('button', { name: 'Review, 2 open items' })).toBeVisible()
+    await expect(review.locator('[id^="review-item-"]')).toHaveCount(2)
     await expect(review).not.toContainText('REVIEW 1 OF 2')
     await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toContain('data-status="deleted"')
 
     await page.reload()
-    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     await expect(page.getByRole('complementary', { name: 'Manuscript comments' }).getByText('Can we quantify this increase in the main text?')).toHaveCount(0)
-    await expect(page.locator('.topbar').getByRole('button', { name: 'Review, 2 open items' })).toBeVisible()
+    await expect(review.locator('[id^="review-item-"]')).toHaveCount(2)
     const portable = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')
     expect(portable).toContain('{#dm-comment-01 .dm-thread')
     expect(portable).toContain('data-status="deleted"')
