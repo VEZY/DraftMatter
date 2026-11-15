@@ -3601,7 +3601,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const activeReviewIdRef = useRef(activeReviewId)
   const activeReviewAnchorIdRef = useRef(activeReviewAnchorId)
   const collaborationRef = useRef(collaboration)
-  const reviewDecorationRef = useRef(reviewDecorationIndex(source))
+  const reviewDecorationRef = useRef<ReviewDecorationIndex | null>(null)
+  // Building the index parses the manuscript; do it only once during mounting.
+  if (reviewDecorationRef.current === null) reviewDecorationRef.current = reviewDecorationIndex(source)
   onChangeRef.current = onChange
   publicationBylineRef.current = publicationByline
   onDiagnosticsRef.current = onDiagnostics
@@ -4261,7 +4263,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         ...publicationBylineDecorations(state.doc, publicationBylineRef.current),
         ...reviewDecorations(
           state.doc,
-          reviewDecorationRef.current,
+          reviewDecorationRef.current!,
           markupViewRef.current,
           reviewAuthorIdRef.current,
           activeReviewIdRef.current,

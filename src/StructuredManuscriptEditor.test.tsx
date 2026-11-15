@@ -13,6 +13,7 @@ import { StructuredManuscriptEditor, moveStructuredBlock, shouldRequestStructure
 import { manuscriptSchema } from './manuscriptSchema'
 import { createReviewAlternative, createReviewChange, createReviewThread } from './reviewOperations'
 import { parseStructuredManuscript } from './structuredManuscript'
+import * as structuredManuscriptModule from './structuredManuscript'
 import { semanticManuscriptObjects } from './semanticObjects'
 import { COLLABORATIVE_PROSEMIRROR_ROOT, createCollaborativeProseMirrorState, setCollaborativeEditorPresence } from './sharedEditor/prosemirrorCollaboration'
 
@@ -574,6 +575,39 @@ print("result")
 
     expect(editorRef.current?.scrollToNode(lowerSection.dataset.dmId!)).toBe(true)
     expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'center' })
+  })
+
+  it('reuses review parsing on presentation rerenders and refreshes decorations for external source changes', async () => {
+    const base = '# Review parsing\n\nEvidence remains reproducible.\n'
+    const create = (proposal: string) => createReviewChange(base, {
+      start: base.indexOf('Evidence'),
+      end: base.indexOf('Evidence') + 'Evidence'.length,
+      author: { id: 'dm-reviewer', name: 'Reviewer' },
+      kind: 'replace',
+      proposal,
+    })
+    const initial = create('Initial evidence'), updated = create('Updated evidence')
+    const onChange = vi.fn()
+    await act(async () => root.render(<StructuredManuscriptEditor source={initial.document.source} onChange={onChange} />))
+    expect(container.querySelector('.dm-review-proposal')?.textContent).toBe('Initial evidence')
+    const parse = vi.spyOn(structuredManuscriptModule, 'parseStructuredManuscript')
+
+    for (const className of ['presentation-one', 'presentation-two']) {
+      await act(async () => root.render(<StructuredManuscriptEditor source={initial.document.source} onChange={onChange} className={className} />))
+    }
+    expect(parse).not.toHaveBeenCalled()
+    expect(container.querySelector('.dm-review-proposal')?.textContent).toBe('Initial evidence')
+
+    await act(async () => root.render(<StructuredManuscriptEditor source={updated.document.source} onChange={onChange} className="presentation-two" />))
+    expect(parse).toHaveBeenCalled()
+    expect(container.querySelector('.dm-review-proposal')?.textContent).toBe('Updated evidence')
+    expect(container.querySelector(`[data-review-anchor="${updated.change.anchorId}"]`)).not.toBeNull()
+    expect(container.querySelector(`[data-review-anchor="${initial.change.anchorId}"]`)).toBeNull()
+
+    parse.mockClear()
+    await act(async () => root.render(<StructuredManuscriptEditor source={updated.document.source} onChange={onChange} className="presentation-three" />))
+    expect(parse).not.toHaveBeenCalled()
+    expect(onChange).not.toHaveBeenCalled()
   })
 
   it('filters manuscript review marks by author and highlights the active navigable anchor', async () => {

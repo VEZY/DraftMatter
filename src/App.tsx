@@ -38,10 +38,10 @@ import { createCitationCache, hydrateCitationsFromCache, parseCitationCache, rea
 import {
   citationLocaleOptions,
   citationStyleOptions,
-  renderCslDocument,
   type CitationLocale,
   type CitationStyleId,
 } from './cslRenderer'
+import { useCslDocument } from './useCslDocument'
 import { assignCollisionSafeCitekeys, CITATION_INTAKE_MAX_BYTES, previewCitationIntake, type CitationIntakePreview } from './citationIntake'
 import { CrossrefSearchSession, crossrefCandidateToCitationRecord, crossrefDuplicateCitekeys, type CrossrefCandidate } from './crossref'
 import { DEFAULT_ACQUISITION_BIBLIOGRAPHY, canonicalizeAcquisitionRecord, citationRecordToAcquisitionCsl, ensureBibliographyReference, persistedAcquisitionRecord } from './citationAcquisition'
@@ -753,10 +753,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const [projectName, setProjectName] = useState(initialProjectMeta.projectName)
   const [citationStyle, setCitationStyle] = useState<CitationStyleId>(initialProjectMeta.citationStyle)
   const [citationLocale, setCitationLocale] = useState<CitationLocale>(initialProjectMeta.citationLocale)
-  const [renderedCitations, setRenderedCitations] = useState<Record<string, string>>({})
-  const [renderedBibliography, setRenderedBibliography] = useState<Array<{ id: string; value: string }>>([])
-  const [cslState, setCslState] = useState<'loading' | 'ready' | 'error'>('loading')
-  const [cslDiagnostics, setCslDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [citationPreferenceDiagnostics, setCitationPreferenceDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [diagnostics, setDiagnostics] = useState<DocumentDiagnostic[]>([])
   const [bibliographyDiagnostics, setBibliographyDiagnostics] = useState<DocumentDiagnostic[]>([])
@@ -1044,6 +1040,15 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     () => structuredMode ? structuredCitationClusters(manuscriptSource) : [],
     [manuscriptSource, structuredMode],
   )
+  const { renderedCitations, renderedBibliography, cslState, cslDiagnostics } = useCslDocument({
+    records: citations,
+    clusters: structuredMode ? manuscriptCitationClusters : [
+      { id: 'introduction', items: draftCitationItems },
+      { id: 'results', items: [{ citekey: 'coutellier2022' }] },
+    ],
+    style: citationStyle,
+    locale: citationLocale,
+  })
   const documentCitationKeys = structuredMode
     ? [...new Set(manuscriptCitationClusters.flatMap((cluster) => cluster.items.map((item) => item.citekey)))]
     : draft.citationKeys
@@ -1601,37 +1606,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   }, [filename, projectName, citationStyle, citationLocale])
 
   useEffect(() => {
-    let disposed = false
-    setCslState('loading')
-    setRenderedCitations({})
-    setRenderedBibliography([])
-    void renderCslDocument({
-      records: citations,
-      clusters: structuredMode ? manuscriptCitationClusters.map((cluster) => ({ id: cluster.id, items: cluster.items })) : [
-        { id: 'introduction', items: draftCitationItems },
-        { id: 'results', items: [{ citekey: 'coutellier2022' }] },
-      ],
-      style: citationStyle,
-      locale: citationLocale,
-    }).then((result) => {
-      if (disposed) return
-      setRenderedCitations(result.clusters)
-      setRenderedBibliography(result.bibliography)
-      setCslDiagnostics(result.diagnostics)
-      setCslState('ready')
-    }).catch((error) => {
-      if (disposed) return
-      setCslDiagnostics([{
-        code: 'csl-render-failed',
-        level: 'error',
-        message: `Citation formatting is temporarily unavailable: ${readableError(error)}`,
-      }])
-      setCslState('error')
-    })
-    return () => { disposed = true }
-  }, [citations, citationStyle, citationLocale, draft.citationItems, draft.citationKeys, manuscriptCitationClusters, structuredMode])
-
-  useEffect(() => {
     try {
       localStorage.setItem(CITATIONS_KEY, JSON.stringify(citations))
     } catch {
@@ -1913,7 +1887,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const demoReviewAvailable = !collaborationSessionActive && Boolean(demoAliceChange && demoMarcusChange && demoCommentThread)
   const totalOpenReviewCount = allReviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
   const reviewProposalStatus = reviewProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
-  const executableCells = extractExecutableCells(executionSource).cells
+  const executableCells = useMemo(() => extractExecutableCells(executionSource).cells, [executionSource])
   const sharedManuscript = Boolean(activeCollaborationLaunch || collaborationSessionActive)
   const executionBoundaryKind = desktopSession
     ? 'desktop'
@@ -1932,7 +1906,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   ))
   const manuscriptCodeCells = executableCells.filter((cell) => !isPanelManagedCell(cell))
   const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL) ?? executableCells[0]
-  const retainedOutputParse = parseRetainedOutputs(executionSource)
+  const retainedOutputParse = useMemo(() => parseRetainedOutputs(executionSource), [executionSource])
   const retainedOutputs = retainedOutputParse.outputs
   const retainedPublishedValueParse = useMemo(() => parseRetainedPublishedValues(manuscriptSource), [manuscriptSource])
   const retainedPublishedValues = Object.values(retainedPublishedValueParse.values)
