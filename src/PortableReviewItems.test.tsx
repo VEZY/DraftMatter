@@ -34,14 +34,6 @@ async function input(element: HTMLInputElement | HTMLTextAreaElement, value: str
   })
 }
 
-async function select(element: HTMLSelectElement, value: string) {
-  await act(async () => {
-    const setter = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value')?.set
-    setter?.call(element, value)
-    element.dispatchEvent(new Event('change', { bubbles: true }))
-  })
-}
-
 describe('portable review panel items', () => {
   let container: HTMLDivElement
   let root: ReturnType<typeof createRoot>
@@ -232,7 +224,9 @@ describe('portable review panel items', () => {
     const timestamp = container.querySelector('time')
     expect(timestamp?.getAttribute('datetime')).toBe('2026-07-15T16:04:00.000Z')
     expect(text(timestamp)).toBe('15 Jul 2026 · 16:04 UTC')
-    expect(text(timestamp?.parentElement ?? null)).toContain('Open')
+    expect(container.querySelector('.comment-quote')).toBeNull()
+    expect(text(container.querySelector('.portable-comment-body'))).toBe('Keep the recorded time portable.')
+    expect(container.textContent).not.toContain('portable timestamp belongs')
   })
 
   it('surfaces ambiguous locations and applies the chosen placement without changing the thread payload', async () => {
@@ -289,13 +283,16 @@ describe('portable review panel items', () => {
     expect(recovered.threads[0].anchorContext?.prefix).toContain('After reloading')
   })
 
-  it('creates a new portable comment from a unique manuscript quote', async () => {
+  it('creates a comment from the current selection with only a body field', async () => {
+    await act(async () => root.render(<PortableReviewItems source={identicalSource} selectedTarget={{ quote: 'leaf area declined', occurrence: 0 }} onApply={(next, message) => { latestSource = next; notices.push(message) }} />))
     await click(button(container, 'New comment'))
     const composer = container.querySelector('.portable-review-composer')!
-    const fields = composer.querySelectorAll('input, textarea')
-    await input(fields[0] as HTMLInputElement, 'leaf area declined')
-    await input(fields[1] as HTMLTextAreaElement, 'Please report the confidence interval.')
-    await click(button(composer, 'Add'))
+    expect(composer.querySelectorAll('input, select')).toHaveLength(0)
+    expect(composer.querySelectorAll('textarea')).toHaveLength(1)
+    expect(text(composer)).not.toMatch(/Attach to|Exact manuscript text|leaf area declined|Point before|Point after/)
+    expect(button(composer, 'Add comment').disabled).toBe(true)
+    await input(composer.querySelector('textarea')!, 'Please report the confidence interval.')
+    await click(button(composer, 'Add comment'))
 
     const parsed = parseReviewMarkup(latestSource)
     expect(parsed.threads).toEqual([expect.objectContaining({
@@ -320,59 +317,137 @@ describe('portable review panel items', () => {
 
     await click(button(container, 'New comment'))
     const composer = container.querySelector('.portable-review-composer')!
-    const fields = composer.querySelectorAll('input, textarea')
-    expect((fields[0] as HTMLInputElement).value).toBe('repeat')
-    await input(fields[1] as HTMLTextAreaElement, 'This comment belongs to the second occurrence.')
-    await click(button(composer, 'Add'))
+    expect(composer.querySelector('input')).toBeNull()
+    await input(composer.querySelector('textarea')!, 'This comment belongs to the second occurrence.')
+    await click(button(composer, 'Add comment'))
 
     expect(latestSource).toMatch(/repeat first, \[\]\{#dm-[^}]+data-edge="start"[^}]*\}repeat\[\]\{#dm-[^}]+data-edge="end"[^}]*\} second\./)
     expect(notices.at(-1)).toBe('Portable comment created')
   })
 
-  it('opens and pre-fills the comment composer from a manuscript context-menu request', async () => {
+  it('opens and focuses the body from a context-menu request and reports when the composer closes', async () => {
+    const composeChanged = vi.fn()
     const selectedTarget = { quote: 'leaf area declined', occurrence: 0 }
     await act(async () => root.render(
       <PortableReviewItems
         source={identicalSource}
         selectedTarget={selectedTarget}
         openCommentRequest={1}
+        composerAnchorTop={240}
+        onComposeChange={composeChanged}
         onApply={() => undefined}
       />,
     ))
 
     const composer = container.querySelector<HTMLElement>('[aria-label="New comment"]')!
     expect(composer).not.toBeNull()
-    expect(composer.querySelector<HTMLInputElement>('input')?.value).toBe(selectedTarget.quote)
+    expect(composer.querySelector('input')).toBeNull()
+    expect(composer.textContent).not.toContain(selectedTarget.quote)
     expect(composer.querySelector('textarea')).toBe(document.activeElement)
+    expect(composer.getAttribute('data-review-balloon')).toBe('new-comment')
+    expect(composer.getAttribute('data-review-balloon-target-top')).toBe('240')
+    expect(composeChanged.mock.calls.map(([open]) => open)).toEqual([true])
+    await input(composer.querySelector('textarea')!, 'A draft comment')
+    expect(composeChanged).toHaveBeenCalledTimes(1)
+    await click(button(composer, 'Cancel'))
+    expect(composeChanged.mock.calls.map(([open]) => open)).toEqual([true, false])
   })
 
-  it('creates a recoverable point comment after nearby selected text and offers either side', async () => {
-    const pointSource = '# Point comment\n\nMeasure canopy area weekly.\n'
-    await act(async () => root.render(
-      <PortableReviewItems
-        source={pointSource}
-        selectedTarget={{ quote: 'canopy area', occurrence: 0 }}
-        onApply={(next, message) => { latestSource = next; notices.push(message) }}
-      />,
-    ))
+  it('keeps a draft anchored to the captured selection if the editor selection changes', async () => {
+    const manuscript = '# Results\n\nFirst target, second target.\n'
+    const apply = vi.fn()
+    const render = (quote: string) => root.render(<PortableReviewItems source={manuscript} selectedTarget={{ quote, occurrence: 0 }} openCommentRequest={1} onApply={apply} />)
+    await act(async () => render('First target'))
+    await input(container.querySelector('.portable-comment-composer textarea')!, 'Keep this on the original selection.')
+    await act(async () => render('second target'))
+    expect(container.querySelector<HTMLTextAreaElement>('.portable-comment-composer textarea')?.value).toBe('Keep this on the original selection.')
+    await click(button(container.querySelector('.portable-comment-composer')!, 'Add comment'))
+    const parsed = parseReviewMarkup(apply.mock.calls[0][0])
+    expect(parsed.threads[0].anchorContext?.quote).toBe('First target')
+  })
 
+  it('preserves an exact whitespace selection and refuses to silently relocate a stale selection', async () => {
+    const manuscript = '# Results\n\nA  spaced target  remains.\n'
+    const apply = vi.fn()
+    const render = (source: string) => root.render(<PortableReviewItems source={source} selectedTarget={{ quote: ' spaced target ', occurrence: 0 }} openCommentRequest={1} onApply={apply} />)
+    await act(async () => render(manuscript))
+    await input(container.querySelector('.portable-comment-composer textarea')!, 'Preserve the selected range.')
+    await click(button(container.querySelector('.portable-comment-composer')!, 'Add comment'))
+    expect(parseReviewMarkup(apply.mock.calls[0][0]).threads[0].anchorContext?.quote).toBe(' spaced target ')
+
+    await act(async () => root.render(<PortableReviewItems key="stale" source={manuscript} selectedTarget={{ quote: ' spaced target ', occurrence: 0 }} openCommentRequest={1} onApply={apply} />))
+    await input(container.querySelector('.portable-comment-composer textarea')!, 'Do not attach this elsewhere.')
+    await act(async () => root.render(<PortableReviewItems key="stale" source={manuscript.replace('spaced target', 'changed target')} selectedTarget={{ quote: ' spaced target ', occurrence: 0 }} openCommentRequest={1} onApply={apply} />))
+    await click(button(container.querySelector('.portable-comment-composer')!, 'Add comment'))
+    expect(apply).toHaveBeenCalledTimes(1)
+    expect(text(container.querySelector('[role="alert"]'))).toContain('selected text has changed')
+  })
+
+  it('hides footer chrome while still allowing selection requests to open the composer', async () => {
+    const composeChanged = vi.fn()
+    await act(async () => root.render(<PortableReviewItems source="# Results\n\nA target phrase.\n" selectedTarget={{ quote: 'target phrase', occurrence: 0 }} openCommentRequest={1} showFooter={false} onComposeChange={composeChanged} onApply={() => undefined} />))
+    expect(container.querySelector('.portable-review-footer')).toBeNull()
+    expect(container.querySelector('.portable-comment-composer')).not.toBeNull()
+    expect(composeChanged.mock.calls).toEqual([[true]])
+  })
+
+  it('requires a manuscript selection before opening a new comment', async () => {
+    expect(button(container, 'New comment').disabled).toBe(true)
     await click(button(container, 'New comment'))
-    const composer = container.querySelector('.portable-review-composer')!
-    expect([...composer.querySelectorAll<HTMLOptionElement>('select option')].map((option) => option.value)).toEqual(['range', 'point-before', 'point-after'])
-    await select(composer.querySelector('select')!, 'point-after')
-    await input(composer.querySelector('textarea')!, 'Add the sampling date here.')
-    await click(button(composer, 'Add'))
+    expect(container.querySelector('.portable-comment-composer')).toBeNull()
+  })
 
-    const parsed = parseReviewMarkup(latestSource)
-    const point = parsed.ranges.find((range) => range.anchorId === parsed.threads[0].anchorId)
-    expect(point).toMatchObject({ complete: true, start: expect.any(Number), end: expect.any(Number) })
-    expect(point?.start).toBe(point?.end)
-    expect(parsed.threads[0]).toMatchObject({
-      messages: ['Add the sampling date here.'],
-      anchorContext: { quote: '', prefix: expect.stringContaining('canopy area'), suffix: expect.stringContaining('weekly') },
-    })
-    expect(latestSource).toMatch(/canopy area\[\]\{#dm-[^}]+data-edge="point"[^}]*\} weekly/)
-    expect(notices.at(-1)).toBe('Portable comment created')
+  it('shows imported point comments as plain collapsible bubbles without repeating nearby text', async () => {
+    const manuscript = '# Point comment\n\nMeasure canopy area weekly.\n'
+    const point = manuscript.indexOf(' weekly')
+    const created = createReviewThread(manuscript, { start: point, end: point, author: { id: 'dm-author', name: 'Alice Martin' }, message: 'Add the sampling date here.', timestamp: '2026-07-15T16:00:00Z' }).document.source
+    const apply = vi.fn()
+    const navigate = vi.fn()
+    await act(async () => root.render(<PortableReviewItems source={created} onApply={apply} onNavigateToItem={navigate} />))
+    const bubble = container.querySelector('.portable-comment-bubble')!
+    expect(text(bubble)).toContain('Alice Martin')
+    expect(text(bubble)).toContain('15 Jul 2026')
+    expect(text(bubble.querySelector('.portable-comment-body'))).toBe('Add the sampling date here.')
+    expect(text(bubble)).not.toMatch(/canopy area|weekly|Exact manuscript text|Review location|Point review/)
+    expect(bubble.querySelector('.unplaced-review-placement')).toBeNull()
+    await click(bubble.querySelector('[aria-label="Collapse comment by Alice Martin"]')!)
+    expect(bubble.querySelector('.portable-comment-body')).toBeNull()
+    expect(bubble.querySelector('[aria-expanded="false"]')).not.toBeNull()
+    await click(bubble.querySelector('[aria-label="Expand comment by Alice Martin"]')!)
+    expect(text(bubble.querySelector('.portable-comment-body'))).toBe('Add the sampling date here.')
+    await click(bubble.querySelector('.portable-comment-body')!)
+    await click(button(bubble.querySelector('.portable-thread-actions')!, 'Reply'))
+    expect(bubble.querySelector('.reply-box input')).toBe(document.activeElement)
+    expect(navigate).not.toHaveBeenCalled()
+    expect(apply).not.toHaveBeenCalled()
+  })
+
+  it('replies, resolves, reopens and deletes a comment while retaining portable records', async () => {
+    const manuscript = '# Results\n\nA target phrase here.\n'
+    const created = createReviewThread(manuscript, { start: manuscript.indexOf('target phrase'), end: manuscript.indexOf('target phrase') + 'target phrase'.length, author: { id: 'dm-author', name: 'Alice Martin' }, message: 'Check this result.', threadId: 'dm-comment-actions' }).document.source
+    function ThreadHarness() {
+      const [source, setSource] = useState(created)
+      return <PortableReviewItems source={source} onApply={(next) => { latestSource = next; setSource(next) }} />
+    }
+    await act(async () => root.render(<ThreadHarness />))
+    expect(container.querySelector('.reply-box')).toBeNull()
+    await click(button(container.querySelector('.portable-thread-actions')!, 'Reply'))
+    const reply = container.querySelector<HTMLInputElement>('.reply-box input')!
+    expect(reply).toBe(document.activeElement)
+    await input(reply, 'The uncertainty is included.')
+    await click(container.querySelector('[aria-label="Send reply"]')!)
+    expect(parseReviewMarkup(latestSource).threads[0].messages).toEqual(['Check this result.', 'The uncertainty is included.'])
+    expect(text(container.querySelector('.portable-comment-reply-meta'))).toContain('Remi Vezy')
+    expect(container.querySelector('.portable-comment-reply time')).not.toBeNull()
+    await click(container.querySelector('[aria-label="Resolve comment"]')!)
+    expect(parseReviewMarkup(latestSource).threads[0].status).toBe('resolved')
+    expect(container.querySelector('.comment-card.resolved')).not.toBeNull()
+    expect(container.querySelector('.portable-comment-reply-button')).toBeNull()
+    await click(container.querySelector('[aria-label="Reopen comment"]')!)
+    expect(parseReviewMarkup(latestSource).threads[0].status).toBe('open')
+    await click(container.querySelector('[aria-label="Delete comment"]')!)
+    expect(container.querySelector('.comment-card')).toBeNull()
+    expect(parseReviewMarkup(latestSource).threads[0]).toMatchObject({ status: 'deleted', messages: ['Check this result.', 'The uncertainty is included.'] })
   })
 
   it('gives commenters comment and reply controls without manuscript or decision actions', async () => {
@@ -398,8 +473,10 @@ describe('portable review panel items', () => {
     expect(container.textContent).not.toContain('Suggest edit')
     expect(container.textContent).not.toContain('Accept selected')
     await click(container.querySelector('.comment-card')!)
+    await click(button(container.querySelector('.portable-thread-actions')!, 'Reply'))
     expect(container.querySelector('.reply-box')).not.toBeNull()
-    expect(container.querySelector('.portable-thread-actions')).toBeNull()
+    expect(container.querySelector('[aria-label="Resolve comment"]')).toBeNull()
+    expect(container.querySelector('[aria-label="Delete comment"]')).toBeNull()
     await input(container.querySelector('.reply-box input')!, 'I can add that as a comment, but not edit the claim.')
     await click(button(container.querySelector('.reply-box')!, ''))
 

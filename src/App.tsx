@@ -54,6 +54,7 @@ import { RuntimeProvenance } from './RuntimeProvenance'
 import { discoverRuntimeInventory, healthyKernelsFor, runtimeExecutableForKernelSetup, type JupyterKernelProbe, type RuntimeInventory, type RuntimeLanguage } from './runtimeDiscovery'
 import { PortableReviewItems } from './PortableReviewItems'
 import { AlignedReviewRail } from './AlignedReviewRail'
+import { SelectionCommentButton } from './SelectionCommentButton'
 import { GitHistoryPanel } from './GitHistoryPanel'
 import { ProjectChecksDialog, ProjectDiagnostics, prioritizeProjectDiagnostics, type ProjectCheckAction } from './ProjectDiagnostics'
 import { buildReviewQueue } from './reviewQueue'
@@ -647,7 +648,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const [reviewAuthorFilter, setReviewAuthorFilter] = useState('all')
   const [activeReviewId, setActiveReviewId] = useState<string>()
   const [activeNav, setActiveNav] = useState<'manuscript' | 'review' | 'sources' | 'history'>('manuscript')
-  const [rightPanelOpen, setRightPanelOpen] = useState(false)
+  const [rightPanelOpen, setRightPanelOpen] = useState(true)
+  const [reviewOptionsOpen, setReviewOptionsOpen] = useState(false)
+  const [commentComposerOpen, setCommentComposerOpen] = useState(false)
+  const [composerAnchorTop, setComposerAnchorTop] = useState<number>()
   const [leftPanelOpen, setLeftPanelOpen] = useState(true)
   const [focusMode, setFocusMode] = useState(false)
   const [insertMenuOpen, setInsertMenuOpen] = useState(false)
@@ -682,7 +686,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const [commandActiveIndex, setCommandActiveIndex] = useState(0)
   const [insertBlockKind, setInsertBlockKind] = useState<InsertBlockKind>()
   const [linkDialogOpen, setLinkDialogOpen] = useState(false)
-  const [reply, setReply] = useState('')
   const [saveState, setSaveState] = useState<'saved' | 'saving' | 'conflict' | 'error'>('saved')
   const [saveProblem, setSaveProblem] = useState('')
   const [toast, setToast] = useState('')
@@ -824,6 +827,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const structuredEditorRef = useRef<StructuredManuscriptEditorHandle>(null)
   const structuredCitationDetailRef = useRef<HTMLDivElement>(null)
   const editorAreaRef = useRef<HTMLElement>(null)
+  const commentRangeRef = useRef<Range | null>(null)
   const outlineTreeRef = useRef<HTMLDivElement>(null)
   const draftRef = useRef(draft)
   const manuscriptSourceRef = useRef(manuscriptSource)
@@ -1836,11 +1840,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
   const demoMarcusChange = reviewDocument.changes.find((change) => change.id === 'dm-c02')
   const demoCommentThread = reviewDocument.threads.find((thread) => thread.id === 'dm-comment-01')
   const demoReviewAvailable = !collaborationSessionActive && Boolean(demoAliceChange && demoMarcusChange && demoCommentThread)
-  const demoCommentAvailable = demoReviewAvailable && !draft.commentDeleted
-  const openReviewCount = reviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
   const totalOpenReviewCount = allReviewQueue.filter((item) => item.status === 'open' || item.status === 'needs-rebase').length
-  const activeReviewPosition = Math.max(0, reviewQueue.findIndex((item) => item.id === activeReviewId))
-  const reviewLocationLabel = reviewQueue.length ? `REVIEW ${activeReviewPosition + 1} OF ${reviewQueue.length}` : 'NO FEEDBACK IN THIS VIEW'
   const reviewProposalStatus = reviewProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
   const executableCells = extractExecutableCells(executionSource).cells
   const sharedManuscript = Boolean(activeCollaborationLaunch || collaborationSessionActive)
@@ -1944,6 +1944,38 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       setReviewAuthorFilter('all')
     }
   }, [reviewAuthorFilter, reviewDocument.authors])
+
+  useLayoutEffect(() => {
+    const editor = editorAreaRef.current
+    const range = commentRangeRef.current
+    if (!commentComposerOpen || !editor || !range) return
+    const measure = () => {
+      if (!range.startContainer.isConnected) return
+      const rect = range.getBoundingClientRect()
+      setComposerAnchorTop(Math.max(8, rect.top + editor.scrollTop - editor.getBoundingClientRect().top))
+    }
+    measure()
+    const observer = globalThis.ResizeObserver ? new ResizeObserver(measure) : undefined
+    observer?.observe(editor)
+    const highlights = globalThis.CSS?.highlights
+    if (highlights && typeof Highlight !== 'undefined') highlights.set('draftmatter-comment-selection', new Highlight(range))
+    return () => {
+      observer?.disconnect()
+      highlights?.delete('draftmatter-comment-selection')
+    }
+  }, [commentComposerOpen, rightPanelOpen])
+
+  useEffect(() => {
+    if (!reviewOptionsOpen) return
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent && event.key !== 'Escape') return
+      if (event instanceof MouseEvent && event.target instanceof Element && event.target.closest('.review-display-options-wrap')) return
+      setReviewOptionsOpen(false)
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', close)
+    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close) }
+  }, [reviewOptionsOpen])
 
   useEffect(() => {
     if (!reviewContextMenu) return
@@ -3548,34 +3580,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     setToast('Suggestion rejected · accepted text unchanged')
   }
 
-  const addReply = () => {
-    if (!canCommentReview || !reply.trim()) return
-    const timestamp = new Date().toISOString()
-    updateDraft({
-      commentReplies: [...draft.commentReplies, reply.trim()],
-      commentReplyAuthors: [...(draft.commentReplyAuthors ?? []), { ...userSettings.author }],
-      commentReplyTimestamps: [...(draft.commentReplyTimestamps ?? []), timestamp],
-      reviewUpdatedAt: { ...draft.reviewUpdatedAt, comment: timestamp },
-    })
-    setReply('')
-  }
-
-  const removeDemoComment = () => {
-    if (!canDecideReview) return
-    updateDraft({ commentDeleted: true, commentResolved: false, reviewUpdatedAt: { ...draft.reviewUpdatedAt, comment: new Date().toISOString() } })
-    setActiveReviewId(reviewQueue.find((item) => item.id !== 'dm-comment-01')?.id)
-    setToast('Comment thread removed from the active queue')
-  }
-
-  const toggleDemoComment = () => {
-    if (!canDecideReview) return
-    updateDraft({
-      commentResolved: !draft.commentResolved,
-      commentDeleted: false,
-      reviewUpdatedAt: { ...draft.reviewUpdatedAt, comment: new Date().toISOString() },
-    })
-  }
-
   const copyPortableReference = async (label: string) => {
     const reference = `@${label}`
     const copied = await copyPlainText(reference)
@@ -3839,7 +3843,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     if (display === 'simple') showReviewPanel()
     setToast(display === 'all'
       ? 'Changes displayed in text · additions and deletions are visible in the manuscript'
-      : 'Changes displayed in panel · manuscript hints link to the review panel')
+      : 'Changes displayed in the margin · select a change in the manuscript to see its details')
   }
 
   const toggleTrackChanges = () => {
@@ -3858,13 +3862,25 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
     setReviewContextMenu({ selection, ...point })
   }
 
-  const addCommentFromContextMenu = () => {
-    if (!reviewContextMenu) return
-    setStructuredReviewSelection(reviewContextMenu.selection)
+  const addCommentToSelection = (selection: StructuredReviewSelection, range?: Range) => {
+    if (!canCommentReview) return
+    commentRangeRef.current = range ?? null
+    const editor = editorAreaRef.current
+    const rect = range?.getBoundingClientRect()
+    setComposerAnchorTop(editor && rect ? Math.max(8, rect.top + editor.scrollTop - editor.getBoundingClientRect().top) : undefined)
+    setStructuredReviewSelection(selection)
     setReviewContextMenu(undefined)
+    setCommentComposerOpen(true)
     showReviewPanel()
     if (markupView === 'original' || markupView === 'final') setMarkupView('all')
     setOpenCommentRequest((request) => request + 1)
+  }
+
+  const addCommentFromContextMenu = () => {
+    if (!reviewContextMenu) return
+    const native = window.getSelection()
+    const range = native?.rangeCount && !native.isCollapsed ? native.getRangeAt(0).cloneRange() : undefined
+    addCommentToSelection(reviewContextMenu.selection, range)
   }
 
   const selectReviewItem = (id: string | undefined) => {
@@ -4952,7 +4968,11 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
       keywords: 'review feedback thread note',
       icon: <span className="command-icon"><Icon name="message" size={17} /></span>,
       disabled: !canCommentReview,
-      action: () => { setCommandOpen(false); showReviewPanel() },
+      action: () => {
+        setCommandOpen(false)
+        if (structuredReviewSelection) addCommentToSelection(structuredReviewSelection)
+        else setToast('Select some manuscript text to add a comment')
+      },
     },
     {
       id: 'authors',
@@ -5546,6 +5566,18 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
               disabled={!canSuggestReview || !structuredMode}
               title="Record additions, deletions, formatting, and moved blocks as reviewable changes"
             ><Icon name="spark" size={15} /><span>Track changes</span></button>
+            <div className="review-display-options-wrap">
+              <button aria-label="Review options" aria-haspopup="dialog" aria-expanded={reviewOptionsOpen} onClick={() => setReviewOptionsOpen((open) => !open)}><Icon name="more" size={17} /></button>
+              {reviewOptionsOpen && <div className="review-display-options review-display-options-popover popover" role="dialog" aria-label="Review options">
+                <div className="review-display-options-heading"><strong>Review display</strong><button className="icon-button" aria-label="Close review options" onClick={() => setReviewOptionsOpen(false)}><Icon name="close" size={14} /></button></div>
+                <div className="tracked-changes-display-options" role="group" aria-label="Display tracked changes">
+                  <button type="button" className={markupView === 'simple' ? 'active' : ''} aria-pressed={markupView === 'simple'} onClick={() => setTrackedChangesDisplay('simple')}><Icon name="message" size={14} /><span>Margin notes</span></button>
+                  <button type="button" className={markupView === 'all' ? 'active' : ''} aria-pressed={markupView === 'all'} onClick={() => setTrackedChangesDisplay('all')}><Icon name="document" size={14} /><span>In text</span></button>
+                </div>
+                <label><span>Preview</span><select value={markupView} onChange={(event) => setMarkupView(event.target.value as MarkupView)} aria-label="Review display and preview"><option value="simple">Changes in margin</option><option value="all">Inline additions &amp; deletions</option><option value="original">Original</option><option value="final">Final preview</option></select></label>
+                <label><span>Author</span><select value={reviewAuthorFilter} onChange={(event) => setReviewAuthorFilter(event.target.value)} aria-label="Review author"><option value="all">All authors</option>{reviewDocument.authors.map((author) => <option value={author.id} key={author.id}>{author.name}</option>)}</select></label>
+              </div>}
+            </div>
             <span className="toolbar-divider" />
             <button aria-label="Undo" onClick={() => structuredMode ? structuredEditorRef.current?.undo() : undoDraft()} disabled={!canEditManuscript || (!structuredMode && !canUndo)}><Icon name="undo" size={16} /></button>
             <button aria-label="Redo" onClick={() => structuredMode ? structuredEditorRef.current?.redo() : redoDraft()} disabled={!canEditManuscript || (!structuredMode && !canRedo)}><Icon name="redo" size={16} /></button>
@@ -5952,78 +5984,9 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
           </div>
         )}
 
-          <aside className="review-panel" aria-label="Review feedback" hidden={!rightPanelOpen}>
-            <div className="review-panel-header">
-              <div><span className="eyebrow">Review</span><h2>Open feedback <span>{openReviewCount}</span></h2></div>
-              <button className="icon-button subtle" onClick={() => setRightPanelOpen(false)} aria-label="Close review panel"><Icon name="close" /></button>
-            </div>
-
-            <div className="tracked-changes-display" role="group" aria-label="Display tracked changes">
-              <div className="tracked-changes-display-heading">
-                <Icon name="eye" size={14} />
-                <span><strong>Display changes</strong><small>{markupView === 'all' ? 'Additions and deletions appear in the manuscript' : markupView === 'simple' ? 'Text hints link to details in this panel' : 'Choose a markup display to leave the clean preview'}</small></span>
-              </div>
-              <div className="tracked-changes-display-options">
-                <button
-                  type="button"
-                  className={markupView === 'simple' ? 'active' : ''}
-                  aria-pressed={markupView === 'simple'}
-                  onClick={() => setTrackedChangesDisplay('simple')}
-                >
-                  <Icon name="panelRight" size={14} />
-                  <span><strong>In panel</strong><small>Hints in text</small></span>
-                </button>
-                <button
-                  type="button"
-                  className={markupView === 'all' ? 'active' : ''}
-                  aria-pressed={markupView === 'all'}
-                  onClick={() => setTrackedChangesDisplay('all')}
-                >
-                  <Icon name="document" size={14} />
-                  <span><strong>In text</strong><small>Additions / deletions</small></span>
-                </button>
-              </div>
-            </div>
-
-            <details className="review-options">
-              <summary><span>More options</span><small>{markupView === 'simple' ? 'Panel' : markupView === 'all' ? 'In text' : markupView === 'original' ? 'Original' : 'Final preview'} · {reviewAuthorFilter === 'all' ? 'All authors' : reviewDocument.authors.find((author) => author.id === reviewAuthorFilter)?.name ?? 'Filtered'}</small></summary>
-              <div className="review-options-body">
-            <div className="markup-view-control">
-              <Icon name="eye" size={16} />
-              <select value={markupView} onChange={(event) => setMarkupView(event.target.value as MarkupView)} aria-label="Review display and preview">
-                <option value="simple">Hints + review panel</option>
-                <option value="all">Inline additions &amp; deletions</option>
-                <option value="original">Original</option>
-                <option value="final">Final preview</option>
-              </select>
-              <Icon name="chevronDown" size={13} />
-            </div>
-
-            <button
-              type="button"
-              className={`suggestion-mode-control ${suggestionMode ? 'active' : ''}`}
-              aria-pressed={suggestionMode}
-              onClick={toggleTrackChanges}
-              disabled={!canSuggestReview || !structuredMode}
-            >
-              <Icon name="spark" size={15} />
-              <span><strong>{canSuggestReview ? `Track changes ${suggestionMode ? 'on' : 'off'}` : collaborationRole === 'commenter' ? 'Comment-only' : 'Read-only'}</strong><small>{canSuggestReview ? (suggestionMode ? (markupView === 'all' ? 'Additions and deletions appear directly in the manuscript' : 'Text hints link to the full changes in this panel') : structuredMode ? 'Edits apply directly to the manuscript' : 'Open a portable manuscript to track changes') : collaborationRole === 'commenter' ? 'Add comments without changing the manuscript' : 'This role can inspect the manuscript and review history'}</small></span>
-              <span className="suggestion-mode-switch" aria-hidden="true"><i /></span>
-            </button>
-
-            <div className="markup-view-control review-author-control">
-              <Icon name="users" size={16} />
-              <select value={reviewAuthorFilter} onChange={(event) => setReviewAuthorFilter(event.target.value)} aria-label="Review author">
-                <option value="all">All authors</option>
-                {reviewDocument.authors.map((author) => <option value={author.id} key={author.id}>{author.name}</option>)}
-              </select>
-              <Icon name="chevronDown" size={13} />
-            </div>
-              </div>
-            </details>
-
+          <aside className="review-panel review-margin" aria-label="Manuscript comments" hidden={!rightPanelOpen || (!reviewQueue.length && !commentComposerOpen)}>
+            <button className="icon-button review-margin-close" onClick={() => setRightPanelOpen(false)} aria-label="Hide comments"><Icon name="close" size={15} /></button>
             <AlignedReviewRail editorRef={editorAreaRef}>
-              <div className="review-location"><span>{reviewLocationLabel}</span></div>
 
               {demoReviewAvailable && (reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a01' || reviewAuthorFilter === 'dm-a02') && <>
               <div className="conflict-card" data-review-balloon="dm-c01" data-review-balloon-anchor={demoAliceChange?.anchorId}>
@@ -6056,28 +6019,11 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
                 ) : null}
               </div>
 
-              {demoCommentAvailable && (reviewAuthorFilter === 'all' || reviewAuthorFilter === 'dm-a02') &&
-              <div id="review-item-dm-comment-01" className={`comment-card ${activeReviewId === 'dm-comment-01' ? 'active' : ''} ${draft.commentResolved ? 'resolved' : ''}`} data-review-balloon="dm-comment-01" data-review-balloon-anchor={demoCommentThread?.anchorId} onClick={() => selectReviewItem('dm-comment-01')}>
-                <div className="comment-author"><Avatar initials="MC" tone="clay" small /><span><strong>Marcus Chen</strong><small><ReviewTimestamp value={demoCommentThread?.updatedAt ?? demoCommentThread?.createdAt} verb={demoCommentThread?.updatedAt ? 'Updated' : 'Created'} fallback="Portable comment" /></small></span></div>
-                <div className="comment-quote">“increased modestly”</div>
-                <p>Can we quantify this increase in the main text? The estimate is already in the supplement.</p>
-                {draft.commentReplies.map((message, index) => {
-                  const author = draft.commentReplyAuthors?.[index] ?? { id: 'dm-a01', name: 'Alice Martin' }
-                  return <div className="reply-message" key={`${message}-${index}`}><Avatar initials={authorInitials(author.name)} tone="sage" small label={author.name} /><p><strong>{author.id === userSettings.author.id ? 'You' : author.name}</strong>{message}</p></div>
-                })}
-                {canCommentReview && !draft.commentResolved && (
-                  <div className="reply-box"><input value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') addReply() }} placeholder="Reply…" aria-label="Reply to comment" /><button onClick={addReply} disabled={!reply.trim()} aria-label="Send reply"><Icon name="arrowRight" size={15} /></button></div>
-                )}
-                {canDecideReview && <div className="portable-thread-actions">
-                  <button className="resolve-button" onClick={toggleDemoComment}><Icon name="check" size={14} /> {draft.commentResolved ? 'Reopen thread' : 'Resolve thread'}</button>
-                  <button className="portable-delete-thread" onClick={(event) => { event.stopPropagation(); removeDemoComment() }}><Icon name="x" size={13} /> Remove</button>
-                </div>}
-              </div>}
               </>}
 
               <PortableReviewItems
                 source={manuscriptSource}
-                excludeIds={demoReviewAvailable ? ['dm-c01', 'dm-c02', 'dm-comment-01'] : []}
+                excludeIds={demoReviewAvailable ? ['dm-c01', 'dm-c02'] : []}
                 authorId={reviewAuthorFilter === 'all' ? undefined : reviewAuthorFilter}
                 activeId={activeReviewId}
                 navigationItems={reviewQueue}
@@ -6089,6 +6035,9 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
                 }}
                 selectedTarget={structuredMode ? structuredReviewSelection : null}
                 openCommentRequest={openCommentRequest}
+                composerAnchorTop={composerAnchorTop}
+                showFooter={reviewQueue.some((item) => item.kind === 'change' || item.kind === 'unplaced-change')}
+                onComposeChange={setCommentComposerOpen}
                 collaborativeReview={collaborativeEditorBinding?.review}
                 onApply={applyPortableReviewSource}
                 canComment={canCommentReview}
@@ -6098,6 +6047,13 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
             </AlignedReviewRail>
           </aside>
       </div>
+
+      <SelectionCommentButton
+        editorRef={editorAreaRef}
+        selection={structuredReviewSelection}
+        enabled={structuredMode && canCommentReview && !commentComposerOpen && !focusMode && !reviewContextMenu}
+        onAddComment={addCommentToSelection}
+      />
 
       {reviewContextMenu && (
         <div
@@ -6112,7 +6068,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, on
         >
           <button type="button" role="menuitem" onClick={addCommentFromContextMenu}>
             <Icon name="message" size={15} />
-            <span><strong>Add comment</strong><small>Attach to “{reviewContextMenu.selection.quote.slice(0, 44)}{reviewContextMenu.selection.quote.length > 44 ? '…' : ''}”</small></span>
+            <span>Add comment</span>
           </button>
         </div>
       )}

@@ -8617,3 +8617,592 @@ textarea:focus,
     filter: none;
   }
 }
+
+/* Manuscript comments live in a quiet margin, independent of the panel chrome. */
+.review-panel.review-margin {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  display: flex;
+  flex: 0 0 320px;
+  min-width: 0;
+  padding: 0;
+  position: relative;
+}
+
+.review-panel.review-margin[hidden],
+.app-shell.focus-mode .review-panel.review-margin {
+  display: none;
+}
+
+.review-margin .review-scroll {
+  margin: 0;
+  overscroll-behavior: contain;
+  padding: 28px 18px 48px 10px;
+  scrollbar-color: #d9dce1 transparent;
+  scrollbar-width: thin;
+}
+
+.review-margin svg {
+  filter: none;
+}
+
+.review-margin [data-review-balloon][data-review-balloon-aligned="true"]::after {
+  content: none;
+}
+
+.review-margin-close,
+.review-margin .portable-comment-toggle {
+  align-items: center;
+  background: #fff;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  box-shadow: none;
+  color: #7c818a;
+  display: inline-flex;
+  flex: 0 0 30px;
+  height: 30px;
+  justify-content: center;
+  min-width: 30px;
+  padding: 0;
+  width: 30px;
+}
+
+.review-margin-close {
+  position: absolute;
+  right: 17px;
+  top: 4px;
+  z-index: 3;
+}
+
+.review-margin-close:hover,
+.review-margin .portable-comment-toggle:hover {
+  background: #fff;
+  border-color: #e5e7eb;
+  color: #303640;
+}
+
+.review-margin .portable-comment-bubble,
+.review-margin .portable-comment-bubble.active,
+.review-margin .portable-comment-bubble.resolved,
+.review-margin .portable-comment-composer {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+  box-shadow: 0 2px 10px rgba(25, 30, 40, .045);
+  color: #424650;
+  margin-bottom: 12px;
+  overflow: visible;
+  padding: 14px;
+}
+
+.review-margin .portable-comment-bubble.active {
+  border-color: #cdd1d8;
+  box-shadow: 0 2px 12px rgba(25, 30, 40, .065);
+}
+
+.review-margin .portable-comment-bubble.resolved {
+  opacity: 1;
+}
+
+.review-margin .portable-comment-header {
+  align-items: flex-start;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.review-margin .comment-author {
+  align-items: center;
+  display: flex;
+  flex: 1 1 auto;
+  gap: 9px;
+  min-width: 0;
+}
+
+.review-margin .comment-author > span:not(.avatar) {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* A generic author span grows; an avatar must never inherit that flex value. */
+.review-margin .comment-author > .avatar,
+.review-margin .portable-comment-reply > .avatar {
+  align-items: center;
+  aspect-ratio: 1;
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 50%;
+  box-shadow: none;
+  color: #626873;
+  display: inline-flex;
+  flex: 0 0 28px;
+  flex-direction: row;
+  font-size: 10px;
+  font-weight: 600;
+  height: 28px;
+  justify-content: center;
+  letter-spacing: 0;
+  max-height: 28px;
+  max-width: 28px;
+  min-height: 28px;
+  min-width: 28px;
+  width: 28px;
+}
+
+.review-margin .comment-author strong {
+  color: #353a44;
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.review-margin .comment-author small,
+.review-margin .comment-author time {
+  color: #646d79;
+  font-size: 10.5px;
+  font-weight: 400;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.review-margin .portable-comment-content {
+  min-width: 0;
+}
+
+.review-margin .portable-comment-body,
+.review-margin .comment-card > p {
+  color: #444a54;
+  font-size: 13px;
+  line-height: 1.6;
+  margin: 12px 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.review-margin .portable-comment-bubble.collapsed {
+  padding-block: 11px;
+}
+
+.review-margin .portable-comment-reply {
+  align-items: flex-start;
+  border-top: 1px solid #eff0f2;
+  display: flex;
+  gap: 9px;
+  margin-top: 13px;
+  padding: 13px 0 0;
+}
+
+.review-margin .portable-comment-reply > .avatar {
+  flex-basis: 24px;
+  font-size: 9px;
+  height: 24px;
+  max-height: 24px;
+  max-width: 24px;
+  min-height: 24px;
+  min-width: 24px;
+  width: 24px;
+}
+
+.review-margin .portable-comment-reply > div {
+  flex: 1;
+  min-width: 0;
+}
+
+.review-margin .portable-comment-reply-meta {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px 8px;
+}
+
+.review-margin .portable-comment-reply-meta strong {
+  color: #454b55;
+  font-size: 11.5px;
+  font-weight: 600;
+}
+
+.review-margin .portable-comment-reply-meta small,
+.review-margin .portable-comment-reply-meta time {
+  color: #646d79;
+  font-size: 10px;
+  font-weight: 400;
+}
+
+.review-margin .portable-comment-reply p {
+  color: #555b65;
+  display: block;
+  font-size: 12px;
+  line-height: 1.55;
+  margin: 5px 0 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+.review-margin .portable-thread-actions {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  justify-content: flex-start;
+  margin-top: 8px;
+  opacity: 1;
+}
+
+
+.review-margin .portable-thread-actions button {
+  align-items: center;
+  background: #fff;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  box-shadow: none;
+  color: #646d79;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 500;
+  gap: 4px;
+  line-height: 1.3;
+  margin: 0;
+  min-height: 24px;
+  padding: 2px 3px;
+}
+
+.review-margin .portable-thread-actions button:hover {
+  border-color: #e5e7eb;
+  color: #353b45;
+}
+
+.review-margin .reply-box {
+  background: #fff;
+  border: 1px solid #e1e4e9;
+  border-radius: 8px;
+  box-shadow: none;
+  height: auto;
+  margin-top: 12px;
+  min-height: 36px;
+  overflow: hidden;
+}
+
+.review-margin .reply-box input {
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px 10px;
+}
+
+.review-margin .reply-box button {
+  background: #fff;
+  color: #606874;
+  min-height: 34px;
+  min-width: 34px;
+  padding: 7px;
+}
+
+.review-margin .portable-comment-composer {
+  gap: 12px;
+  margin: 10px 0 12px;
+  scroll-margin-block: 36px;
+}
+
+.review-margin .portable-comment-composer > strong {
+  color: #3c424c;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.review-margin .portable-comment-composer label {
+  color: #646d79;
+  font-size: 11px;
+  gap: 7px;
+}
+
+.review-margin .portable-comment-composer textarea {
+  background: #fff;
+  border: 1px solid #e1e4e9;
+  border-radius: 8px;
+  box-shadow: none;
+  color: #424953;
+  font-size: 13px;
+  line-height: 1.55;
+  min-height: 96px;
+  min-width: 0;
+  padding: 10px;
+  width: 100%;
+}
+
+.review-margin .reply-box:focus-within {
+  border-color: #a1a7b1;
+  box-shadow: 0 0 0 2px rgba(40, 48, 60, .055);
+}
+
+.review-margin .portable-comment-composer textarea:focus,
+.review-margin .portable-comment-composer textarea:focus-visible {
+  border-color: transparent;
+  box-shadow: none;
+  outline: 2px solid #646d79 !important;
+  outline-offset: 0;
+}
+
+.review-margin .portable-comment-composer > div button {
+  background: #fff;
+  border: 1px solid #e1e4e9;
+  border-radius: 7px;
+  box-shadow: none;
+  color: #69717e;
+  font-size: 12px;
+  font-weight: 500;
+  height: auto;
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+.review-margin .portable-comment-composer > div button:last-child {
+  background: #353b45;
+  border-color: #353b45;
+  color: #fff;
+}
+
+.review-margin button:focus-visible {
+  outline: 2px solid #555e6b !important;
+  outline-offset: 2px;
+}
+
+.selection-comment-button {
+  align-items: center;
+  background: #fff;
+  border: 1px solid #e1e4e9;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(25, 30, 40, .07);
+  color: #555d69;
+  display: inline-flex;
+  font-size: 12px;
+  font-weight: 500;
+  gap: 6px;
+  min-height: 32px;
+  padding: 6px 10px;
+}
+
+.selection-comment-button:hover {
+  background: #fff;
+  border-color: #bfc5ce;
+  color: #303742;
+}
+
+@media (hover: none), (pointer: coarse) {
+  .review-margin .portable-thread-actions { opacity: 1; }
+  .review-margin .portable-thread-actions button,
+  .review-margin-close,
+  .review-margin .portable-comment-toggle {
+    min-height: 38px;
+  }
+}
+
+@media (max-width: 980px) {
+  .review-panel.review-margin {
+    bottom: 18px;
+    flex-basis: auto;
+    max-height: calc(100dvh - 86px);
+    position: fixed;
+    right: 10px;
+    top: 68px;
+    width: min(340px, calc(100vw - 20px));
+    z-index: 25;
+  }
+
+  .review-margin .review-scroll {
+    padding: 36px 8px 20px;
+  }
+
+  .review-margin-close {
+    border-color: #e5e7eb;
+    box-shadow: 0 2px 8px rgba(25, 30, 40, .07);
+    right: 8px;
+    top: 0;
+  }
+}
+
+@media (max-width: 700px) {
+  .review-panel.review-margin {
+    bottom: 12px;
+    right: 8px;
+    width: min(340px, calc(100vw - 16px));
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .review-margin .portable-thread-actions { transition: none; }
+}
+
+@media (forced-colors: active) {
+  .review-margin .portable-comment-bubble,
+  .review-margin .portable-comment-composer {
+    border-color: CanvasText;
+    box-shadow: none;
+  }
+}
+
+.review-margin .portable-comment-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.review-margin .portable-review-footer {
+  background: transparent;
+  border: 0;
+  bottom: auto;
+  box-shadow: none;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  font-size: 10px;
+  gap: 4px 8px;
+  margin: 12px 0 0;
+  min-height: 30px;
+  opacity: 1;
+  padding: 0;
+  pointer-events: auto;
+  position: static;
+}
+
+.review-margin .portable-review-footer:hover,
+.review-margin .portable-review-footer:focus-within {
+  opacity: 1;
+}
+
+.review-margin .portable-review-footer button {
+  background: transparent;
+  border: 0;
+  border-radius: 6px;
+  box-shadow: none;
+  color: #646d79;
+  font-size: 10.5px;
+  gap: 4px;
+  height: auto;
+  min-height: 30px;
+  padding: 4px 2px;
+}
+
+.review-margin .portable-review-footer button:disabled {
+  opacity: .42;
+}
+
+.review-margin .portable-review-footer > span {
+  color: #646d79;
+  font-size: 10px;
+}
+
+.selection-comment-button {
+  position: fixed;
+  z-index: 45;
+}
+
+.review-display-options-wrap {
+  display: inline-flex;
+  position: relative;
+}
+
+.review-display-options-popover {
+  background: #fff;
+  border: 1px solid #e1e4e9;
+  border-radius: 10px;
+  box-shadow: 0 6px 22px rgba(25, 30, 40, .1);
+  color: #4c5562;
+  font-size: 12px;
+  left: auto;
+  max-height: min(560px, calc(100dvh - 120px));
+  max-width: calc(100vw - 24px);
+  overflow: auto;
+  padding: 14px;
+  right: 0;
+  top: calc(100% + 8px);
+  width: 310px;
+  z-index: 46;
+}
+
+.review-display-options-popover svg {
+  filter: none;
+}
+
+.review-display-options-popover .review-display-options-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.review-display-options-popover .review-display-options-heading strong {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.review-display-options-popover :is(.tracked-changes-display, .markup-view-control, .suggestion-mode-control) {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: none;
+  margin: 0 0 10px;
+  width: 100%;
+}
+
+.review-display-options-popover .tracked-changes-display-options {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+.review-display-options-popover button,
+.review-display-options-popover button:hover,
+.review-display-options-popover .tracked-changes-display-options button.active {
+  background: #fff;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  box-shadow: none;
+  color: #666f7c;
+  font-size: 11px;
+  height: auto;
+  min-height: 30px;
+}
+
+.review-display-options-popover .tracked-changes-display-options button:hover,
+.review-display-options-popover .tracked-changes-display-options button.active {
+  border-color: #d1d6de;
+  color: #343d4a;
+}
+
+.review-display-options-popover > label {
+  display: grid;
+  gap: 6px;
+  margin-top: 12px;
+}
+
+.review-display-options-popover > label > span {
+  color: #79818e;
+  font-size: 11px;
+}
+
+.review-display-options-popover select {
+  appearance: auto;
+  background: #fff;
+  border: 1px solid #e1e4e9;
+  border-radius: 6px;
+  color: #545e6c;
+  font-size: 12px;
+  min-height: 32px;
+  padding: 5px 8px;
+  width: 100%;
+}
+
+.review-margin [data-review-balloon][data-review-balloon-target-top] {
+  position: relative;
+  transform: translateY(var(--review-balloon-offset, 0px));
+  z-index: 1;
+}
+
+::highlight(draftmatter-comment-selection) {
+  background: #e8eef5;
+  color: inherit;
+}

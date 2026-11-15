@@ -31,7 +31,7 @@ test.describe('DM-P4-04 atomic local rebase', () => {
     await page.goto('/draft')
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
 
-    const review = page.getByRole('complementary', { name: 'Review feedback' })
+    const review = page.getByRole('complementary', { name: 'Manuscript comments' })
     await review.getByRole('button', { name: /Marcus Chen/ }).click()
     await review.getByRole('button', { name: 'Accept', exact: true }).click()
     await expect(review.locator('#review-item-dm-i01')).toContainText('Needs rebase')
@@ -56,8 +56,8 @@ test.describe('DM-P4-04 atomic local rebase', () => {
     expect(portable).toContain('The []{')
     expect(portable).toContain('leaf expansion slowed')
 
-    await review.getByText('More options', { exact: true }).click()
-    await review.getByLabel('Review display and preview').selectOption('final')
+    await page.getByRole('button', { name: 'Review options', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByLabel('Review display and preview').selectOption('final')
     await expect(page.getByRole('article', { name: 'Editable manuscript' })).toContainText('The leaf area declined by 16%.')
   })
 })

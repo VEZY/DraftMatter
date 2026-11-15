@@ -10,7 +10,7 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
 
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
-    const reviewPanel = page.getByRole('complementary', { name: 'Review feedback' })
+    const reviewPanel = page.getByRole('complementary', { name: 'Manuscript comments' })
 
     await expect(manuscript).toBeVisible()
     await expect(page.getByRole('textbox', { name: 'Manuscript title' })).toContainText('Drought acclimation reshapes canopy development')

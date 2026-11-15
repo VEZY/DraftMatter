@@ -68,7 +68,7 @@ test.describe('DM-P4-02 rendered suggestion transactions', () => {
     await expect(manuscript.locator('.dm-review-change').filter({ hasText: 'Paste over this' })).toBeVisible()
     await expect(manuscript.locator('.dm-review-change').filter({ hasText: 'Delete this sentence.' })).toBeVisible()
     await expect(manuscript.locator('.structured-editor-content p').filter({ hasText: 'Insert after this sentence.' })).toContainText('Insert after this sentence.')
-    await expect(page.getByRole('complementary', { name: 'Review feedback' }).getByText('A carefully replaced')).toBeVisible()
+    await expect(page.getByRole('complementary', { name: 'Manuscript comments' }).getByText('A carefully replaced')).toBeVisible()
   })
 
   test('captures toolbar formatting and block structure without changing accepted prose', async ({ page }) => {

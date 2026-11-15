@@ -22,16 +22,38 @@ describe('focused authoring workspace', () => {
     container.remove()
   })
 
-  it('starts with review and computation details disclosed only on request', async () => {
+  it('shows margin comments by default while computation details stay closed', async () => {
     await act(async () => root.render(<App />))
 
-    expect(container.querySelector<HTMLElement>('.review-panel')?.hidden).toBe(true)
+    expect(container.querySelector<HTMLElement>('.review-margin')?.hidden).toBe(false)
+    expect(container.querySelector('.portable-comment-bubble')).not.toBeNull()
+    expect(container.querySelector('.review-panel-header')).toBeNull()
+    expect(container.querySelector('.review-display-options-popover')).toBeNull()
     expect(container.querySelector<HTMLElement>('.code-workspace-drawer')).toBeNull()
     expect(container.querySelector('article.manuscript [aria-label="Code and computation"]')).toBeNull()
     expect(container.querySelector('.topbar-actions [aria-label="Open browser view-only code and desktop instructions"]')).not.toBeNull()
     expect(container.querySelector('.format-toolbar [aria-label="Open Code and computation"]')).toBeNull()
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open browser view-only code and desktop instructions"]')!.click())
     expect(container.querySelector<HTMLElement>('.code-workspace-drawer')).not.toBeNull()
+  })
+
+  it('can hide and reopen comments without a review pane', async () => {
+    await act(async () => root.render(<App />))
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Hide comments"]')!.click())
+    expect(container.querySelector<HTMLElement>('.review-margin')?.hidden).toBe(true)
+    await act(async () => container.querySelector<HTMLButtonElement>('.topbar [aria-label^="Review,"]')!.click())
+    expect(container.querySelector<HTMLElement>('.review-margin')?.hidden).toBe(false)
+    expect(container.querySelector('.portable-comment-bubble')).not.toBeNull()
+  })
+
+  it('leaves the margin empty for a paper without feedback and keeps review options in the toolbar', async () => {
+    localStorage.setItem('draftmatter.structured-source.v1', '# A quiet manuscript\n\nA paragraph without feedback.\n')
+    localStorage.setItem('draftmatter.structured-mode.v1', 'true')
+    await act(async () => root.render(<App />))
+    expect(container.querySelector<HTMLElement>('.review-margin')?.hidden).toBe(true)
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Review options"]')!.click())
+    expect(container.querySelector('.format-toolbar [role="dialog"][aria-label="Review options"]')).not.toBeNull()
+    expect(container.querySelector('.review-margin [aria-label="Review author"]')).toBeNull()
   })
 
   it('enters a manuscript-only focus mode and leaves it with Escape', async () => {

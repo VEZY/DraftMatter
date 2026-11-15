@@ -321,11 +321,53 @@ function insertBlock(view: EditorView, node: ProseMirrorNode) {
   view.dispatch(view.state.tr.insert(position, node).scrollIntoView())
 }
 
-function selectedReviewText(view: EditorView): StructuredReviewSelection | null {
+function selectedReviewText(view: EditorView, source?: string, metadata?: StructuredManuscriptMetadata): StructuredReviewSelection | null {
   const { from, to, empty } = view.state.selection
   if (empty) return null
   const quote = view.state.doc.textBetween(from, to, ' ', ' ').trim()
   if (!quote) return null
+  const insideLink = (position: number) => {
+    const resolved = view.state.doc.resolve(position)
+    const before = resolved.nodeBefore?.marks.find((mark) => mark.type === manuscriptSchema.marks.link)
+    const after = resolved.nodeAfter?.marks.find((mark) => mark.type === manuscriptSchema.marks.link)
+    return Boolean(before && after && before.eq(after))
+  }
+  // Portable review anchors cannot safely split the current Markdown link parser's label.
+  if (insideLink(from) || insideLink(to)) return null
+  if (source !== undefined && metadata) {
+    // Probe an undispatched transaction: selection must never rewrite the source.
+    // Only use its source coordinates if removing the markers is byte-for-byte exact.
+    const nonce = randomId('dmReviewSelection').replace(/[^A-Za-z0-9]/g, '')
+    const startMarker = `${nonce}Start`, endMarker = `${nonce}End`
+    if (!source.includes(startMarker) && !source.includes(endMarker)) {
+      try {
+        const startMarks = view.state.doc.resolve(from).marks(), endMarks = view.state.doc.resolve(to).marks()
+        // Prefer boundaries outside complete formatting/link syntax, preserving marks
+        // only when the selection starts or ends inside a formatted text node.
+        for (const inheritStart of [false, true]) for (const inheritEnd of [false, true]) {
+          if ((inheritStart && !startMarks.length) || (inheritEnd && !endMarks.length)) continue
+          const probe = view.state.tr.insert(to, manuscriptSchema.text(endMarker, inheritEnd ? endMarks : []))
+            .insert(from, manuscriptSchema.text(startMarker, inheritStart ? startMarks : []))
+          const serialized = serializeStructuredManuscript(probe.doc, metadata)
+          const start = serialized.indexOf(startMarker), end = serialized.indexOf(endMarker)
+          if (start < 0 || end <= start) continue
+          if (serialized.indexOf(startMarker, start + startMarker.length) >= 0 || serialized.indexOf(endMarker, end + endMarker.length) >= 0) continue
+          const rawQuote = serialized.slice(start + startMarker.length, end)
+          const restored = serialized.slice(0, start) + rawQuote + serialized.slice(end + endMarker.length)
+          if (!rawQuote || restored !== source) continue
+          let occurrence = 0
+          let offset = source.indexOf(rawQuote)
+          while (offset >= 0 && offset < start) {
+            occurrence += 1
+            offset = source.indexOf(rawQuote, offset + rawQuote.length)
+          }
+          if (offset === start) return { quote: rawQuote, occurrence }
+        }
+      } catch {
+        // Opaque/noncanonical blocks retain the prior plain-text selection behavior.
+      }
+    }
+  }
   const prefix = view.state.doc.textBetween(0, from, ' ', ' ')
   let occurrence = 0
   let offset = prefix.indexOf(quote)
@@ -336,9 +378,10 @@ function selectedReviewText(view: EditorView): StructuredReviewSelection | null 
   return { quote, occurrence }
 }
 
-function semanticReviewTarget(view: EditorView, event: MouseEvent): StructuredReviewSelection | null {
-  const selected = selectedReviewText(view)
+function semanticReviewTarget(view: EditorView, event: MouseEvent, source?: string, metadata?: StructuredManuscriptMetadata): StructuredReviewSelection | null {
+  const selected = selectedReviewText(view, source, metadata)
   if (selected) return selected
+  if (!view.state.selection.empty && !(view.state.selection instanceof NodeSelection)) return null
   const element = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-dm-id]') : null
   const id = element?.dataset.dmId
   if (!id) return null
@@ -3555,7 +3598,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   }
 
   const emitReviewSelection = (view: EditorView) => {
-    const selection = selectedReviewText(view)
+    const selection = selectedReviewText(view, sourceRef.current, metadataRef.current)
     const signature = selection ? `${selection.occurrence}:${selection.quote}` : ''
     if (signature === reviewSelectionSignatureRef.current) return
     reviewSelectionSignatureRef.current = signature
@@ -4216,7 +4259,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       },
     })
     const openReviewContextMenu = (event: MouseEvent) => {
-      const target = semanticReviewTarget(view, event)
+      const target = semanticReviewTarget(view, event, sourceRef.current, metadataRef.current)
       if (!target || !onReviewContextMenuRef.current) return
       event.preventDefault()
       event.stopPropagation()

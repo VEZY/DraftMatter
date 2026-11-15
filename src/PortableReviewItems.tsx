@@ -56,6 +56,9 @@ export function PortableReviewItems({
   onNavigateToItem,
   selectedTarget,
   openCommentRequest = 0,
+  onComposeChange,
+  composerAnchorTop,
+  showFooter = true,
   collaborativeReview,
   onApply,
   canComment = true,
@@ -72,6 +75,9 @@ export function PortableReviewItems({
   onNavigateToItem?: (item: ReviewQueueItem) => void
   selectedTarget?: { quote: string; occurrence: number } | null
   openCommentRequest?: number
+  onComposeChange?: (open: boolean) => void
+  composerAnchorTop?: number
+  showFooter?: boolean
   collaborativeReview?: CollaborativeReviewBinding | null
   onApply: (source: string, message: string) => void
   canComment?: boolean
@@ -112,7 +118,9 @@ export function PortableReviewItems({
   const [reply, setReply] = useState('')
   const [problem, setProblem] = useState('')
   const [compose, setCompose] = useState<'comment' | 'suggestion' | null>(null)
-  const [commentAnchorMode, setCommentAnchorMode] = useState<'range' | 'point-before' | 'point-after'>('range')
+  const [commentTarget, setCommentTarget] = useState<{ quote: string; occurrence: number } | null>(null)
+  const [collapsedThreadIds, setCollapsedThreadIds] = useState<string[]>([])
+  const [replyingThreadId, setReplyingThreadId] = useState<string>()
   const [quote, setQuote] = useState('')
   const [selectedOccurrence, setSelectedOccurrence] = useState<number>()
   const [body, setBody] = useState('')
@@ -124,6 +132,17 @@ export function PortableReviewItems({
   const composerRef = useRef<HTMLDivElement>(null)
   const rebaseRef = useRef<HTMLDivElement>(null)
   const autoRecoveredSourceRef = useRef<string | undefined>(undefined)
+  const handledCommentRequestRef = useRef(0)
+  const reportedComposeOpenRef = useRef(false)
+  const onComposeChangeRef = useRef(onComposeChange)
+  onComposeChangeRef.current = onComposeChange
+
+  useEffect(() => {
+    const open = compose !== null
+    if (reportedComposeOpenRef.current === open) return
+    reportedComposeOpenRef.current = open
+    onComposeChangeRef.current?.(open)
+  }, [compose])
 
   useEffect(() => {
     if (!canDecide || reanchorResult.recovered === 0 || reanchorResult.source === source || autoRecoveredSourceRef.current === reanchorResult.source) return
@@ -136,7 +155,7 @@ export function PortableReviewItems({
 
   useEffect(() => {
     if ((compose === 'comment' && !canComment) || (compose === 'suggestion' && !canSuggest)) setCompose(null)
-    if (!canComment) setReply('')
+    if (!canComment) { setReply(''); setReplyingThreadId(undefined) }
     if (!canDecide) {
       setSelectedChangeIds([])
       setPlacementAnchorId(undefined)
@@ -157,8 +176,8 @@ export function PortableReviewItems({
   }, [batchableChangeIds])
 
   useEffect(() => {
-    if (compose && typeof composerRef.current?.scrollIntoView === 'function') composerRef.current.scrollIntoView({ block: 'nearest' })
-    if (compose === 'comment' && openCommentRequest) composerRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus()
+    if (compose === 'suggestion' && typeof composerRef.current?.scrollIntoView === 'function') composerRef.current.scrollIntoView({ block: 'nearest' })
+    if (compose === 'comment') composerRef.current?.querySelector<HTMLTextAreaElement>('textarea')?.focus({ preventScroll: true })
   }, [compose, openCommentRequest])
 
   useEffect(() => {
@@ -166,12 +185,11 @@ export function PortableReviewItems({
   }, [rebaseChangeId])
 
   useEffect(() => {
-    if (!openCommentRequest || !canComment || !selectedTarget?.quote) return
+    if (!openCommentRequest || handledCommentRequestRef.current === openCommentRequest || !canComment || !selectedTarget?.quote) return
+    handledCommentRequestRef.current = openCommentRequest
     setCompose('comment')
-    setCommentAnchorMode('range')
     setProblem('')
-    setQuote(selectedTarget.quote)
-    setSelectedOccurrence(selectedTarget.occurrence)
+    setCommentTarget({ ...selectedTarget })
     setBody('')
   }, [canComment, openCommentRequest, selectedTarget])
 
@@ -179,6 +197,7 @@ export function PortableReviewItems({
   const apply = (nextSource: string, message: string) => {
     setProblem('')
     setReply('')
+    setReplyingThreadId(undefined)
     onApply(nextSource, message)
   }
   const fail = (error: unknown) => setProblem(error instanceof Error ? error.message : String(error))
@@ -308,27 +327,30 @@ export function PortableReviewItems({
 
   const create = () => {
     if ((compose === 'comment' && !canComment) || (compose === 'suggestion' && !canSuggest) || !compose) return
-    const selected = quote.trim()
+    const selected = compose === 'comment' ? commentTarget?.quote ?? '' : quote.trim()
     if (!selected || !body.trim()) {
-      setProblem('Enter an exact manuscript quote and a comment or replacement.')
+      setProblem(compose === 'comment' ? 'Select manuscript text and write a comment.' : 'Enter an exact manuscript quote and a replacement.')
       return
     }
     const matches = uniqueQuote(source, selected)
-    const selectedMatch = selectedTarget?.quote === selected && selectedOccurrence !== undefined ? matches[selectedOccurrence] : undefined
+    const occurrence = compose === 'comment' ? commentTarget?.occurrence : selectedTarget?.quote === selected ? selectedOccurrence : undefined
+    const selectedMatch = occurrence !== undefined ? matches[occurrence] : undefined
+    if (compose === 'comment' && selectedMatch === undefined) {
+      setProblem('The selected text has changed. Select it again before adding the comment.')
+      return
+    }
     if (selectedMatch === undefined && matches.length !== 1) {
       setProblem(matches.length === 0 ? 'That quote was not found in the manuscript.' : 'That quote occurs more than once; use a longer selection.')
       return
     }
-    const matchedStart = selectedMatch ?? matches[0]
-    const point = commentAnchorMode === 'point-after' ? matchedStart + selected.length : matchedStart
-    const start = compose === 'comment' && commentAnchorMode !== 'range' ? point : matchedStart
-    const end = compose === 'comment' && commentAnchorMode !== 'range' ? point : matchedStart + selected.length
+    const start = selectedMatch ?? matches[0]
+    const end = start + selected.length
     try {
       const result = compose === 'comment'
         ? createReviewThread(source, { start, end, author: localAuthor, message: body.trim() })
         : createReviewChange(source, { start, end, author: localAuthor, kind: 'replace', proposal: body })
       setCompose(null)
-      setCommentAnchorMode('range')
+      setCommentTarget(null)
       setQuote('')
       setBody('')
       apply(result.document.source, compose === 'comment' ? 'Portable comment created' : 'Portable suggestion created')
@@ -439,47 +461,54 @@ export function PortableReviewItems({
 
         const thread = document.threads.find((candidate) => candidate.id === item.id)!
         const recovery = recoveryByAnchor.get(item.anchorId)
+        const collapsed = collapsedThreadIds.includes(item.id)
+        const contentId = `review-comment-content-${item.id}`
         return (
-          <div className={`comment-card portable-review-card ${active ? 'active' : ''} ${thread.status === 'resolved' ? 'resolved' : ''}`} id={`review-item-${item.id}`} data-review-balloon={item.id} data-review-balloon-anchor={item.anchorId} key={item.id} onClick={() => activate(item.id)}>
-            <div className="comment-author"><span className="avatar avatar-clay avatar-small">{initials(item.authorName)}</span><span><strong>{item.authorName}</strong><small><ReviewTimestamp value={thread.updatedAt ?? thread.createdAt} verb={thread.updatedAt ? 'Updated' : 'Created'} fallback={item.kind === 'unplaced-thread' ? 'Location needs attention' : statusLabel(thread.status)} detail={item.kind === 'unplaced-thread' ? 'Location needs attention' : statusLabel(thread.status)} /></small></span></div>
-            <div className="comment-quote">“{thread.anchorContext?.quote || item.excerpt}”</div>
-            {thread.messageRecords.map((message, index) => index === 0
-              ? <p key={`${item.id}-${index}`}>{message.content}</p>
-              : <div className="reply-message" key={`${item.id}-${index}`}><span className="avatar avatar-sage avatar-small">{initials(authors.get(message.authorId ?? '') ?? message.authorId ?? 'A')}</span><p><strong>{authors.get(message.authorId ?? '') ?? message.authorId ?? 'Author'}</strong>{message.content}</p></div>)}
-            {canComment && active && thread.status === 'open' && item.kind !== 'unplaced-thread' && (
-              <div className="reply-box"><input value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') sendReply(item.id) }} placeholder="Reply…" aria-label={`Reply to ${item.authorName}`} /><button onClick={() => sendReply(item.id)} disabled={!reply.trim()} aria-label="Send reply"><Icon name="arrowRight" size={15} /></button></div>
-            )}
-            {canDecide && active && item.kind !== 'unplaced-thread' && <div className="portable-thread-actions"><button className="resolve-button" onClick={() => changeThreadStatus(item.id, thread.status === 'resolved' ? 'open' : 'resolved')}><Icon name="check" size={14} /> {thread.status === 'resolved' ? 'Reopen thread' : 'Resolve thread'}</button><button className="portable-delete-thread" onClick={() => changeThreadStatus(item.id, 'deleted')}><Icon name="x" size={13} /> Remove</button></div>}
-            {canDecide && active && item.kind === 'unplaced-thread' && recovery && (
-              <div className="unplaced-review-placement">
-                <p>{recovery.reason}</p>
-                {recovery.candidates.map((match, index) => <div className="unplaced-review-candidate" key={`${match.start}-${match.end}`}><span>{match.excerpt}</span><button onClick={() => placeCandidate(item.anchorId, match.start, match.end)}>Place here {index + 1}</button></div>)}
-                <button className="unplaced-review-manual" onClick={() => { setPlacementAnchorId(item.anchorId); setPlacementQuote(selectedTarget?.quote ?? '') }}>Choose different text</button>
-                {placementAnchorId === item.anchorId && <div className="unplaced-review-form"><label><span>Exact manuscript text</span><input value={placementQuote} onChange={(event) => setPlacementQuote(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') placeAtQuote(item.anchorId) }} /></label><button onClick={() => placeAtQuote(item.anchorId)}>Place review</button></div>}
-              </div>
-            )}
+          <div className={`comment-card portable-review-card portable-comment-bubble ${active ? 'active' : ''} ${thread.status === 'resolved' ? 'resolved' : ''} ${collapsed ? 'collapsed' : ''}`} id={`review-item-${item.id}`} data-review-balloon={item.id} data-review-balloon-anchor={item.anchorId} key={item.id} onClick={() => setActiveId(item.id)}>
+            <div className="portable-comment-header">
+              <div className="comment-author"><span className="avatar avatar-clay avatar-small">{initials(item.authorName)}</span><span><strong>{item.authorName}</strong><small><ReviewTimestamp value={thread.createdAt} verb="Created" fallback={item.kind === 'unplaced-thread' ? 'Location needs attention' : 'Comment'} /></small></span></div>
+              <button className="portable-comment-toggle" aria-label={`${collapsed ? 'Expand' : 'Collapse'} comment by ${item.authorName}`} aria-expanded={!collapsed} aria-controls={contentId} onClick={(event) => { event.stopPropagation(); if (collapsed) setActiveId(item.id); setCollapsedThreadIds((current) => collapsed ? current.filter((id) => id !== item.id) : [...current, item.id]) }}><Icon name="chevronDown" size={15} /></button>
+            </div>
+            {!collapsed && <div className="portable-comment-content" id={contentId}>
+              {thread.messageRecords.map((message, index) => index === 0
+                ? <p className="portable-comment-body" key={`${item.id}-${index}`}>{message.content}</p>
+                : <div className="reply-message portable-comment-reply" key={`${item.id}-${index}`}><span className="avatar avatar-sage avatar-small">{initials(authors.get(message.authorId ?? '') ?? message.authorId ?? 'A')}</span><div><div className="portable-comment-reply-meta"><strong>{authors.get(message.authorId ?? '') ?? message.authorId ?? 'Author'}</strong>{message.timestamp && <small><ReviewTimestamp value={message.timestamp} fallback="" /></small>}</div><p>{message.content}</p></div></div>)}
+              {item.kind !== 'unplaced-thread' && (canComment && thread.status === 'open' || canDecide) && <div className="portable-thread-actions">
+                {canComment && thread.status === 'open' && <button className="portable-comment-reply-button" onClick={() => { setActiveId(item.id); setReply(''); setReplyingThreadId(item.id) }}>Reply</button>}
+                {canDecide && <><button className="resolve-button" aria-label={thread.status === 'resolved' ? 'Reopen comment' : 'Resolve comment'} onClick={() => changeThreadStatus(item.id, thread.status === 'resolved' ? 'open' : 'resolved')}><Icon name="check" size={14} /> {thread.status === 'resolved' ? 'Reopen' : 'Resolve'}</button><button className="portable-delete-thread" aria-label="Delete comment" onClick={() => changeThreadStatus(item.id, 'deleted')}><Icon name="x" size={13} /> Delete</button></>}
+              </div>}
+              {canComment && replyingThreadId === item.id && thread.status === 'open' && item.kind !== 'unplaced-thread' && (
+                <div className="reply-box"><input autoFocus value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') sendReply(item.id); if (event.key === 'Escape') { setReply(''); setReplyingThreadId(undefined) } }} placeholder="Reply…" aria-label={`Reply to ${item.authorName}`} /><button onClick={() => sendReply(item.id)} disabled={!reply.trim()} aria-label="Send reply"><Icon name="arrowRight" size={15} /></button></div>
+              )}
+              {canDecide && active && item.kind === 'unplaced-thread' && recovery && (
+                <div className="unplaced-review-placement">
+                  <p>{recovery.reason}</p>
+                  {recovery.candidates.map((match, index) => <div className="unplaced-review-candidate" key={`${match.start}-${match.end}`}><span>{match.excerpt}</span><button onClick={() => placeCandidate(item.anchorId, match.start, match.end)}>Place here {index + 1}</button></div>)}
+                  <button className="unplaced-review-manual" onClick={() => { setPlacementAnchorId(item.anchorId); setPlacementQuote(selectedTarget?.quote ?? '') }}>Choose different text</button>
+                  {placementAnchorId === item.anchorId && <div className="unplaced-review-form"><label><span>Exact manuscript text</span><input value={placementQuote} onChange={(event) => setPlacementQuote(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') placeAtQuote(item.anchorId) }} /></label><button onClick={() => placeAtQuote(item.anchorId)}>Place review</button></div>}
+                </div>
+              )}
+            </div>}
           </div>
         )
       })}
 
       {compose && (
-        <div className="portable-review-composer" ref={composerRef} role="group" aria-label={compose === 'comment' ? 'New comment' : 'New suggestion'}>
+        <div className={`portable-review-composer ${compose === 'comment' ? 'portable-comment-composer' : ''}`} ref={composerRef} role="group" aria-label={compose === 'comment' ? 'New comment' : 'New suggestion'} data-review-balloon={compose === 'comment' ? 'new-comment' : undefined} data-review-balloon-target-top={compose === 'comment' && Number.isFinite(composerAnchorTop) ? composerAnchorTop : undefined}>
           <strong>{compose === 'comment' ? 'New comment' : 'Suggest replacement'}</strong>
-          {compose === 'comment' && <label><span>Attach to</span><select value={commentAnchorMode} onChange={(event) => setCommentAnchorMode(event.target.value as typeof commentAnchorMode)}><option value="range">Selected text</option><option value="point-before">Point before nearby text</option><option value="point-after">Point after nearby text</option></select></label>}
-          <label><span>{compose === 'comment' && commentAnchorMode !== 'range' ? 'Exact nearby manuscript text' : 'Exact manuscript text'}</span><input value={quote} onChange={(event) => { setQuote(event.target.value); setSelectedOccurrence(undefined) }} placeholder={compose === 'comment' && commentAnchorMode !== 'range' ? 'Select text beside the comment point' : 'Paste the selected text'} /></label>
-          {compose === 'comment' && commentAnchorMode !== 'range' && <small className="portable-point-note">The comment is attached between characters; nearby text keeps that point recoverable after external edits.</small>}
+          {compose === 'suggestion' && <label><span>Exact manuscript text</span><input value={quote} onChange={(event) => { setQuote(event.target.value); setSelectedOccurrence(undefined) }} placeholder="Paste the selected text" /></label>}
           <label><span>{compose === 'comment' ? 'Comment' : 'Replacement'}</span><textarea value={body} onChange={(event) => setBody(event.target.value)} rows={3} /></label>
-          <div><button onClick={() => { setCompose(null); setCommentAnchorMode('range') }}>Cancel</button><button className="primary-button" onClick={create}>Add</button></div>
+          <div><button onClick={() => { setCompose(null); setCommentTarget(null); setBody('') }}>Cancel</button><button className="primary-button" onClick={create} disabled={!body.trim()}>{compose === 'comment' ? 'Add comment' : 'Add'}</button></div>
         </div>
       )}
 
-      <div className="review-panel-footer portable-review-footer">
-        {canComment && <button onClick={() => { setCompose('comment'); setCommentAnchorMode('range'); setProblem(''); setQuote(selectedTarget?.quote ?? ''); setSelectedOccurrence(selectedTarget?.occurrence) }}><Icon name="message" size={15} /> New comment</button>}
+      {showFooter && <div className="review-panel-footer portable-review-footer">
+        {canComment && <button disabled={!selectedTarget?.quote} title={selectedTarget?.quote ? 'Comment on the selected text' : 'Select manuscript text to add a comment'} onClick={() => { setCompose('comment'); setProblem(''); setCommentTarget(selectedTarget ? { ...selectedTarget } : null); setBody('') }}><Icon name="message" size={15} /> New comment</button>}
         {canSuggest && <button onClick={() => { setCompose('suggestion'); setProblem(''); setQuote(selectedTarget?.quote ?? ''); setSelectedOccurrence(selectedTarget?.occurrence) }}><Icon name="spark" size={15} /> Suggest edit</button>}
         <span>{navigableQueue.length ? `${Math.max(1, activePosition + 1)} of ${navigableQueue.length}` : 'No review items'}</span>
         <button onClick={() => navigate('previous')} disabled={navigableQueue.length < 2} aria-label="Previous review item">↑</button>
         <button onClick={() => navigate('next')} disabled={navigableQueue.length < 2} aria-label="Next review item">↓</button>
-      </div>
+      </div>}
     </>
   )
 }

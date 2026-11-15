@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react'
 import { alignReviewBalloons, type ReviewBalloonMeasurement } from './reviewBalloonAlignment'
 
-const BALLOON_SELECTOR = '[data-review-balloon][data-review-balloon-anchor]'
+const BALLOON_SELECTOR = '[data-review-balloon][data-review-balloon-anchor], [data-review-balloon][data-review-balloon-target-top]'
 const ANCHOR_SELECTOR = '[data-review-anchor]'
 
 function numbered(value: number) {
@@ -28,41 +28,69 @@ export function AlignedReviewRail({
 
     const railRect = rail.getBoundingClientRect()
     const anchors = new Map<string, HTMLElement>()
+    const anchorOrder = new Map<string, number>()
     editor.querySelectorAll<HTMLElement>(ANCHOR_SELECTOR).forEach((anchor) => {
       const anchorId = anchor.dataset.reviewAnchor
-      if (anchorId && !anchors.has(anchorId)) anchors.set(anchorId, anchor)
+      if (anchorId && !anchors.has(anchorId)) {
+        anchorOrder.set(anchorId, anchors.size)
+        anchors.set(anchorId, anchor)
+      } else if (anchorId && anchors.get(anchorId)?.matches('.dm-review-margin-marker') && !anchor.matches('.dm-review-margin-marker')) {
+        // The small margin marker is taller than the text. Align a range
+        // comment with its actual highlight, retaining markers for point notes.
+        anchors.set(anchorId, anchor)
+      }
     })
 
     const balloons = [...rail.querySelectorAll<HTMLElement>(BALLOON_SELECTOR)]
+    const firstTop = balloons.length ? Math.min(...balloons.map((balloon) => numbered(balloon.offsetTop))) : 0
+    const orderByBalloon = new Map(balloons.map((balloon, index) => [balloon.dataset.reviewBalloon || String(index), anchorOrder.get(balloon.dataset.reviewBalloonAnchor ?? '')]))
     const measurements: ReviewBalloonMeasurement[] = balloons.map((balloon, index) => {
       const anchor = anchors.get(balloon.dataset.reviewBalloonAnchor ?? '')
+      const explicitTop = balloon.dataset.reviewBalloonTargetTop
       resizeObserverRef.current?.observe(balloon)
       if (anchor) resizeObserverRef.current?.observe(anchor)
       return {
         id: balloon.dataset.reviewBalloon || String(index),
-        naturalTop: numbered(balloon.offsetTop),
+        naturalTop: firstTop,
         height: numbered(balloon.offsetHeight || balloon.getBoundingClientRect().height),
         ...(anchor ? {
           // This is stable in document coordinates: scrolling subtracts from
           // the DOM rect and adds the same amount through editor.scrollTop.
           targetTop: numbered(anchor.getBoundingClientRect().top + editor.scrollTop - railRect.top),
-        } : {}),
+        } : explicitTop !== undefined && Number.isFinite(Number(explicitTop)) ? { targetTop: numbered(Number(explicitTop)) } : {}),
       }
     })
+    const placed = measurements.filter((item) => orderByBalloon.get(item.id) !== undefined)
+      .sort((left, right) => orderByBalloon.get(left.id)! - orderByBalloon.get(right.id)!)
+    const rank = (item: ReviewBalloonMeasurement) => {
+      const order = orderByBalloon.get(item.id)
+      if (order !== undefined) return order
+      if (item.targetTop === undefined) return Number.MAX_SAFE_INTEGER
+      // Insert a new composer near its selection without reordering existing
+      // anchors whose inline/point boxes can differ by a few pixels on one line.
+      const next = placed.find((candidate) => candidate.targetTop! > item.targetTop! + 8)
+      return next ? orderByBalloon.get(next.id)! - 0.5 : Number.MAX_SAFE_INTEGER - 1
+    }
+    measurements.sort((left, right) => rank(left) - rank(right))
 
     const layout = alignReviewBalloons(measurements)
-    layout.placements.forEach((placement, index) => {
-      const balloon = balloons[index]
-      balloon.style.setProperty('--review-balloon-offset', `${placement.translateY}px`)
+    const balloonById = new Map(balloons.map((balloon, index) => [balloon.dataset.reviewBalloon || String(index), balloon]))
+    layout.placements.forEach((placement) => {
+      const balloon = balloonById.get(placement.id)!
+      balloon.style.setProperty('--review-balloon-offset', `${placement.top - balloon.offsetTop}px`)
       balloon.dataset.reviewBalloonAligned = String(placement.aligned)
     })
+
+    const footer = rail.querySelector<HTMLElement>('.portable-review-footer')
+    if (footer) footer.style.transform = `translateY(${Math.max(0, layout.bottom + 16 - footer.offsetTop)}px)`
 
     const sharedScrollRange = Math.max(0, editor.scrollHeight - editor.clientHeight)
     const alignmentHeight = Math.max(
       rail.clientHeight + sharedScrollRange,
-      layout.bottom + 24,
+      layout.bottom + (footer?.offsetHeight ?? 0) + 40,
     )
     spacer.style.height = `${alignmentHeight}px`
+    rail.scrollTop = Math.min(editor.scrollTop, Math.max(0, rail.scrollHeight - rail.clientHeight))
   }, [editorRef])
 
   const schedule = useCallback(() => {

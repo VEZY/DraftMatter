@@ -8,9 +8,9 @@ import { EditorView as CodeMirrorView } from '@codemirror/view'
 import { Awareness, applyAwarenessUpdate, encodeAwarenessUpdate } from 'y-protocols/awareness'
 import * as Y from 'yjs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { StructuredManuscriptEditor, moveStructuredBlock, shouldRequestStructuredCommands, type StructuredManuscriptEditorHandle } from './StructuredManuscriptEditor'
+import { StructuredManuscriptEditor, moveStructuredBlock, shouldRequestStructuredCommands, type StructuredManuscriptEditorHandle, type StructuredReviewSelection } from './StructuredManuscriptEditor'
 import { manuscriptSchema } from './manuscriptSchema'
-import { createReviewAlternative, createReviewChange } from './reviewOperations'
+import { createReviewAlternative, createReviewChange, createReviewThread } from './reviewOperations'
 import { parseStructuredManuscript } from './structuredManuscript'
 import { semanticManuscriptObjects } from './semanticObjects'
 import { COLLABORATIVE_PROSEMIRROR_ROOT, createCollaborativeProseMirrorState, setCollaborativeEditorPresence } from './sharedEditor/prosemirrorCollaboration'
@@ -150,6 +150,107 @@ describe('full structured manuscript editor', () => {
     collaborativeDocuments.forEach((document) => document.destroy())
     vi.restoreAllMocks()
     container.remove()
+  })
+
+  async function selectRenderedText(content: HTMLElement, quote: string, occurrence = 0) {
+    const nodes: Text[] = []
+    const walker = document.createTreeWalker(content, NodeFilter.SHOW_TEXT)
+    while (walker.nextNode()) nodes.push(walker.currentNode as Text)
+    const rendered = nodes.map((node) => node.data).join('')
+    let start = -1
+    for (let count = 0; count <= occurrence; count += 1) start = rendered.indexOf(quote, start + 1)
+    expect(start).toBeGreaterThanOrEqual(0)
+    const boundary = (offset: number) => {
+      for (const node of nodes) {
+        if (offset <= node.length) return { node, offset }
+        offset -= node.length
+      }
+      throw new Error('Rendered selection exceeds text nodes.')
+    }
+    const from = boundary(start), to = boundary(start + quote.length)
+    await act(async () => {
+      content.focus()
+      const range = document.createRange()
+      range.setStart(from.node, from.offset)
+      range.setEnd(to.node, to.offset)
+      const selection = window.getSelection()!
+      selection.removeAllRanges()
+      selection.addRange(range)
+      document.dispatchEvent(new Event('selectionchange'))
+      await new Promise((resolve) => window.setTimeout(resolve, 30))
+    })
+  }
+
+  it.each([
+    { name: 'bold and italic text', source: '# Results\n\nBefore **bold words** and *soft words* after.\n', visible: 'bold words and soft words', raw: '**bold words** and *soft words*' },
+    { name: 'partial bold and italic text', source: '# Results\n\nBefore **bold words** and *soft words* after.\n', visible: 'ld words and soft wo', raw: 'ld words** and *soft wo' },
+    { name: 'complete link boundaries', source: '# Results\n\nBefore [linked words](https://example.test/evidence) after.\n', visible: 'Before linked words', raw: 'Before [linked words](https://example.test/evidence)' },
+  ])('anchors a selection crossing $name without rewriting the manuscript', async ({ source: manuscript, visible, raw }) => {
+    const onChange = vi.fn(), selected = vi.fn(), contextMenu = vi.fn()
+    await act(async () => root.render(<StructuredManuscriptEditor source={manuscript} onChange={onChange} onReviewSelectionChange={selected} onReviewContextMenu={contextMenu} />))
+    await selectRenderedText(container.querySelector<HTMLElement>('.structured-editor-content')!, visible)
+    const target = selected.mock.calls.at(-1)?.[0] as StructuredReviewSelection | null
+    expect(target).toEqual({ quote: raw, occurrence: 0 })
+    await act(async () => container.querySelector('.structured-editor-content p')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })))
+    expect(contextMenu.mock.calls.at(-1)?.[0]).toEqual(target)
+    const start = manuscript.indexOf(target!.quote)
+    const commented = createReviewThread(manuscript, { start, end: start + target!.quote.length, author: { id: 'dm-author', name: 'Reviewer' }, message: 'Check this formatted passage.' }).document
+    const restored = commented.anchors.sort((a, b) => b.start - a.start).reduce((current, anchor) => current.slice(0, anchor.start) + current.slice(anchor.end), commented.source.slice(0, commented.sectionStart))
+    expect(restored.slice(0, manuscript.length)).toBe(manuscript)
+    expect(restored.slice(manuscript.length)).toMatch(/^\s*$/)
+    const formatted = (document: ProseMirrorNode) => {
+      const pieces: Record<string, string> = {}
+      document.descendants((node) => { if (node.isText) for (const mark of node.marks) { const key = `${mark.type.name}:${mark.attrs.href ?? ''}`; pieces[key] = (pieces[key] ?? '') + node.text } })
+      return pieces
+    }
+    expect(formatted(parseStructuredManuscript(commented.source).document)).toEqual(formatted(parseStructuredManuscript(manuscript).document))
+    expect(onChange).not.toHaveBeenCalled()
+    expect(container.textContent).not.toContain('dmReviewSelection')
+  })
+
+  it('counts raw selected occurrences in frontmatter and repeated paragraphs before anchoring the selected one', async () => {
+    const manuscript = '---\ntitle: "**repeat words**"\n---\n\n# Results\n\n**repeat words** first.\n\n**repeat words** second.\n'
+    const selected = vi.fn(), onChange = vi.fn()
+    await act(async () => root.render(<StructuredManuscriptEditor source={manuscript} onChange={onChange} onReviewSelectionChange={selected} />))
+    const content = container.querySelector<HTMLElement>('.structured-editor-content')!
+    await selectRenderedText(content, 'repeat words', 1)
+    const target = selected.mock.calls.at(-1)?.[0] as StructuredReviewSelection
+    expect(target).toEqual({ quote: '**repeat words**', occurrence: 2 })
+    let start = -1
+    for (let i = 0; i <= target.occurrence; i += 1) start = manuscript.indexOf(target.quote, start + 1)
+    expect(start).toBe(manuscript.lastIndexOf('**repeat words**'))
+    const commented = createReviewThread(manuscript, { start, end: start + target.quote.length, author: { id: 'dm-author', name: 'Reviewer' }, message: 'Only the second paragraph.' }).document
+    expect(commented.anchors[0].start).toBe(start)
+    expect(commented.source.slice(0, start)).toBe(manuscript.slice(0, start))
+    expect(commented.threads[0].anchorContext?.quote).toBe('**repeat words**')
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it.each(['linked', 'words', 'inked wor'])('declines the partial link selection "%s" without falling back to the paragraph', async (visible) => {
+    const manuscript = '# Results\n\nBefore [linked words](https://example.test/evidence) after.\n'
+    const selected = vi.fn(), contextMenu = vi.fn(), onChange = vi.fn(), handle = createRef<StructuredManuscriptEditorHandle>()
+    await act(async () => root.render(<StructuredManuscriptEditor ref={handle} source={manuscript} onChange={onChange} onReviewSelectionChange={selected} onReviewContextMenu={contextMenu} />))
+    const content = container.querySelector<HTMLElement>('.structured-editor-content')!
+    await selectRenderedText(content, 'Before')
+    expect(selected.mock.calls.at(-1)?.[0]).toEqual({ quote: 'Before', occurrence: 0 })
+    await selectRenderedText(content, visible)
+    expect(selected.mock.calls.at(-1)?.[0]).toBeNull()
+    await act(async () => content.querySelector('p')!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true })))
+    expect(contextMenu).not.toHaveBeenCalled()
+    expect(handle.current?.source()).toBe(manuscript)
+    expect(content.querySelector('a')?.textContent).toBe('linked words')
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  it('retains the previous plain selection when noncanonical Markdown cannot round-trip exactly', async () => {
+    const manuscript = '# Results\n\nBefore __bold words__ and _soft words_ after.\n'
+    const selected = vi.fn(), onChange = vi.fn(), handle = createRef<StructuredManuscriptEditorHandle>()
+    await act(async () => root.render(<StructuredManuscriptEditor ref={handle} source={manuscript} onChange={onChange} onReviewSelectionChange={selected} />))
+    await selectRenderedText(container.querySelector<HTMLElement>('.structured-editor-content')!, 'bold words and soft words')
+    expect(selected.mock.calls.at(-1)?.[0]).toEqual({ quote: 'bold words and soft words', occurrence: 0 })
+    expect(handle.current?.source()).toBe(manuscript)
+    expect(onChange).not.toHaveBeenCalled()
+    expect(container.textContent).not.toContain('dmReviewSelection')
   })
 
   it('renders semantic content while hiding Markdown, review storage, and unsupported raw payloads', async () => {

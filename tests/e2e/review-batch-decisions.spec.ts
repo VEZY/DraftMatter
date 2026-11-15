@@ -40,9 +40,9 @@ test.describe('DM-P4-04 selected and author batch decisions', () => {
     await page.goto('/draft')
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
 
-    const review = page.getByRole('complementary', { name: 'Review feedback' })
-    await review.getByText('More options', { exact: true }).click()
-    await review.getByLabel('Review author').selectOption('dm-alice')
+    const review = page.getByRole('complementary', { name: 'Manuscript comments' })
+    await page.getByRole('button', { name: 'Review options', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByLabel('Review author').selectOption('dm-alice')
     await expect(review.getByRole('group', { name: 'Batch suggestion decisions' })).toContainText("Alice Martin's visible suggestions")
     await review.getByRole('button', { name: 'Select all 2' }).click()
     await expect(review.getByLabel('Select suggestion by Alice Martin')).toHaveCount(2)
@@ -57,7 +57,8 @@ test.describe('DM-P4-04 selected and author batch decisions', () => {
     expect(portable.match(/data-action="accepted"/g)).toHaveLength(2)
     expect(portable).toMatch(/#dm-change-gamma[^\n]*data-status="open"/)
 
-    await review.getByLabel('Review author').selectOption('all')
+    await page.getByRole('button', { name: 'Review options', exact: true }).click()
+    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByLabel('Review author').selectOption('all')
     await review.getByRole('button', { name: 'Select all 1' }).click()
     await review.getByRole('button', { name: 'Reject selected' }).click()
     await expect(page.getByText('1 suggestion rejected atomically')).toBeVisible()

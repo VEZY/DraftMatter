@@ -185,14 +185,12 @@ describe('owner-controlled collaboration checkpoint', () => {
     await act(async () => [...controls.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Join as commenter')!.click())
 
     expect(container.querySelector('.structured-manuscript-editor')?.getAttribute('data-read-only')).toBe('true')
-    expect(container.querySelector<HTMLButtonElement>('.suggestion-mode-control')?.disabled).toBe(true)
-    expect(container.querySelector('.suggestion-mode-control')?.textContent).toContain('Comment-only')
     expect(container.querySelector<HTMLButtonElement>('.format-toolbar [aria-label="Bold"]')?.disabled).toBe(true)
-    expect(container.textContent).toContain('New comment')
+    expect(container.querySelector('.portable-comment-reply-button')).not.toBeNull()
     expect(container.textContent).not.toContain('Suggest edit')
     expect(container.querySelector('.review-actions')).toBeNull()
 
-    await act(async () => container.querySelector<HTMLButtonElement>('#review-item-dm-comment-01')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('#review-item-dm-comment-01 .portable-comment-reply-button')!.click())
     const reply = container.querySelector<HTMLInputElement>('input[aria-label^="Reply to"]')!
     await act(async () => {
       const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set
@@ -205,7 +203,9 @@ describe('owner-controlled collaboration checkpoint', () => {
     expect(container.textContent).toContain('Canonical shared browser reply')
 
     await act(async () => [...controls.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Join as viewer')!.click())
-    expect(container.querySelector('.suggestion-mode-control')?.textContent).toContain('Read-only')
+    expect(container.querySelector('.structured-manuscript-editor')?.getAttribute('data-read-only')).toBe('true')
+    expect(container.querySelector<HTMLButtonElement>('.format-toolbar [aria-label="Bold"]')?.disabled).toBe(true)
+    expect(container.querySelector('.portable-comment-reply-button')).toBeNull()
     expect(container.textContent).not.toContain('New comment')
     expect(container.textContent).not.toContain('Suggest edit')
     expect(container.querySelector('.reply-box')).toBeNull()

@@ -19,13 +19,6 @@ async function click(element: Element) {
   await act(async () => element.dispatchEvent(new MouseEvent('click', { bubbles: true })))
 }
 
-async function select(element: HTMLSelectElement, value: string) {
-  await act(async () => {
-    element.value = value
-    element.dispatchEvent(new Event('change', { bubbles: true }))
-  })
-}
-
 describe('rendered Phase 0 vertical slice', () => {
   let container: HTMLDivElement
   let root: ReturnType<typeof createRoot>
@@ -54,7 +47,7 @@ describe('rendered Phase 0 vertical slice', () => {
       outputLabel: container.querySelector('.structured-output img')?.getAttribute('alt') ?? container.querySelector('.cell-output svg')?.getAttribute('aria-label'),
       conflict: normalizedText(container.querySelector('.conflict-heading')),
       alternatives,
-      comment: normalizedText(container.querySelector('.comment-card > p')),
+      comment: [...container.querySelectorAll('.comment-card .portable-comment-content p')].map(normalizedText).join(' '),
     }
 
     expect(renderedSlice).toMatchInlineSnapshot(`
@@ -65,7 +58,7 @@ describe('rendered Phase 0 vertical slice', () => {
         ],
         "citation": "(Vezy et al., 2024)",
         "codeCell": "pythonReproducible figureBrowser view onlyDesktop requiredView source",
-        "comment": "Can we quantify this increase in the main text? The estimate is already in the supplement.",
+        "comment": "Can we quantify this increase in the main text?",
         "conflict": "2 overlapping alternativesCompare one at a time",
         "outputLabel": "Leaf area response over twelve weeks",
         "title": "Drought acclimation reshapes canopy development",
@@ -88,16 +81,9 @@ describe('rendered Phase 0 vertical slice', () => {
     await click(nextReview)
     expect(normalizedText(reviewFooter.querySelector('span'))).toBe('1 of 3')
 
-    const authorFilter = container.querySelector<HTMLSelectElement>('[aria-label="Review author"]')!
-    await select(authorFilter, 'dm-a01')
-    expect([...container.querySelectorAll('.proposal-option')].map((option) => normalizedText(option))).toEqual([
-      expect.stringContaining('Alice Martin'),
-    ])
-    expect(container.querySelector('.comment-card')).toBeNull()
-    expect(normalizedText(container.querySelector('.review-panel-header h2'))).toContain('1')
-    expect(normalizedText(reviewFooter.querySelector('span'))).toBe('1 of 1')
-    expect(nextReview.disabled).toBe(true)
-    await select(authorFilter, 'all')
+    expect(container.querySelector('.review-panel-header')).toBeNull()
+    expect(container.querySelector('[aria-label="Review author"]')).toBeNull()
+    expect(container.querySelector('.comment-quote')).toBeNull()
 
     await click(buttonWithText(container, 'View source'))
     await click(buttonWithText(container.querySelector('.source-tabs')!, 'Clean final'))

@@ -33,7 +33,7 @@ test.describe('DM-P4-06 external review recovery', () => {
     await page.goto('/draft')
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
 
-    const reviewPanel = page.getByRole('complementary', { name: 'Review feedback' })
+    const reviewPanel = page.getByRole('complementary', { name: 'Manuscript comments' })
     await expect(reviewPanel.getByText('Unplaced suggestion')).toHaveCount(0)
     await expect(reviewPanel.getByText('Location needs attention')).toBeVisible()
     await expect(reviewPanel.getByText('More than one plausible text match remains.')).toBeVisible()

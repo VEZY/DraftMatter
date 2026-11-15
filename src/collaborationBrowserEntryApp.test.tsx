@@ -102,7 +102,8 @@ describe('fresh browser collaboration entry', () => {
     expect(editor?.dataset.collaborative).toBe('true')
     expect(editor?.dataset.readOnly).toBe('true')
     expect(container.textContent).toContain('Browser workspace manuscript')
-    expect(container.querySelector('.suggestion-mode-control')?.textContent).toContain('Read-only')
+    expect(container.querySelector<HTMLButtonElement>('.toolbar-track-changes')?.disabled).toBe(true)
+    expect(container.querySelector<HTMLButtonElement>('.format-toolbar [aria-label="Bold"]')?.disabled).toBe(true)
 
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 400)) })
     expect(localStorage.getItem('draftmatter.structured-mode.v1')).toBe('true')

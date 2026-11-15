@@ -2,11 +2,21 @@ import { expect, test } from '@playwright/test'
 
 const source = `# Point comments
 
-Measure canopy area weekly.
+Measure canopy area[]{#dm-sampling-point .dm-anchor data-anchor="dm-sampling-point" data-edge="point" data-affinity="after"} weekly.
+
+::::: {.draftmatter-reviews .hidden data-schema="1"}
+:::: {#dm-sampling-thread .dm-thread data-anchor="dm-sampling-point" data-author="dm-alice" data-status="open" data-created="2026-07-15T09:00:00.000Z"}
+~~~{.dm-message}
+Add the sampling date here.
+~~~
+::::
+:::: {#dm-alice .dm-author data-name="Alice Martin"}
+::::
+:::::
 `
 
 test.describe('DM-P4-01 rendered point comments', () => {
-  test('anchors a zero-width comment without changing accepted prose and reopens it', async ({ page }) => {
+  test('retains an imported zero-width comment, its prose and replies across reload', async ({ page }) => {
     await page.addInitScript((portableSource) => {
       if (!localStorage.getItem('draftmatter.structured-mode.v1')) {
         localStorage.setItem('draftmatter.structured-source.v1', portableSource)
@@ -16,45 +26,33 @@ test.describe('DM-P4-01 rendered point comments', () => {
     await page.goto('/draft')
 
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
-    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
-    const review = page.getByRole('complementary', { name: 'Review feedback' })
-    await manuscript.getByText('Measure canopy area weekly.', { exact: true }).evaluate((element) => {
-      const editor = element.closest<HTMLElement>('[contenteditable="true"]')
-      const selection = window.getSelection()
-      const text = element.firstChild
-      if (!editor || !selection || !text) throw new Error('Rendered point-comment selection is unavailable')
-      const start = text.textContent?.indexOf('canopy area') ?? -1
-      if (start < 0) throw new Error('Nearby point-comment text is unavailable')
-      editor.focus()
-      const range = document.createRange()
-      range.setStart(text, start)
-      range.setEnd(text, start + 'canopy area'.length)
-      selection.removeAllRanges()
-      selection.addRange(range)
-      document.dispatchEvent(new Event('selectionchange'))
-    })
+    const marker = manuscript.getByRole('button', { name: 'Open point comment', exact: true })
+    await marker.click()
+    const comment = page.locator('#review-item-dm-sampling-thread')
+    await expect(comment).toContainText('Add the sampling date here.')
+    await expect(comment.getByText('Alice Martin', { exact: true })).toBeVisible()
+    await expect(comment.locator('.comment-quote')).toHaveCount(0)
 
-    await review.getByRole('button', { name: 'New comment' }).click()
-    const composer = review.getByRole('group', { name: 'New comment' })
-    await composer.getByLabel('Attach to').selectOption('point-after')
-    await expect(composer.getByLabel('Exact nearby manuscript text')).toHaveValue('canopy area')
-    await composer.getByLabel('Comment').fill('Add the sampling date here.')
-    await composer.getByRole('button', { name: 'Add' }).click()
-
-    const acceptedProse = async () => manuscript.locator('.structured-editor-content p').evaluate((paragraph) =>
+    const acceptedProse = () => manuscript.locator('.structured-editor-content p').evaluate((paragraph) =>
       [...paragraph.childNodes].filter((node) => node.nodeType === Node.TEXT_NODE).map((node) => node.textContent).join(''),
     )
     await expect.poll(acceptedProse).toBe('Measure canopy area weekly.')
-    await expect(review.getByText('Add the sampling date here.', { exact: true })).toBeVisible()
-    await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toMatch(/canopy area\[\]\{#dm-[^}]+data-edge="point"[^}]*\} weekly/)
+    await comment.getByRole('button', { name: 'Reply', exact: true }).click()
+    await comment.getByRole('textbox', { name: 'Reply to Alice Martin', exact: true }).fill('Sampled on 15 July.')
+    await comment.getByRole('button', { name: 'Send reply', exact: true }).click()
+    await expect(comment).toContainText('Sampled on 15 July.')
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toContain('Sampled on 15 July.')
 
     const portable = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')
     expect(portable.match(/data-edge="point"/g)).toHaveLength(1)
     expect(portable).not.toContain('data-edge="end"')
+    expect(portable).toContain('canopy area[]{#dm-sampling-point')
 
     await page.reload()
     await expect.poll(acceptedProse).toBe('Measure canopy area weekly.')
-    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
-    await expect(page.getByRole('complementary', { name: 'Review feedback' }).getByText('Add the sampling date here.', { exact: true })).toBeVisible()
+    await marker.click()
+    await expect(comment).toContainText('Add the sampling date here.')
+    await expect(comment).toContainText('Sampled on 15 July.')
+    await expect(marker).toHaveAttribute('data-review-anchor', 'dm-sampling-point')
   })
 })

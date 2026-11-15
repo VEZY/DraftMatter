@@ -97,7 +97,7 @@ test.describe('built-in complete example', () => {
     await expect(manuscript.locator('.structured-output-image img').first()).toHaveAttribute('src', /^data:image\/svg\+xml/)
 
     await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
-    const review = page.getByRole('complementary', { name: 'Review feedback' })
+    const review = page.getByRole('complementary', { name: 'Manuscript comments' })
     await expect(review.getByText('drought treatment reduced canopy expansion by 18.4%', { exact: true })).toBeVisible()
     await expect(review.getByText('Please confirm that the ±3.0 cm² diagnostic threshold was fixed before the model check.', { exact: true })).toBeVisible()
 
