@@ -62,6 +62,27 @@ describe('in-app block insertion dialog', () => {
     expect(close).toHaveBeenCalledOnce()
   })
 
+  it('inserts a computed value through the existing portable value request', async () => {
+    const insert = vi.fn(() => true)
+    await act(async () => root.render(<InsertBlockDialog kind="published-value" onClose={vi.fn()} onInsert={insert} />))
+    expect(container.querySelector('h2')?.textContent).toBe('Insert computed value')
+    expect(container.textContent).not.toContain('Published name')
+    await type(container.querySelector<HTMLInputElement>('input[placeholder="mean_height"]')!, 'mean_height')
+    await act(async () => container.querySelector<HTMLFormElement>('form')!.requestSubmit())
+    expect(insert).toHaveBeenCalledWith({ kind: 'published-value', name: 'mean_height' })
+  })
+
+  it('offers new value calculations in context without submitting a placeholder', async () => {
+    const create = vi.fn(), insert = vi.fn(), close = vi.fn()
+    await act(async () => root.render(<InsertBlockDialog kind="published-value" onClose={close} onInsert={insert} onCreateComputation={create} />))
+    const button = [...container.querySelectorAll<HTMLButtonElement>('button')].find((candidate) => candidate.textContent === 'Create a calculation…')!
+    expect(button.type).toBe('button')
+    await act(async () => button.click())
+    expect(create).toHaveBeenCalledOnce()
+    expect(insert).not.toHaveBeenCalled()
+    expect(close).not.toHaveBeenCalled()
+  })
+
   it('searches grouped manuscript objects by keyboard and keeps the dialog open when insertion fails', async () => {
     const insert = vi.fn(() => false)
     const close = vi.fn()

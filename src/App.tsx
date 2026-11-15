@@ -20,6 +20,10 @@ import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
 import { ManuscriptOutlineTree, type ManuscriptOutlineItem } from './ManuscriptOutlineTree'
 import './writingWorkspace.css'
+import { FloatingWritingToolbar } from './FloatingWritingToolbar'
+import { ComputationSetupPanel } from './ComputationSetupPanel'
+import { ManuscriptFind } from './ManuscriptFind'
+import type { ManuscriptSearchState } from './manuscriptSearch'
 import { ExampleTour } from './ExampleTour'
 import { ManuscriptTextEditor } from './ManuscriptTextEditor'
 import { StructuredManuscriptEditor, type StructuredManuscriptEditorHandle, type StructuredOutlineItem, type StructuredReviewSelection } from './StructuredManuscriptEditor'
@@ -735,6 +739,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const [publicationAuthorsProblem, setPublicationAuthorsProblem] = useState('')
   const [authorBank, setAuthorBank] = useState(() => readAuthorBank(localStorage))
   const [recoveryOpen, setRecoveryOpen] = useState(false)
+  const [findOpen, setFindOpen] = useState(false)
+  const [findFocusRequest, setFindFocusRequest] = useState(0)
+  const [findQuery, setFindQuery] = useState('')
+  const [findResult, setFindResult] = useState<ManuscriptSearchState>({ query: '', total: 0, current: 0 })
   const [collaborationOpen, setCollaborationOpen] = useState(Boolean(collaborationLaunch))
   const [startCollaborationOpen, setStartCollaborationOpen] = useState(false)
   const [desktopProject, setDesktopProject] = useState<ProjectSnapshot | null>(null)
@@ -1060,6 +1068,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     cluster.signature,
     renderedCitations[cluster.id] || fallbackCitationLabel(cluster.items),
   ])), [citations, manuscriptCitationClusters, renderedCitations])
+  useEffect(() => {
+    if (findOpen) structuredEditorRef.current?.setSearch(findQuery)
+  }, [findOpen, findQuery, manuscriptSource, renderedBibliography])
+
   const detailCitationItems = structuredMode && structuredCitationSelection ? structuredCitationSelection.items : draftCitationItems
   const citationLabel = renderedCitations.introduction ?? formatCitationCluster(citations, draftCitationItems)
   const detailCitationLabel = structuredMode && structuredCitationSelection
@@ -1173,6 +1185,24 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       setPublicationAuthorsProblem(error instanceof Error ? error.message : String(error))
     }
   }
+
+  const openDocumentFind = () => {
+    setInsertMenuOpen(false)
+    setReviewOptionsOpen(false)
+    setFindOpen(true)
+    setFindFocusRequest((current) => current + 1)
+  }
+
+  const closeDocumentFind = () => {
+    setFindOpen(false)
+    structuredEditorRef.current?.setSearch('')
+    structuredEditorRef.current?.focus()
+  }
+
+  const documentSearchRegions = useMemo(() => () => ({
+    before: [...(editorAreaRef.current?.querySelectorAll<HTMLElement>('.paper-title') ?? [])],
+    after: [...(editorAreaRef.current?.querySelectorAll<HTMLElement>('.bibliography-section .bibliography-entries') ?? [])],
+  }), [])
 
   const replaceDesktopSession = (next: DesktopSession | null) => {
     if (desktopSessionRef.current?.root !== next?.root) {
@@ -1780,12 +1810,19 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         event.preventDefault()
         setCommandOpen((open) => !open)
       }
+      if (modifier && !event.altKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault()
+        openDocumentFind()
+      }
       if (modifier && event.shiftKey && event.key.toLowerCase() === 'c') {
         event.preventDefault()
         setCommandOpen(false)
         openCitationPicker()
       }
       if (event.key === 'Escape') {
+        if (findOpen) closeDocumentFind()
+        setInsertMenuOpen(false)
+        setRecoveryOpen(false)
         setCommandOpen(false)
         setCitationOpen(false)
         setCitationSearchOpen(false)
@@ -1806,7 +1843,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [canRedo, canUndo, draft, executionTrustBusy, juliaPackageBusy, pendingProject, projectBusy, awaitingDesktopLaunch, structuredMode, structuredCitationSelection])
+  }, [canRedo, canUndo, draft, executionTrustBusy, juliaPackageBusy, pendingProject, projectBusy, awaitingDesktopLaunch, structuredMode, structuredCitationSelection, findOpen])
 
   useEffect(() => {
     if (!commandOpen) return
@@ -2455,12 +2492,12 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       return inserted
     }
     if (request.kind === 'published-value') {
-      const inserted = runStructuredCommand((editor) => editor.insertPublishedValue(request.name), 'Insert published value')
-      if (inserted) setToast(`Published value inserted · ${request.name}`)
+      const inserted = runStructuredCommand((editor) => editor.insertPublishedValue(request.name), 'Insert computed value')
+      if (inserted) setToast(`Computed value inserted · ${request.name}`)
       return inserted
     }
     if (request.kind === 'setup-cell') {
-      const inserted = runStructuredCommand((editor) => editor.insertSetupCell(request.language), 'Add setup cell')
+      const inserted = runStructuredCommand((editor) => editor.insertSetupCell(request.language), 'Add shared setup')
       if (inserted) {
         setExecutionWorkspaceOpen(true)
         setToast(`${runtimeName(request.language)} setup added to Code & computation · runs first in a fresh kernel`)
@@ -5211,6 +5248,16 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
 
   const commandEntries: CommandPaletteEntry[] = [
     {
+      id: 'find-document', label: 'Find in document', description: 'Search manuscript text with Command F or Control F',
+      keywords: 'find search document text next previous', icon: <span className="command-icon"><Icon name="search" size={17} /></span>,
+      action: () => { setCommandOpen(false); openDocumentFind() },
+    },
+    {
+      id: 'recovery-history', label: 'History', description: 'Browse local recovery snapshots and restore an earlier version',
+      keywords: 'history recovery snapshot version restore', icon: <span className="command-icon"><Icon name="history" size={17} /></span>,
+      action: () => { setCommandOpen(false); setRecoveryOpen(true) },
+    },
+    {
       id: 'project-files', label: 'Browse project files', description: 'Find figures, data, and files available locally or online', keywords: 'files folder image figure data shared online local sync',
       icon: <span className="command-icon"><Icon name="folder" size={17} /></span>, action: () => { setCommandOpen(false); openProjectFiles() },
     },
@@ -5327,7 +5374,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     },
     {
       id: 'published-value',
-      label: 'Insert published value',
+      label: 'Insert computed value',
       description: 'Place a retained statistic or model result in the sentence',
       keywords: 'statistic result value inline reproducible number',
       icon: <span className="command-icon">123</span>,
@@ -5336,7 +5383,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     },
     {
       id: 'setup-cell',
-      label: setupCell ? 'Edit language setup' : 'Add language setup',
+      label: setupCell ? 'Edit shared setup' : 'Add shared setup',
       description: desktopSession
         ? setupCell ? 'Open the project’s single setup cell' : 'Add the project’s single setup cell in Code & computation'
         : 'View-only in the browser · open the project in DraftMatter desktop to change setup',
@@ -5347,7 +5394,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     },
     {
       id: 'values-cell',
-      label: 'Add published-values computation',
+      label: 'Create a value calculation',
       description: desktopSession ? 'Compute inline manuscript values from project-only code' : 'View-only in the browser · desktop project required',
       keywords: 'values statistic publish scalar code computation',
       icon: <span className="command-icon">123</span>,
@@ -5425,7 +5472,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         ? 'Copy first'
         : 'View only'
     : executableCells.length === 0
-      ? 'Setup needed'
+      ? 'Choose a language'
       : executionSummaryStatus === 'current'
         ? 'Ready'
         : executionSummaryStatus === 'running'
@@ -5454,7 +5501,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       <div className={`execution-cell-row ${managed ? 'panel-managed' : 'manuscript-cell'} ${view?.tone === 'warning' ? 'warning' : ''}`} data-cell-id={cell.id} key={cell.id}>
         <div className="execution-cell-summary">
           <span className="execution-language">{runtimeName(cell.language)}</span>
-          <span className="execution-cell-kind">{cell.role === 'setup' ? 'Setup' : cell.role === 'values' ? 'Published values' : 'Manuscript'}</span>
+          <span className="execution-cell-kind">{cell.role === 'setup' ? 'Setup' : cell.role === 'values' ? 'Computed values' : 'Manuscript'}</span>
           <strong>{cell.id}</strong>
           <em className={`cell-status ${status}`}><i />{cellStatusLabel(status)}</em>
           <small>{desktopSession ? state?.reason ?? view?.message ?? 'Ready for an explicit run.' : executionBoundaryKind === 'template' ? 'Make a project copy to establish a new execution state.' : executionBoundaryKind === 'shared-desktop' ? 'Create a local project copy to establish desktop execution state.' : 'Execution status is available in a local DraftMatter desktop project.'}</small>
@@ -5650,7 +5697,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
             {exportOpen && (
               <div className="popover export-menu">
                 <span className="export-menu-heading">Publish</span>
-                <label className="export-freshness-policy"><input type="checkbox" checked={requireFreshPublication} onChange={(event) => setRequireFreshPublication(event.target.checked)} /><span><strong>Require current computed results</strong><small>Block publication when a published value, figure, or table is missing or stale</small></span></label>
+                <label className="export-freshness-policy"><input type="checkbox" checked={requireFreshPublication} onChange={(event) => setRequireFreshPublication(event.target.checked)} /><span><strong>Require current computed results</strong><small>Block publication when a computed value, figure, or table is missing or stale</small></span></label>
                 <button onClick={openSubmissionPreparation}><span><strong>Journal submission…</strong><small>Check and package manuscript files</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => exportPublication('html')}><span><strong>Web page</strong><small>Clean, styled, and self-contained</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => exportPublication('pdf')}><span><strong>PDF</strong><small>Print-ready manuscript</small></span><Icon name="arrowRight" /></button>
@@ -5707,6 +5754,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
           <div className="rail-items">
             <button className={leftPanelOpen && projectFilesOpen ? 'active' : ''} onClick={() => toggleNavigationPanel(true)} data-label="Files" aria-label="Files" aria-pressed={leftPanelOpen && projectFilesOpen} aria-controls={leftPanelOpen ? "project-navigation-panel" : undefined}><Icon name="folder" />{(synchronizationProblems > 0 || selectiveSync.snapshot?.error) && <span className="rail-notice" aria-label="File synchronization needs attention">{synchronizationProblems || '!'}</span>}</button>
             <button className={leftPanelOpen && !projectFilesOpen ? 'active' : ''} onClick={() => toggleNavigationPanel(false)} data-label="Outline" aria-label="Outline" aria-pressed={leftPanelOpen && !projectFilesOpen} aria-controls={leftPanelOpen ? "project-navigation-panel" : undefined}><Icon name="document" /></button>
+            <button className={recoveryOpen ? 'active' : ''} onClick={() => setRecoveryOpen(true)} data-label="History" aria-label="History" aria-haspopup="dialog" aria-expanded={recoveryOpen}><Icon name="history" /></button>
+            <button className={findOpen ? 'active' : ''} onClick={openDocumentFind} data-label="Find in document" aria-label="Find in document" aria-pressed={findOpen} title={`Find in document (${commandUsesMetaKey ? '⌘F' : 'Ctrl+F'})`}><Icon name="search" /></button>
           </div>
           <div className="rail-footer-actions">
             {desktopSession && !kernelConsoleOpen && (
@@ -5840,7 +5889,11 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         )}
 
         <main className="editor-area" ref={editorAreaRef}>
-          <div className={`format-toolbar ${insertMenuOpen || linkDialogOpen ? 'expanded' : ''}`} role="toolbar" aria-label="Formatting toolbar" onMouseDown={(event) => { if ((event.target as HTMLElement).closest('button')) event.preventDefault() }}>
+          {findOpen && <ManuscriptFind query={findQuery} result={findResult} focusRequest={findFocusRequest} onQueryChange={setFindQuery}
+            onNext={() => structuredEditorRef.current?.findNext(1)}
+            onPrevious={() => structuredEditorRef.current?.findNext(-1)} onClose={closeDocumentFind} />}
+
+          <FloatingWritingToolbar expanded={insertMenuOpen || linkDialogOpen || exampleTourOpen}>
             <label className="style-select">
               <span className="visually-hidden">Block style</span>
               <select
@@ -5879,19 +5932,18 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
                 <button onClick={() => { setInsertMenuOpen(false); openCitationPicker() }}><Icon name="quote" size={15} /><span><strong>Citation</strong><small>Zotero or project references</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('figure') }}><Icon name="image" size={15} /><span><strong>Figure</strong><small>Image and caption</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('table') }}><Icon name="table" size={15} /><span><strong>Table</strong><small>Editable rows and columns</small></span></button>
-                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('equation-inline') }}><span className="toolbar-symbol">∑</span><span><strong>Equation</strong><small>Inline or display mathematics</small></span></button>
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('equation-inline') }}><span className="toolbar-symbol" aria-hidden="true">∑</span><span><strong>Equation</strong><small>Inline or display mathematics</small></span></button>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('cross-reference') }}><Icon name="link" size={15} /><span><strong>Cross-reference</strong><small>Figure, table, equation, or section</small></span></button>
-                <details className="toolbar-computation-options"><summary><Icon name="code" size={14} />Optional computations<Icon name="chevronDown" size={12} /></summary>
-                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('published-value') }}><span className="toolbar-symbol">123</span><span><strong>Published value</strong><small>Statistic or model result in text</small></span></button>
+                <div className="toolbar-reproducibility-heading">Reproducibility</div>
+                <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('published-value') }}><span className="toolbar-symbol" aria-hidden="true">123</span><span><strong>Computed value</strong><small>Statistic or model result in text</small></span></button>
                 <button disabled={!desktopSession} title={!desktopSession ? 'Code is view-only in the browser. Open this project in DraftMatter desktop to add a computation.' : undefined} onClick={() => { setInsertMenuOpen(false); openInsertBlock('figure-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible figure</strong><small>{desktopSession ? 'Visible code block and retained figure' : 'DraftMatter desktop required'}</small></span></button>
                 <button disabled={!desktopSession} title={!desktopSession ? 'Code is view-only in the browser. Open this project in DraftMatter desktop to add a computation.' : undefined} onClick={() => { setInsertMenuOpen(false); openInsertBlock('table-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible table</strong><small>{desktopSession ? 'Visible code block and retained table' : 'DraftMatter desktop required'}</small></span></button>
-                </details>
               </div>}
             </div>
             <span className="toolbar-divider" />
             <button aria-label="Undo" onClick={() => structuredMode ? structuredEditorRef.current?.undo() : undoDraft()} disabled={!canEditManuscript || (!structuredMode && !canUndo)}><Icon name="undo" size={16} /></button>
             <button aria-label="Redo" onClick={() => structuredMode ? structuredEditorRef.current?.redo() : redoDraft()} disabled={!canEditManuscript || (!structuredMode && !canRedo)}><Icon name="redo" size={16} /></button>
-          </div>
+          </FloatingWritingToolbar>
 
           {structuredMode ? (
           <article className="manuscript structured-manuscript" aria-label="Editable manuscript">
@@ -5954,6 +6006,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
               publicationByline={publicationByline}
               onDiagnostics={setDiagnostics}
               onOutlineChange={setStructuredOutline}
+              onSearchChange={setFindResult}
+              searchRegions={documentSearchRegions}
               onInspectRaw={openSourceInspector}
               onCitationSelect={openStructuredCitationDetails}
               onReviewSelectionChange={setStructuredReviewSelection}
@@ -6221,7 +6275,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
                       : executionBoundaryKind === 'shared-browser'
                         ? 'Online collaboration'
                         : 'Browser boundary'}</span><h2 id="code-workspace-title">Code &amp; computation</h2><p>{desktopSession
-                  ? <>{executableCells.length ? `${executableCells.length} cell${executableCells.length === 1 ? '' : 's'} · ${cellStatusLabel(executionSummaryStatus)} ·` : 'Set up a language or add a computation.'} Setup and published-value source stay outside the manuscript page.</>
+                  ? <>{executableCells.length ? `${executableCells.length} cell${executableCells.length === 1 ? '' : 's'} · ${cellStatusLabel(executionSummaryStatus)} ·` : 'Set up a language or add a computation.'} Check a language environment, then add an optional shared setup or inspect your calculations.</>
                   : executionBoundaryKind === 'template'
                     ? <>{executableCells.length} example code cell{executableCells.length === 1 ? '' : 's'} · retained outputs are view-only until you make a project copy.</>
                     : executionBoundaryKind === 'shared-desktop'
@@ -6230,21 +6284,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
                 </p></div>
                 <button className="icon-button" onClick={() => setExecutionWorkspaceOpen(false)} aria-label="Close Code and computation"><Icon name="close" /></button>
               </header>
-              {desktopSession ? <div className="code-workspace-toolbar">
-                <button className="subtle" onClick={() => setupCell ? revealPanelManagedCell(setupCell.id) : openInsertBlock('setup-cell')} disabled={!canEditManuscript}><Icon name={setupCell ? 'code' : 'plus'} size={12} /> {setupCell ? 'Edit setup' : 'Add setup'}</button>
-                <button className="subtle" onClick={() => openInsertBlock('values-cell')} disabled={!canEditManuscript}><Icon name="plus" size={12} /> Add values</button>
-                <button className="subtle" onClick={() => openInsertBlock('figure-cell')} disabled={!canEditManuscript}><Icon name="image" size={12} /> Add figure from code</button>
-                <button className="subtle" onClick={() => openInsertBlock('table-cell')} disabled={!canEditManuscript}><Icon name="table" size={12} /> Add reproducible table</button>
-                {[...new Set(executableCells.map((cell) => cell.language))].map((language) => (
-                  <button className="subtle" key={language} onClick={() => void requestExecution({ kind: 'language', language })} disabled={executionPlanBusy}>
-                    <Icon name="play" size={12} /> Run {runtimeName(language)}
-                  </button>
-                ))}
-                <button className="subtle" onClick={() => void requestExecution({ kind: 'clean-all' })} disabled={executionPlanBusy}><Icon name="history" size={13} /> Clean run</button>
-                {executableCells.some((cell) => cell.language === 'julia') && <button className="subtle" onClick={() => void openJuliaPackages()} disabled={juliaPackageBusy}><Icon name="plus" size={12} /> Julia packages</button>}
-                {executableCells.length > 0 && <button className="subtle" onClick={() => void ensureProjectLanguageSetup([...new Set(executableCells.map((cell) => cell.language))])} disabled={projectSetupRunningRef.current}>Prepare environments</button>}
-                <button className="subtle" onClick={() => void discoverExecutionEnvironments(true)} aria-label="Execution environments and options"><Icon name="more" size={14} /> Environments</button>
-              </div> : <section className={`execution-browser-boundary ${executionBoundaryKind}`} role="note" aria-label="How to enable code execution">
+              {!desktopSession && <section className={`execution-browser-boundary ${executionBoundaryKind}`} role="note" aria-label="How to enable code execution">
                 <div className="execution-browser-boundary-heading">
                   <span><Icon name={executionBoundaryKind === 'template' ? 'spark' : 'eye'} size={18} /></span>
                   {executionBoundaryKind === 'template' ? <div>
@@ -6291,13 +6331,36 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
                 </div>
               )}
               <div className="code-workspace-scroll">
+                {desktopSession ? <ComputationSetupPanel
+                  runtimes={(['python', 'r', 'julia'] as const).map((language) => {
+                    const runtime = runtimeInventory?.executables[language]
+                    const kernel = selectedKernelForLanguage(language)
+                    return { language, label: runtimeName(language),
+                      status: kernel ? 'ready' : runtime?.health === 'available' ? 'available' : runtime?.health ?? 'not-checked',
+                      detail: kernel?.displayName ?? runtime?.version ?? runtime?.message }
+                  })}
+                  discovering={runtimeDiscoveryState === 'discovering'}
+                  preparing={projectSetupRunningRef.current}
+                  onConfigureEnvironments={() => void discoverExecutionEnvironments(true)}
+                  onPrepareEnvironments={executableCells.length ? () => void ensureProjectLanguageSetup([...new Set(executableCells.map((cell) => cell.language))]) : undefined}
+                  onCreateSetup={canEditManuscript ? () => openInsertBlock('setup-cell') : undefined}
+                  setupSource={setupCells.length ? setupCells.map(renderExecutionCellRow) : undefined}
+                  computedValueSource={panelManagedCells.some((cell) => cell.role === 'values') ? panelManagedCells.filter((cell) => cell.role === 'values').map(renderExecutionCellRow) : undefined}
+                  manuscriptSource={manuscriptCodeCells.length ? manuscriptCodeCells.map(renderExecutionCellRow) : undefined}
+                  runControls={executableCells.length ? <>
+                    {[...new Set(executableCells.map((cell) => cell.language))].map((language) => <button key={language} onClick={() => void requestExecution({ kind: 'language', language })} disabled={executionPlanBusy}><Icon name="play" size={12} />Run {runtimeName(language)}</button>)}
+                    <button onClick={() => void requestExecution({ kind: 'clean-all' })} disabled={executionPlanBusy}><Icon name="history" size={13} />Clean run</button>
+                    {executableCells.some((cell) => cell.language === 'julia') && <button onClick={() => void openJuliaPackages()} disabled={juliaPackageBusy}>Julia packages</button>}
+                  </> : undefined}
+                /> : (
                 <div className="execution-cell-list">
-                  {panelManagedCells.length > 0 && <div className="execution-cell-group"><strong>Project code</strong><small>{desktopSession ? 'Setup and published-value computations run with the document but are never displayed on the manuscript page.' : executionBoundaryKind === 'template' ? 'Example setup and published-value source · available after making a project copy.' : 'View-only setup and published-value source retained in the portable manuscript.'}</small></div>}
+                  {panelManagedCells.length > 0 && <div className="execution-cell-group"><strong>Project code</strong><small>{desktopSession ? 'Setup and computed value calculations run with the document but are never displayed on the manuscript page.' : executionBoundaryKind === 'template' ? 'Example setup and computed value source · available after making a project copy.' : 'View-only setup and computed value source retained in the portable manuscript.'}</small></div>}
                   {panelManagedCells.map(renderExecutionCellRow)}
                   {manuscriptCodeCells.length > 0 && <div className="execution-cell-group"><strong>Manuscript code blocks</strong><small>{desktopSession ? 'These figure, table, and ordinary code blocks remain visible and editable in the manuscript.' : executionBoundaryKind === 'template' ? 'View-only template code and retained outputs. Make a project copy to edit or run them.' : executionBoundaryKind === 'shared-desktop' ? 'View-only until this shared manuscript has a local project copy.' : 'View-only code and retained outputs. Open a local project in DraftMatter desktop to edit or run them.'}</small></div>}
                   {manuscriptCodeCells.map(renderExecutionCellRow)}
-                  {executableCells.length === 0 && <div className="execution-cell-empty"><strong>No computations yet</strong><small>{desktopSession ? 'Add the project setup or a published-values computation here. Figure and table code blocks can be inserted directly in the manuscript.' : 'Code authoring and execution become available when this manuscript is opened as a DraftMatter desktop project.'}</small></div>}
+                  {executableCells.length === 0 && <div className="execution-cell-empty"><strong>No computations yet</strong><small>{desktopSession ? 'Choose Insert → Computed value, Reproducible figure, or Reproducible table to add a calculation. Shared setup is optional.' : 'Code authoring and execution become available when this manuscript is opened as a DraftMatter desktop project.'}</small></div>}
                 </div>
+                )}
                 {cleanRunCertification && <p className="clean-run-certification"><Icon name="check" size={13} /> Clean run certified · {cleanRunCertification.resultHashes.length} outputs from one ordered run</p>}
               </div>
               <footer className="code-workspace-footer"><span><Icon name={desktopSession ? 'document' : 'eye'} size={13} /> {desktopSession ? 'Source is saved in the portable project document' : executionBoundaryKind === 'template' ? 'Built-in example · execution requires your own project copy' : executionBoundaryKind === 'shared-desktop' ? 'Shared online source · local project not created yet' : 'Portable code and retained outputs · view only in browser'}</span><button onClick={() => setExecutionWorkspaceOpen(false)}>Done</button></footer>
@@ -6428,6 +6491,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
           onClose={() => setInsertBlockKind(undefined)}
           onInsert={insertStructuredRequest}
           publishedValues={retainedPublishedValues}
+          onCreateComputation={desktopSession && canEditManuscript ? () => openInsertBlock('values-cell') : undefined}
           semanticObjects={semanticObjects}
           onImportFigure={async (file) => (await importFigureFiles([file]))[0]}
           availableFigures={[...new Set([...browserProjectImages.map((image) => image.path), ...sharedResources.images.map((image) => image.path), ...(builtInProject === 'complete-example' ? completeExampleProjectFiles.filter((file) => file.path.startsWith('figures/')).map((file) => file.path) : [])])].map((path) => ({ path }))}
@@ -6588,7 +6652,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
           <div className="execution-environment-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="execution-environment-title">
             <div className="execution-dialog-head">
               <span className="execution-shield"><Icon name="code" size={19} /></span>
-              <div><span className="eyebrow">Execution environments</span><h2 id="execution-environment-title">Local runtimes</h2><p>DraftMatter detects the languages used by the manuscript, activates this project’s environment, and prepares missing integration after one project-trust confirmation.</p></div>
+              <div><span className="eyebrow">Execution environments</span><h2 id="execution-environment-title">Local runtimes</h2><p>Choose a language and kernel for this project. Detected installations are listed below; DraftMatter verifies the connection when you run a calculation.</p></div>
               <button className="icon-button" onClick={() => setEnvironmentOpen(false)} aria-label="Close execution environments"><Icon name="close" /></button>
             </div>
             <div className="execution-environment-list">
@@ -6598,8 +6662,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
                 const projectKernel = runtimeInventory && healthyKernelsFor(runtimeInventory, language)[0]
                 return <button className={selected ? 'selected' : ''} key={language} onClick={() => setSelectedEnvironmentLanguage(language)} aria-pressed={selected}>
                   <span className={`runtime-language runtime-${language}`}>{language === 'python' ? 'Py' : language === 'julia' ? 'Jl' : 'R'}</span>
-                  <span><strong>{runtimeName(language)}</strong><small>{runtimeDiscoveryState === 'discovering' ? 'Checking…' : projectKernel ? `Project environment · ${projectKernel.executable ?? projectKernel.resourceDir}` : runtime?.health === 'available' ? `${runtime.version ?? 'Version available'} · ${runtime.executable}` : runtime?.message ?? 'Not checked'}</small></span>
-                  <span className={`runtime-health ${projectKernel ? 'available' : runtime?.health ?? 'not-checked'}`}>{projectKernel ? 'Project ready' : runtime?.health === 'available' ? 'Available' : runtime?.health === 'unhealthy' ? 'Needs attention' : runtime?.health === 'missing' ? 'Missing' : 'Not checked'}</span>
+                  <span><strong>{runtimeName(language)}</strong><small>{runtimeDiscoveryState === 'discovering' ? 'Checking…' : projectKernel ? `Detected kernel · ${projectKernel.displayName}` : runtime?.health === 'available' ? `${runtime.version ?? 'Version available'} · ${runtime.executable}` : runtime?.message ?? 'Not checked'}</small></span>
+                  <span className={`runtime-health ${projectKernel ? 'available' : runtime?.health ?? 'not-checked'}`}>{projectKernel ? 'Kernel detected' : runtime?.health === 'available' ? 'Installed only' : runtime?.health === 'unhealthy' ? 'Needs attention' : runtime?.health === 'missing' ? 'Missing' : 'Not checked'}</span>
                 </button>
               })}
             </div>
@@ -7192,7 +7256,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
                 }
                 return
               }
-              const inserted = runStructuredCommand((editor) => editor.insertSetupCell(language, code), 'Add setup cell')
+              const inserted = runStructuredCommand((editor) => editor.insertSetupCell(language, code), 'Add shared setup')
               if (inserted) {
                 setExecutionWorkspaceOpen(true)
                 setToast(`${runtimeName(language)} setup added to Code & computation from the terminal`)

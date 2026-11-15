@@ -1,3 +1,4 @@
+import { showWritingTools } from './writing-tools'
 import { expect, test } from '@playwright/test'
 import { reloadWithPortableSource } from './portable-source'
 import { selectRenderedTextWithMouse } from './rendered-selection'
@@ -59,6 +60,23 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
       }
     }, source)
     await page.goto('/draft')
+  })
+
+  test('keeps reproducibility insertions visible and names computed values consistently', async ({ page }) => {
+    await page.goto('/draft')
+    const toolbar = page.getByRole('toolbar', { name: 'Formatting toolbar', exact: true })
+    await showWritingTools(page)
+    await toolbar.getByRole('button', { name: 'Insert', exact: true }).click()
+    const menu = page.locator('.toolbar-insert-menu')
+    await expect(menu).toContainText('Reproducibility')
+    await expect(menu.getByRole('button', { name: /Computed value/ })).toBeVisible()
+    await expect(menu.getByRole('button', { name: /^Reproducible figure/ })).toBeVisible()
+    await expect(menu.getByRole('button', { name: /^Reproducible table/ })).toBeVisible()
+    await expect(menu.locator('summary').filter({ hasText: 'Optional computations' })).toHaveCount(0)
+    await menu.getByRole('button', { name: /Computed value/ }).click()
+    const dialog = page.getByRole('dialog', { name: 'Insert computed value', exact: true })
+    await expect(dialog.getByLabel('Value name')).toBeVisible()
+    await expect(dialog).not.toContainText('Published value')
   })
 
   test('renders, edits, and reopens an arbitrary QMD without exposing opaque source', async ({ page }) => {
@@ -227,7 +245,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(commandMenu.getByRole('button', { name: /Insert footnote/ })).toBeVisible()
     await expect(commandMenu.getByRole('button', { name: /Insert table/ })).toBeVisible()
     await expect(commandMenu.getByRole('button', { name: /Insert figure/ })).toBeVisible()
-    await expect(commandMenu.getByRole('button', { name: /Add language setup/ })).toBeVisible()
+    await expect(commandMenu.getByRole('button', { name: /Add shared setup/ })).toBeVisible()
     await expect(commandMenu.getByRole('button', { name: /Add reproducible figure/ })).toBeVisible()
     await expect(commandMenu.getByRole('button', { name: /Add reproducible table/ })).toBeVisible()
     await commandMenu.getByRole('button', { name: /Insert citation/ }).click()
@@ -380,6 +398,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
       document.dispatchEvent(new Event('selectionchange'))
     })
 
+    await showWritingTools(page)
     await page.getByRole('button', { name: 'Add link' }).click()
     const dialog = page.getByRole('dialog', { name: 'Add link' })
     await expect(dialog).toBeVisible()

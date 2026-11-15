@@ -68,16 +68,15 @@ describe('connected project files workspace', () => {
     expect(desktopHost.listProjectFiles).not.toHaveBeenCalled()
   })
 
-  it('downloads the actual local image when an older online copy also exists', async () => {
+  it('omits downloads for an existing local image even when an older online copy exists', async () => {
     const localBytes = [137, 80, 78, 71]
     vi.spyOn(desktopHost, 'readProjectAssets').mockResolvedValue([{ path: 'figures/used.png', bytes: localBytes, mediaType: 'image/png' }])
     vi.spyOn(desktopHost, 'saveExportFile').mockResolvedValue({ path: '/saved/used.png', bytes: localBytes.length })
     const image = sharedImage('figures/used.png', new Uint8Array([1, 2]))
     await act(async () => root.render(<ProjectFilesWorkspace project={project} currentManuscriptPath="paper.qmd" source="![A response](figures/used.png)" sharedImages={[image]} location="local" onClose={vi.fn()} />))
-    await act(async () => button('Download figures/used.png').click())
-    expect(desktopHost.readProjectAssets).toHaveBeenCalledWith(project.root, ['figures/used.png'])
-    expect(desktopHost.saveExportFile).toHaveBeenCalledWith({ suggestedName: 'used.png', bytes: localBytes })
-    expect(container.textContent).toContain('Saved used.png.')
+    expect(button('Download figures/used.png')).toBeNull()
+    expect(desktopHost.readProjectAssets).not.toHaveBeenCalled()
+    expect(desktopHost.saveExportFile).not.toHaveBeenCalled()
   })
 
   it('retains known manuscript entries and explains an unavailable full inventory', async () => {

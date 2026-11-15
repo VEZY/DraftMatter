@@ -29,7 +29,7 @@ publish("python_value", python_value)
   it('explains how to publish and run an unresolved value', () => {
     const hint = publishedValueUnavailableHint('mean_height', 'julia')
     expect(hint).toContain('{{mean_height}} is unavailable')
-    expect(hint).toContain('Julia values cell')
+    expect(hint).toContain('Julia computed value calculation')
     expect(hint).toContain('@publish mean_height')
   })
 })

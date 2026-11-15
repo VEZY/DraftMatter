@@ -15,7 +15,7 @@ function languageExtension(language: ExecutableCell['language']) {
 }
 
 function sourceLabel(cell: ExecutableCell) {
-  return cell.role === 'setup' ? 'Setup source' : 'Published values source'
+  return cell.role === 'setup' ? 'Setup source' : 'Computed values source'
 }
 
 export function ManagedCodeCellEditor({

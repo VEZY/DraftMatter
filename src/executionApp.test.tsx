@@ -109,7 +109,7 @@ describe('rendered local execution workflow', () => {
     expect(desktopHost.executeKernel).not.toHaveBeenCalled()
     expect(desktopHost.probeRuntime).not.toHaveBeenCalled()
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
-    const prepare = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Prepare environments')!
+    const prepare = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Prepare project languages')!
     await act(async () => prepare.click())
     const trustDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="execution-trust-title"]')!
     expect(trustDialog.textContent).toContain('Local execution is not a sandbox')

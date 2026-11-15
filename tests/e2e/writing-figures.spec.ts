@@ -1,3 +1,4 @@
+import { showWritingTools } from './writing-tools'
 import { mkdir, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { expect, test } from '@playwright/test'
@@ -47,6 +48,7 @@ test.describe('ordinary writing and portable figure files', () => {
     await page.goto('/draft')
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
     await manuscript.getByText('The observed response belongs here.', { exact: true }).click()
+    await showWritingTools(page)
     await page.getByRole('button', { name: 'Insert', exact: true }).click()
     await page.locator('.toolbar-insert-menu').getByRole('button', { name: /^Figure/ }).click()
     const dialog = page.getByRole('dialog', { name: 'Insert figure', exact: true })
@@ -162,6 +164,7 @@ test.describe('ordinary writing and portable figure files', () => {
       return url.split(',')[1]
     })
     await page.getByText('The observed response belongs here.', { exact: true }).click()
+    await showWritingTools(page)
     await page.getByRole('button', { name: 'Insert', exact: true }).click()
     await page.locator('.toolbar-insert-menu').getByRole('button', { name: /^Figure/ }).click()
     const insertion = page.getByRole('dialog', { name: 'Insert figure', exact: true })

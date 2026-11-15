@@ -193,6 +193,76 @@ describe('full structured manuscript editor', () => {
     })
   }
 
+  it('finds prose without changing the editing selection, source or undo history and updates counts after edits', async () => {
+    const manuscript = '# Evidence study\n\nBefore **evidence** after. Another evidence.\n'
+    const onChange = vi.fn(), onSearch = vi.fn(), selected = vi.fn(), editor = createRef<StructuredManuscriptEditorHandle>()
+    const render = (text: string) => root.render(<StructuredManuscriptEditor ref={editor} source={text} onChange={onChange} onSearchChange={onSearch} onReviewSelectionChange={selected} />)
+    await act(async () => render(manuscript))
+    const content = container.querySelector<HTMLElement>('.structured-editor-content')!
+    await selectRenderedText(content, 'after')
+    const selectionPrefix = () => { const range = document.createRange(); range.selectNodeContents(content); range.setEnd(getSelection()!.anchorNode!, getSelection()!.anchorOffset); return range.toString() }
+    const beforeSelection = { prefix: selectionPrefix(), selected: getSelection()!.toString() }
+    selected.mockClear()
+    await act(async () => { expect(editor.current?.setSearch('evidence')).toEqual({ query: 'evidence', total: 3, current: 1 }) })
+    expect(content.querySelectorAll('.manuscript-find-match')).toHaveLength(3)
+    await act(async () => { expect(editor.current?.findNext()?.current).toBe(2); expect(editor.current?.findNext(-1)?.current).toBe(1) })
+    expect({ prefix: selectionPrefix(), selected: getSelection()!.toString() }).toEqual(beforeSelection)
+    expect(selected).not.toHaveBeenCalled()
+    expect(editor.current?.source()).toBe(manuscript)
+    expect(onChange).not.toHaveBeenCalled()
+    await act(async () => { expect(editor.current?.undo()).toBe(false) })
+    await act(async () => { expect(editor.current?.insertHeading('New evidence', 2)).toBe(true) })
+    expect(onSearch.mock.calls.at(-1)?.[0].total).toBe(4)
+    await act(async () => { expect(editor.current?.undo()).toBe(true) })
+    expect(onSearch.mock.calls.at(-1)?.[0].total).toBe(3)
+    await act(async () => render('# Changed document\n\nOne evidence.\n'))
+    expect(onSearch.mock.calls.at(-1)?.[0]).toEqual({ query: 'evidence', total: 1, current: 1 })
+    await act(async () => { editor.current?.setSearch('') })
+    expect(content.querySelector('.manuscript-find-match')).toBeNull()
+  })
+
+  it('searches generated table contents and captions in reading order without exposing their computation source', async () => {
+    const manuscript = '# Results\n\nBefore evidence.\n\n```python {#find-table .execute output="table"}\nprint("secret_hidden_code evidence")\n```\n\n<!-- dm-output:start cell="find-table" run="sha256:find" -->\n| Treatment | Mean |\n| --- | --- |\n| evidence | 18 |\n: Generated evidence. {#tbl-find}\n<!-- dm-output:end -->\n\nAfter evidence.\n'
+    const editor = createRef<StructuredManuscriptEditorHandle>(), changed = vi.fn()
+    await act(async () => root.render(<StructuredManuscriptEditor ref={editor} source={manuscript} onChange={changed} />))
+    await act(async () => { expect(editor.current?.setSearch('evidence')).toEqual({ query: 'evidence', total: 4, current: 1 }) })
+    expect(container.querySelector('.manuscript-find-active')?.parentElement?.textContent).toContain('Before evidence')
+    await act(async () => { expect(editor.current?.findNext()?.current).toBe(2) })
+    expect(container.querySelector('.structured-output-caption')?.classList).toContain('manuscript-find-external-active')
+    await act(async () => { expect(editor.current?.findNext()?.current).toBe(3) })
+    expect(container.querySelector('td.manuscript-find-external-active')?.textContent).toBe('evidence')
+    await act(async () => { expect(editor.current?.findNext()?.current).toBe(4) })
+    expect(container.querySelector('.manuscript-find-active')?.parentElement?.textContent).toContain('After evidence')
+    await act(async () => { expect(editor.current?.setSearch('secret_hidden_code').total).toBe(0); expect(editor.current?.setSearch('TreatmentMean').total).toBe(0) })
+    expect(editor.current?.source()).toBe(manuscript)
+    expect(changed).not.toHaveBeenCalled()
+    await act(async () => { expect(editor.current?.undo()).toBe(false) })
+    const updated = manuscript.replace('| evidence | 18 |', '| changed | 18 |')
+    await act(async () => root.render(<StructuredManuscriptEditor ref={editor} source={updated} onChange={changed} />))
+    await act(async () => { expect(editor.current?.setSearch('evidence').total).toBe(3) })
+    await act(async () => { editor.current?.setSearch('') })
+    expect(container.querySelector('.manuscript-find-external-match')).toBeNull()
+    expect(changed).not.toHaveBeenCalled()
+  })
+
+  it('does not publish collaboration updates or review suggestions when searching and navigating', async () => {
+    const manuscript = '# Shared search\n\nShared evidence and more evidence.\n'
+    const shared = new Y.Doc(), awareness = new Awareness(shared)
+    collaborativeDocuments.push(shared); collaborativeAwareness.push(awareness)
+    createCollaborativeProseMirrorState({ document: shared, awareness, schema: manuscriptSchema, initialDocument: parseStructuredManuscript(manuscript).document })
+    const editor = createRef<StructuredManuscriptEditorHandle>(), onChange = vi.fn(), publish = vi.fn(), onSuggestion = vi.fn()
+    await act(async () => root.render(<StructuredManuscriptEditor ref={editor} source={manuscript} onChange={onChange} onSuggestionCapture={onSuggestion} suggestionMode collaboration={{ document: shared, awareness, publishPortableSource: publish }} />))
+    const updates = vi.fn(), presence = vi.fn()
+    shared.on('update', updates); awareness.on('update', presence)
+    const encoded = Y.encodeStateAsUpdate(shared)
+    await act(async () => { editor.current?.setSearch('evidence'); editor.current?.findNext(); editor.current?.findNext(-1); editor.current?.setSearch('') })
+    expect(updates).not.toHaveBeenCalled()
+    expect(presence).not.toHaveBeenCalled()
+    expect(Y.encodeStateAsUpdate(shared)).toEqual(encoded)
+    expect(onChange).not.toHaveBeenCalled(); expect(publish).not.toHaveBeenCalled(); expect(onSuggestion).not.toHaveBeenCalled()
+    await act(async () => { expect(editor.current?.undo()).toBe(false) })
+  })
+
   it.each([
     { name: 'bold and italic text', source: '# Results\n\nBefore **bold words** and *soft words* after.\n', visible: 'bold words and soft words', raw: '**bold words** and *soft words*' },
     { name: 'partial bold and italic text', source: '# Results\n\nBefore **bold words** and *soft words* after.\n', visible: 'ld words and soft wo', raw: 'ld words** and *soft wo' },
@@ -921,7 +991,7 @@ print("result")
     const published = container.querySelector<HTMLElement>('[data-dm-node="published-value"]')!
     expect(published.dataset.status).toBe('missing')
     expect(published.dataset.language).toBe('julia')
-    expect(published.dataset.publishHint).toContain('Julia values cell')
+    expect(published.dataset.publishHint).toContain('Julia computed value calculation')
     expect(published.dataset.publishHint).toContain('@publish mean_height unit="cm" digits=1')
     expect(published.getAttribute('tabindex')).toBe('0')
     expect(published.getAttribute('aria-description')).toContain('{{mean_height}} is unavailable')

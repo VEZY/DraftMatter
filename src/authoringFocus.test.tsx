@@ -75,10 +75,10 @@ describe('focused authoring workspace', () => {
 
   it('groups secondary insertions under one toolbar control', async () => {
     await act(async () => root.render(<App />))
-    expect([...container.querySelectorAll('.format-toolbar > button[aria-label^="Insert "]')].map((button) => button.getAttribute('aria-label'))).toEqual(['Insert citation'])
+    expect([...container.querySelectorAll('.format-toolbar button[aria-label^="Insert "]')].map((button) => button.getAttribute('aria-label'))).toEqual(['Insert citation'])
     await act(async () => container.querySelector<HTMLButtonElement>('.toolbar-insert-button')!.click())
     const labels = [...container.querySelectorAll('.toolbar-insert-menu strong')].map((item) => item.textContent)
-    expect(labels).toEqual(['Citation', 'Figure', 'Table', 'Equation', 'Cross-reference', 'Published value', 'Reproducible figure', 'Reproducible table'])
+    expect(labels).toEqual(['Citation', 'Figure', 'Table', 'Equation', 'Cross-reference', 'Computed value', 'Reproducible figure', 'Reproducible table'])
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open browser view-only code and desktop instructions"]')!.click())
     expect(container.querySelector('.code-workspace-drawer')?.textContent).toContain('Open this portable manuscript as a DraftMatter desktop project')
     expect(container.querySelector('.code-workspace-drawer')?.textContent).toContain('Open project folder…')

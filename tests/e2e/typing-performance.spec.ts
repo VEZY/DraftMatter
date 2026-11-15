@@ -1,3 +1,4 @@
+import { showWritingTools } from './writing-tools'
 import { expect, test } from '@playwright/test'
 import type { CitationRecord } from '../../src/types'
 
@@ -137,8 +138,10 @@ test('ordinary typing stays responsive with a large library without citation fli
   const storedSource = () => page.evaluate((key) => localStorage.getItem(key) ?? '', SOURCE_KEY)
   await expect.poll(storedSource).toContain(TYPING_TARGET + INSERTED)
   const saved = await storedSource()
+  await showWritingTools(page)
   await page.getByRole('button', { name: 'Undo', exact: true }).click()
   await expect.poll(storedSource).not.toBe(saved)
+  await showWritingTools(page)
   await page.getByRole('button', { name: 'Redo', exact: true }).click()
   await expect.poll(storedSource).toBe(saved)
   expect(await citations.allTextContents()).toEqual(initialLabels)

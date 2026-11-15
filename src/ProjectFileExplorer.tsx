@@ -105,7 +105,7 @@ export function ProjectFileExplorer({
       {selected.local && selected.online && <p className="project-file-explorer-copy-note">{selected.localBytes !== undefined && selected.onlineBytes !== undefined && selected.localBytes !== selected.onlineBytes ? 'Local and online file sizes differ.' : 'An online copy exists; matching contents have not been checked.'}</p>}
       <div className="project-file-explorer-actions">
         {selected.kind === 'figure' && /\.(?:png|jpe?g|gif|webp|svg)$/i.test(selected.path) && onInsertFigure && <button type="button" aria-label={`Insert ${selected.path} as a figure`} onClick={() => onInsertFigure(selected.path)}><Icon name="plus" size={13} />Insert figure</button>}
-        {onDownloadFile && (!downloadablePaths || downloadablePaths.includes(selected.path)) && <button type="button" aria-label={`Download ${selected.path}`} onClick={() => onDownloadFile(selected.path)}><Icon name="download" size={13} />Download</button>}
+        {onDownloadFile && !(location === 'local' && selected.local) && (!downloadablePaths || downloadablePaths.includes(selected.path)) && <button type="button" aria-label={`Download ${selected.path}`} onClick={() => onDownloadFile(selected.path)}><Icon name="download" size={13} />Download</button>}
       </div>
     </section>}
     {children && <details className="project-file-explorer-transfers"><summary><Icon name="users" size={14} />Sharing &amp; transfers</summary><div>{children}</div></details>}

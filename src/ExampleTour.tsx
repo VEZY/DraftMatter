@@ -35,7 +35,7 @@ const steps: ReadonlyArray<{
   },
   {
     title: 'Optional: create a figure from code',
-    detail: 'In a local desktop copy, choose Insert → Optional computations → Reproducible figure, select a language, and add your code. Choose Run; DraftMatter helps prepare the language before continuing the computation.',
+    detail: 'In a local desktop copy, choose Insert → Reproducible figure, select a language, and add your code. Choose Run; DraftMatter helps prepare the language before continuing the computation.',
     target: '[aria-label="Insert"]',
     desktopOnly: true,
   },
@@ -47,7 +47,7 @@ const steps: ReadonlyArray<{
   },
   {
     title: 'Optional: insert a computed value',
-    detail: 'Publish a named value from a code cell, then use Published value to place its saved result in the text. Collaborators can read it online without running the code.',
+    detail: 'Create and run a named calculation, then choose Insert → Computed value to place its saved result in the text. Collaborators can read it online without running the code.',
     target: '[aria-label="Insert"]',
     desktopOnly: true,
   },

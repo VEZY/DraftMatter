@@ -65,9 +65,9 @@ describe('project file browser', () => {
     expect(container.querySelector('[aria-label="Selected project file"]')!.textContent).toContain('response.svg')
     expect(container.querySelector('[aria-label="Selected project file"]')!.textContent).toContain('Image · 123 B')
     await act(async () => button('Insert figures/response.svg as a figure').click())
-    await act(async () => button('Download figures/response.svg').click())
+    expect(button('Download figures/response.svg')).toBeNull()
     expect(insert).toHaveBeenCalledWith('figures/response.svg')
-    expect(download).toHaveBeenCalledWith('figures/response.svg')
+    expect(download).not.toHaveBeenCalled()
     expect(open).not.toHaveBeenCalled()
     await act(async () => button('Open drafts/supplement.md').click())
     expect(open).toHaveBeenCalledWith('drafts/supplement.md')
@@ -108,5 +108,23 @@ describe('project file browser', () => {
     await act(async () => { select.value = 'online'; select.dispatchEvent(new Event('change', { bubbles: true })) })
     expect(container.querySelector('[aria-label="Project file tree"]')!.textContent).not.toContain('paper.md')
     expect(container.querySelector('[aria-label="Project file tree"]')!.textContent).toContain('notes.md')
+  })
+})
+
+
+describe('downloads reflect where files actually live', () => {
+  it.each(['sidebar', 'dialog'] as const)('hides existing local downloads but keeps online-only and browser downloads in %s', async (layout) => {
+    const download = vi.fn()
+    const render = (location: 'local' | 'browser') => act(async () => root.render(<ProjectFileBrowser layout={layout} location={location} currentManuscriptPath="paper.md" localFiles={[{ path: 'paper.md' }]} onlineFiles={[{ path: 'remote.md' }]} onDownloadFile={download} />))
+    await render('local')
+    expect(container.querySelector('[aria-label="Download paper.md"]')).toBeNull()
+    if (layout === 'sidebar') await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Select remote.md"]')!.click())
+    const remote = container.querySelector<HTMLButtonElement>('[aria-label="Download remote.md"]')!
+    expect(remote).not.toBeNull()
+    await act(async () => remote.click())
+    expect(download).toHaveBeenCalledWith('remote.md')
+    await render('browser')
+    if (layout === 'sidebar') await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Select paper.md"]')!.click())
+    expect(container.querySelector('[aria-label="Download paper.md"]')).not.toBeNull()
   })
 })

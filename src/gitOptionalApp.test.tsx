@@ -30,10 +30,9 @@ describe('Git stays outside the normal writing workflow', () => {
     vi.restoreAllMocks()
   })
 
-  it('opens device recovery from the project menu without exposing repository management', async () => {
+  it('opens device recovery from the History launcher without exposing repository management', async () => {
     await act(async () => root.render(<App initialExperience="browser-new" />))
-    await act(async () => container.querySelector<HTMLButtonElement>('.project-switcher')!.click())
-    const history = container.querySelector<HTMLButtonElement>('[aria-label="Open local recovery history"]')!
+    const history = container.querySelector<HTMLButtonElement>('[aria-label="History"]')!
     expect(history).not.toBeNull()
     await act(async () => history.click())
     expect(container.querySelector('[role="dialog"][aria-label="Recovery history"]')).not.toBeNull()

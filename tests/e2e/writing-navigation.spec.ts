@@ -80,6 +80,8 @@ test('groups writing actions in the toolbar and moves change tracking into the h
   const header = page.locator('.topbar')
   const toolbar = page.getByLabel('Formatting toolbar', { exact: true })
   const navigation = page.getByRole('navigation', { name: 'Workspace navigation', exact: true })
+  await expect(toolbar).toHaveCSS('opacity', '0')
+  await page.getByRole('button', { name: 'Show writing tools', exact: true }).hover()
   await expect(toolbar.getByRole('button', { name: 'Insert citation', exact: true })).toBeVisible()
   await expect(toolbar.getByRole('button', { name: 'Insert citation', exact: true })).toHaveAttribute('title', /Zotero/)
   await expect(page.locator('.quick-cite')).toHaveCount(0)
@@ -90,7 +92,7 @@ test('groups writing actions in the toolbar and moves change tracking into the h
   await expect(navigation.getByRole('button', { name: 'Files', exact: true })).toBeVisible()
   await expect(navigation.getByRole('button', { name: 'Outline', exact: true })).toBeVisible()
   await expect(navigation.getByRole('button', { name: 'Manuscript', exact: true })).toHaveCount(0)
-  await expect(navigation.getByRole('button', { name: 'Open local recovery history', exact: true })).toHaveCount(0)
+  await expect(navigation.getByRole('button', { name: 'History', exact: true })).toBeVisible()
 
   await header.getByRole('button', { name: 'Turn on track changes', exact: true }).click()
   await expect(header.getByRole('button', { name: 'Turn off track changes', exact: true })).toHaveAttribute('aria-pressed', 'true')
@@ -100,7 +102,7 @@ test('groups writing actions in the toolbar and moves change tracking into the h
   await expect(page.getByRole('dialog', { name: 'Review options', exact: true })).toContainText('Changes display')
   await page.keyboard.press('Escape')
 
-  // The subdued toolbar becomes fully legible on keyboard focus as well as hover.
+  // Hidden writing tools become fully legible on keyboard focus as well as hover.
   await toolbar.getByRole('button', { name: 'Insert citation', exact: true }).focus()
   await expect(toolbar).toHaveCSS('opacity', '1')
 })
@@ -108,6 +110,7 @@ test('groups writing actions in the toolbar and moves change tracking into the h
 test('inserts a project citation at the remembered caret from the writing toolbar', async ({ page }) => {
   await openStudy(page)
   await placeCitationCaret(page)
+  await page.getByRole('button', { name: 'Show writing tools', exact: true }).hover()
   await page.getByLabel('Formatting toolbar', { exact: true }).getByRole('button', { name: 'Insert citation', exact: true }).click()
   await insertSelectedReference(page)
   await page.reload()
@@ -194,6 +197,7 @@ test('keeps citations and project navigation accessible on a small screen', asyn
   await expect(files).toBeVisible()
   expect(await audit()).toEqual([])
   await files.getByRole('button', { name: 'Close project files' }).click()
+  await page.getByRole('button', { name: 'Show writing tools', exact: true }).hover()
   await cite.click()
   await expect(page.getByRole('dialog', { name: 'Insert citation', exact: true })).toBeVisible()
   expect(await audit()).toEqual([])

@@ -24,9 +24,9 @@ export function publishedValueSnippet(name: string, language: ExecutionLanguage)
 
 export function publishedValueUnavailableHint(name: string, language?: ExecutionLanguage) {
   if (language) {
-    return `{{${name}}} is unavailable.\nPublish it from a ${languageLabel[language]} values cell, then run the cell:\n${publishedValueSnippet(name, language)}`
+    return `{{${name}}} is unavailable.\nProduce it in a ${languageLabel[language]} computed value calculation, then run the calculation:\n${publishedValueSnippet(name, language)}`
   }
-  return `{{${name}}} is unavailable.\nPublish it from a values cell, then run the cell:\nPython/R: publish("${name}", value, unit="cm", digits=1)\nJulia: ${publishedValueSnippet(name, 'julia')}`
+  return `{{${name}}} is unavailable.\nProduce it in a computed value calculation, then run the calculation:\nPython/R: publish("${name}", value, unit="cm", digits=1)\nJulia: ${publishedValueSnippet(name, 'julia')}`
 }
 
 function explicitlyPublishes(cell: ExecutableCell, name: string) {

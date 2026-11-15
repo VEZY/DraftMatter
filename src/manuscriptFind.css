@@ -1,0 +1,14 @@
+.manuscript-find { align-items: center; background: #fff; border: 1px solid #d7dfd8; border-radius: 8px; box-shadow: 0 5px 20px #20382b18; color: #52665a; display: flex; gap: 5px; padding: 6px 7px 6px 10px; position: fixed; right: 22px; top: 70px; width: min(430px, calc(100vw - 24px)); z-index: 75; }
+.manuscript-find input { background: transparent; border: 0; color: #304c3d; flex: 1; font: inherit; font-size: 12px; min-width: 0; outline-offset: 2px; padding: 5px; }
+.manuscript-find output { color: #627268; font-size: 11px; white-space: nowrap; }
+.manuscript-find button { align-items: center; border-radius: 4px; color: #4e6657; display: inline-flex; flex: 0 0 28px; height: 28px; justify-content: center; }
+.manuscript-find button:hover:not(:disabled) { background: #edf3ed; }
+.manuscript-find button:disabled { opacity: .4; }
+.manuscript-find-previous { transform: rotate(180deg); }
+.manuscript-find-match { background: #fff0a6; box-shadow: 0 0 0 1px #e2c66a55; }
+.manuscript-find-active { background: #ffc86b; box-shadow: 0 0 0 1px #b77324; }
+::highlight(draftmatter-find-all) { background: #fff0a6; color: #172d20; }
+::highlight(draftmatter-find-current) { background: #ffc86b; color: #172d20; }
+.manuscript-find-external-match { background: #fff6cc; outline: 1px solid #d9c470; }
+.manuscript-find-external-active { background: #ffdf9d; outline-color: #a46d28; }
+@media (max-width: 700px) { .manuscript-find { right: 12px; } }
