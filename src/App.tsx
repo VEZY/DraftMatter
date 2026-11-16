@@ -12,10 +12,11 @@ import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useSt
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, parseBibliographyFile, searchCitations } from './bibliography'
-import { desktopHost, projectAssetHash, normaliseHostFailure, resolveMainDocument, type AgentIntegrationStatus, type CodeFormatterStatus, type JuliaEnvironment, type ProjectExecutionPreferences, type ProjectSnapshot, type ZoteroAttachment } from './desktopHost'
+import { desktopHost, projectAssetHash, normaliseHostFailure, resolveMainDocument, type AgentIntegrationStatus, type CodeFormatterStatus, type DocumentRecoverySnapshot, type JuliaEnvironment, type ProjectExecutionPreferences, type ProjectSnapshot, type RecoveryVersionOptions, type SavedDocumentVersionMetadata, type ZoteroAttachment } from './desktopHost'
 import type { AssistantConnectionsStatus } from './desktopHost'
 import { AssistantConnectionsDialog } from './AssistantConnectionsDialog'
 import { parsePortableDocument, parseReviewMarkup } from './sharedEditor'
+import { sourceHash } from './document'
 import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
 import { ManuscriptOutlineTree, type ManuscriptOutlineItem } from './ManuscriptOutlineTree'
@@ -23,6 +24,9 @@ import './writingWorkspace.css'
 import { FloatingWritingToolbar } from './FloatingWritingToolbar'
 import { ComputationSetupPanel } from './ComputationSetupPanel'
 import { ManuscriptFind } from './ManuscriptFind'
+import { RecoveryHistory, type RecoveryHistoryVersion } from './RecoveryHistory'
+import { selectAutomaticRecoveryIds } from './recoveryRetention'
+import { useRecoveryAutosave } from './useRecoveryAutosave'
 import type { ManuscriptSearchState } from './manuscriptSearch'
 import { ExampleTour } from './ExampleTour'
 import { ManuscriptTextEditor } from './ManuscriptTextEditor'
@@ -35,7 +39,7 @@ import { downloadText, projectCurrentManuscriptSource, reviewedProjection } from
 import { sampleCitations } from './sampleCitations'
 import { initialDraft } from './sampleDraft'
 import { SAMPLE_INTRODUCTION_CONTINUATION, seedSampleIntroduction, upgradeSampleIntroduction } from './sampleWorkspace'
-import { LOCAL_DRAFT_KEY, readLocalDraft, readRecoverySnapshots, saveRecoverySnapshot, type RecoverySnapshot } from './storage'
+import { LOCAL_DRAFT_KEY, assertRecoverySnapshotDocument, readLocalDraft, readRecoveryPinnedSnapshotIds, readRecoverySnapshots, recoveryDocumentStorageKey, recoverySnapshotMatchesDocument, saveRecoverySnapshot, type RecoveryDocumentIdentity, type RecoverySnapshot, type RecoverySnapshotOptions } from './storage'
 import type { CitationItem, CitationRecord, DocumentDiagnostic, DraftState, MarkupView, SuggestionStatus } from './types'
 import { queryZoteroLibrary, type ZoteroVersionStamp } from './zotero'
 import { citationItemsForDraft, normalizeCitationItems, serializeCitationCluster } from './citation'
@@ -589,6 +593,8 @@ function PublicationBylineView({ byline }: { byline: PublicationByline }) {
 }
 
 export type EditorSaveGuard = RefObject<(() => Promise<boolean>) | null>
+type HistoryVersion = RecoveryHistoryVersion & { archiveId?: string }
+type LoadedHistoryVersion = RecoverySnapshot & { archiveId?: string }
 
 export interface AppProps {
   saveBeforeLeaveRef?: EditorSaveGuard
@@ -780,7 +786,12 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const [crossrefCandidates, setCrossrefCandidates] = useState<CrossrefCandidate[]>([])
   const [doiLookupState, setDoiLookupState] = useState<'idle' | 'resolving'>('idle')
   const [scholarHelpOpen, setScholarHelpOpen] = useState(false)
-  const [recoveries, setRecoveries] = useState<RecoverySnapshot[]>(() => readRecoverySnapshots(localStorage))
+  const [recoverySnapshots, setRecoveries] = useState<RecoverySnapshot[]>([])
+  const [diskRecoverySnapshots, setDiskRecoverySnapshots] = useState<RecoverySnapshot[]>([])
+  const [archivedRecoveryVersions, setArchivedRecoveryVersions] = useState<HistoryVersion[]>([])
+  const [diskRecoveryLoading, setDiskRecoveryLoading] = useState(false)
+  const [diskRecoveryProblem, setDiskRecoveryProblem] = useState('')
+  const [hasUnassignedRecoveryVersions, setHasUnassignedRecoveryVersions] = useState(false)
   const collaborationBaselineRef = useRef<Promise<{ root: string; assets: Record<string, string | null>; bibliographyHash: string | null }> | null>(null)
   const collaborationSaveGuardRef = useRef<(() => Promise<boolean>) | null>(null)
   const [sharedResources, setSharedResources] = useState<ProjectResources>({ images: [], citations: [] })
@@ -914,6 +925,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const setupActivityIdRef = useRef<string | undefined>(undefined)
   const pendingSetupLanguagesRef = useRef<ExecutionLanguage[]>([])
   const projectSetupRunningRef = useRef(false)
+  const recoveryActionRunningRef = useRef(false)
   const executionActiveCellRef = useRef<string | undefined>(undefined)
   const executionActiveLanguageRef = useRef<ExecutionLanguage | undefined>(undefined)
   const kernelCellFailureSequenceRef = useRef(0)
@@ -982,10 +994,104 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     })
   }
 
-  const writeRecoverySnapshot = (nextDraft: DraftState, nextFilename: string, source: string, savedAt?: string) => {
+  const recoveryDocumentIdentity = useMemo<RecoveryDocumentIdentity | undefined>(() => {
+    if (desktopSession) return { kind: 'desktop', projectRoot: desktopSession.root, documentPath: desktopSession.path }
+    if (awaitingDesktopLaunch) return undefined
+    if (activeCollaborationLaunch) return {
+      kind: 'collaboration', serviceUrl: activeCollaborationLaunch.serviceUrl,
+      workspaceId: activeCollaborationLaunch.workspaceId, projectId: activeCollaborationLaunch.projectId, documentPath: filename,
+    }
+    return { kind: 'browser', browserAssetScope, documentPath: filename }
+  }, [desktopSession?.root, desktopSession?.path, awaitingDesktopLaunch, activeCollaborationLaunch?.serviceUrl,
+    activeCollaborationLaunch?.workspaceId, activeCollaborationLaunch?.projectId, browserAssetScope, filename])
+  const activeRecoveryIdentityRef = useRef(recoveryDocumentIdentity)
+  activeRecoveryIdentityRef.current = recoveryDocumentIdentity
+  const recoveries = useMemo(() => {
+    if (!recoveryDocumentIdentity) return []
+    const versions = new Map<string, HistoryVersion>()
+    for (const snapshot of [...recoverySnapshots, ...diskRecoverySnapshots, ...archivedRecoveryVersions]) {
+      if (recoverySnapshotMatchesDocument(snapshot, recoveryDocumentIdentity)) versions.set(snapshot.id, snapshot)
+    }
+    const protectedIds = new Set(readRecoveryPinnedSnapshotIds(localStorage, recoveryDocumentIdentity))
+    for (const version of versions.values()) {
+      if (version.kind !== 'autosave' && version.restoredFromId) protectedIds.add(version.restoredFromId)
+    }
+    const retainedAutomatic = selectAutomaticRecoveryIds([...versions.values()].map((version) => ({
+      id: version.id, kind: version.kind, savedAtMillis: Date.parse(version.savedAt),
+    })), protectedIds)
+    return [...versions.values()].sort((left, right) => Date.parse(right.savedAt) - Date.parse(left.savedAt))
+      .filter((version) => version.kind !== 'autosave' || protectedIds.has(version.id) || retainedAutomatic.has(version.id))
+  }, [recoverySnapshots, diskRecoverySnapshots, archivedRecoveryVersions, recoveryDocumentIdentity])
+
+  const archivedHistoryVersion = (version: SavedDocumentVersionMetadata, identity: RecoveryDocumentIdentity): HistoryVersion => ({
+    id: version.kind === 'origin' && version.restoredFromId ? version.restoredFromId : `saved:${version.id}`,
+    archiveId: version.id, filename: version.documentPath.split('/').at(-1) ?? version.documentPath,
+    title: version.title ?? version.documentPath.split('/').at(-1) ?? version.documentPath,
+    savedAt: new Date(version.originalSavedAtMillis ?? version.savedAtMillis).toISOString(),
+    sourceHash: version.sourceHash, kind: version.kind, label: version.label, restoredFromId: version.restoredFromId,
+    documentIdentity: identity,
+  })
+
+  const loadHistorySnapshot = async (version: HistoryVersion): Promise<LoadedHistoryVersion> => {
+    if (typeof version.source === 'string' && version.draft) return version as LoadedHistoryVersion
+    const identity = activeRecoveryIdentityRef.current
+    if (!identity || identity.kind !== 'desktop' || !version.archiveId || !recoverySnapshotMatchesDocument(version, identity)) throw new Error('This version belongs to another manuscript. The current paper is unchanged.')
+    const copy = await desktopHost.readSavedDocumentVersion(identity.projectRoot, identity.documentPath, version.archiveId)
+    if (copy.documentPath !== identity.documentPath || copy.id !== version.archiveId || copy.sourceHash !== version.sourceHash
+      || !activeRecoveryIdentityRef.current || recoveryDocumentStorageKey(activeRecoveryIdentityRef.current) !== recoveryDocumentStorageKey(identity)) {
+      throw new Error('This saved version changed or the manuscript was switched. Reopen history to inspect it safely.')
+    }
+    const parsed = parsePortableDocument(copy.source, { ...initialDraft, title: version.title })
+    return { ...version, source: copy.source, draft: parsed.draft, title: parsed.draft.title } as LoadedHistoryVersion
+  }
+
+  useEffect(() => {
+    setRecoveries(recoveryDocumentIdentity ? readRecoverySnapshots(localStorage, recoveryDocumentIdentity) : [])
+    const basename = recoveryDocumentIdentity?.documentPath.split('/').at(-1)
+    setHasUnassignedRecoveryVersions(Boolean(basename && readRecoverySnapshots(localStorage).some((snapshot) => snapshot.filename === basename)))
+  }, [recoveryDocumentIdentity, recoveryOpen])
+
+  useEffect(() => {
+    let cancelled = false
+    setDiskRecoverySnapshots([])
+    setArchivedRecoveryVersions([])
+    setDiskRecoveryProblem('')
+    setDiskRecoveryLoading(false)
+    if (!recoveryOpen || recoveryDocumentIdentity?.kind !== 'desktop') return
+    const identity = recoveryDocumentIdentity
+    setDiskRecoveryLoading(true)
+    void Promise.allSettled([
+      desktopHost.listDocumentRecoveries(identity.projectRoot, identity.documentPath),
+      desktopHost.listSavedDocumentVersions(identity.projectRoot, identity.documentPath),
+    ]).then(([recent, saved]) => {
+      if (cancelled) return
+      const versions = recent.status === 'fulfilled' ? recent.value : []
+      const snapshots = versions.flatMap((version): RecoverySnapshot[] => {
+        if (version.documentPath !== identity.documentPath || !Number.isFinite(version.savedAtMillis)
+          || Math.abs(version.savedAtMillis) > 8_640_000_000_000_000) return []
+        const filename = identity.documentPath.split('/').at(-1) ?? identity.documentPath
+        const parsed = parsePortableDocument(version.source, { ...initialDraft, title: filename })
+        return [{ id: `disk:${version.id}`, filename, title: parsed.draft.title,
+          savedAt: new Date(version.savedAtMillis).toISOString(), sourceHash: sourceHash(version.source),
+          source: version.source, draft: parsed.draft, documentIdentity: identity, kind: 'autosave' }]
+      })
+      setDiskRecoverySnapshots(snapshots)
+      if (saved.status === 'fulfilled') setArchivedRecoveryVersions(saved.value
+        .filter((version) => version.documentPath === identity.documentPath)
+        .map((version) => archivedHistoryVersion(version, identity)))
+      const problems = [recent, saved].flatMap((result) => result.status === 'rejected' ? [readableError(result.reason)] : [])
+      if (problems.length) setDiskRecoveryProblem(`Some saved versions could not be read: ${problems.join(' · ')}`)
+    }).catch((error) => {
+      if (!cancelled) setDiskRecoveryProblem(`Saved-on-disk versions could not be read: ${readableError(error)}`)
+    }).finally(() => { if (!cancelled) setDiskRecoveryLoading(false) })
+    return () => { cancelled = true }
+  }, [recoveryDocumentIdentity, recoveryOpen])
+
+  const writeRecoverySnapshot = (nextDraft: DraftState, nextFilename: string, source: string, savedAt?: string, preserveSnapshotId?: string, documentIdentity = recoveryDocumentIdentity, options: RecoverySnapshotOptions = {}) => {
+    if (!documentIdentity) return null
     try {
-      const next = saveRecoverySnapshot(localStorage, nextDraft, nextFilename, source, savedAt, !desktopSessionRef.current && !collaborationSessionActiveRef.current ? browserAssetScopeRef.current : undefined)
-      setRecoveries(next)
+      const next = saveRecoverySnapshot(localStorage, nextDraft, nextFilename, source, savedAt, documentIdentity.kind === 'browser' ? documentIdentity.browserAssetScope : undefined, { ...options, preserveSnapshotId, documentIdentity })
+      if (activeRecoveryIdentityRef.current && recoveryDocumentStorageKey(activeRecoveryIdentityRef.current) === recoveryDocumentStorageKey(documentIdentity)) setRecoveries(next)
       return next
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
@@ -993,6 +1099,28 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       if (!desktopSessionRef.current) setSaveState('error')
       return null
     }
+  }
+
+  const captureRecoverySnapshot = (source: string, capturedDocumentKey: string) => {
+    const identity = activeRecoveryIdentityRef.current
+    const session = desktopSessionRef.current
+    if (recoveryOpen || !identity || capturedDocumentKey !== recoveryDocumentStorageKey(identity)
+      || source !== manuscriptSourceRef.current
+      || (session ? identity.kind !== 'desktop' || session.root !== identity.projectRoot || session.path !== identity.documentPath : identity.kind === 'desktop')) return false
+    const journal = writeRecoverySnapshot(draftRef.current, filename, source, undefined, undefined, identity)
+    // Continuous typing can postpone the ordinary file save. Its recovery
+    // deadline must also keep the pending source on disk, beyond browser storage.
+    if (session && session.savedRevision !== draftRevisionRef.current && !collaborationSessionActiveRef.current) {
+      void desktopHost.createDocumentRecovery(session.root, session.path, source, undefined, { kind: 'autosave' })
+        .then((copy) => {
+          if (copy.documentPath !== session.path || copy.source !== source) throw new Error('The automatic recovery copy could not be verified.')
+        }).catch((error) => {
+          if (activeRecoveryIdentityRef.current && recoveryDocumentStorageKey(activeRecoveryIdentityRef.current) === recoveryDocumentStorageKey(identity)) {
+            setSaveProblem(`Automatic recovery on disk unavailable: ${readableError(error)}`)
+          }
+        })
+    }
+    return journal !== null
   }
 
   const preserveDesktopConflict = (message: string) => {
@@ -1626,12 +1754,12 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     return () => { active = false }
   }, [desktopSession?.root])
 
-  useEffect(() => {
-    const timeout = window.setTimeout(() => {
-      writeRecoverySnapshot(draft, filename, manuscriptSource)
-    }, 1800)
-    return () => window.clearTimeout(timeout)
-  }, [draft, filename, manuscriptSource])
+  useRecoveryAutosave({
+    documentKey: recoveryDocumentIdentity ? recoveryDocumentStorageKey(recoveryDocumentIdentity) : undefined,
+    source: manuscriptSource,
+    paused: recoveryOpen,
+    onSnapshot: captureRecoverySnapshot,
+  })
 
   useEffect(() => {
     if (initialExperience === 'browser-new') localStorage.removeItem(BUILT_IN_PROJECT_KEY)
@@ -1795,6 +1923,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (recoveryOpen) {
+        if (event.key === 'Escape') setRecoveryOpen(false)
+        return
+      }
       if (projectBusy || (awaitingDesktopLaunch && !pendingProject)) return
       if (pendingProject) {
         if (event.key === 'Escape') closeManuscriptPicker()
@@ -1848,7 +1980,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [canRedo, canUndo, draft, executionTrustBusy, juliaPackageBusy, pendingProject, projectBusy, awaitingDesktopLaunch, structuredMode, structuredCitationSelection, findOpen, manuscriptFileActive])
+  }, [canRedo, canUndo, draft, executionTrustBusy, juliaPackageBusy, pendingProject, projectBusy, awaitingDesktopLaunch, structuredMode, structuredCitationSelection, findOpen, manuscriptFileActive, recoveryOpen])
 
   useEffect(() => {
     if (!commandOpen) return
@@ -1858,7 +1990,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
 
 
   useEffect(() => {
-    if (!focusMode) return
+    if (!focusMode || recoveryOpen) return
     const exitFocus = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       event.preventDefault()
@@ -1866,7 +1998,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     }
     globalThis.addEventListener('keydown', exitFocus)
     return () => globalThis.removeEventListener('keydown', exitFocus)
-  }, [focusMode])
+  }, [focusMode, recoveryOpen])
 
   useEffect(() => {
     if (!toast) return
@@ -4128,7 +4260,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     setDiagnostics(parsed.diagnostics)
     setProjectMenuOpen(false)
     setSaveState('saved')
-    const recoveryAvailable = writeRecoverySnapshot(parsed.draft, file.name, source) !== null
+    const recoveryAvailable = writeRecoverySnapshot(parsed.draft, file.name, source, undefined, undefined,
+      { kind: 'browser', browserAssetScope: browserAssetScopeRef.current, documentPath: file.name }) !== null
     const warnings = parsed.diagnostics.filter((item) => item.level !== 'info').length
     setToast(options.successMessage
       ?? `${warnings ? `Opened ${file.name} · ${warnings} check${warnings === 1 ? '' : 's'} to review` : `Opened ${file.name}`}${recoveryAvailable ? '' : ' · local recovery unavailable'}`)
@@ -4322,7 +4455,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       localStorage.setItem(LAST_PROJECT_ROOT_KEY, project.root)
       rememberLocalProject(localStorage, project)
     }
-    writeRecoverySnapshot(openedDraft, displayName, document.content)
+    writeRecoverySnapshot(openedDraft, displayName, document.content, undefined, undefined,
+      { kind: 'desktop', projectRoot: project.root, documentPath: mainPath })
     if (announce) {
       const sourceCount = projectBibliography.records.length
       setToast(`Opened ${project.config.name} · ${mainPath}${sourceCount ? ` · ${sourceCount} project source${sourceCount === 1 ? '' : 's'}` : ''}`)
@@ -4676,41 +4810,159 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     if (file) await openPortableFile(file)
   }
 
-  const createSnapshot = () => {
-    const next = writeRecoverySnapshot(draft, filename, manuscriptSource, new Date().toISOString())
-    setProjectMenuOpen(false)
-    setToast(next ? 'Recovery snapshot saved locally' : 'Could not save a local recovery snapshot')
+  const archiveRecoverySource = async (identity: Extract<RecoveryDocumentIdentity, { kind: 'desktop' }>, source: string, options: RecoveryVersionOptions): Promise<LoadedHistoryVersion> => {
+    const copy = await desktopHost.createDocumentRecovery(identity.projectRoot, identity.documentPath, source, undefined, options)
+    if (copy.documentPath !== identity.documentPath || copy.source !== source || copy.kind !== options.kind || !copy.id || !copy.sourceHash) {
+      throw new Error('The saved version could not be verified. Your current manuscript has been kept.')
+    }
+    const parsed = parsePortableDocument(copy.source, { ...initialDraft, title: identity.documentPath.split('/').at(-1) ?? filename })
+    const version = archivedHistoryVersion({ ...copy, kind: options.kind as SavedDocumentVersionMetadata['kind'],
+      sourceHash: copy.sourceHash, bytes: copy.bytes ?? new TextEncoder().encode(source).byteLength,
+      title: parsed.draft.title }, identity)
+    const loaded: LoadedHistoryVersion = { ...version, source, draft: parsed.draft } as LoadedHistoryVersion
+    if (activeRecoveryIdentityRef.current && recoveryDocumentStorageKey(activeRecoveryIdentityRef.current) === recoveryDocumentStorageKey(identity)) {
+      setArchivedRecoveryVersions((current) => [loaded, ...current.filter((entry) => entry.id !== loaded.id)])
+    }
+    return loaded
   }
 
-  const restoreSnapshot = (snapshot: RecoverySnapshot) => {
+  const preserveCurrentRecovery = async (preserveSnapshotId?: string, kind: 'manual' | 'before-restore' = 'manual', label?: string) => {
+    const session = desktopSessionRef.current
+    const identity: RecoveryDocumentIdentity | undefined = session
+      ? { kind: 'desktop', projectRoot: session.root, documentPath: session.path } : recoveryDocumentIdentity
+    if (!identity) throw new Error('Open a manuscript before saving a recovery version.')
+    const source = manuscriptSourceRef.current
+    const revision = draftRevisionRef.current
+    let savedOnDisk = false
+    if (identity.kind === 'desktop') {
+      await archiveRecoverySource(identity, source, { kind, label })
+      savedOnDisk = true
+    } else if (!writeRecoverySnapshot(draftRef.current, filename, source, new Date().toISOString(), preserveSnapshotId, identity, { kind, label })) {
+      throw new Error('Could not create a safety copy of the current draft. Saved versions were kept. Export the current manuscript before restoring.')
+    }
+    const current = desktopSessionRef.current
+    const stillSameDocument = identity.kind === 'desktop'
+      ? current?.root === identity.projectRoot && current.path === identity.documentPath
+      : !current && activeRecoveryIdentityRef.current && recoveryDocumentStorageKey(activeRecoveryIdentityRef.current) === recoveryDocumentStorageKey(identity)
+    if (!stillSameDocument || manuscriptSourceRef.current !== source || draftRevisionRef.current !== revision) {
+      throw new Error('The manuscript changed while creating its safety copy. Try restoring again; your current text has been kept.')
+    }
+    if (savedOnDisk) setSaveProblem('')
+    return { identity, savedOnDisk }
+  }
+
+  const createSnapshot = async (label?: string, reportFailure = false) => {
+    if (projectBusy || recoveryActionRunningRef.current) {
+      if (reportFailure) throw new Error('Another project operation is still running. Try saving the version again.')
+      return
+    }
+    if (sourceEditing && sourceBuffer !== manuscriptSourceRef.current) {
+      const message = 'Apply or cancel your source edits before saving a manuscript version.'
+      setToast(message)
+      if (reportFailure) throw new Error(message)
+      return
+    }
+    recoveryActionRunningRef.current = true
+    setProjectBusy(true)
+    setProjectMenuOpen(false)
+    try {
+      const { savedOnDisk } = await preserveCurrentRecovery(undefined, 'manual', label)
+      setToast(savedOnDisk ? 'Version saved in this project on disk' : 'Version saved on this device')
+    } catch (error) { setToast(readableError(error)); if (reportFailure) throw error }
+    finally { recoveryActionRunningRef.current = false; setProjectBusy(false) }
+  }
+
+  const nameHistoryVersion = async (snapshot: LoadedHistoryVersion, name: string) => {
+    const label = name.trim()
+    if (!label || label.length > 160 || /[\u0000-\u001f\u007f]/.test(label)) throw new Error('Enter a version name of 1 to 160 characters.')
+    if (projectBusy || recoveryActionRunningRef.current) throw new Error('Another project operation is still running. Try naming the version again.')
+    const identity = activeRecoveryIdentityRef.current
+    if (!identity) throw new Error('Open a manuscript before naming a version.')
+    assertRecoverySnapshotDocument(snapshot, identity)
+    recoveryActionRunningRef.current = true
+    setProjectBusy(true)
+    try {
+      if (identity.kind === 'desktop') {
+        await archiveRecoverySource(identity, snapshot.source, { kind: 'manual', label,
+          restoredFromId: snapshot.id, originalSavedAtMillis: Date.parse(snapshot.savedAt) })
+      } else if (!writeRecoverySnapshot(snapshot.draft, snapshot.filename, snapshot.source, snapshot.savedAt,
+        snapshot.id, identity, { kind: 'manual', label, restoredFromId: snapshot.id })) {
+        throw new Error('The named version could not be saved. Your manuscript and existing history are unchanged.')
+      }
+      if (!activeRecoveryIdentityRef.current || recoveryDocumentStorageKey(activeRecoveryIdentityRef.current) !== recoveryDocumentStorageKey(identity)) {
+        throw new Error('The version was kept in its original project. Reopen that manuscript to see its name.')
+      }
+      setToast('Named version kept · the working manuscript is unchanged')
+    } finally {
+      recoveryActionRunningRef.current = false
+      setProjectBusy(false)
+    }
+  }
+
+  const restoreSnapshot = async (snapshot: LoadedHistoryVersion) => {
     if (fileWorkspaceRef.current && !fileWorkspaceRef.current.canLeave()) return
+    if (projectBusy || recoveryActionRunningRef.current) return
+    try {
+      const currentSession = desktopSessionRef.current
+      const identity = currentSession ? { kind: 'desktop' as const, projectRoot: currentSession.root, documentPath: currentSession.path } : recoveryDocumentIdentity
+      if (!identity) throw new Error('Open a manuscript before restoring a recovery version.')
+      assertRecoverySnapshotDocument(snapshot, identity)
+    } catch (error) {
+      setToast(readableError(error))
+      return
+    }
     if (collaborationSessionActiveRef.current) {
       setRecoveryOpen(false)
       setCollaborationOpen(true)
       setToast('Leave online collaboration before restoring a local recovery snapshot. Use Files to resolve differences between the current local and online copies.')
       return
     }
-    if (!writeRecoverySnapshot(draftRef.current, filename, manuscriptSourceRef.current)) {
-      setToast('The current draft could not be preserved. Free local recovery storage before restoring an older version.')
+    if (sourceEditing && sourceBuffer !== manuscriptSourceRef.current) {
+      setToast('Apply or cancel your source edits before restoring a manuscript version.')
       return
     }
-    replaceBuiltInProject(null)
-    replaceManuscriptSource(snapshot.source)
-    setStructuredMode(true)
-    commitDraftHistory(snapshot.draft)
-    if (desktopSession) {
-      setCurrentRevision(draftRevisionRef.current + 1)
-      if (!desktopSaveBlockedRef.current) setSaveState('saving')
-    } else {
-      browserAssetScopeRef.current = snapshot.browserAssetScope ?? crypto.randomUUID()
-      setBrowserAssetScope(browserAssetScopeRef.current)
-      setFilename(snapshot.filename)
-      setProjectName(snapshot.filename.replace(/\.(qmd|md)$/i, '').replaceAll(/[-_]+/g, ' '))
-      setSaveState('saving')
+    recoveryActionRunningRef.current = true
+    setProjectBusy(true)
+    try {
+      const sourceBeforeRestore = manuscriptSourceRef.current
+      const revisionBeforeRestore = draftRevisionRef.current
+      const { identity, savedOnDisk } = await preserveCurrentRecovery(snapshot.id, 'before-restore')
+      assertRecoverySnapshotDocument(snapshot, identity)
+      if (identity.kind === 'desktop' && !snapshot.archiveId) {
+        await archiveRecoverySource(identity, snapshot.source, { kind: 'origin', restoredFromId: snapshot.id,
+          originalSavedAtMillis: Date.parse(snapshot.savedAt) })
+      }
+      if (manuscriptSourceRef.current !== sourceBeforeRestore || draftRevisionRef.current !== revisionBeforeRestore
+        || !activeRecoveryIdentityRef.current || recoveryDocumentStorageKey(activeRecoveryIdentityRef.current) !== recoveryDocumentStorageKey(identity)) {
+        throw new Error('The manuscript changed while preserving its versions. Your current text has been kept; try restoring again.')
+      }
+      replaceBuiltInProject(null)
+      replaceManuscriptSource(snapshot.source)
+      setStructuredMode(true)
+      commitDraftHistory(snapshot.draft)
+      if (identity.kind === 'desktop') {
+        setCurrentRevision(draftRevisionRef.current + 1)
+        if (!desktopSaveBlockedRef.current) setSaveState('saving')
+      } else {
+        setSaveState('saving')
+      }
+      setDiagnostics([{ code: 'recovery-restored', level: 'info', message: `Recovered the local version saved ${new Date(snapshot.savedAt).toLocaleString()}.` }])
+      let versionProblem = ''
+      if (identity.kind === 'desktop') {
+        try { await archiveRecoverySource(identity, snapshot.source, { kind: 'restored', restoredFromId: snapshot.id }) }
+        catch (error) { versionProblem = `The draft was restored, but its new saved-version entry could not be recorded: ${readableError(error)}` }
+      } else if (!writeRecoverySnapshot(snapshot.draft, filename, snapshot.source, new Date().toISOString(), snapshot.id, identity,
+        { kind: 'restored', restoredFromId: snapshot.id })) {
+        versionProblem = 'The draft was restored. Its original version and your previous draft are preserved, but local storage could not record another version.'
+      }
+      setRecoveryOpen(false)
+      setToast(versionProblem || (savedOnDisk ? 'Version restored · the original and previous draft remain saved' : 'Recovered local manuscript version · previous versions kept'))
+    } catch (error) {
+      setToast(`Could not restore this version: ${readableError(error)}`)
+    } finally {
+      recoveryActionRunningRef.current = false
+      setProjectBusy(false)
     }
-    setDiagnostics([{ code: 'recovery-restored', level: 'info', message: `Recovered the local version saved ${new Date(snapshot.savedAt).toLocaleString()}.` }])
-    setRecoveryOpen(false)
-    setToast('Recovered local manuscript version')
   }
 
   const openCitationPicker = (intent: 'insert' | 'edit' = 'insert') => {
@@ -5640,7 +5892,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
                   <button className="project-menu-example" onClick={() => void openCompleteExample()} disabled={projectBusy}><Icon name="spark" size={16} /><span><strong>Open complete example</strong><small>Citations, review, figures, tables, Python, R, and Julia</small></span></button>
                   {desktopProject && collaborationSession && <button onClick={() => { setProjectMenuOpen(false); desktopProject.config.collaboration ? setCollaborationOpen(true) : setStartCollaborationOpen(true) }}><Icon name="users" size={16} /><span><strong>{desktopProject.config.collaboration ? collaborationRole === 'owner' ? 'Invite people' : 'Collaboration details' : 'Start collaboration'}</strong><small>{desktopProject.config.collaboration ? `${desktopProject.config.collaboration.workspaceId} · ${desktopProject.config.collaboration.projectId}` : 'Link this local manuscript to an online workspace'}</small></span></button>}
                   <button onClick={() => bibliographyInputRef.current?.click()}><Icon name="book" size={16} /><span><strong>Attach bibliography…</strong><small>BibTeX, CSL JSON, RIS, or EndNote · {citations.length} indexed</small></span></button>
-                  <button onClick={createSnapshot}><Icon name="clock" size={16} /><span><strong>Save recovery snapshot</strong><small>Keep a private safety copy on this device</small></span></button>
+                  <button onClick={() => void createSnapshot()}><Icon name="clock" size={16} /><span><strong>Save recovery snapshot</strong><small>Keep a private safety copy on this device</small></span></button>
                   <button aria-label="Open local recovery history" onClick={() => { setRecoveryOpen(true); setProjectMenuOpen(false) }}><Icon name="history" size={16} /><span><strong>Recovery history</strong><small>{recoveries.length ? `${recoveries.length} local version${recoveries.length === 1 ? '' : 's'}` : 'No local versions yet'}</small></span><span className="menu-count">{recoveries.length}</span></button>
                   {desktopHost.available && <button onClick={openAssistantConnections}><Icon name="spark" size={16} /><span><strong>Connect AI assistants…</strong><small>Device-wide setup for Codex, Claude, Copilot, and Vibe</small></span></button>}
                   {desktopSession && <button onClick={openAgentIntegration}><Icon name="code" size={16} /><span><strong>AI for this project…</strong><small>Project enablement, execution trust, and request-scoped network access</small></span></button>}
@@ -7151,25 +7403,16 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         <ProjectChecksDialog diagnostics={allDiagnostics} onClose={closeProjectChecks} onAction={runProjectCheckAction} />
       )}
 
-      {recoveryOpen && (
-        <div className="modal-backdrop recovery-backdrop" onMouseDown={() => setRecoveryOpen(false)}>
-          <div className="recovery-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-label="Recovery history">
-            <div className="recovery-head"><div><span className="eyebrow">Local safety net</span><h2>Recovery history</h2><p>DraftMatter keeps a small, private journal on this device. Restoring creates a new autosaved state; it does not delete newer versions.</p></div><button className="icon-button" onClick={() => setRecoveryOpen(false)} aria-label="Close recovery history"><Icon name="close" /></button></div>
-            <div className="recovery-list">
-              {recoveries.length === 0 ? (
-                <div className="recovery-empty"><Icon name="history" size={24} /><strong>No recovery versions yet</strong><p>Continue writing or save a snapshot from the project menu.</p></div>
-              ) : recoveries.map((snapshot, index) => (
-                <button key={snapshot.id} onClick={() => restoreSnapshot(snapshot)}>
-                  <span className="recovery-timeline"><i />{index < recoveries.length - 1 && <b />}</span>
-                  <span className="recovery-copy"><strong>{snapshot.title}</strong><small>{snapshot.filename} · {new Date(snapshot.savedAt).toLocaleString()}</small><em>{snapshot.sourceHash}</em></span>
-                  <span className="recovery-action">Restore <Icon name="arrowRight" size={14} /></span>
-                </button>
-              ))}
-            </div>
-            <div className="recovery-footer"><Icon name="check" size={14} /> Stored only on this device · maximum 8 versions</div>
-          </div>
-        </div>
-      )}
+      {recoveryOpen && <RecoveryHistory
+        key={recoveryDocumentIdentity ? recoveryDocumentStorageKey(recoveryDocumentIdentity) : 'unopened'}
+        snapshots={recoveries} documentPath={recoveryDocumentIdentity?.documentPath ?? filename}
+        currentSource={manuscriptSource} currentTitle={draft.title} loading={diskRecoveryLoading}
+        problem={diskRecoveryProblem} legacyNotice={hasUnassignedRecoveryVersions} busy={projectBusy}
+        loadSnapshot={loadHistorySnapshot}
+        onClose={() => setRecoveryOpen(false)} onRestore={(snapshot) => void restoreSnapshot(snapshot)}
+        onSaveVersion={() => void createSnapshot()}
+        onSaveNamedVersion={(label) => createSnapshot(label, true)}
+        onTagVersion={nameHistoryVersion} />}
 
       {sourceOpen && (
         <div className="source-drawer-backdrop" onMouseDown={closeSourceInspector}>

@@ -34,10 +34,24 @@ document** on the left. Enter a phrase, then use **Enter / Shift+Enter** for the
 next or previous match. The search includes the visible title and bibliography.
 **Escape** closes it and returns to the manuscript without changing the text.
 
-Choose **History** on the left to browse this device’s recovery snapshots.
-Restoring an earlier snapshot creates a new saved state. The project menu also
-keeps its **Recovery history** entry. These safety copies are separate from Git
-commits and shared collaboration checkpoints.
+Choose **History** on the left to browse recovery versions for the current
+manuscript only. Histories are identified by both project and manuscript path;
+two projects containing `paper.md` have separate histories. On desktop, verified
+on-disk backups for that same file are included. Older global backups without a
+reliable project/file identity remain preserved separately and are not mixed in.
+Selecting a version opens **Preview**, **Changes**, or **Source** in read-only
+mode. It does not restore the version or change the working manuscript. Use
+**Back to current manuscript** when finished, or explicitly choose **Restore this
+version** to use it. Restoration preserves both the current draft and selected
+original, and records a distinct restored version.
+
+**Save version** adds a new saved event for the current working manuscript,
+including when its contents match an older version. Saved events are kept;
+recent automatic safety copies rotate separately. A full archive fails visibly
+rather than deleting a saved version. The project menu also keeps **Recovery
+history**. These versions are separate from Git commits and shared collaboration
+checkpoints. See [Manuscript history](manuscript-history.md) for the exact timing,
+retention and project-backup boundaries.
 
 ## Add figures, tables, and equations
 

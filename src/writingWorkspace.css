@@ -150,5 +150,8 @@
 
 .toolbar-reproducibility-heading { border-top: 1px solid #dde4df; color: #63766a; font-size: 10px; font-weight: 650; letter-spacing: .04em; margin-top: 4px; padding: 10px 8px 4px; }
 .recovery-dialog :is(.recovery-head p, .recovery-empty p, .recovery-footer) { color: #596b60; font-size: 11px; }
+.recovery-head p strong { overflow-wrap: anywhere; }
+.recovery-dialog .recovery-copy :is(small, em) { color: #596b60; font-size: 10px; }
+.recovery-legacy-notice { border-top: 1px solid #e4e9e2; color: #596b60; font-size: 11px; line-height: 1.5; margin: 0; padding: 12px 20px; }
 .floating-writing-toolbar-shell .toolbar-insert-menu small { color: #596b60; font-size: 10px; }
 .floating-writing-toolbar-shell .toolbar-insert-menu strong { font-size: 11px; }

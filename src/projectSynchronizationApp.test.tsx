@@ -161,11 +161,15 @@ describe('selective synchronization in the actual app', () => {
   it('automatically pulls the shared manuscript into its unchanged local default without creating a second text authority', async () => {
     liveSource = onlineSource
     await connectAndOpenFiles()
-    await until(() => decoder.decode(local.get('paper.qmd')) === onlineSource && container.textContent?.includes('Up to date') === true)
+    const onlineHash = await projectAssetHash(encoder.encode(onlineSource))
+    // The data row can already say "Up to date" while the manuscript transfer
+    // has written its bytes but is still persisting its synchronization baseline.
+    await until(() => decoder.decode(local.get('paper.qmd')) === onlineSource
+      && stored.state.baselines['paper.qmd'].localHash === onlineHash && container.textContent?.includes('Up to date') === true)
     expect(container.querySelector('.structured-manuscript-editor')?.textContent).toContain('A collaborator updated this manuscript online.')
     expect(desktopHost.applyProjectSyncFile).toHaveBeenCalledWith(expect.objectContaining({ path: 'paper.qmd', expectedHash: await projectAssetHash(encoder.encode(originalSource)) }))
     expect(remoteWrites.some((write) => write.path === 'paper.qmd')).toBe(false)
-    expect(stored.state.baselines['paper.qmd'].localHash).toBe(await projectAssetHash(encoder.encode(onlineSource)))
+    expect(stored.state.baselines['paper.qmd'].localHash).toBe(onlineHash)
   })
 
   it('pauses a file changed on both sides and keeps both versions when the app user resolves it', async () => {

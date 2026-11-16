@@ -5,12 +5,13 @@ import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
 import { DraftMatterApplication } from './DraftMatterApplication'
-import { desktopHost, type ProjectSnapshot } from './desktopHost'
+import { desktopHost, type DocumentRecoverySnapshot, type ProjectSnapshot } from './desktopHost'
 import { readLocalProjectRecents } from './localProjectCatalogue'
 import { readRecoverySnapshots } from './storage'
 
 const projectParent = '/research'
 const projectRoot = '/research/Portable research article'
+const recoveryIdentity = { kind: 'desktop' as const, projectRoot, documentPath: 'paper.qmd' }
 const originalSource = `---
 title: "Phase 1 article"
 ---
@@ -52,12 +53,14 @@ describe('DM-P1-GATE local project workflow', () => {
   let previousAvailability: boolean
   let persistedSource: string
   let persistedHash: string
+  let archivedVersions: DocumentRecoverySnapshot[]
 
   beforeEach(() => {
     ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
     localStorage.clear()
     persistedSource = originalSource
     persistedHash = 'document-1'
+    archivedVersions = []
     previousAvailability = desktopHost.available
     desktopHost.available = true
 
@@ -76,6 +79,14 @@ describe('DM-P1-GATE local project workflow', () => {
     vi.spyOn(desktopHost, 'readCitationLock').mockResolvedValue(null)
     vi.spyOn(desktopHost, 'readCitationCache').mockResolvedValue(null)
     vi.spyOn(desktopHost, 'readExecutionManifests').mockResolvedValue([])
+    vi.spyOn(desktopHost, 'listDocumentRecoveries').mockResolvedValue([])
+    vi.spyOn(desktopHost, 'listSavedDocumentVersions').mockImplementation(async () => archivedVersions.map(({ source: _source, ...entry }) => ({ ...entry, kind: entry.kind as 'manual', title: 'Phase 1 article', sourceHash: entry.sourceHash!, bytes: entry.bytes! })))
+    vi.spyOn(desktopHost, 'readSavedDocumentVersion').mockImplementation(async (_root, _path, id) => archivedVersions.find((entry) => entry.id === id)!)
+    vi.spyOn(desktopHost, 'createDocumentRecovery').mockImplementation(async (_root, path, source, _preserve, options) => {
+      const entry = { id: `archive-${archivedVersions.length + 1}`, documentPath: path, source, savedAtMillis: Date.now(), ...options, sourceHash: `saved:${source.length}`, bytes: source.length }
+      archivedVersions.push(entry)
+      return entry
+    })
     vi.spyOn(desktopHost, 'agentIntegrationStatus').mockResolvedValue({
       schemaVersion: 2,
       protocolVersion: '1.0',
@@ -187,7 +198,7 @@ describe('DM-P1-GATE local project workflow', () => {
     await act(async () => container.querySelector<HTMLElement>('[aria-label="DraftMatter home"]')!.click())
     expect(leave).not.toHaveBeenCalled()
     expect(persistedSource).toBe(originalSource)
-    expect(readRecoverySnapshots(localStorage)[0].source).toBe(editedSource)
+    expect(readRecoverySnapshots(localStorage, recoveryIdentity)[0].source).toBe(editedSource)
     expect(container.textContent).toContain('The external copy changed.')
   })
 
@@ -342,7 +353,9 @@ describe('DM-P1-GATE local project workflow', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close source inspector"]')!.click())
     await act(async () => container.querySelector<HTMLButtonElement>('.project-switcher')!.click())
     await act(async () => buttonWithText(container, 'Save recovery snapshot').click())
-    expect(readRecoverySnapshots(localStorage).map((snapshot) => snapshot.source)).toEqual([editedSource, originalSource])
+    expect(readRecoverySnapshots(localStorage, recoveryIdentity).some((snapshot) => snapshot.source === originalSource)).toBe(true)
+    const manualVersion = archivedVersions.find((version) => version.kind === 'manual' && version.source === editedSource)!
+    expect(manualVersion).toBeDefined()
 
     await act(async () => appRoot.unmount())
     container.remove()
@@ -360,7 +373,9 @@ describe('DM-P1-GATE local project workflow', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('.project-switcher')!.click())
     await act(async () => buttonWithText(container, 'Recovery history').click())
     const recoveryDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Recovery history"]')!
-    expect(recoveryDialog.querySelectorAll('.recovery-list > button')).toHaveLength(2)
+    expect(recoveryDialog.querySelector(`[data-history-select="saved:${manualVersion.id}"]`)).not.toBeNull()
+    const originalVersion = readRecoverySnapshots(localStorage, recoveryIdentity).find((version) => version.source === originalSource)!
+    expect(recoveryDialog.querySelector(`[data-history-select="${originalVersion.id}"]`)).not.toBeNull()
   })
 
   it('reloads a clean external edit without creating a conflict', async () => {
@@ -426,13 +441,13 @@ describe('DM-P1-GATE local project workflow', () => {
 
     const alert = container.querySelector<HTMLElement>('.save-alert.conflict')!
     expect(alert.textContent).toContain('A recovery snapshot of your editor copy was saved before disk reload.')
-    expect(readRecoverySnapshots(localStorage).some((snapshot) => snapshot.source === editedSource)).toBe(true)
+    expect(readRecoverySnapshots(localStorage, recoveryIdentity).some((snapshot) => snapshot.source === editedSource)).toBe(true)
     expect(persistedSource).toBe(originalSource)
 
     await act(async () => buttonWithText(alert, 'Reload disk version').click())
     await flush(50)
     expect(container.querySelector('.structured-manuscript-editor')?.textContent).toContain('First observation.')
-    expect(readRecoverySnapshots(localStorage).some((snapshot) => snapshot.source === editedSource)).toBe(true)
+    expect(readRecoverySnapshots(localStorage, recoveryIdentity).some((snapshot) => snapshot.source === editedSource)).toBe(true)
   })
 
   it('opens local recovery from the History launcher and restores a saved version without managing Git', async () => {
@@ -448,21 +463,24 @@ describe('DM-P1-GATE local project workflow', () => {
     await flush()
     const history = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Recovery history"]')!
     expect(history).not.toBeNull()
-    expect(history.textContent).toContain('Stored only on this device')
+    expect(history.textContent).toContain('Browsing leaves your manuscript unchanged.')
     expect(container.querySelector('.git-history-browser')).toBeNull()
     expect(container.textContent).not.toContain('Restore clean files')
     expect(desktopHost.saveDocument).toHaveBeenCalledTimes(writesBeforeHistory)
     expect(persistedSource).toBe(editedSource)
 
-    const original = readRecoverySnapshots(localStorage).find((snapshot) => snapshot.source === originalSource)!
-    const restore = [...history.querySelectorAll<HTMLButtonElement>('.recovery-list > button')]
-      .find((button) => button.textContent?.includes(original.sourceHash))!
+    const original = readRecoverySnapshots(localStorage, recoveryIdentity).find((snapshot) => snapshot.source === originalSource)!
+    const restore = history.querySelector<HTMLButtonElement>(`[data-history-select="${original.id}"]`)!
     await act(async () => restore.click())
+    expect(persistedSource).toBe(editedSource)
+    expect(desktopHost.saveDocument).toHaveBeenCalledTimes(writesBeforeHistory)
+    await act(async () => container.querySelector<HTMLButtonElement>('.recovery-restore-version')!.click())
     await flush(1_000)
 
     expect(persistedSource).toBe(originalSource)
     expect(container.querySelector('.structured-manuscript-editor')?.textContent).toContain('First observation.')
-    expect(readRecoverySnapshots(localStorage).some((snapshot) => snapshot.source === editedSource)).toBe(true)
+    expect(archivedVersions.some((snapshot) => snapshot.source === editedSource && snapshot.kind === 'before-restore')).toBe(true)
+    expect(archivedVersions.some((snapshot) => snapshot.source === originalSource && snapshot.kind === 'restored')).toBe(true)
     for (const method of ['gitStatus', 'gitInitialize', 'gitBranches', 'gitHistory', 'gitCheckpointDiff', 'gitRestoreCheckpoint'] as const) {
       expect(desktopHost[method]).not.toHaveBeenCalled()
     }

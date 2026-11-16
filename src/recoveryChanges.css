@@ -1,0 +1,20 @@
+.recovery-changes { color: #35473b; font-size: 12px; }
+.recovery-changes-direction { line-height: 1.6; margin: 0 0 10px; }
+.recovery-changes-direction span { display: inline-block; font-size: 11px; margin-right: 10px; }
+.recovery-changes-count { color: #455a4b; font-size: 11px; margin: 0 0 12px; }
+.recovery-changes-empty { color: #526459; line-height: 1.6; }
+.recovery-changes-notices { border-left: 2px solid #c5d1c1; color: #526459; font-size: 11px; line-height: 1.5; margin-bottom: 12px; padding-left: 10px; }
+.recovery-changes-notices p { margin: 4px 0; }
+.recovery-changes-lines { border: 1px solid #dce3d8; border-radius: 6px; max-height: 100%; overflow: auto; }
+.recovery-changes-lines:focus-visible { outline: 2px solid #52754b; outline-offset: 2px; }
+.recovery-changes-row { align-items: start; display: grid; grid-template-columns: 38px 38px 20px minmax(0, 1fr); min-height: 24px; }
+.recovery-changes-row.added { background: #edf6e8; }
+.recovery-changes-row.removed { background: #fbefeb; }
+.recovery-changes-row pre { color: #263b2e; font: 11px/1.7 "SFMono-Regular", Consolas, monospace; margin: 0; min-height: 24px; overflow-wrap: anywhere; padding: 2px 9px 2px 0; white-space: pre-wrap; }
+.recovery-changes-line-number, .recovery-changes-sign { color: #5c6d60; font: 10px/1.8 "SFMono-Regular", Consolas, monospace; padding: 3px 5px; text-align: right; user-select: none; }
+.recovery-changes-sign { font-size: 12px; padding: 1px 3px; text-align: center; }
+.recovery-changes-row del { background: #f1d0c5; color: #653c2d; text-decoration: line-through; text-decoration-thickness: 1px; }
+.recovery-changes-row ins { background: #cce5bf; color: #254b22; text-decoration: none; }
+.recovery-changes-ending { background: #fff9; border: 1px solid #8d9c8b; border-radius: 3px; color: #3e5142; font: 9px/1.4 system-ui, sans-serif; margin-left: 8px; padding: 1px 3px; }
+.recovery-changes-omitted { background: #f4f6f1; color: #526459; font-size: 10px; padding: 6px 10px; }
+@media (max-width: 600px) { .recovery-changes-row { grid-template-columns: 28px 28px 17px minmax(0, 1fr); } }

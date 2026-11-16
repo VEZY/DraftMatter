@@ -4,6 +4,7 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import App from './App'
+import { BROWSER_ASSET_SCOPE_KEY } from './browserProjectAssets'
 import { readRecoverySnapshots } from './storage'
 
 const source = `---
@@ -27,6 +28,12 @@ Keep this opaque block exactly.
 
 async function flush(delay = 0) {
   await act(async () => { await new Promise((resolve) => setTimeout(resolve, delay)) })
+}
+
+function browserRecoveries(filename: string) {
+  const browserAssetScope = localStorage.getItem(BROWSER_ASSET_SCOPE_KEY)
+  if (!browserAssetScope) throw new Error('The browser project identity has not been saved yet.')
+  return readRecoverySnapshots(localStorage, { kind: 'browser', browserAssetScope, documentPath: filename })
 }
 
 describe('generic portable manuscript app workflow', () => {
@@ -53,7 +60,7 @@ describe('generic portable manuscript app workflow', () => {
     const file = { name: 'real-paper.qmd', size: source.length, text: vi.fn().mockResolvedValue(source) } as unknown as File
     Object.defineProperty(input, 'files', { configurable: true, value: [file] })
     await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })))
-    await flush()
+    await flush(420)
 
     expect(container.querySelector('.structured-manuscript-editor')).not.toBeNull()
     expect(container.querySelector('.structured-manuscript-editor h1')?.textContent).toBe('A real portable paper')
@@ -61,8 +68,8 @@ describe('generic portable manuscript app workflow', () => {
     expect(container.querySelector('.structured-citation')?.textContent).toBe('(real2026)')
     expect(container.querySelector('.structured-code-editor .cm-content')?.textContent).toBe('println("before")')
     expect(container.textContent).not.toContain('Keep this opaque block exactly')
-    expect(readRecoverySnapshots(localStorage)[0]?.source).toBe(source)
-    expect(readRecoverySnapshots(localStorage)[0]?.source).not.toContain('Drought acclimation reshapes canopy development')
+    expect(browserRecoveries('real-paper.qmd')[0]?.source).toBe(source)
+    expect(browserRecoveries('real-paper.qmd')[0]?.source).not.toContain('Drought acclimation reshapes canopy development')
 
     expect(container.querySelector('.structured-code-editor .cm-content')?.getAttribute('contenteditable')).toBe('false')
     expect(container.querySelector('.structured-code-cell')?.getAttribute('data-execution-mode')).toBe('browser-view-only')
@@ -141,7 +148,7 @@ describe('generic portable manuscript app workflow', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Learn DraftMatter"]')!.click())
     expect(leave).toHaveBeenCalledOnce()
     expect(localStorage.getItem('draftmatter.structured-source.v1')).toBe(next)
-    expect(readRecoverySnapshots(localStorage)[0].source).toBe(next)
+    expect(browserRecoveries('untitled-paper.qmd')[0].source).toBe(next)
   })
 
   it('starts a fresh browser paper independently from a previously opened example', async () => {

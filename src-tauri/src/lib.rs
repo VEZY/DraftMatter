@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use sha2::{Digest, Sha256};
+use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsStr;
 use std::fmt::{Display, Formatter};
 use std::fs::{self, File, OpenOptions};
@@ -27,6 +28,8 @@ mod project_inventory;
 mod project_file_preview;
 mod project_sync;
 mod execution_trust;
+mod recovery_archive;
+pub use recovery_archive::{RecoveryEventOptions, SavedDocumentVersionMetadata};
 mod export_adapter;
 mod git_adapter;
 mod oidc_desktop;
@@ -126,7 +129,10 @@ fn runtime_name_for_progress(language: RuntimeLanguage) -> &'static str {
 }
 
 const PROJECT_SCHEMA: u32 = 1;
-const MAX_RECOVERY_FILES: usize = 8;
+const MAX_RECOVERY_FILES: usize = 100;
+const KEEP_RECENT_RECOVERIES: usize = 8;
+const MAX_RECOVERY_SOURCE_BYTES: u64 = 5 * 1024 * 1024;
+const MAX_RECOVERY_DIRECTORY_ENTRIES: usize = 4096;
 const MAX_BIBLIOGRAPHY_BYTES: u64 = 10 * 1024 * 1024;
 const MAX_CITATION_LOCK_BYTES: u64 = 4 * 1024 * 1024;
 const MAX_ZOTERO_RESPONSE_BYTES: u64 = 4 * 1024 * 1024;
@@ -386,6 +392,43 @@ pub struct SaveDocumentResult {
     pub hash: String,
     pub bytes: u64,
     pub recovery_path: Option<String>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct DocumentRecoverySnapshot {
+    pub id: String,
+    pub document_path: String,
+    pub source: String,
+    pub saved_at_millis: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub label: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub restored_from_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original_saved_at_millis: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_hash: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RecoveryDocumentIdentity {
+    schema_version: u8,
+    document_path: String,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RecoveryRestoreProtection {
+    schema_version: u8,
+    recovery_id: String,
+    #[serde(default)]
+    current_recovery_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -1702,41 +1745,325 @@ fn apply_citation_file_transaction(
     })
 }
 
-fn recovery_filename(relative: &str, hash: &str) -> String {
+fn recovery_filename(relative: &str, hash: &str, timestamp: u64) -> String {
     let safe = relative.replace(['/', '\\'], "__");
     format!(
         "{}-{}-{}.bak",
-        now_millis(),
+        timestamp,
         hash.trim_start_matches("fnv1a:"),
         safe
     )
 }
 
-fn create_recovery(root: &Path, relative: &str, previous: &[u8]) -> Result<String, HostError> {
-    let directory = contained_path(root, ".draftmatter/recovery")?;
-    fs::create_dir_all(&directory)?;
-    let filename = recovery_filename(relative, &source_hash(previous));
-    let path = directory.join(filename);
-    write_atomic(&path, previous, false)?;
+fn recovery_document_directory(root: &Path, relative: &str) -> Result<(PathBuf, String), HostError> {
+    let relative = slash_path(&safe_relative(relative)?);
+    let identity = format!("{:x}", Sha256::digest(relative.as_bytes()));
+    Ok((contained_path(root, &format!(".draftmatter/recovery/documents/{identity}"))?, relative))
+}
 
+fn recovery_name_parts(name: &str) -> Option<(u64, &str, &str)> {
+    let mut parts = name.splitn(3, '-');
+    let timestamp = parts.next()?.parse::<u64>().ok()?;
+    // Keep timestamps valid in the JavaScript Date used by the desktop UI.
+    if timestamp == 0 || timestamp > 8_640_000_000_000_000 { return None; }
+    let hash = parts.next()?;
+    if hash.len() != 16 || !hash.bytes().all(|byte| byte.is_ascii_hexdigit()) { return None; }
+    Some((timestamp, hash, parts.next()?.strip_suffix(".bak")?))
+}
+
+fn recovery_regular_bytes(path: &Path, limit: u64) -> Result<Option<Vec<u8>>, HostError> {
+    let mut options = OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        options.custom_flags(0x00200000); // FILE_FLAG_OPEN_REPARSE_POINT
+    }
+    let file = match options.open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error.into()),
+    };
+    let metadata = file.metadata()?;
+    if !metadata.is_file() || metadata.file_type().is_symlink() || metadata.len() > limit {
+        return Err(HostError::UnsupportedFile("A recovery entry is not a regular file within its size limit; it was preserved.".into()));
+    }
+    let mut bytes = Vec::new();
+    file.take(limit + 1).read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > limit {
+        return Err(HostError::UnsupportedFile("A recovery entry exceeds its size limit; it was preserved.".into()));
+    }
+    Ok(Some(bytes))
+}
+
+fn recovery_directory_entries(directory: &Path, encoded_path: &str) -> Result<Vec<(u64, String, String, PathBuf)>, HostError> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error.into()),
+    };
+    let mut matching = Vec::new();
+    for (index, entry) in entries.enumerate() {
+        if index >= MAX_RECOVERY_DIRECTORY_ENTRIES {
+            return Err(HostError::UnsupportedFile("The recovery directory exceeds its entry limit; its files were preserved.".into()));
+        }
+        let entry = entry?;
+        let file_type = match entry.file_type() {
+            Ok(file_type) => file_type,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(error.into()),
+        };
+        if !file_type.is_file() { continue; }
+        let Ok(name) = entry.file_name().into_string() else { continue; };
+        if let Some((timestamp, hash, path)) = recovery_name_parts(&name) {
+            if path == encoded_path {
+                matching.push((timestamp, hash.to_string(), name, entry.path()));
+            }
+        }
+    }
+    matching.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.2.cmp(&left.2)));
+    Ok(matching)
+}
+
+/// Higher-priority automatic versions survive when the budget is exceeded.
+/// Manual checkpoints and restore protections live outside this budget. Keep the
+/// latest eight first, then give unbracketed work priority over work between two
+/// explicit checkpoints. Each group retains progressively wider UTC buckets.
+fn automatic_recovery_priority_ids(entries: &[(u64, String)], manual_checkpoint_times: &[u64]) -> Vec<String> {
+    let mut ordered = entries.to_vec();
+    ordered.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+    let boundaries = manual_checkpoint_times.iter().min().zip(manual_checkpoint_times.iter().max())
+        .filter(|(first, last)| first < last);
+    let is_bracketed = |timestamp: u64| boundaries.is_some_and(|(first, last)| *first < timestamp && timestamp < *last);
+    let mut selected = HashSet::new();
+    let mut result = Vec::new();
+    let mut keep = |id: &str| {
+        if selected.insert(id.to_string()) { result.push(id.to_string()); }
+    };
+    for (_, id) in ordered.iter().take(KEEP_RECENT_RECOVERIES) { keep(id); }
+    for bracketed in [false, true] {
+        let group = ordered.iter().filter(|(timestamp, _)| is_bracketed(*timestamp) == bracketed).collect::<Vec<_>>();
+        for (width, count) in [(5 * 60 * 1000_u64, 12_usize), (60 * 60 * 1000, 24), (24 * 60 * 60 * 1000, 56)] {
+            let mut buckets = HashSet::new();
+            for (timestamp, id) in &group {
+                if buckets.insert(*timestamp / width) {
+                    keep(id);
+                    if buckets.len() >= count { break; }
+                }
+            }
+        }
+        for (_, id) in group { keep(id); }
+    }
+    result
+}
+
+fn recovery_archive_retention(root: &Path, relative: &str) -> Result<(Vec<u64>, HashSet<String>), HostError> {
+    let root_string = root.to_str().ok_or_else(|| HostError::InvalidPath("The project path cannot be represented as UTF-8.".into()))?;
+    let saved = recovery_archive::list_saved_versions(root_string, relative)?;
+    let checkpoints = saved.iter().filter(|version| version.kind == "manual")
+        .map(|version| version.original_saved_at_millis.unwrap_or(version.saved_at_millis)).collect();
+    let protected = saved.iter().filter_map(|version| version.restored_from_id.as_deref())
+        .map(|id| id.strip_prefix("disk:").unwrap_or(id).to_string()).collect();
+    Ok((checkpoints, protected))
+}
+
+fn create_recovery(root: &Path, relative: &str, previous: &[u8]) -> Result<String, HostError> {
+    create_recovery_at(root, relative, previous, None)
+}
+
+/// `earlier_capture_time` is used only for an old disk state when the incoming
+/// source was already captured during continuous typing. It must remain before
+/// that newer source in the timeline, rather than looking like another edit.
+fn create_recovery_at(root: &Path, relative: &str, previous: &[u8], earlier_capture_time: Option<u64>) -> Result<String, HostError> {
+    if previous.len() as u64 > MAX_RECOVERY_SOURCE_BYTES {
+        return Err(HostError::UnsupportedFile("The manuscript safety copy exceeds the 5 MiB recovery limit; earlier versions were preserved.".into()));
+    }
+    let (directory, relative) = recovery_document_directory(root, relative)?;
+    fs::create_dir_all(&directory)?;
+    let identity_path = directory.join("document.json");
+    if let Some(bytes) = recovery_regular_bytes(&identity_path, 16 * 1024)? {
+        let identity: RecoveryDocumentIdentity = serde_json::from_slice(&bytes).map_err(|_| HostError::InvalidProject("Invalid recovery document identity; its files were preserved.".into()))?;
+        if identity.schema_version != 1 || identity.document_path != relative {
+            return Err(HostError::InvalidProject("The recovery directory belongs to another document; its files were preserved.".into()));
+        }
+    } else {
+        let identity = RecoveryDocumentIdentity { schema_version: 1, document_path: relative.clone() };
+        write_atomic(&identity_path, &serde_json::to_vec(&identity).map_err(|error| HostError::Io(error.to_string()))?, false)?;
+    }
     let suffix = relative.replace(['/', '\\'], "__");
-    let mut matching = fs::read_dir(&directory)?
-        .filter_map(Result::ok)
-        .filter(|entry| {
-            entry
-                .file_name()
-                .to_string_lossy()
-                .ends_with(&format!("-{suffix}.bak"))
-        })
-        .collect::<Vec<_>>();
-    matching.sort_by_key(|entry| std::cmp::Reverse(entry.file_name()));
-    for old in matching.into_iter().skip(MAX_RECOVERY_FILES) {
-        let _ = fs::remove_file(old.path());
+    let existing = recovery_directory_entries(&directory, &suffix)?;
+    let hash = source_hash(previous);
+    if earlier_capture_time.is_some() {
+        // The old disk state may already be represented by an earlier version.
+        // Reuse it without moving its date or creating a misleading new event.
+        for (_, recorded_hash, _, candidate) in &existing {
+            if recorded_hash == hash.trim_start_matches("fnv1a:")
+                && matches!(recovery_regular_bytes(candidate, MAX_RECOVERY_SOURCE_BYTES), Ok(Some(bytes)) if bytes == previous) {
+                return Ok(slash_path(candidate.strip_prefix(root).map_err(|_| HostError::InvalidPath("Recovery entry escaped its project.".into()))?));
+            }
+        }
+    }
+    if let Some((_, _, _, latest)) = existing.first() {
+        if matches!(recovery_regular_bytes(latest, MAX_RECOVERY_SOURCE_BYTES), Ok(Some(bytes)) if bytes == previous) {
+            return Ok(slash_path(latest.strip_prefix(root).map_err(|_| HostError::InvalidPath("Recovery entry escaped its project.".into()))?));
+        }
+    }
+    let protection = recovery_regular_bytes(&directory.join("restore-protection.json"), 16 * 1024)?
+        .map(|bytes| serde_json::from_slice::<RecoveryRestoreProtection>(&bytes).map_err(|_| HostError::InvalidProject("Invalid recovery restore protection; its files were preserved.".into())))
+        .transpose()?;
+    if protection.as_ref().is_some_and(|value| value.schema_version != 1) {
+        return Err(HostError::InvalidProject("Unsupported recovery restore protection; its files were preserved.".into()));
+    }
+    // When pruning could be needed, inspect checkpoint metadata before publishing
+    // anything. Invalid archives must never cause an automatic pass to discard
+    // earlier versions. Small histories avoid scanning the explicit archive.
+    let (manual_checkpoints, mut protected_ids) = if existing.len() >= MAX_RECOVERY_FILES {
+        recovery_archive_retention(root, &relative)?
+    } else { (Vec::new(), HashSet::new()) };
+    if let Some(protection) = &protection {
+        protected_ids.insert(protection.recovery_id.clone());
+        if let Some(id) = &protection.current_recovery_id { protected_ids.insert(id.clone()); }
+    }
+    // Preserve capture order if the wall clock moves backwards or two saves
+    // happen in the same millisecond.
+    let mut timestamp = earlier_capture_time.unwrap_or_else(|| now_millis().max(existing.first().map(|entry| entry.0.saturating_add(1)).unwrap_or(0)));
+    if timestamp == 0 || timestamp > 8_640_000_000_000_000 {
+        return Err(HostError::UnsupportedFile("The automatic-version timestamp exceeds its supported range; earlier versions were preserved.".into()));
+    }
+    let path = loop {
+        let candidate = directory.join(recovery_filename(&relative, &hash, timestamp));
+        match fs::symlink_metadata(&candidate) {
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => break candidate,
+            Err(error) => return Err(error.into()),
+            Ok(_) => {
+                timestamp = if earlier_capture_time.is_some() { timestamp.saturating_sub(1) } else { timestamp.saturating_add(1) };
+                if timestamp == 0 || timestamp > 8_640_000_000_000_000 {
+                    return Err(HostError::UnsupportedFile("A distinct automatic-version timestamp could not be assigned; earlier versions were preserved.".into()));
+                }
+            }
+        }
+    };
+    write_atomic(&path, previous, false)?;
+    let committed = recovery_regular_bytes(&path, MAX_RECOVERY_SOURCE_BYTES)?
+        .ok_or_else(|| HostError::NotFound("The automatic manuscript version disappeared before retention could be applied; earlier versions were preserved.".into()))?;
+    if committed != previous {
+        return Err(HostError::Conflict("The automatic manuscript version could not be verified; earlier versions were preserved.".into()));
+    }
+
+    let matching = recovery_directory_entries(&directory, &suffix)?;
+    let automatic = matching.iter().filter_map(|(timestamp, _, _, candidate)| {
+        let id = slash_path(candidate.strip_prefix(root).ok()?);
+        (!protected_ids.contains(&id)).then_some((*timestamp, id))
+    }).collect::<Vec<_>>();
+    let priority = automatic_recovery_priority_ids(&automatic, &manual_checkpoints);
+    let mut retained = priority.iter().take(MAX_RECOVERY_FILES).cloned().collect::<HashSet<_>>();
+    let new_id = slash_path(path.strip_prefix(root).map_err(|_| HostError::InvalidPath("Recovery entry escaped its project.".into()))?);
+    // The newly protected pre-write state must survive this save, even when its
+    // historical timestamp falls outside the ordinary temporal representatives.
+    if !protected_ids.contains(&new_id) && !retained.contains(&new_id) {
+        if retained.len() >= MAX_RECOVERY_FILES {
+            if let Some(last) = priority.iter().take(MAX_RECOVERY_FILES).last() { retained.remove(last); }
+        }
+        retained.insert(new_id);
+    }
+    for (_, hash, _, old) in matching {
+        let Some(relative) = old.strip_prefix(root).ok() else { continue; };
+        let id = slash_path(relative);
+        if old == path || protected_ids.contains(&id) || retained.contains(&id) { continue; }
+        // Preserve entries whose contents cannot be verified, including files
+        // changed externally and files that exceed the recovery size bound.
+        if matches!(recovery_regular_bytes(&old, MAX_RECOVERY_SOURCE_BYTES), Ok(Some(bytes)) if source_hash(&bytes).trim_start_matches("fnv1a:") == hash && std::str::from_utf8(&bytes).is_ok()) {
+            let _ = fs::remove_file(old);
+        }
     }
     Ok(path
         .strip_prefix(root)
         .map(slash_path)
         .unwrap_or_else(|_| path.to_string_lossy().into_owned()))
+}
+
+fn list_document_recoveries_impl(raw_root: &str, relative: &str) -> Result<Vec<DocumentRecoverySnapshot>, HostError> {
+    let root = canonical_root(raw_root)?;
+    let manuscript = contained_path(&root, relative)?;
+    if !manuscript_extension(&manuscript) {
+        return Err(HostError::UnsupportedFile("Recovery history is available only for Markdown and Quarto manuscripts.".into()));
+    }
+    let (directory, document_path) = recovery_document_directory(&root, relative)?;
+    let encoded_path = document_path.replace(['/', '\\'], "__");
+    let mut candidates = Vec::new();
+    if let Some(bytes) = recovery_regular_bytes(&directory.join("document.json"), 16 * 1024)? {
+        let identity: RecoveryDocumentIdentity = serde_json::from_slice(&bytes).map_err(|_| HostError::InvalidProject("Invalid recovery document identity; its files were preserved.".into()))?;
+        if identity.schema_version != 1 || identity.document_path != document_path {
+            return Err(HostError::InvalidProject("The recovery directory belongs to another document; its files were preserved.".into()));
+        }
+        candidates.extend(recovery_directory_entries(&directory, &encoded_path)?);
+    }
+    // Old flat backup names replaced both separators and literal '__' identically.
+    // Only simple root filenames without that ambiguity can be attributed safely.
+    if safe_relative(&document_path)?.components().count() == 1 && !document_path.contains("__") && !document_path.contains('\\') {
+        let legacy_directory = contained_path(&root, ".draftmatter/recovery")?;
+        candidates.extend(recovery_directory_entries(&legacy_directory, &document_path)?);
+    }
+    candidates.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.2.cmp(&left.2)));
+    let mut snapshots = Vec::new();
+    for (saved_at_millis, hash, _, path) in candidates {
+        let bytes = match recovery_regular_bytes(&path, MAX_RECOVERY_SOURCE_BYTES) {
+            Ok(Some(bytes)) => bytes,
+            _ => continue,
+        };
+        if source_hash(&bytes).trim_start_matches("fnv1a:") != hash { continue; }
+        let Ok(source) = String::from_utf8(bytes) else { continue; };
+        if snapshots.iter().any(|snapshot: &DocumentRecoverySnapshot| snapshot.source == source) { continue; }
+        snapshots.push(DocumentRecoverySnapshot {
+            id: slash_path(path.strip_prefix(&root).map_err(|_| HostError::InvalidPath("Recovery entry escaped its project.".into()))?),
+            document_path: document_path.clone(), source, saved_at_millis, ..Default::default()
+        });
+    }
+    Ok(snapshots)
+}
+
+fn create_document_recovery_impl(raw_root: &str, relative: &str, content: &str, preserve_recovery_id: Option<&str>) -> Result<DocumentRecoverySnapshot, HostError> {
+    if content.len() as u64 > MAX_RECOVERY_SOURCE_BYTES {
+        return Err(HostError::UnsupportedFile("The manuscript safety copy exceeds the 5 MiB recovery limit; the current manuscript was not changed.".into()));
+    }
+    let root = canonical_root(raw_root)?;
+    let manuscript = contained_path(&root, relative)?;
+    if !manuscript_extension(&manuscript) {
+        return Err(HostError::UnsupportedFile("A safety copy can be created only for Markdown and Quarto manuscripts.".into()));
+    }
+    if !manuscript.is_file() {
+        return Err(HostError::NotFound("The active manuscript is no longer present in this project; keep or export the current editor copy before restoring.".into()));
+    }
+    let _project_guard = project_guard(&root)?;
+    let (directory, document_path) = recovery_document_directory(&root, relative)?;
+    if let Some(recovery_id) = preserve_recovery_id {
+        if !list_document_recoveries_impl(raw_root, &document_path)?.iter().any(|entry| entry.id == recovery_id) {
+            return Err(HostError::Conflict("The selected recovery version no longer belongs to this manuscript's readable history; the current manuscript was not changed.".into()));
+        }
+        fs::create_dir_all(&directory)?;
+        let protection = RecoveryRestoreProtection { schema_version: 1, recovery_id: recovery_id.to_string(), current_recovery_id: None };
+        write_atomic(&directory.join("restore-protection.json"), &serde_json::to_vec(&protection).map_err(|error| HostError::Io(error.to_string()))?, false)?;
+    }
+    let id = create_recovery(&root, &document_path, content.as_bytes())?;
+    let recovery_path = contained_path(&root, &id)?;
+    let verified = recovery_regular_bytes(&recovery_path, MAX_RECOVERY_SOURCE_BYTES)?
+        .ok_or_else(|| HostError::NotFound("The manuscript safety copy disappeared before it could be verified; the current manuscript was not changed.".into()))?;
+    if verified != content.as_bytes() {
+        return Err(HostError::Conflict("The manuscript safety copy could not be verified; the current manuscript was not changed.".into()));
+    }
+    if let Some(recovery_id) = preserve_recovery_id {
+        let protection = RecoveryRestoreProtection { schema_version: 1, recovery_id: recovery_id.to_string(), current_recovery_id: Some(id.clone()) };
+        write_atomic(&directory.join("restore-protection.json"), &serde_json::to_vec(&protection).map_err(|error| HostError::Io(error.to_string()))?, false)?;
+    }
+    let saved_at_millis = recovery_path.file_name().and_then(OsStr::to_str)
+        .and_then(recovery_name_parts).map(|(timestamp, _, _)| timestamp)
+        .ok_or_else(|| HostError::InvalidProject("The manuscript safety copy has invalid identity metadata.".into()))?;
+    Ok(DocumentRecoverySnapshot { id, document_path, source: content.to_string(), saved_at_millis, ..Default::default() })
 }
 
 fn save_document_impl(request: SaveDocumentRequest) -> Result<SaveDocumentResult, HostError> {
@@ -1775,9 +2102,29 @@ fn save_document_impl_with_fault(
     let recovery_path = if previous.is_empty() {
         None
     } else {
-        Some(create_recovery(&root, &request.path, &previous)?)
+        // A deadline capture can already represent edits newer than the disk
+        // source, even when typing continued after that checkpoint. Date the
+        // pre-write copy by its disk modification time in that case, keeping the
+        // old A before the pending B/C states rather than inventing a return to A.
+        let earlier_capture_time = if previous != request.content.as_bytes() {
+            let (directory, relative) = recovery_document_directory(&root, &request.path)?;
+            let entries = recovery_directory_entries(&directory, &relative.replace(['/', '\\'], "__"))?;
+            let disk_modified = fs::metadata(&path).ok().map(|metadata| modified_ms(&metadata)).filter(|time| *time > 0);
+            entries.first().and_then(|(timestamp, hash, _, latest)| {
+                disk_modified.filter(|modified| *modified < *timestamp).and_then(|modified| {
+                    matches!(recovery_regular_bytes(latest, MAX_RECOVERY_SOURCE_BYTES), Ok(Some(bytes)) if bytes != previous && source_hash(&bytes).trim_start_matches("fnv1a:") == hash && std::str::from_utf8(&bytes).is_ok())
+                        .then_some(modified)
+                })
+            })
+        } else { None };
+        Some(create_recovery_at(&root, &request.path, &previous, earlier_capture_time)?)
     };
     write_atomic(&path, request.content.as_bytes(), fail_before_replace)?;
+    // A protection marker survives failed replacement. Cleanup after a committed
+    // save is best-effort: extra retention must not report that the save failed.
+    if let Ok((directory, _)) = recovery_document_directory(&root, &request.path) {
+        let _ = fs::remove_file(directory.join("restore-protection.json"));
+    }
     Ok(SaveDocumentResult {
         path: request.path,
         hash: source_hash(request.content.as_bytes()),
@@ -2998,6 +3345,29 @@ fn save_document(request: SaveDocumentRequest) -> Result<SaveDocumentResult, Hos
 }
 
 #[tauri::command]
+fn list_document_recoveries(root: String, path: String) -> Result<Vec<DocumentRecoverySnapshot>, HostError> {
+    list_document_recoveries_impl(&root, &path)
+}
+
+#[tauri::command]
+fn create_document_recovery(root: String, path: String, content: String, preserve_recovery_id: Option<String>, options: Option<RecoveryEventOptions>) -> Result<DocumentRecoverySnapshot, HostError> {
+    match options.as_ref() {
+        Some(options) if options.kind != "autosave" => recovery_archive::create_saved_version(&root, &path, &content, preserve_recovery_id.as_deref(), options),
+        _ => create_document_recovery_impl(&root, &path, &content, preserve_recovery_id.as_deref()),
+    }
+}
+
+#[tauri::command]
+fn list_saved_document_versions(root: String, path: String) -> Result<Vec<SavedDocumentVersionMetadata>, HostError> {
+    recovery_archive::list_saved_versions(&root, &path)
+}
+
+#[tauri::command]
+fn read_saved_document_version(root: String, path: String, id: String) -> Result<DocumentRecoverySnapshot, HostError> {
+    recovery_archive::read_saved_version(&root, &path, &id)
+}
+
+#[tauri::command]
 async fn save_export_file(
     app: tauri::AppHandle,
     request: SaveExportFileRequest,
@@ -3570,6 +3940,10 @@ pub fn run() {
             read_citation_cache,
             save_citation_lock,
             save_document,
+            list_document_recoveries,
+            create_document_recovery,
+            list_saved_document_versions,
+            read_saved_document_version,
             save_export_file,
             project_file_download::begin_project_file_download,
             project_file_download::write_project_file_download_part,
@@ -4831,13 +5205,9 @@ mod tests {
             fs::read_to_string(root.join("paper.qmd")).unwrap(),
             before.content
         );
-        let recovery_directory = root.join(".draftmatter/recovery");
-        let recoveries = fs::read_dir(&recovery_directory)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .collect::<Vec<_>>();
+        let recoveries = list_document_recoveries_impl(root.to_str().unwrap(), "paper.qmd").unwrap();
         assert_eq!(recoveries.len(), 1);
-        assert_eq!(fs::read_to_string(&recoveries[0]).unwrap(), before.content);
+        assert_eq!(recoveries[0].source, before.content);
         assert!(!fs::read_dir(&root)
             .unwrap()
             .filter_map(Result::ok)
@@ -4853,7 +5223,7 @@ mod tests {
         let root = temporary.path().join("project");
         create_project_at_root(&root, "Test").unwrap();
 
-        for revision in 0..12 {
+        for revision in 0..(MAX_RECOVERY_FILES + 12) {
             let before = read_document_impl(root.to_str().unwrap(), "paper.qmd").unwrap();
             save_document_impl(SaveDocumentRequest {
                 root: root.to_string_lossy().into_owned(),
@@ -4864,17 +5234,374 @@ mod tests {
             .unwrap();
         }
 
-        let recovery_directory = root.join(".draftmatter/recovery");
-        let recoveries = fs::read_dir(recovery_directory)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .collect::<Vec<_>>();
+        let recoveries = list_document_recoveries_impl(root.to_str().unwrap(), "paper.qmd").unwrap();
         assert_eq!(recoveries.len(), MAX_RECOVERY_FILES);
         for recovery in recoveries {
-            let content = fs::read_to_string(recovery).unwrap();
-            assert!(!content.is_empty());
-            assert!(content.contains("title:"));
+            assert!(!recovery.source.is_empty());
+            assert!(recovery.source.contains("title:"));
         }
+    }
+
+    #[test]
+    fn recovery_temporal_priority_keeps_recent_work_and_minute_hour_day_representatives() {
+        let day = 24 * 60 * 60 * 1000_u64;
+        let hour = 60 * 60 * 1000_u64;
+        let minute = 60 * 1000_u64;
+        let base = 100 * day;
+        let mut entries = (0..80).map(|index| (base + index * day, format!("day-{index:03}"))).collect::<Vec<_>>();
+        let latest_day = base + 80 * day;
+        entries.extend((0..24).map(|index| (latest_day + index * hour, format!("hour-{index:03}"))));
+        let latest_hour = latest_day + 24 * hour;
+        entries.extend((0..60).map(|index| (latest_hour + index * minute, format!("minute-{index:03}"))));
+        let latest_minute = latest_hour + 60 * minute;
+        entries.extend((0..20).map(|index| (latest_minute + index, format!("recent-{index:03}"))));
+        let priority = automatic_recovery_priority_ids(&entries, &[]);
+        assert_eq!(priority.len(), entries.len());
+        let retained = priority.iter().take(MAX_RECOVERY_FILES).map(String::as_str).collect::<HashSet<_>>();
+        assert_eq!(retained.len(), MAX_RECOVERY_FILES);
+        for index in 12..20 { assert!(retained.contains(format!("recent-{index:03}").as_str())); }
+        for id in ["minute-054", "minute-049", "hour-022", "hour-003", "day-078", "day-030"] {
+            assert!(retained.contains(id), "Temporal representative {id} must survive a burst of recent edits");
+        }
+        let mut shuffled = entries.clone();
+        shuffled.reverse();
+        assert_eq!(automatic_recovery_priority_ids(&shuffled, &[]), priority, "Input iteration order must not change the chosen versions");
+    }
+
+    #[test]
+    fn recovery_pressure_prefers_unbracketed_automatic_work_without_discarding_latest_eight() {
+        let entries = (1..=150).map(|index| (index * 60_000, format!("version-{index:03}"))).collect::<Vec<_>>();
+        let manual_times = [40 * 60_000, 130 * 60_000];
+        let priority = automatic_recovery_priority_ids(&entries, &manual_times);
+        let retained = priority.iter().take(MAX_RECOVERY_FILES).map(String::as_str).collect::<HashSet<_>>();
+        for index in (1..=40).chain(130..=150) { assert!(retained.contains(format!("version-{index:03}").as_str()), "Work not enclosed by checkpoints is retained first"); }
+        assert!(retained.len() == MAX_RECOVERY_FILES);
+        let latest_bracketed = automatic_recovery_priority_ids(&entries, &[1, 151 * 60_000]);
+        assert_eq!(latest_bracketed.iter().take(8).cloned().collect::<Vec<_>>(), (143..=150).rev().map(|index| format!("version-{index:03}")).collect::<Vec<_>>());
+        let tied = vec![(10, "a".into()), (10, "z".into()), (10, "m".into())];
+        assert_eq!(automatic_recovery_priority_ids(&tied, &[]), vec!["z", "m", "a"]);
+    }
+
+    #[test]
+    fn unchanged_recovery_source_does_not_create_another_file_or_change_capture_time() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        let first = create_recovery(root, "paper.md", b"# Exact source\r\n").unwrap();
+        for _ in 0..12 { assert_eq!(create_recovery(root, "paper.md", b"# Exact source\r\n").unwrap(), first); }
+        let (directory, _) = recovery_document_directory(root, "paper.md").unwrap();
+        assert_eq!(recovery_directory_entries(&directory, "paper.md").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn recovery_deadline_capture_remains_latest_when_the_older_disk_source_is_preserved_before_save() {
+        for continued_typing in [false, true] {
+        for under_pressure in [false, true] {
+            for fail_before_replace in [false, true] {
+                let temporary = tempdir().unwrap();
+                let root = temporary.path();
+                let older = "# Earlier saved disk state A\r\n";
+                let newer = "# Continuously edited state B\r\n\r\nRésumé αβ.\r\n";
+                let incoming = if continued_typing { format!("{newer}Continued typing creates state C.\r\n") } else { newer.to_string() };
+                fs::write(root.join("paper.md"), older).unwrap();
+                File::options().write(true).open(root.join("paper.md")).unwrap().set_times(
+                    fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_millis(now_millis() - 60_000))
+                ).unwrap();
+                if under_pressure {
+                    for index in 0..MAX_RECOVERY_FILES { create_recovery(root, "paper.md", format!("# Earlier automatic state {index}\n").as_bytes()).unwrap(); }
+                }
+                let captured = create_document_recovery_impl(root.to_str().unwrap(), "paper.md", newer, None).unwrap();
+                let request = SaveDocumentRequest { root: root.to_string_lossy().into_owned(), path: "paper.md".into(), content: incoming.clone(), expected_hash: Some(source_hash(older.as_bytes())) };
+                let result = save_document_impl_with_fault(request.clone(), fail_before_replace);
+                assert_eq!(result.is_err(), fail_before_replace);
+                assert_eq!(fs::read(root.join("paper.md")).unwrap(), if fail_before_replace { older.as_bytes() } else { incoming.as_bytes() });
+                let versions = list_document_recoveries_impl(root.to_str().unwrap(), "paper.md").unwrap();
+                assert_eq!(versions.first().unwrap(), &captured, "Preserving disk A must not move it ahead of captured B");
+                let prior = versions.iter().find(|version| version.source == older).expect("The overwritten disk state must remain recoverable");
+                assert!(prior.saved_at_millis < captured.saved_at_millis);
+                assert_eq!(versions.len(), if under_pressure { MAX_RECOVERY_FILES } else { 2 });
+                let previous_versions = versions.clone();
+                if fail_before_replace {
+                    save_document_impl(request).unwrap();
+                    assert_eq!(list_document_recoveries_impl(root.to_str().unwrap(), "paper.md").unwrap(), previous_versions, "Retry reuses A rather than adding another dated copy");
+                    assert_eq!(fs::read(root.join("paper.md")).unwrap(), incoming.as_bytes());
+                }
+            }
+        }
+        }
+    }
+
+    #[test]
+    fn recovery_a_real_disk_return_after_a_pending_checkpoint_keeps_its_newer_order() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        let returned = "# Disk state A restored after B\n";
+        let captured_source = "# Pending checkpoint B\n";
+        let final_source = "# New edit C after the restored disk state\n";
+        fs::write(root.join("paper.md"), "# Initial disk state\n").unwrap();
+        let captured = create_document_recovery_impl(root.to_str().unwrap(), "paper.md", captured_source, None).unwrap();
+        fs::write(root.join("paper.md"), returned).unwrap();
+        File::options().write(true).open(root.join("paper.md")).unwrap().set_times(
+            fs::FileTimes::new().set_modified(UNIX_EPOCH + Duration::from_millis(captured.saved_at_millis + 1000))
+        ).unwrap();
+        save_document_impl(SaveDocumentRequest { root: root.to_string_lossy().into_owned(), path: "paper.md".into(), content: final_source.into(), expected_hash: Some(source_hash(returned.as_bytes())) }).unwrap();
+        let versions = list_document_recoveries_impl(root.to_str().unwrap(), "paper.md").unwrap();
+        assert_eq!(versions.first().unwrap().source, returned);
+        assert!(versions.first().unwrap().saved_at_millis > captured.saved_at_millis);
+        assert!(versions.iter().any(|version| version == &captured));
+        assert_eq!(fs::read(root.join("paper.md")).unwrap(), final_source.as_bytes());
+    }
+
+    #[test]
+    fn historical_prewrite_recovery_does_not_overwrite_an_existing_path_collision() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        let older = b"# Earlier saved disk state A\n";
+        let newer = b"# Pending state B\n";
+        let newest_id = create_recovery(root, "paper.md", newer).unwrap();
+        let latest_time = Path::new(&newest_id).file_name().and_then(OsStr::to_str).and_then(recovery_name_parts).unwrap().0;
+        let (directory, _) = recovery_document_directory(root, "paper.md").unwrap();
+        let collision = directory.join(recovery_filename("paper.md", &source_hash(older), latest_time - 1));
+        let externally_modified = b"# Externally modified recovery; preserve it\n";
+        fs::write(&collision, externally_modified).unwrap();
+        let older_id = create_recovery_at(root, "paper.md", older, Some(latest_time - 1)).unwrap();
+        assert_ne!(root.join(&older_id), collision);
+        assert_eq!(fs::read(collision).unwrap(), externally_modified);
+        assert_eq!(fs::read(root.join(&older_id)).unwrap(), older);
+        assert_eq!(list_document_recoveries_impl(root.to_str().unwrap(), "paper.md").unwrap().first().unwrap().id, newest_id);
+    }
+
+    #[test]
+    fn recovery_capture_order_survives_clock_rollback_without_overwriting_an_earlier_source() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        create_recovery(root, "paper.md", b"# Initialize\n").unwrap();
+        let (directory, _) = recovery_document_directory(root, "paper.md").unwrap();
+        let future = now_millis() + 60_000;
+        let earlier = b"# Saved before the clock moved backwards\n";
+        let older_path = directory.join(recovery_filename("paper.md", &source_hash(earlier), future));
+        fs::write(&older_path, earlier).unwrap();
+        let created = create_recovery(root, "paper.md", b"# Saved after the clock moved backwards\n").unwrap();
+        let timestamp = Path::new(&created).file_name().and_then(OsStr::to_str).and_then(recovery_name_parts).unwrap().0;
+        assert_eq!(timestamp, future + 1);
+        assert_eq!(fs::read(older_path).unwrap(), earlier);
+        let snapshots = list_document_recoveries_impl(root.to_str().unwrap(), "paper.md").unwrap();
+        assert_eq!(snapshots[0].id, created);
+    }
+
+    fn seed_legacy_recovery(root: &Path, relative: &str, source: &[u8], timestamp: u64) -> PathBuf {
+        let directory = root.join(".draftmatter/recovery");
+        fs::create_dir_all(&directory).unwrap();
+        let hash = source_hash(source);
+        let name = format!("{timestamp}-{}-{}.bak", hash.trim_start_matches("fnv1a:"), relative.replace(['/', '\\'], "__"));
+        let path = directory.join(name);
+        fs::write(&path, source).unwrap();
+        path
+    }
+
+    #[test]
+    fn listing_recovery_is_read_only_and_missing_history_does_not_create_metadata() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        fs::write(root.join("paper.md"), "# Current\n").unwrap();
+        assert!(list_document_recoveries_impl(root.to_str().unwrap(), "paper.md").unwrap().is_empty());
+        assert!(!root.join(".draftmatter").exists());
+        assert!(matches!(list_document_recoveries_impl(root.to_str().unwrap(), "../outside.md"), Err(HostError::InvalidPath(_))));
+        assert!(matches!(list_document_recoveries_impl(root.to_str().unwrap(), "data.csv"), Err(HostError::UnsupportedFile(_))));
+    }
+
+    #[test]
+    fn recovery_listing_keeps_projects_and_exact_legacy_filenames_separate() {
+        let first = tempdir().unwrap();
+        let second = tempdir().unwrap();
+        seed_legacy_recovery(first.path(), "paper.md", b"# Paper from the first project\n", 1000);
+        seed_legacy_recovery(first.path(), "other-paper.md", b"# A different manuscript\n", 2000);
+        seed_legacy_recovery(first.path(), "README.md", b"# Readme\n", 3000);
+        seed_legacy_recovery(second.path(), "paper.md", b"# Paper from the second project\n", 4000);
+        let entries = list_document_recoveries_impl(first.path().to_str().unwrap(), "paper.md").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].source, "# Paper from the first project\n");
+        assert_eq!(entries[0].document_path, "paper.md");
+        assert_eq!(entries[0].saved_at_millis, 1000);
+        assert_eq!(list_document_recoveries_impl(second.path().to_str().unwrap(), "paper.md").unwrap()[0].source, "# Paper from the second project\n");
+    }
+
+    #[test]
+    fn recovery_paths_with_ambiguous_legacy_encoding_use_independent_hashed_directories() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        seed_legacy_recovery(root, "drafts/paper.md", b"# Unattributable old backup\n", 1000);
+        assert!(list_document_recoveries_impl(root.to_str().unwrap(), "drafts/paper.md").unwrap().is_empty());
+        assert!(list_document_recoveries_impl(root.to_str().unwrap(), "drafts__paper.md").unwrap().is_empty());
+        create_recovery(root, "drafts/paper.md", b"# Nested manuscript\n").unwrap();
+        create_recovery(root, "drafts__paper.md", b"# Literal underscores\n").unwrap();
+        let nested = list_document_recoveries_impl(root.to_str().unwrap(), "drafts/paper.md").unwrap();
+        let flat = list_document_recoveries_impl(root.to_str().unwrap(), "drafts__paper.md").unwrap();
+        assert_eq!(nested.len(), 1);
+        assert_eq!(flat.len(), 1);
+        assert_eq!(nested[0].source, "# Nested manuscript\n");
+        assert_eq!(flat[0].source, "# Literal underscores\n");
+        assert_ne!(Path::new(&nested[0].id).parent(), Path::new(&flat[0].id).parent());
+    }
+
+    #[test]
+    fn recovery_retention_never_prunes_another_legacy_manuscript_with_the_same_suffix() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        let legacy_paths = (0..8).map(|index| seed_legacy_recovery(root, "other-paper.md", format!("# Other {index}\n").as_bytes(), 1000 + index)).collect::<Vec<_>>();
+        for index in 0..12 { create_recovery(root, "paper.md", format!("# Paper {index}\n").as_bytes()).unwrap(); }
+        assert!(legacy_paths.iter().all(|path| path.is_file()));
+        assert_eq!(list_document_recoveries_impl(root.to_str().unwrap(), "other-paper.md").unwrap().len(), 8);
+        assert_eq!(list_document_recoveries_impl(root.to_str().unwrap(), "paper.md").unwrap().len(), 12);
+        let (directory, _) = recovery_document_directory(root, "paper.md").unwrap();
+        assert_eq!(recovery_directory_entries(&directory, "paper.md").unwrap().len(), 12);
+    }
+
+    #[test]
+    fn recovery_listing_validates_content_bounds_and_preserves_invalid_entries() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        let valid = seed_legacy_recovery(root, "paper.md", b"# Valid\n", 1000);
+        let tampered = seed_legacy_recovery(root, "paper.md", b"# Untampered\n", 2000);
+        fs::write(&tampered, b"# Tampered\n").unwrap();
+        let invalid_utf8 = seed_legacy_recovery(root, "paper.md", &[0xff, 0xfe], 3000);
+        let oversized = seed_legacy_recovery(root, "paper.md", b"# Oversize\n", 4000);
+        OpenOptions::new().write(true).open(&oversized).unwrap().set_len(MAX_RECOVERY_SOURCE_BYTES + 1).unwrap();
+        let invalid_name = root.join(".draftmatter/recovery/not-a-backup-paper.md.bak");
+        fs::write(&invalid_name, b"# Invalid name\n").unwrap();
+        let entries = list_document_recoveries_impl(root.to_str().unwrap(), "paper.md").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].source, "# Valid\n");
+        assert!(valid.exists() && tampered.exists() && invalid_utf8.exists() && oversized.exists() && invalid_name.exists());
+    }
+
+    #[test]
+    fn recovery_listing_rejects_mismatched_document_identity_without_rewriting_it() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        create_recovery(root, "paper.md", b"# Paper\n").unwrap();
+        let (directory, _) = recovery_document_directory(root, "paper.md").unwrap();
+        let metadata = directory.join("document.json");
+        let wrong_identity = br#"{"schemaVersion":1,"documentPath":"README.md"}"#;
+        fs::write(&metadata, wrong_identity).unwrap();
+        assert!(matches!(list_document_recoveries_impl(root.to_str().unwrap(), "paper.md"), Err(HostError::InvalidProject(_))));
+        assert!(matches!(create_recovery(root, "paper.md", b"# New\n"), Err(HostError::InvalidProject(_))));
+        assert_eq!(fs::read(metadata).unwrap(), wrong_identity);
+    }
+
+    #[test]
+    fn explicit_document_recovery_preserves_exact_unsaved_source_without_overwriting_the_manuscript() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        let disk_source = b"# Saved paper\n";
+        let editor_source = "---\r\ntitle: \"Unsaved paper\"\r\n---\r\n\r\nRésumé αβ, exactly as typed.\r\n";
+        fs::write(root.join("paper.md"), disk_source).unwrap();
+        let snapshot = create_document_recovery_impl(root.to_str().unwrap(), "paper.md", editor_source, None).unwrap();
+        assert_eq!(snapshot.document_path, "paper.md");
+        assert_eq!(snapshot.source, editor_source);
+        assert!(snapshot.saved_at_millis > 0);
+        assert_eq!(fs::read(root.join(&snapshot.id)).unwrap(), editor_source.as_bytes());
+        assert_eq!(fs::read(root.join("paper.md")).unwrap(), disk_source);
+        assert!(list_document_recoveries_impl(root.to_str().unwrap(), "paper.md").unwrap().contains(&snapshot));
+    }
+
+    #[test]
+    fn explicit_document_recovery_rejects_invalid_requests_before_creating_private_metadata() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        fs::write(root.join("paper.md"), b"# Keep this saved paper\n").unwrap();
+        fs::write(root.join("data.csv"), b"x,y\n1,2\n").unwrap();
+        let oversized = "é".repeat(MAX_RECOVERY_SOURCE_BYTES as usize / 2 + 1);
+        assert!(matches!(create_document_recovery_impl(root.to_str().unwrap(), "paper.md", &oversized, None), Err(HostError::UnsupportedFile(_))));
+        assert!(matches!(create_document_recovery_impl(root.to_str().unwrap(), "../outside.md", "# Unsafe\n", None), Err(HostError::InvalidPath(_))));
+        assert!(matches!(create_document_recovery_impl(root.to_str().unwrap(), "data.csv", "# Wrong type\n", None), Err(HostError::UnsupportedFile(_))));
+        assert!(matches!(create_document_recovery_impl(root.to_str().unwrap(), "missing.md", "# Missing manuscript\n", None), Err(HostError::NotFound(_))));
+        assert_eq!(fs::read(root.join("paper.md")).unwrap(), b"# Keep this saved paper\n");
+        assert_eq!(fs::read(root.join("data.csv")).unwrap(), b"x,y\n1,2\n");
+        assert!(!root.join(".draftmatter").exists());
+    }
+
+    #[test]
+    fn explicit_document_recovery_failure_leaves_the_current_file_and_previous_backup_untouched() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        fs::write(root.join("paper.md"), b"# Current disk copy\n").unwrap();
+        let previous = create_document_recovery_impl(root.to_str().unwrap(), "paper.md", "# Earlier editor copy\n", None).unwrap();
+        let (directory, _) = recovery_document_directory(root, "paper.md").unwrap();
+        fs::write(directory.join("document.json"), br#"{"schemaVersion":1,"documentPath":"README.md"}"#).unwrap();
+        assert!(matches!(create_document_recovery_impl(root.to_str().unwrap(), "paper.md", "# Current unsaved copy\n", None), Err(HostError::InvalidProject(_))));
+        assert_eq!(fs::read(root.join("paper.md")).unwrap(), b"# Current disk copy\n");
+        assert_eq!(fs::read(root.join(previous.id)).unwrap(), b"# Earlier editor copy\n");
+    }
+
+    #[test]
+    fn protected_recovery_and_current_editor_copy_survive_full_history_and_failed_disk_replacement() {
+        for unsaved_edits in [false, true] {
+            let temporary = tempdir().unwrap();
+            let root = temporary.path();
+            let disk_source = "# Current saved paper\n";
+            let current_source = if unsaved_edits { "# Current editor with unsaved changes\n" } else { disk_source };
+            fs::write(root.join("paper.md"), disk_source).unwrap();
+            for index in 0..MAX_RECOVERY_FILES { create_recovery(root, "paper.md", format!("# Version {index}\n").as_bytes()).unwrap(); }
+            let target = list_document_recoveries_impl(root.to_str().unwrap(), "paper.md").unwrap().pop().unwrap();
+            let current = create_document_recovery_impl(root.to_str().unwrap(), "paper.md", current_source, Some(&target.id)).unwrap();
+            assert!(root.join(&target.id).is_file());
+            assert_eq!(fs::read(root.join(&current.id)).unwrap(), current_source.as_bytes());
+            let (directory, _) = recovery_document_directory(root, "paper.md").unwrap();
+            let before = recovery_directory_entries(&directory, "paper.md").unwrap().into_iter().map(|(_, _, _, path)| path).collect::<Vec<_>>();
+            assert_eq!(before.len(), MAX_RECOVERY_FILES + 1, "The selected original is protected outside the automatic budget");
+            let request = SaveDocumentRequest { root: root.to_string_lossy().into_owned(), path: "paper.md".into(), content: target.source.clone(), expected_hash: Some(source_hash(disk_source.as_bytes())) };
+            assert!(matches!(save_document_impl_with_fault(request.clone(), true), Err(HostError::Io(_))));
+            assert_eq!(fs::read(root.join("paper.md")).unwrap(), disk_source.as_bytes());
+            assert_eq!(fs::read(root.join(&target.id)).unwrap(), target.source.as_bytes());
+            assert_eq!(fs::read(root.join(&current.id)).unwrap(), current_source.as_bytes());
+            assert!(directory.join("restore-protection.json").is_file());
+            let after = recovery_directory_entries(&directory, "paper.md").unwrap().into_iter().map(|(_, _, _, path)| path).collect::<Vec<_>>();
+            assert_eq!(after.len(), MAX_RECOVERY_FILES + if unsaved_edits { 2 } else { 1 }, "A failed replacement must retain both protected sources");
+            if !unsaved_edits { assert_eq!(before, after, "Saving the already-preserved disk source must reuse its safety copy"); }
+            save_document_impl(request).unwrap();
+            assert_eq!(fs::read(root.join("paper.md")).unwrap(), target.source.as_bytes());
+            assert!(root.join(&target.id).is_file());
+            assert!(root.join(&current.id).is_file());
+            assert!(!directory.join("restore-protection.json").exists());
+        }
+    }
+
+    #[test]
+    fn explicit_recovery_protection_refuses_a_version_from_another_manuscript() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        fs::write(root.join("paper.md"), b"# Current paper\n").unwrap();
+        fs::write(root.join("README.md"), b"# Current readme\n").unwrap();
+        let foreign = create_document_recovery_impl(root.to_str().unwrap(), "README.md", "# Readme backup\n", None).unwrap();
+        assert!(matches!(create_document_recovery_impl(root.to_str().unwrap(), "paper.md", "# Unsaved paper\n", Some(&foreign.id)), Err(HostError::Conflict(_))));
+        assert_eq!(fs::read(root.join("paper.md")).unwrap(), b"# Current paper\n");
+        let (directory, _) = recovery_document_directory(root, "paper.md").unwrap();
+        assert!(!directory.join("restore-protection.json").exists());
+        assert!(list_document_recoveries_impl(root.to_str().unwrap(), "paper.md").unwrap().is_empty());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recovery_listing_never_follows_symlinked_files_or_directories() {
+        use std::os::unix::fs::symlink;
+        let temporary = tempdir().unwrap();
+        let outside = tempdir().unwrap();
+        let root = temporary.path();
+        let valid = seed_legacy_recovery(root, "paper.md", b"# Valid\n", 1000);
+        let private = outside.path().join("private.md");
+        fs::write(&private, b"# Outside secret\n").unwrap();
+        let linked = seed_legacy_recovery(root, "paper.md", b"# Outside secret\n", 2000);
+        fs::remove_file(&linked).unwrap();
+        symlink(&private, &linked).unwrap();
+        let entries = list_document_recoveries_impl(root.to_str().unwrap(), "paper.md").unwrap();
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].source, "# Valid\n");
+        assert!(valid.exists());
+        let another = tempdir().unwrap();
+        fs::create_dir(another.path().join(".draftmatter")).unwrap();
+        symlink(outside.path(), another.path().join(".draftmatter/recovery")).unwrap();
+        assert!(matches!(list_document_recoveries_impl(another.path().to_str().unwrap(), "paper.md"), Err(HostError::InvalidPath(_))));
+        assert_eq!(fs::read(&private).unwrap(), b"# Outside secret\n");
     }
 
     #[test]

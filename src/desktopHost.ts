@@ -60,6 +60,33 @@ export interface ProjectSnapshot {
   bibliographies: ProjectEntry[]
 }
 
+export interface DocumentRecoverySnapshot {
+  id: string
+  documentPath: string
+  source: string
+  savedAtMillis: number
+  kind?: 'autosave' | 'manual' | 'before-restore' | 'restored' | 'origin'
+  label?: string
+  restoredFromId?: string
+  originalSavedAtMillis?: number
+  sourceHash?: string
+  bytes?: number
+}
+
+export interface RecoveryVersionOptions {
+  kind: 'autosave' | 'manual' | 'before-restore' | 'restored' | 'origin'
+  label?: string
+  restoredFromId?: string
+  originalSavedAtMillis?: number
+}
+
+export interface SavedDocumentVersionMetadata extends Omit<DocumentRecoverySnapshot, 'source'> {
+  kind: Exclude<RecoveryVersionOptions['kind'], 'autosave'>
+  title?: string
+  sourceHash: string
+  bytes: number
+}
+
 export interface NewProjectAuthor {
   name: string
   orcid?: string
@@ -819,6 +846,18 @@ export function createDesktopHost(
     },
     documentStatus(root: string, path: string, expectedHash: string) {
       return invokeBridge<DocumentStatus>('document_status', { root, path, expectedHash })
+    },
+    listDocumentRecoveries(root: string, path: string) {
+      return available ? invokeBridge<DocumentRecoverySnapshot[]>('list_document_recoveries', { root, path }) : Promise.resolve([])
+    },
+    createDocumentRecovery(root: string, path: string, content: string, preserveRecoveryId?: string, options?: RecoveryVersionOptions) {
+      return available ? invokeBridge<DocumentRecoverySnapshot>('create_document_recovery', { root, path, content, ...(preserveRecoveryId ? { preserveRecoveryId } : {}), ...(options ? { options } : {}) }) : Promise.reject(new Error('Native manuscript recovery is available only in the desktop app.'))
+    },
+    listSavedDocumentVersions(root: string, path: string) {
+      return available ? invokeBridge<SavedDocumentVersionMetadata[]>('list_saved_document_versions', { root, path }) : Promise.resolve([])
+    },
+    readSavedDocumentVersion(root: string, path: string, id: string) {
+      return available ? invokeBridge<DocumentRecoverySnapshot>('read_saved_document_version', { root, path, id }) : Promise.reject(new Error('Saved manuscript versions are available only in the desktop app.'))
     },
     setMainDocument(root: string, path: string, renamedFrom?: string) {
       return invokeBridge<ProjectSnapshot>('set_main_document', { root, path, ...(renamedFrom ? { renamedFrom } : {}) })

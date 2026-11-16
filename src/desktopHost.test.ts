@@ -59,6 +59,9 @@ describe('desktop host adapter', () => {
       expectedCacheHash: null,
     })
     await host.documentStatus('/research/canopy', 'paper.qmd', 'next')
+    await host.listDocumentRecoveries('/research/canopy', 'paper.qmd')
+    await host.createDocumentRecovery('/research/canopy', 'paper.qmd', '# Current editor copy')
+    await host.createDocumentRecovery('/research/canopy', 'paper.qmd', '# Current editor copy', '.draftmatter/recovery/older-paper.qmd.bak')
     await host.setMainDocument('/research/canopy', 'renamed.qmd')
     await host.setCitationPreferences('/research/canopy', 'draftmatter-numeric', 'fr-FR')
     await host.setExecutionPreferences('/research/canopy', {
@@ -144,6 +147,9 @@ describe('desktop host adapter', () => {
         root: '/research/canopy', documentPath: 'paper.qmd', documentContent: 'Cited [@vezy2020].', expectedDocumentHash: 'old', bibliographyPath: 'references.json', expectedBibliographyHash: null, bibliographyRecords: [{ id: 'vezy2020' }], lockContent: '{"schemaVersion":1,"entries":[]}', expectedLockHash: null, cacheContent: '{"schemaVersion":1,"records":[]}', expectedCacheHash: null,
       } }],
       ['document_status', { root: '/research/canopy', path: 'paper.qmd', expectedHash: 'next' }],
+      ['list_document_recoveries', { root: '/research/canopy', path: 'paper.qmd' }],
+      ['create_document_recovery', { root: '/research/canopy', path: 'paper.qmd', content: '# Current editor copy' }],
+      ['create_document_recovery', { root: '/research/canopy', path: 'paper.qmd', content: '# Current editor copy', preserveRecoveryId: '.draftmatter/recovery/older-paper.qmd.bak' }],
       ['set_main_document', { root: '/research/canopy', path: 'renamed.qmd' }],
       ['set_citation_preferences', { root: '/research/canopy', style: 'draftmatter-numeric', locale: 'fr-FR' }],
       ['set_execution_preferences', { root: '/research/canopy', preferences: {
