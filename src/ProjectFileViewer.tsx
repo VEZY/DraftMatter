@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { Fragment, lazy, Suspense, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { Compartment, EditorState } from '@codemirror/state'
 import { EditorView, highlightSpecialChars, keymap, lineNumbers } from '@codemirror/view'
 import { defaultKeymap, history, historyKeymap, indentWithTab, undo, redo } from '@codemirror/commands'
@@ -22,6 +22,7 @@ import { parseTablePreview, previewImageMediaType, previewText, projectPreviewKi
 import './projectFileViewer.css'
 
 const MAX_TEXT_PREVIEW_BYTES = 1_048_576
+const PdfFilePreview = lazy(() => import('./PdfFilePreview'))
 
 export interface ProjectFileViewerProps {
   path: string
@@ -33,6 +34,7 @@ export interface ProjectFileViewerProps {
   onSave?: (content: string) => Promise<void>
   onDirtyChange?: (dirty: boolean) => void
   onInsertFigure?: () => void
+  active?: boolean
 }
 
 function language(path: string) {
@@ -171,11 +173,12 @@ function ImagePreview({ path, bytes, truncated, onInsertFigure }: Pick<ProjectFi
 }
 
 export function ProjectFileViewer(props: ProjectFileViewerProps) {
-  const { path, bytes, totalBytes, truncated, provenance, editable, onSave, onDirtyChange, onInsertFigure } = props
+  const { path, bytes, totalBytes, truncated, provenance, editable, onSave, onDirtyChange, onInsertFigure, active = true } = props
   const kind = projectPreviewKind(path)
-  const boundedBytes = useMemo(() => kind === 'image' ? bytes : bytes.subarray(0, MAX_TEXT_PREVIEW_BYTES), [bytes, kind])
-  const partial = truncated || (kind !== 'image' && bytes.byteLength > MAX_TEXT_PREVIEW_BYTES)
-  const text = useMemo(() => kind === 'image' || kind === 'unsupported' ? null : previewText(boundedBytes, partial), [boundedBytes, kind, partial])
+  const binary = kind === 'image' || kind === 'pdf'
+  const boundedBytes = useMemo(() => binary ? bytes : bytes.subarray(0, MAX_TEXT_PREVIEW_BYTES), [bytes, binary])
+  const partial = truncated || (!binary && bytes.byteLength > MAX_TEXT_PREVIEW_BYTES)
+  const text = useMemo(() => binary || kind === 'unsupported' ? null : previewText(boundedBytes, partial), [boundedBytes, kind, binary, partial])
   const [mode, setMode] = useState<'preview' | 'source'>(kind === 'text' ? 'source' : 'preview')
   const [query, setQuery] = useState('')
   const table = useMemo(() => kind === 'table' && text !== null ? parseTablePreview(text, /\.tsv$/i.test(path) ? '\t' : ',', partial) : null, [kind, text, path, partial])
@@ -183,7 +186,7 @@ export function ProjectFileViewer(props: ProjectFileViewerProps) {
   return <section className="project-file-viewer" aria-label={`Preview of ${path}`}>
     <header className="file-preview-heading"><strong>{path}</strong><span>{provenance} · {projectFileByteSize(totalBytes)}</span></header>
     {(partial || table?.truncated) && <p className="file-preview-limited" role="status">Limited preview: {partial ? `first ${projectFileByteSize(boundedBytes.byteLength)} of ${projectFileByteSize(totalBytes)}` : 'up to 500 rows, 100 columns and 10,000 characters per cell'}. The complete file is unchanged. Truncated files cannot be edited here.</p>}
-    {kind === 'image' ? <ImagePreview {...{ path, bytes, truncated, onInsertFigure }} /> : text === null ? <p className="file-preview-unavailable">No preview is available for this file type or encoding. Use Download or your computer’s file manager to open it.</p> : <>
+    {kind === 'pdf' ? active && <Suspense fallback={<p className="file-preview-unavailable" role="status">Loading PDF preview…</p>}><PdfFilePreview {...{ path, bytes, truncated }} /></Suspense> : kind === 'image' ? <ImagePreview {...{ path, bytes, truncated, onInsertFigure }} /> : text === null ? <p className="file-preview-unavailable">No preview is available for this file type or encoding. Use Download or your computer’s file manager to open it.</p> : <>
       {(kind === 'markdown' || kind === 'table') && <div className="file-preview-toolbar" role="group" aria-label="Preview format"><button type="button" aria-pressed={mode === 'preview'} onClick={() => setMode('preview')}>{kind === 'table' ? 'Table' : 'Rendered'}</button><button type="button" aria-pressed={mode === 'source'} onClick={() => setMode('source')}>View source</button></div>}
       {kind === 'markdown' && mode === 'preview' && <MarkdownPreview source={text} />}
       {table && mode === 'preview' && <section className="file-table-preview" aria-label="Table preview"><label className="file-table-filter">Filter preview rows <input type="search" value={query} onChange={(event) => setQuery(event.target.value)} /></label><p role="status">{filteredRows.length} of {table.rows.length} preview rows</p><div className="file-table-scroll"><table><thead><tr><th scope="col">Row</th>{table.headers.map((header, index) => <th scope="col" key={index}>{header || `Column ${index + 1}`}</th>)}</tr></thead><tbody>{table.rows.map((row, rowIndex) => filteredRows.includes(row) ? <tr key={rowIndex}><th scope="row">{rowIndex + 1}</th>{Array.from({ length: table.headers.length }, (_, index) => <td key={index}>{row[index] ?? ''}</td>)}</tr> : null)}</tbody></table></div></section>}

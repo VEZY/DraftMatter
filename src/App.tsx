@@ -87,6 +87,7 @@ import { CollaborationDialog, type CollaborationFileService } from './Collaborat
 import { ProjectFilesWorkspace } from './ProjectFilesWorkspace'
 import { ProjectDocumentWorkspace, type ProjectDocumentWorkspaceHandle } from './ProjectDocumentWorkspace'
 import { useProjectSynchronization } from './useProjectSynchronization'
+import { useProjectImageUrls } from './useProjectImageUrls'
 import { SelectiveSyncPanel } from './SelectiveSyncPanel'
 import type { CollaborationCheckpoint, CollaborationClientStatus, CollaborativeEditorBinding } from './sharedEditor'
 import { motionAwareScrollBehavior } from './accessibility'
@@ -801,7 +802,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const [citationQuery, setCitationQuery] = useState('')
   const [citationAcquisitionState, setCitationAcquisitionState] = useState<'idle' | 'saving'>('idle')
   const [desktopSession, setDesktopSession] = useState<DesktopSession | null>(null)
-  const assetResolutionRevision = useMemo(() => ({ browserProjectImages, sharedImages: sharedResources.images, root: desktopSession?.root, builtInProject }), [browserProjectImages, sharedResources.images, desktopSession?.root, builtInProject])
+  const [localImageRefreshRevision, setLocalImageRefreshRevision] = useState(0)
   useEffect(() => {
     let cancelled = false
     if (collaborationSessionActive && !activeCollaborationLaunch && !desktopSession) { setBrowserAssetsLoading(false); return }
@@ -2062,6 +2063,18 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const primaryCell = executableCells.find((cell) => cell.id === PRIMARY_EXECUTION_CELL) ?? executableCells[0]
   const retainedOutputParse = useMemo(() => parseRetainedOutputs(executionSource), [executionSource])
   const retainedOutputs = retainedOutputParse.outputs
+  const localFigurePaths = useMemo(() => {
+    const paths = new Set<string>()
+    structuredDocument.descendants((node) => {
+      if (node.type.name === 'image' && typeof node.attrs.src === 'string') paths.add(node.attrs.src)
+    })
+    for (const output of retainedOutputs) for (const path of output.artifactPaths) paths.add(path)
+    return [...paths].filter((path) => !sharedResources.images.some((image) => image.path === path)
+      && !browserProjectImages.some((image) => image.path === path))
+  }, [structuredDocument, retainedOutputs, sharedResources.images, browserProjectImages])
+  const localImageRevision = useMemo(() => ({ executionResults, localImageRefreshRevision }), [executionResults, localImageRefreshRevision])
+  const localFigureImages = useProjectImageUrls(desktopSession?.root, localFigurePaths, localImageRevision)
+  const assetResolutionRevision = useMemo(() => ({ browserProjectImages, sharedImages: sharedResources.images, localImages: localFigureImages.urls, builtInProject }), [browserProjectImages, sharedResources.images, localFigureImages.urls, builtInProject])
   const retainedPublishedValueParse = useMemo(() => parseRetainedPublishedValues(manuscriptSource), [manuscriptSource])
   const retainedPublishedValues = Object.values(retainedPublishedValueParse.values)
   const allDiagnostics = [...diagnostics, ...semanticReferenceDiagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics, ...executionDiagnostics, ...retainedOutputParse.diagnostics, ...retainedPublishedValueParse.diagnostics]
@@ -2593,6 +2606,9 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       }
       const description = alt ?? path.split('/').at(-1)?.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ') ?? 'Figure'
       const inserted = runStructuredCommand((editor) => editor.insertFigure(path, description, caption, label), 'Insert figure')
+      if (inserted && session && localFigurePaths.includes(normalizeProjectRelativePath(path) ?? '')) {
+        setLocalImageRefreshRevision((revision) => revision + 1)
+      }
       if (inserted) setToast(binding ? 'Figure inserted and shared with the manuscript' : 'Figure inserted · numbering follows the manuscript')
       return inserted
     } catch (error) { setToast(`The figure could not be inserted: ${readableError(error)}`); return false }
@@ -6324,7 +6340,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
                 : browserProjectImages.some((image) => image.path === path)
                 ? (() => { const image = browserProjectImages.find((item) => item.path === path)!; return `data:${image.mimeType};base64,${image.base64}` })()
                 : desktopSession
-                ? projectArtifactUrl(desktopSession.root, path) ?? 'data:,'
+                ? localFigureImages.urls[normalizeProjectRelativePath(path) ?? ''] ?? 'data:,'
                 : builtInProject === 'complete-example'
                   ? completeExampleAssetUrls[path] ?? path
                   : path === 'figures/generated/fig-canopy.svg' ? '/fixtures/canopy-response.svg' : path}

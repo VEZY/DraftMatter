@@ -351,6 +351,18 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | @lifeomic/attempt | 3.1.0 | MIT | required |
 | npm | @marijn/find-cluster-break | 1.0.3 | MIT | required |
 | npm | @modelcontextprotocol/sdk | 1.32.2 | MIT | required |
+| npm | @napi-rs/canvas | 1.1.1 | MIT | required |
+| npm | @napi-rs/canvas-android-arm64 | 1.1.1 | MIT | required |
+| npm | @napi-rs/canvas-darwin-arm64 | 1.1.1 | MIT | required |
+| npm | @napi-rs/canvas-darwin-x64 | 1.1.1 | MIT | required |
+| npm | @napi-rs/canvas-linux-arm-gnueabihf | 1.1.1 | MIT | required |
+| npm | @napi-rs/canvas-linux-arm64-gnu | 1.1.1 | MIT | required |
+| npm | @napi-rs/canvas-linux-arm64-musl | 1.1.1 | MIT | required |
+| npm | @napi-rs/canvas-linux-riscv64-gnu | 1.1.1 | MIT | required |
+| npm | @napi-rs/canvas-linux-x64-gnu | 1.1.1 | MIT | required |
+| npm | @napi-rs/canvas-linux-x64-musl | 1.1.1 | MIT | required |
+| npm | @napi-rs/canvas-win32-arm64-msvc | 1.1.1 | MIT | required |
+| npm | @napi-rs/canvas-win32-x64-msvc | 1.1.1 | MIT | required |
 | npm | @oxc-project/types | 0.156.0 | MIT | required |
 | npm | @playwright/test | 1.61.1 | Apache-2.0 | development |
 | npm | @rolldown/binding-android-arm-eabi | 1.2.16 | MIT | required |
@@ -480,6 +492,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | es-module-lexer | 2.3.1 | MIT | development |
 | npm | es-object-atoms | 1.1.2 | MIT | required |
 | npm | escape-html | 1.0.3 | MIT | required |
+| npm | eslint-visitor-keys | 3.4.3 | Apache-2.0 | required |
 | npm | estree-walker | 3.0.3 | MIT | development |
 | npm | etag | 1.8.1 | MIT | required |
 | npm | eventsource | 3.0.7 | MIT | required |
@@ -590,6 +603,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | path-key | 3.1.1 | MIT | required |
 | npm | path-to-regexp | 8.4.2 | MIT | required |
 | npm | pathe | 2.0.3 | MIT | development |
+| npm | pdfjs-dist | 6.5.438 | Apache-2.0 | required |
 | npm | pg | 8.22.0 | MIT | required |
 | npm | pg-cloudflare | 1.4.0 | MIT | required |
 | npm | pg-connection-string | 2.14.0 | MIT | required |
@@ -662,6 +676,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | tldts | 7.4.8 | MIT | development |
 | npm | tldts-core | 7.4.8 | MIT | development |
 | npm | toidentifier | 1.0.1 | MIT | required |
+| npm | toml-eslint-parser | 0.10.1 | MIT | required |
 | npm | tough-cookie | 6.0.2 | BSD-3-Clause | development |
 | npm | tr46 | 6.0.0 | MIT | development |
 | npm | trough | 2.2.0 | MIT | required |

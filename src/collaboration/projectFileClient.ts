@@ -169,15 +169,19 @@ export class ProjectFileClient {
 
   async readPreview(file: ProjectFile, maxBytes = 262144, signal?: AbortSignal): Promise<ProjectFilePreview> {
     validateMetadata(file, true)
-    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > PROJECT_FILE_PREVIEW_MAX_BYTES) throw new Error('Preview limits must be between 1 byte and 8 MiB.')
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > PROJECT_FILE_PREVIEW_MAX_BYTES) throw new Error('Preview limits must be between 1 byte and 32 MiB.')
     abortIfNeeded(signal)
     const response = await this.service.authenticatedFetch(`${this.basePath}/${encodeURIComponent(file.id)}/preview?maxBytes=${maxBytes}`, { signal })
     if (response.headers.get('x-draftmatter-version') !== file.id || response.headers.get('x-draftmatter-file-size') !== String(file.size)) throw new Error('The preview does not match this online file version. Refresh the file list.')
     const bytes = await boundedResponseBytes(response, Math.min(maxBytes, file.size), signal)
     const expectedSize = Math.min(maxBytes, file.size)
     if (bytes.byteLength !== expectedSize || await projectFilePartHash(bytes) !== response.headers.get('x-draftmatter-sha256')?.toLowerCase()) throw new Error('The preview failed its integrity check. Retry the preview.')
-    // A complete first part can also be verified against the catalogue itself.
-    if (file.size && bytes.length === file.parts[0].size && await projectFilePartHash(bytes) !== file.parts[0].sha256) throw new Error('The preview does not match the selected file version.')
+    // Every complete returned part can also be verified against the catalogue.
+    for (const part of file.parts) {
+      const start = (part.partNumber - 1) * file.chunkSize
+      if (start + part.size > bytes.length) continue
+      if (await projectFilePartHash(bytes.subarray(start, start + part.size)) !== part.sha256) throw new Error('The preview does not match the selected file version.')
+    }
     abortIfNeeded(signal)
     return { bytes, truncated: file.size > bytes.byteLength, versionId: file.id }
   }

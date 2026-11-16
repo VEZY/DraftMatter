@@ -20,7 +20,7 @@
       },
       {
         "name": "draftmatter:dependency-fingerprint",
-        "value": "sha256:6fb2198a5dedf70f662c9f1f888d48fa966cc5c453cfa9df48a704f11649abd1"
+        "value": "sha256:1ada2457eb012bda1f8d4ca8e44a7c6f6bf5e40f7626b0a3e1ab669bc681991e"
       }
     ]
   },
@@ -8244,6 +8244,354 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:npm/%40napi-rs%2Fcanvas@1.1.1",
+      "name": "@napi-rs/canvas",
+      "version": "1.1.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40napi-rs%2Fcanvas@1.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/canvas/-/canvas-1.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40napi-rs%2Fcanvas-android-arm64@1.1.1",
+      "name": "@napi-rs/canvas-android-arm64",
+      "version": "1.1.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40napi-rs%2Fcanvas-android-arm64@1.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/canvas-android-arm64/-/canvas-android-arm64-1.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40napi-rs%2Fcanvas-darwin-arm64@1.1.1",
+      "name": "@napi-rs/canvas-darwin-arm64",
+      "version": "1.1.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40napi-rs%2Fcanvas-darwin-arm64@1.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/canvas-darwin-arm64/-/canvas-darwin-arm64-1.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40napi-rs%2Fcanvas-darwin-x64@1.1.1",
+      "name": "@napi-rs/canvas-darwin-x64",
+      "version": "1.1.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40napi-rs%2Fcanvas-darwin-x64@1.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/canvas-darwin-x64/-/canvas-darwin-x64-1.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40napi-rs%2Fcanvas-linux-arm-gnueabihf@1.1.1",
+      "name": "@napi-rs/canvas-linux-arm-gnueabihf",
+      "version": "1.1.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40napi-rs%2Fcanvas-linux-arm-gnueabihf@1.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/canvas-linux-arm-gnueabihf/-/canvas-linux-arm-gnueabihf-1.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40napi-rs%2Fcanvas-linux-arm64-gnu@1.1.1",
+      "name": "@napi-rs/canvas-linux-arm64-gnu",
+      "version": "1.1.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40napi-rs%2Fcanvas-linux-arm64-gnu@1.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/canvas-linux-arm64-gnu/-/canvas-linux-arm64-gnu-1.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40napi-rs%2Fcanvas-linux-arm64-musl@1.1.1",
+      "name": "@napi-rs/canvas-linux-arm64-musl",
+      "version": "1.1.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40napi-rs%2Fcanvas-linux-arm64-musl@1.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/canvas-linux-arm64-musl/-/canvas-linux-arm64-musl-1.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40napi-rs%2Fcanvas-linux-riscv64-gnu@1.1.1",
+      "name": "@napi-rs/canvas-linux-riscv64-gnu",
+      "version": "1.1.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40napi-rs%2Fcanvas-linux-riscv64-gnu@1.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/canvas-linux-riscv64-gnu/-/canvas-linux-riscv64-gnu-1.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40napi-rs%2Fcanvas-linux-x64-gnu@1.1.1",
+      "name": "@napi-rs/canvas-linux-x64-gnu",
+      "version": "1.1.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40napi-rs%2Fcanvas-linux-x64-gnu@1.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/canvas-linux-x64-gnu/-/canvas-linux-x64-gnu-1.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40napi-rs%2Fcanvas-linux-x64-musl@1.1.1",
+      "name": "@napi-rs/canvas-linux-x64-musl",
+      "version": "1.1.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40napi-rs%2Fcanvas-linux-x64-musl@1.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/canvas-linux-x64-musl/-/canvas-linux-x64-musl-1.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40napi-rs%2Fcanvas-win32-arm64-msvc@1.1.1",
+      "name": "@napi-rs/canvas-win32-arm64-msvc",
+      "version": "1.1.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40napi-rs%2Fcanvas-win32-arm64-msvc@1.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/canvas-win32-arm64-msvc/-/canvas-win32-arm64-msvc-1.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/%40napi-rs%2Fcanvas-win32-x64-msvc@1.1.1",
+      "name": "@napi-rs/canvas-win32-x64-msvc",
+      "version": "1.1.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/%40napi-rs%2Fcanvas-win32-x64-msvc@1.1.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/@napi-rs/canvas-win32-x64-msvc/-/canvas-win32-x64-msvc-1.1.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:npm/%40oxc-project%2Ftypes@0.156.0",
       "name": "@oxc-project/types",
       "version": "0.156.0",
@@ -11985,6 +12333,35 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:npm/eslint-visitor-keys@3.4.3",
+      "name": "eslint-visitor-keys",
+      "version": "3.4.3",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/eslint-visitor-keys@3.4.3",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/eslint-visitor-keys/-/eslint-visitor-keys-3.4.3.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:npm/estree-walker@3.0.3",
       "name": "estree-walker",
       "version": "3.0.3",
@@ -15175,6 +15552,35 @@
     },
     {
       "type": "library",
+      "bom-ref": "pkg:npm/pdfjs-dist@6.5.438",
+      "name": "pdfjs-dist",
+      "version": "6.5.438",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "Apache-2.0"
+        }
+      ],
+      "purl": "pkg:npm/pdfjs-dist@6.5.438",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/pdfjs-dist/-/pdfjs-dist-6.5.438.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
       "bom-ref": "pkg:npm/pg@8.22.0",
       "name": "pg",
       "version": "8.22.0",
@@ -17248,6 +17654,35 @@
         {
           "type": "distribution",
           "url": "https://registry.npmjs.org/toidentifier/-/toidentifier-1.0.1.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/toml-eslint-parser@0.10.1",
+      "name": "toml-eslint-parser",
+      "version": "0.10.1",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/toml-eslint-parser@0.10.1",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/toml-eslint-parser/-/toml-eslint-parser-0.10.1.tgz"
         }
       ],
       "properties": [

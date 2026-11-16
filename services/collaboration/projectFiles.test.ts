@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import type { Pool } from 'pg'
 import { DataType, newDb } from 'pg-mem'
 import { afterEach, describe, expect, it, vi } from 'vitest'
-import { PROJECT_FILE_CHUNK_BYTES, PROJECT_FILE_QUOTA_BYTES } from '../../src/collaboration/projectFiles'
+import { PROJECT_FILE_CHUNK_BYTES, PROJECT_FILE_PREVIEW_MAX_BYTES, PROJECT_FILE_QUOTA_BYTES } from '../../src/collaboration/projectFiles'
 import { runCollaborationMigrations } from './migrations'
 import { PostgresWorkspaceService } from './postgresWorkspaceService'
 import { PostgresProjectFileService, validateProjectFilePath } from './projectFiles'
@@ -59,6 +59,24 @@ async function fixture(storage = new MemoryProjectFileStorage(), totalQuotaBytes
 }
 
 describe('durable shared project files', () => {
+  it('bounds larger previews to 32 MiB and verifies each 8 MiB storage part before returning bytes', async () => {
+    const { files, storage, upload } = await fixture()
+    const bytes = new Uint8Array(PROJECT_FILE_PREVIEW_MAX_BYTES + 17).fill(9)
+    const file = await upload(bytes, 'references/large.pdf')
+    const reads = vi.spyOn(storage, 'readPart')
+    const preview = await files.readPreview('reader', scope, file.id, PROJECT_FILE_PREVIEW_MAX_BYTES)
+    expect(preview.bytes.length).toBe(PROJECT_FILE_PREVIEW_MAX_BYTES)
+    expect(preview.sha256).toBe(sha(bytes.subarray(0, PROJECT_FILE_PREVIEW_MAX_BYTES)))
+    expect(preview.size).toBe(bytes.length)
+    expect(reads.mock.calls.map(([, start, size]) => [start, size])).toEqual([0, 1, 2, 3].map((index) => [index * PROJECT_FILE_CHUNK_BYTES, PROJECT_FILE_CHUNK_BYTES]))
+    reads.mockClear()
+    expect((await files.readPreview('reader', scope, file.id, PROJECT_FILE_CHUNK_BYTES + 5)).bytes.length).toBe(PROJECT_FILE_CHUNK_BYTES + 5)
+    expect(reads).toHaveBeenCalledTimes(2)
+    reads.mockResolvedValueOnce(bytes.subarray(0, PROJECT_FILE_CHUNK_BYTES)).mockResolvedValueOnce(new Uint8Array(PROJECT_FILE_CHUNK_BYTES).fill(99))
+    await expect(files.readPreview('reader', scope, file.id, PROJECT_FILE_CHUNK_BYTES + 5)).rejects.toMatchObject({ code: 'integrity-error' })
+    await expect(files.readPreview('reader', scope, file.id, PROJECT_FILE_PREVIEW_MAX_BYTES + 1)).rejects.toMatchObject({ code: 'invalid-preview-limit' })
+  })
+
   it('resumes out-of-order parts after service restart, retries idempotently and retains every immutable version', async () => {
     const { files, makeService, storage } = await fixture()
     const first = new Uint8Array(PROJECT_FILE_CHUNK_BYTES).fill(17), last = new Uint8Array([3, 4, 5])

@@ -79,6 +79,11 @@ current manuscript is marked in the tree. Search
 finds files inside closed folders. **Outline** switches the same pane back to
 the manuscript plan.
 
+PDF files open in their own preview tab, with page navigation and zoom. PDF
+previews support files up to 32 MB; larger files can be opened in an external
+PDF reader. Rendering stays on this device and does not activate PDF scripts,
+links or forms. Switching back to the paper releases the PDF renderer.
+
 | Workspace | Where a newly imported image is saved |
 | --- | --- |
 | Local desktop project | In the project's `figures/` folder on this computer. |

@@ -17,6 +17,14 @@
 .file-image-canvas.fit img { max-width: 100%; max-height: calc(100vh - 320px); object-fit: contain; }
 .file-image-canvas.zoomed { display: block; }
 .file-image-canvas img { display: block; }
+.file-pdf-toolbar label { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+.file-pdf-toolbar input { width: 64px; padding: 6px; border: 1px solid var(--border, #dce1e5); border-radius: 5px; background: var(--surface, #fff); color: inherit; font: inherit; }
+.file-pdf-toolbar > span { margin-right: 0; }
+.file-pdf-toolbar label:last-child { margin-left: auto; }
+.file-pdf-status { margin: 8px 20px; color: var(--text-muted, #65717b); font-size: 12px; }
+.file-pdf-canvas { min-height: 300px; max-height: calc(100vh - 290px); overflow: auto; padding: 24px; background: #e9ecef; }
+.file-pdf-canvas[hidden] { display: none; }
+.file-pdf-canvas canvas { display: block; margin: 0 auto; background: white; box-shadow: 0 2px 12px #23314020; }
 .file-markdown-preview { max-width: 780px; padding: 24px 32px; margin: 0 auto; font-size: 15px; line-height: 1.7; overflow-wrap: anywhere; }
 .file-markdown-preview pre { white-space: pre-wrap; background: #f4f5f6; padding: 12px; border-radius: 5px; }
 .file-markdown-preview blockquote { margin-left: 0; border-left: 3px solid #ccd4da; padding-left: 18px; color: #65717b; }

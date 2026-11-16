@@ -1,0 +1,48 @@
+import { expect, test } from '@playwright/test'
+
+test('renders a real PDF locally with pages and zoom while keeping active content inert', async ({ page }, testInfo) => {
+  const errors: string[] = [], external: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  page.on('request', (request) => { if (/^https?:/.test(request.url()) && new URL(request.url()).hostname !== '127.0.0.1') external.push(request.url()) })
+  await page.goto('/tests/e2e/fixtures/pdf-preview.html')
+  await page.getByRole('button', { name: 'Open PDF', exact: true }).click()
+  const canvas = page.getByRole('img', { name: 'PDF page 1 of 2', exact: true })
+  await expect(canvas).toHaveAttribute('data-rendered', 'true')
+  expect(await canvas.evaluate((element) => {
+    const canvas = element as HTMLCanvasElement
+    return [...canvas.getContext('2d')!.getImageData(0, 0, canvas.width, canvas.height).data].some((value, index) => index % 4 < 3 && value < 200)
+  })).toBe(true)
+  await expect(page.getByRole('button', { name: 'Previous PDF page' })).toBeDisabled()
+  await page.getByRole('button', { name: 'Next PDF page' }).click()
+  await expect(page.getByRole('img', { name: 'PDF page 2 of 2', exact: true })).toHaveAttribute('data-rendered', 'true')
+  await expect(page.getByRole('button', { name: 'Next PDF page' })).toBeDisabled()
+  await page.getByLabel('PDF zoom', { exact: true }).selectOption('150')
+  await expect(page.getByRole('img', { name: 'PDF page 2 of 2', exact: true })).toHaveAttribute('data-rendered', 'true')
+  await page.getByLabel('PDF page', { exact: true }).fill('1')
+  await expect(canvas).toHaveAttribute('data-rendered', 'true')
+  await canvas.click()
+  expect(await page.evaluate(() => (window as unknown as { __pdfScriptExecuted: boolean }).__pdfScriptExecuted)).toBe(false)
+  await page.getByLabel('PDF zoom', { exact: true }).selectOption('0')
+  await expect(canvas).toHaveAttribute('data-rendered', 'true')
+  await page.getByRole('tabpanel').filter({ visible: true }).evaluate((panel) => { panel.scrollTop = 0 })
+  await page.screenshot({ path: testInfo.outputPath('project-pdf-preview.png') })
+  await page.getByRole('tab', { name: /paper.qmd/ }).click()
+  await expect(page.getByRole('textbox', { name: 'Manuscript editor' })).toHaveText('The manuscript remains open and unchanged.')
+  await expect(page.locator('.file-pdf-canvas canvas')).toHaveCount(0)
+  await page.getByRole('tab', { name: /article.pdf/ }).click()
+  await expect(page.getByRole('img', { name: 'PDF page 1 of 2', exact: true })).toHaveAttribute('data-rendered', 'true')
+  const reads = await page.evaluate(() => (window as unknown as { pdfPreviewReads: { maxBytes: number; size: number }[] }).pdfPreviewReads)
+  expect(reads[0].size).toBeGreaterThan(1024 * 1024)
+  expect(reads[0].maxBytes).toBe(32 * 1024 * 1024)
+  expect(errors).toEqual([])
+  expect(external).toEqual([])
+})
+
+test('reports an invalid PDF without replacing the manuscript or creating an editor', async ({ page }) => {
+  await page.goto('/tests/e2e/fixtures/pdf-preview.html')
+  await page.getByRole('button', { name: 'Open broken PDF', exact: true }).click()
+  await expect(page.getByRole('alert')).toContainText('This PDF could not be displayed')
+  await expect(page.locator('.cm-editor')).toHaveCount(0)
+  await page.getByRole('tab', { name: /paper.qmd/ }).click()
+  await expect(page.getByRole('textbox', { name: 'Manuscript editor' })).toHaveText('The manuscript remains open and unchanged.')
+})

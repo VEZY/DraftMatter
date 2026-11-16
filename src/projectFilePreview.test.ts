@@ -6,6 +6,7 @@ describe('safe bounded project file previews', () => {
   it('recognizes configuration and ignore files without treating arbitrary binaries as text', () => {
     for (const path of ['.gitignore', '.gitattributes', 'settings.toml', 'analysis.py', 'analysis.jl', 'README']) expect(projectPreviewKind(path)).toBe('text')
     expect(projectPreviewKind('data/archive.parquet')).toBe('unsupported')
+    expect(projectPreviewKind('references/Article.PDF')).toBe('pdf')
     expect(previewText(Uint8Array.from([0, 1, 2]))).toBeNull()
     expect(previewText(Uint8Array.from([0xff]))).toBeNull()
     const split = Uint8Array.from([65, 0xe2, 0x82])

@@ -1,8 +1,9 @@
-export type ProjectPreviewKind = 'image' | 'table' | 'markdown' | 'text' | 'unsupported'
+export type ProjectPreviewKind = 'image' | 'pdf' | 'table' | 'markdown' | 'text' | 'unsupported'
 
 export function projectPreviewKind(path: string): ProjectPreviewKind {
   const name = path.split('/').at(-1)?.toLowerCase() ?? ''
   if (/\.(?:png|jpe?g|gif|webp|svg)$/.test(name)) return 'image'
+  if (/\.pdf$/.test(name)) return 'pdf'
   if (/\.(?:csv|tsv)$/.test(name)) return 'table'
   if (/\.(?:md|qmd|markdown)$/.test(name)) return 'markdown'
   if (/\.(?:py|r|jl|js|jsx|ts|tsx|json|toml|ya?ml|txt|log|bib|bibtex|ris|sh|bash|zsh|fish|c|cpp|cc|h|hpp|rs|css|scss|html?|xml|ini|cfg|conf|sql|tex|m|lock|ipynb)$/.test(name)

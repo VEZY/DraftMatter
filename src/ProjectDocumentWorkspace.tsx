@@ -38,6 +38,7 @@ interface Props {
 }
 const MAX_TABS = 12
 const IMAGE_LIMIT = 8 * 1024 * 1024
+const PDF_LIMIT = 32 * 1024 * 1024
 const TEXT_LIMIT = 1024 * 1024
 const remoteIdentity = (context?: CollaborationFileContext | null) => context ? `${context.client.urls.apiUrl}:${context.workspace.id}:${context.projectId}:${context.currentUserId}` : ''
 const message = (error: unknown) => error instanceof Error ? error.message : error && typeof error === 'object' && 'message' in error ? String(error.message) : 'This file could not be opened.'
@@ -101,7 +102,7 @@ function ProjectDocumentWorkspaceSession({ workspaceRef, scope, root, manuscript
       update(tab.id, { loading: false, problem: 'Reconnect to the original project and account to read this online file.' })
       return
     }
-    const limit = /\.(png|jpe?g|gif|webp|svg)$/i.test(tab.path) ? IMAGE_LIMIT : TEXT_LIMIT
+    const limit = /\.pdf$/i.test(tab.path) ? PDF_LIMIT : /\.(png|jpe?g|gif|webp|svg)$/i.test(tab.path) ? IMAGE_LIMIT : TEXT_LIMIT
     try {
       if (tab.location === 'online' && (tab.file || fileId)) {
         if (!values.context) throw new Error('Connect to this project to open its saved online version.')
@@ -215,7 +216,7 @@ function ProjectDocumentWorkspaceSession({ workspaceRef, scope, root, manuscript
     {tabs.map((tab, index) => <section key={tab.id} id={`file-panel-${index}`} role="tabpanel" aria-labelledby={`file-tab-${index}`} hidden={active !== tab.id} className="project-file-tab-panel">
       <div className="project-file-tab-actions"><span>{tab.path}</span>{!tab.keepOpen && <button onClick={() => update(tab.id, { keepOpen: true })}>Keep open</button>}{tab.bytes && !tab.truncated && !tab.dirty && (tab.location !== 'online' || tab.remoteScope === remoteIdentity(context)) && <button onClick={() => void download(tab)}>Download file</button>}<button disabled={tab.dirty || tab.loading} onClick={() => { update(tab.id, { loading: true, problem: undefined }); void load(tab, tab.file?.id ?? tab.versionId) }}>Reload file</button></div>
       {tab.location === 'online' && tab.remoteScope !== remoteIdentity(context) && <p role="alert">Reconnect to the original project and account to access this online tab. Its unsaved edits are kept here.</p>}
-      <div className="project-file-tab-content" hidden={tab.location === 'online' && tab.remoteScope !== remoteIdentity(context)}>{tab.loading ? <p role="status">Loading file preview…</p> : tab.problem ? <p role="alert">{tab.problem}</p> : tab.bytes && <ProjectFileViewer path={tab.path} bytes={tab.bytes} totalBytes={tab.size ?? tab.bytes.length} truncated={Boolean(tab.truncated)} provenance={tab.provenance ?? tab.location} editable={!tab.truncated && (tab.location === 'local' ? Boolean(root && tab.hash) : Boolean(tab.file && context && ['owner', 'editor'].includes(context.workspace.role))) && (tab.size ?? 0) <= TEXT_LIMIT} onSave={(content) => save(tab, content)} onDirtyChange={(dirty) => update(tab.id, { dirty, ...(dirty ? { keepOpen: true } : {}) })} onInsertFigure={onInsertFigure && !tab.truncated ? () => { void onInsertFigure(tab.path, tab.bytes!, tab.location === 'online').then(() => setActive('manuscript')).catch((error) => onNotice(message(error))) } : undefined} />}</div>
+      <div className="project-file-tab-content" hidden={tab.location === 'online' && tab.remoteScope !== remoteIdentity(context)}>{tab.loading ? <p role="status">Loading file preview…</p> : tab.problem ? <p role="alert">{tab.problem}</p> : tab.bytes && <ProjectFileViewer active={active === tab.id} path={tab.path} bytes={tab.bytes} totalBytes={tab.size ?? tab.bytes.length} truncated={Boolean(tab.truncated)} provenance={tab.provenance ?? tab.location} editable={!tab.truncated && (tab.location === 'local' ? Boolean(root && tab.hash) : Boolean(tab.file && context && ['owner', 'editor'].includes(context.workspace.role))) && (tab.size ?? 0) <= TEXT_LIMIT} onSave={(content) => save(tab, content)} onDirtyChange={(dirty) => update(tab.id, { dirty, ...(dirty ? { keepOpen: true } : {}) })} onInsertFigure={onInsertFigure && !tab.truncated ? () => { void onInsertFigure(tab.path, tab.bytes!, tab.location === 'online').then(() => setActive('manuscript')).catch((error) => onNotice(message(error))) } : undefined} />}</div>
     </section>)}
   </>
 }

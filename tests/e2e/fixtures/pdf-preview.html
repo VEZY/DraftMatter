@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; worker-src 'self' blob:; font-src 'self' blob: data:; img-src 'self' blob: data:; style-src 'self' 'unsafe-inline'; connect-src 'self' ws://127.0.0.1:*">
+  <title>PDF preview test</title>
+  <style>
+    body { margin: 0; padding: 20px; background: #edf0f3; font: 14px system-ui; }
+    main { max-width: 1100px; margin: auto; }
+    .project-document-workspace { height: 85vh; }
+    nav { display: flex; gap: 10px; padding-bottom: 16px; }
+    nav button { font: inherit; padding: 8px 12px; }
+    .fixture-manuscript { background: white; padding: 40px; min-height: 300px; }
+  </style>
+</head>
+<body>
+  <main id="pdf-preview-test"></main>
+  <script type="module">
+    import React, { useRef } from 'react'
+    import { createRoot } from 'react-dom/client'
+    import { ProjectDocumentWorkspace } from '/src/ProjectDocumentWorkspace.tsx'
+    import { desktopHost } from '/src/desktopHost.ts'
+
+    function makePdf() {
+      const pages = ['DraftMatter PDF preview', 'A second page for navigation']
+      const objects = [
+        '<< /Type /Catalog /Pages 2 0 R /OpenAction 8 0 R >>',
+        '<< /Type /Pages /Kids [3 0 R 5 0 R] /Count 2 >>',
+        '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 4 0 R /Annots [9 0 R] >>',
+        '',
+        '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 7 0 R >> >> /Contents 6 0 R >>',
+        '',
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>',
+        '<< /Type /Action /S /JavaScript /JS (globalThis.__pdfScriptExecuted = true) >>',
+        '<< /Type /Annot /Subtype /Link /Rect [0 0 612 792] /A << /S /URI /URI (https://untrusted.example/pdf-link) >> >>',
+      ]
+      for (const [index, title] of pages.entries()) {
+        const content = `0.14 0.28 0.38 rg 48 570 516 120 re f\n1 1 1 rg BT /F1 22 Tf 64 640 Td (${title}) Tj ET\n0.2 0.2 0.2 rg BT /F1 14 Tf 48 510 Td (Scientific files stay beside the manuscript.) Tj ET\n`
+        objects[index === 0 ? 3 : 5] = `<< /Length ${content.length} >>\nstream\n${content}endstream`
+      }
+      // A legitimate, unused stream makes the PDF larger than the text-preview limit.
+      const padding = '0'.repeat(2 * 1024 * 1024)
+      objects.push(`<< /Length ${padding.length} >>\nstream\n${padding}\nendstream`)
+      let document = '%PDF-1.7\n'
+      const offsets = [0]
+      for (const [index, content] of objects.entries()) { offsets.push(document.length); document += `${index + 1} 0 obj\n${content}\nendobj\n` }
+      const xref = document.length
+      document += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`
+      document += offsets.slice(1).map((offset) => `${String(offset).padStart(10, '0')} 00000 n \n`).join('')
+      document += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`
+      return new TextEncoder().encode(document)
+    }
+    const pdf = makePdf()
+    window.__pdfScriptExecuted = false
+    window.pdfPreviewReads = []
+    desktopHost.available = true
+    desktopHost.readProjectFilePreview = async (root, path, maxBytes) => {
+      if (root !== '/fixture/project') throw new Error('Wrong project scope')
+      const bytes = path === 'references/broken.pdf' ? new TextEncoder().encode('%PDF-1.7\nnot a valid document') : pdf
+      window.pdfPreviewReads.push({ path, maxBytes, size: bytes.length })
+      return { path, bytes: [...bytes.subarray(0, maxBytes)], size: bytes.length, modifiedMs: 1, truncated: bytes.length > maxBytes, hash: 'sha256:fixture' }
+    }
+    function Fixture() {
+      const workspaceRef = useRef(null)
+      return React.createElement(React.Fragment, null,
+        React.createElement('nav', { 'aria-label': 'Fixture files' },
+          ...[['Open PDF', 'references/article.pdf'], ['Open broken PDF', 'references/broken.pdf']].map(([title, path]) => React.createElement('button', { key: path, onClick: () => workspaceRef.current.openFile(path, { keepOpen: true }) }, title))),
+        React.createElement(ProjectDocumentWorkspace, { workspaceRef, scope: 'pdf-preview-fixture', root: '/fixture/project', manuscriptPath: 'paper.qmd', images: [], sharedImages: [], bundledFiles: [], onNotice: () => {} },
+          React.createElement('div', { className: 'fixture-manuscript', contentEditable: true, suppressContentEditableWarning: true, role: 'textbox', 'aria-label': 'Manuscript editor' }, 'The manuscript remains open and unchanged.')))
+    }
+    createRoot(document.getElementById('pdf-preview-test')).render(React.createElement(Fixture))
+  </script>
+</body>
+</html>

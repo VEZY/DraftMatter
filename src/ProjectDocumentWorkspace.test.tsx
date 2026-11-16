@@ -65,6 +65,17 @@ async function clickWithin(element: Element, label: string) {
 }
 
 describe('project document workspace integration', () => {
+  it('reads complete PDF previews up to 32 MiB locally and online without writing either copy', async () => {
+    const pdf = { ...file, id: 'pdf-version', path: 'exports/article.PDF', size: 9 * 1024 * 1024, mediaType: 'application/pdf' }
+    await render({ context: context() })
+    await open(pdf.path, { keepOpen: true })
+    expect(desktopHost.readProjectFilePreview).toHaveBeenLastCalledWith('/research/project', pdf.path, 32 * 1024 * 1024)
+    await open(pdf.path, { location: 'online', file: pdf })
+    expect(ProjectFileClient.prototype.readPreview).toHaveBeenLastCalledWith(pdf, 32 * 1024 * 1024, expect.any(AbortSignal))
+    expect(desktopHost.saveProjectFileText).not.toHaveBeenCalled()
+    expect(ProjectFileClient.prototype.saveText).not.toHaveBeenCalled()
+  })
+
   it('keeps the manuscript DOM, selection, scroll and unsaved text while preview tabs replace one another', async () => {
     await render()
     const manuscript = container.querySelector<HTMLDivElement>('[data-testid="manuscript"]')!

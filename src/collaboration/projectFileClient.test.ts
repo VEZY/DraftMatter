@@ -2,7 +2,7 @@ import { webcrypto } from 'node:crypto'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import { CollaborationServiceClient } from './serviceClient'
 import { ProjectFileClient, projectFilePartHash, type ProjectFileSource } from './projectFileClient'
-import { PROJECT_FILE_CHUNK_BYTES, PROJECT_FILE_QUOTA_BYTES, type ProjectFile, type ProjectFileUpload } from './projectFiles'
+import { PROJECT_FILE_CHUNK_BYTES, PROJECT_FILE_PREVIEW_MAX_BYTES, PROJECT_FILE_QUOTA_BYTES, type ProjectFile, type ProjectFileUpload } from './projectFiles'
 
 beforeAll(() => { if (!globalThis.crypto?.subtle) vi.stubGlobal('crypto', webcrypto) })
 
@@ -102,9 +102,30 @@ describe('bounded and resumable project file transfers', () => {
     mode = 'bad-hash'
     await expect(client.readPreview(file, 4)).rejects.toThrow('integrity')
     authenticatedFetch.mockClear()
-    await expect(client.readPreview(file, PROJECT_FILE_CHUNK_BYTES + 1)).rejects.toThrow('8 MiB')
+    await expect(client.readPreview(file, PROJECT_FILE_PREVIEW_MAX_BYTES + 1)).rejects.toThrow('32 MiB')
     await expect(client.saveText(file, 'x'.repeat(1024 * 1024 + 1))).rejects.toThrow('1 MiB')
     expect(authenticatedFetch).not.toHaveBeenCalled()
+  })
+
+  it('verifies every complete preview part against the immutable catalogue', async () => {
+    const bytes = new Uint8Array(PROJECT_FILE_CHUNK_BYTES + 19).fill(7)
+    const file: ProjectFile = {
+      id: 'multipart-pdf', path: 'paper.pdf', size: bytes.length, mediaType: 'application/pdf',
+      createdBy: 'alice', createdAt: '2026-11-16T12:00:00Z', chunkSize: PROJECT_FILE_CHUNK_BYTES,
+      parts: [
+        { partNumber: 1, size: PROJECT_FILE_CHUNK_BYTES, sha256: await projectFilePartHash(bytes.subarray(0, PROJECT_FILE_CHUNK_BYTES)) },
+        { partNumber: 2, size: 19, sha256: await projectFilePartHash(bytes.subarray(PROJECT_FILE_CHUNK_BYTES)) },
+      ],
+    }
+    const authenticatedFetch = vi.fn(async () => new Response(bytes.slice().buffer, { headers: {
+      'x-draftmatter-version': file.id, 'x-draftmatter-file-size': String(file.size),
+      'x-draftmatter-sha256': await projectFilePartHash(bytes),
+    } }))
+    const client = new ProjectFileClient({ authenticatedFetch }, 'lab', 'paper', 'alice')
+    expect((await client.readPreview(file, PROJECT_FILE_PREVIEW_MAX_BYTES)).truncated).toBe(false)
+    // A response hash alone cannot authorize different bytes for the selected version.
+    bytes[PROJECT_FILE_CHUNK_BYTES] = 99
+    await expect(client.readPreview(file, PROJECT_FILE_PREVIEW_MAX_BYTES)).rejects.toThrow('selected file version')
   })
 
   it('pauses a multipart upload and resumes in a new client after checking received bytes', async () => {

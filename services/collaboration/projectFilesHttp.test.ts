@@ -5,7 +5,7 @@ import { DataType, newDb } from 'pg-mem'
 import { afterEach, describe, expect, it } from 'vitest'
 import { CollaborationServiceClient } from '../../src/collaboration/serviceClient'
 import { ProjectFileClient } from '../../src/collaboration/projectFileClient'
-import { PROJECT_FILE_CHUNK_BYTES, PROJECT_FILE_QUOTA_BYTES, type ProjectFile, type ProjectFileUpload } from '../../src/collaboration/projectFiles'
+import { PROJECT_FILE_CHUNK_BYTES, PROJECT_FILE_PREVIEW_MAX_BYTES, PROJECT_FILE_QUOTA_BYTES, type ProjectFile, type ProjectFileUpload } from '../../src/collaboration/projectFiles'
 import { WorkspaceAccessError } from '../../src/collaboration/workspaceService'
 import { createCollaborationHttpApi, handleNodeHttpRequest, collaborationRequestBodyLimit } from './httpApi'
 import { PostgresProjectFileService } from './projectFiles'
@@ -74,7 +74,7 @@ describe('authenticated project file HTTP contract', () => {
     expect(response.headers.get('x-draftmatter-file-size')).toBe(String(bytes.length))
     expect(response.headers.get('access-control-expose-headers')).toContain('x-draftmatter-version')
     expect((await request(`${base}/${original.id}/preview?maxBytes=0`, 'reader')).status).toBe(400)
-    expect((await request(`${base}/${original.id}/preview?maxBytes=${PROJECT_FILE_CHUNK_BYTES + 1}`, 'reader')).status).toBe(400)
+    expect((await request(`${base}/${original.id}/preview?maxBytes=${PROJECT_FILE_PREVIEW_MAX_BYTES + 1}`, 'reader')).status).toBe(400)
     expect((await request(`${base}/${original.id}/preview`, 'stranger')).status).toBe(404)
 
     const client = (token: string) => new ProjectFileClient(new CollaborationServiceClient('https://sync.example.test', async () => token, async (url, init) => api(new Request(String(url), init))), scope.workspaceId, scope.projectId, token)
@@ -91,6 +91,25 @@ describe('authenticated project file HTTP contract', () => {
     expect((await reader.readPreview(original)).bytes).toEqual(bytes)
     await workspaces.revokeMember('owner', scope.workspaceId, 'reader')
     await expect(reader.readPreview(saved)).rejects.toThrow()
+  })
+
+  it('returns a complete authenticated multipart PDF preview without enlarging upload parts', async () => {
+    const { api, files } = await fixture()
+    const bytes = new Uint8Array(PROJECT_FILE_CHUNK_BYTES + 19).fill(32)
+    bytes.set(new TextEncoder().encode('%PDF-1.7\n'))
+    const upload = await files.begin('editor', scope, { path: 'references/article.pdf', size: bytes.length, mediaType: 'application/pdf' })
+    for (let start = 0, part = 1; start < bytes.length; start += PROJECT_FILE_CHUNK_BYTES, part++) {
+      const content = bytes.subarray(start, start + PROJECT_FILE_CHUNK_BYTES)
+      await files.putPart('editor', scope, upload.id, part, content, digest(content))
+    }
+    const file = await files.complete('editor', scope, upload.id)
+    expect(file.chunkSize).toBe(PROJECT_FILE_CHUNK_BYTES)
+    const client = new ProjectFileClient(new CollaborationServiceClient('https://sync.example.test', async () => 'reader', async (url, init) => api(new Request(String(url), init))), scope.workspaceId, scope.projectId, 'reader')
+    const preview = await client.readPreview(file, PROJECT_FILE_PREVIEW_MAX_BYTES)
+    expect(preview.truncated).toBe(false)
+    expect(preview.bytes.length).toBe(bytes.length)
+    expect(digest(preview.bytes)).toBe(digest(bytes))
+    expect(preview.versionId).toBe(file.id)
   })
 
   it('uploads binary data, exposes durable resume progress, and lets an invited reader download the immutable version', async () => {

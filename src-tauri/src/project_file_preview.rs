@@ -7,7 +7,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::{fs, fs::OpenOptions, io::Read};
 
-const MAX_PREVIEW_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_PREVIEW_BYTES: u64 = 32 * 1024 * 1024;
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -27,7 +27,7 @@ fn read_preview(
 ) -> Result<ProjectFilePreview, HostError> {
     if maximum == 0 || maximum > MAX_PREVIEW_BYTES {
         return Err(HostError::InvalidProject(
-            "Choose a preview limit between 1 byte and 8 MiB.".into(),
+            "Choose a preview limit between 1 byte and 32 MiB.".into(),
         ));
     }
     let root = canonical_root(raw_root)?;
@@ -119,6 +119,23 @@ mod tests {
         assert_eq!(result.bytes.len(), 128);
         assert!(result.truncated);
         assert_eq!(result.hash, None);
+    }
+
+    #[test]
+    fn pdf_previews_can_exceed_the_text_and_image_limits() {
+        let directory = tempfile::tempdir().unwrap();
+        let mut bytes = vec![0; 9 * 1024 * 1024];
+        bytes[..8].copy_from_slice(b"%PDF-1.7");
+        fs::write(directory.path().join("article.pdf"), &bytes).unwrap();
+        let result = read_preview(
+            directory.path().to_str().unwrap(),
+            "article.pdf",
+            MAX_PREVIEW_BYTES,
+        )
+        .unwrap();
+        assert_eq!(result.bytes, bytes);
+        assert!(!result.truncated);
+        assert!(result.hash.is_some());
     }
 
     #[test]
