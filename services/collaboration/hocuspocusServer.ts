@@ -43,6 +43,8 @@ export interface DraftMatterHocuspocusOptions {
   allowedOrigins?: string[]
   httpHandler?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
   clock?: () => number
+  /** Reference reconstruction is retained for differential tests and local benchmarks. */
+  validationMode?: 'reference' | 'incremental'
 }
 
 export type CollaborationPresenceDiagnostic = 'too-many-clients' | 'client-collision' | 'identity-mismatch' | 'state-invalid' | null
@@ -66,20 +68,66 @@ function canonical(value: unknown): unknown {
   return value
 }
 
-function protectedFingerprint(document: Y.Doc) {
-  const unknownRoots = Object.fromEntries([...document.share.entries()]
-    .filter(([name]) => !KNOWN_ROOTS.has(name))
-    .sort(([left], [right]) => left.localeCompare(right))
-    .map(([name, value]) => [name, canonical(value.toJSON())]))
-  return JSON.stringify(canonical({
-    document: document.getText(ROOTS.document).toString(),
-    proposals: document.getMap(ROOTS.proposals).toJSON(),
-    decisions: document.getMap(ROOTS.decisions).toJSON(),
-    meta: document.getMap(ROOTS.meta).toJSON(),
-    prosemirror: document.getXmlFragment(ROOTS.prosemirror).toJSON(),
-    resources: document.getMap(ROOTS.resources).toJSON(),
-    unknownRoots,
-  }))
+// Caches belong only to validator-managed documents. Observe typed roots deeply so
+// nested Yjs edits invalidate the same reads as replacements and delete sets.
+class ValidationReadCache {
+  private values = new Map<string, unknown>()
+  private observed = new Set<Y.AbstractType<Y.YEvent<any>>>()
+
+  constructor(private document: Y.Doc) {}
+
+  read<T>(name: string, type: Y.AbstractType<any>, key: string, compute: () => T): T {
+    if (!this.observed.has(type)) {
+      this.observed.add(type)
+      type.observeDeep(() => {
+        for (const entry of this.values.keys()) if (entry.startsWith(`${name}\0`)) this.values.delete(entry)
+      })
+    }
+    const cacheKey = `${name}\0${key}`
+    if (!this.values.has(cacheKey)) this.values.set(cacheKey, compute())
+    return this.values.get(cacheKey) as T
+  }
+
+  resources() {
+    return this.read(ROOTS.resources, this.document.getMap(ROOTS.resources), 'diagnostic', () => projectResourcesDiagnostic(this.document))
+  }
+}
+
+const readCaches = new WeakMap<Y.Doc, ValidationReadCache>()
+
+function rootFingerprint(document: Y.Doc, name: string) {
+  const type = name === ROOTS.document ? document.getText(name)
+    : name === ROOTS.prosemirror ? document.getXmlFragment(name) : document.getMap(name)
+  const compute = () => JSON.stringify(canonical(type.toJSON()))
+  return readCaches.get(document)?.read(name, type, 'fingerprint', compute) ?? compute()
+}
+
+function protectedStateUnchanged(before: Y.Doc, after: Y.Doc) {
+  return [ROOTS.document, ROOTS.proposals, ROOTS.decisions, ROOTS.meta, ROOTS.prosemirror, ROOTS.resources]
+    .every((name) => rootFingerprint(before, name) === rootFingerprint(after, name))
+    && unknownRootsUnchanged(before, after)
+}
+
+function resourcesDiagnostic(document: Y.Doc) {
+  const cache = readCaches.get(document)
+  return cache ? cache.resources() : projectResourcesDiagnostic(document)
+}
+
+function reservedReviewMarkup(document: Y.Doc) {
+  const text = document.getText(ROOTS.document)
+  const compute = (fast: boolean) => {
+    const source = text.toString()
+    // Necessary literals in the current grammar: portableSource's anchorPattern
+    // requires .dm-anchor; reviewMarkup's section classes require
+    // .draftmatter-reviews. Presence always falls back to the complete parser,
+    // including literal/fenced contexts. Scan the full resulting source so
+    // markers assembled by separate or concurrent edits cannot evade this.
+    if (fast && !source.includes('.dm-anchor') && !source.includes('.draftmatter-reviews')) return false
+    const review = parseReviewMarkup(source)
+    return review.sectionStart !== undefined || review.anchors.length > 0
+  }
+  const cache = readCaches.get(document)
+  return cache ? cache.read(ROOTS.document, text, 'review-markup', () => compute(true)) : compute(false)
 }
 
 function unknownRoots(document: Y.Doc) {
@@ -96,7 +144,9 @@ function unknownRootsUnchanged(before: Y.Doc, after: Y.Doc) {
 }
 
 function mapSnapshot(document: Y.Doc, name: string) {
-  return new Map([...document.getMap<Record<string, unknown>>(name).entries()].map(([key, value]) => [key, canonical(value)]))
+  const map = document.getMap<Record<string, unknown>>(name)
+  const compute = () => new Map([...map.entries()].map(([key, value]) => [key, canonical(value)]))
+  return readCaches.get(document)?.read(name, map, 'snapshot', compute) ?? compute()
 }
 
 function same(left: unknown, right: unknown) {
@@ -629,47 +679,8 @@ function hasDeferredUpdate(document: Y.Doc) {
   return document.store.pendingStructs !== null || document.store.pendingDs !== null
 }
 
-export function commenterUpdateDiagnostic(document: Y.Doc, update: Uint8Array, userId: string): 'update-invalid' | 'protected-state-changed' | 'comment-record-invalid' | null {
-  const candidate = new Y.Doc()
-  try {
-    Y.applyUpdate(candidate, Y.encodeStateAsUpdate(document))
-    Y.applyUpdate(candidate, update)
-    if (hasDeferredUpdate(candidate)) return 'update-invalid'
-    if (protectedFingerprint(document) !== protectedFingerprint(candidate)) return 'protected-state-changed'
-    if (!commenterMapsAllowed(document, candidate, userId)) return 'comment-record-invalid'
-    return null
-  } catch {
-    return 'update-invalid'
-  } finally {
-    candidate.destroy()
-  }
-}
-
-export function commenterUpdateAllowed(document: Y.Doc, update: Uint8Array, userId: string) {
-  return commenterUpdateDiagnostic(document, update, userId) === null
-}
-
-export function editorUpdateDiagnostic(document: Y.Doc, update: Uint8Array, userId: string): 'update-invalid' | 'reserved-review-markup' | 'review-record-invalid' | null {
-  const candidate = new Y.Doc()
-  try {
-    Y.applyUpdate(candidate, Y.encodeStateAsUpdate(document))
-    Y.applyUpdate(candidate, update)
-    if (hasDeferredUpdate(candidate)) return 'update-invalid'
-    if (projectResourcesDiagnostic(candidate)) return 'review-record-invalid'
-    const review = parseReviewMarkup(candidate.getText(ROOTS.document).toString())
-    if (review.sectionStart !== undefined || review.anchors.length > 0) return 'reserved-review-markup'
-    if (!editorMapsAllowed(document, candidate, userId)) return 'review-record-invalid'
-    return null
-  } catch {
-    return 'update-invalid'
-  } finally {
-    candidate.destroy()
-  }
-}
-
-export function editorUpdateAllowed(document: Y.Doc, update: Uint8Array, userId: string) {
-  return editorUpdateDiagnostic(document, update, userId) === null
-}
+type UpdateDiagnostic = 'update-invalid' | 'protected-state-changed' | 'comment-record-invalid' | 'reserved-review-markup' | 'review-record-invalid' | null
+export type CollaborationWritableRole = Exclude<WorkspaceRole, 'viewer'>
 
 function collaborationDocumentIsEmpty(document: Y.Doc) {
   return document.getText(ROOTS.document).length === 0
@@ -679,25 +690,158 @@ function collaborationDocumentIsEmpty(document: Y.Doc) {
     && unknownRoots(document).size === 0
 }
 
-export function ownerUpdateDiagnostic(document: Y.Doc, update: Uint8Array, userId: string): ReturnType<typeof editorUpdateDiagnostic> {
-  if (!collaborationDocumentIsEmpty(document)) return editorUpdateDiagnostic(document, update, userId)
+function candidateDiagnostic(document: Y.Doc, candidate: Y.Doc, update: Uint8Array, role: CollaborationWritableRole, userId: string): UpdateDiagnostic {
+  const initialize = role === 'owner' && collaborationDocumentIsEmpty(document)
+  const beforeVector = initialize ? Y.encodeStateVector(candidate) : undefined
+  let changedUnknownRoot = false
+  // Remote roots can still be untyped AbstractTypes, whose toJSON() is undefined
+  // and whose deep observers do not run. Inspect changed types themselves, even
+  // for delete-only transactions, rather than inferring safety from visible JSON.
+  const inspect = (transaction: Y.Transaction) => {
+    const rootNames = new Map([...candidate.share].map(([name, type]) => [type, name]))
+    for (const changed of transaction.changed.keys()) {
+      let root = changed
+      while (root._item?.parent instanceof Y.AbstractType) root = root._item.parent
+      const name = rootNames.get(root)
+      if (name === undefined || !KNOWN_ROOTS.has(name)) changedUnknownRoot = true
+    }
+  }
+  candidate.on('afterTransaction', inspect)
+  try {
+    Y.applyUpdate(candidate, update)
+  } finally {
+    candidate.off('afterTransaction', inspect)
+  }
+  if (hasDeferredUpdate(candidate)) return 'update-invalid'
+  if (role === 'commenter') {
+    if (changedUnknownRoot || !protectedStateUnchanged(document, candidate)) return 'protected-state-changed'
+    return commenterMapsAllowed(document, candidate, userId) ? null : 'comment-record-invalid'
+  }
+  if (resourcesDiagnostic(candidate)) return 'review-record-invalid'
+  if (initialize && same([...beforeVector!], [...Y.encodeStateVector(candidate)])) {
+    return changedUnknownRoot || !unknownRootsUnchanged(document, candidate) ? 'review-record-invalid' : null
+  }
+  if (reservedReviewMarkup(candidate)) return 'reserved-review-markup'
+  if (changedUnknownRoot) return 'review-record-invalid'
+  if (initialize) {
+    const meta = mapSnapshot(candidate, ROOTS.meta)
+    return meta.size === 1 && meta.get('schemaVersion') === 1 && unknownRoots(candidate).size === 0 ? null : 'review-record-invalid'
+  }
+  return editorMapsAllowed(document, candidate, userId) ? null : 'review-record-invalid'
+}
+
+function reconstructDiagnostic(document: Y.Doc, update: Uint8Array, role: CollaborationWritableRole, userId: string): UpdateDiagnostic {
   const candidate = new Y.Doc()
   try {
     Y.applyUpdate(candidate, Y.encodeStateAsUpdate(document))
-    const beforeVector = Y.encodeStateVector(candidate)
-    Y.applyUpdate(candidate, update)
-    if (hasDeferredUpdate(candidate)) return 'update-invalid'
-    if (projectResourcesDiagnostic(candidate)) return 'review-record-invalid'
-    if (same([...beforeVector], [...Y.encodeStateVector(candidate)])) return null
-    const review = parseReviewMarkup(candidate.getText(ROOTS.document).toString())
-    if (review.sectionStart !== undefined || review.anchors.length > 0) return 'reserved-review-markup'
-    const meta = mapSnapshot(candidate, ROOTS.meta)
-    if (meta.size !== 1 || meta.get('schemaVersion') !== 1 || unknownRoots(candidate).size > 0) return 'review-record-invalid'
-    return null
+    return candidateDiagnostic(document, candidate, update, role, userId)
   } catch {
     return 'update-invalid'
   } finally {
     candidate.destroy()
+  }
+}
+
+export function commenterUpdateDiagnostic(document: Y.Doc, update: Uint8Array, userId: string) {
+  return reconstructDiagnostic(document, update, 'commenter', userId)
+}
+
+export function commenterUpdateAllowed(document: Y.Doc, update: Uint8Array, userId: string) {
+  return commenterUpdateDiagnostic(document, update, userId) === null
+}
+
+export function editorUpdateDiagnostic(document: Y.Doc, update: Uint8Array, userId: string) {
+  return reconstructDiagnostic(document, update, 'editor', userId)
+}
+
+export function editorUpdateAllowed(document: Y.Doc, update: Uint8Array, userId: string) {
+  return editorUpdateDiagnostic(document, update, userId) === null
+}
+
+export function ownerUpdateDiagnostic(document: Y.Doc, update: Uint8Array, userId: string) {
+  return reconstructDiagnostic(document, update, 'owner', userId)
+}
+
+interface ValidationMirror {
+  candidate: Y.Doc
+  pending: boolean
+  origin?: unknown
+  integrated: boolean
+  onUpdate: (update: Uint8Array, origin: unknown) => void
+  onDestroy: () => void
+}
+
+/** A speculative document never becomes authoritative. Reuse requires observing
+ * integration by the expected sender; a rejection, failed append, unexpected
+ * local transaction or unfinished message drops the mirror completely. */
+export class CollaborationUpdateValidator {
+  private mirrors = new WeakMap<Y.Doc, ValidationMirror>()
+
+  private discard(document: Y.Doc) {
+    const mirror = this.mirrors.get(document)
+    if (!mirror) return
+    document.off('update', mirror.onUpdate)
+    document.off('destroy', mirror.onDestroy)
+    mirror.candidate.destroy()
+    this.mirrors.delete(document)
+  }
+
+  validate(document: Y.Doc, update: Uint8Array, role: CollaborationWritableRole, userId: string, origin?: unknown): UpdateDiagnostic {
+    let mirror = this.mirrors.get(document)
+    // A caller must release a completed message before starting another.
+    if (mirror?.pending) { this.discard(document); mirror = undefined }
+    try {
+      if (!mirror) {
+        const candidate = new Y.Doc()
+        try {
+          Y.applyUpdate(candidate, Y.encodeStateAsUpdate(document))
+        } catch (error) {
+          candidate.destroy()
+          throw error
+        }
+        readCaches.set(candidate, new ValidationReadCache(candidate))
+        if (!readCaches.has(document)) {
+          readCaches.set(document, new ValidationReadCache(document))
+          document.once('destroy', () => readCaches.delete(document))
+        }
+        const entry: ValidationMirror = {
+          candidate, pending: false, integrated: false,
+          onUpdate: (_update, actualOrigin) => {
+            const sender = actualOrigin && typeof actualOrigin === 'object'
+              && 'source' in actualOrigin && actualOrigin.source === 'connection' && 'connection' in actualOrigin
+              ? actualOrigin.connection : undefined
+            // The mirror already contains this message. Any other transaction
+            // invalidates it, including trusted server writes during durable I/O.
+            if (entry.pending && !entry.integrated && sender !== undefined && sender === entry.origin) entry.integrated = true
+            else this.discard(document)
+          },
+          onDestroy: () => this.discard(document),
+        }
+        document.on('update', entry.onUpdate)
+        document.on('destroy', entry.onDestroy)
+        this.mirrors.set(document, entry)
+        mirror = entry
+      }
+      mirror.pending = true
+      mirror.integrated = false
+      mirror.origin = origin
+      const diagnostic = candidateDiagnostic(document, mirror.candidate, update, role, userId)
+      if (diagnostic) this.discard(document)
+      return diagnostic
+    } catch {
+      this.discard(document)
+      return 'update-invalid'
+    }
+  }
+
+  /** Called in afterHandleMessage's finally path, including persistence errors.
+   * No-op updates emit no event and conservatively rebuild on the next message. */
+  release(document: Y.Doc) {
+    const mirror = this.mirrors.get(document)
+    if (!mirror) return
+    if (!mirror.integrated) { this.discard(document); return }
+    mirror.pending = false
+    mirror.origin = undefined
   }
 }
 
@@ -731,6 +875,7 @@ class DocumentMessageQueue {
 
 export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocusOptions) {
   const messages = new DocumentMessageQueue()
+  const validator = options.validationMode === 'reference' ? undefined : new CollaborationUpdateValidator()
   const releases = new WeakMap<Connection<CollaborationConnectionContext>, () => void>()
   const messageBudgets = new WeakMap<Connection<CollaborationConnectionContext>, { tokens: number; at: number }>()
   const clock = options.clock ?? Date.now
@@ -842,7 +987,8 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
         throw new CollaborationTransportError(4403, 'Collaboration access was revoked.')
       }
     },
-    async afterHandleMessage({ connection }) {
+    async afterHandleMessage({ connection, document }) {
+      validator?.release(document)
       releases.get(connection)?.()
       releases.delete(connection)
     },
@@ -864,15 +1010,10 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
     async beforeSync({ context, document, documentName, connection, type, payload }) {
       if (type !== 1 && type !== 2) return
       if (connection.readOnly || context.role === 'viewer') return
-      if (context.role === 'commenter' && !commenterUpdateAllowed(document, payload, context.userId)) {
-        throw new Error('Commenter updates may only create attributed threads or append attributed replies.')
-      }
-      if (context.role === 'editor' || context.role === 'owner') {
-        const diagnostic = context.role === 'owner'
-          ? ownerUpdateDiagnostic(document, payload, context.userId)
-          : editorUpdateDiagnostic(document, payload, context.userId)
-        if (diagnostic) throw new Error(`Collaboration review records must preserve immutable history and verified attribution (${diagnostic}).`)
-      }
+      const diagnostic = validator
+        ? validator.validate(document, payload, context.role, context.userId, connection)
+        : reconstructDiagnostic(document, payload, context.role, context.userId)
+      if (diagnostic) throw new Error(`Collaboration review records must preserve immutable history and verified attribution (${diagnostic}).`)
       if (!await flushLocalChanges(documentName, document)) throw storageUnavailable()
       try {
         // Hocuspocus applies and acknowledges only after this awaited hook returns.
