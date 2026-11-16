@@ -8,8 +8,11 @@ You can move between saved versions and **Current manuscript** freely.
 
 - **Preview** displays the saved manuscript text and formatting. Figures use
   placeholders; code and saved raw output are shown as inert text.
-- **Changes** compares the selected version with the working manuscript. Added
-  and removed lines are marked, with word changes highlighted where practical.
+- **Changes** compares the selected version with the working manuscript. An
+  edited paragraph is shown once with individual word additions and removals;
+  unchanged surrounding text stays neutral. Entirely added or removed lines
+  remain marked as complete changes. Very broad changes use a bounded fallback
+  with a visible notice.
 - **Source** displays the exact saved Markdown/Quarto source.
 - **Back to current manuscript** closes the history window. The working text,
   selection and undo history have not been replaced by browsing.

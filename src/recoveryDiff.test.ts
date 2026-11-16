@@ -107,4 +107,113 @@ describe('read-only recovery source comparisons', () => {
       }
     }
   })
+
+  it('highlights only scattered edited words in a long paragraph rather than treating its whole source line as changed', () => {
+    const words = Array.from({ length: 2_500 }, (_, index) => `observation${index}`)
+    const previous = words.join(' ')
+    words[40] = 'revised40'
+    words[1_300] = 'revised1300'
+    words[2_400] = 'revised2400'
+    const current = words.join(' ')
+    const diff = compareRecoverySources(previous, current)
+    const removed = diff.rows.find((row) => row.kind === 'removed')!
+    const added = diff.rows.find((row) => row.kind === 'added')!
+    expect(removed.segments?.filter((segment) => segment.changed).map((segment) => segment.text)).toEqual(['observation40', 'observation1300', 'observation2400'])
+    expect(added.segments?.filter((segment) => segment.changed).map((segment) => segment.text)).toEqual(['revised40', 'revised1300', 'revised2400'])
+    expect(added.pairedOldLine).toBe(removed.oldLine)
+    expect(added.inlineSegments?.filter((segment) => segment.kind !== 'added').map((segment) => segment.text).join('')).toBe(previous)
+    expect(added.inlineSegments?.filter((segment) => segment.kind !== 'removed').map((segment) => segment.text).join('')).toBe(current)
+    expect(diff.notices).toEqual([])
+  })
+
+  it('keeps long repeated prose neutral around distant edits, additions and removals', () => {
+    const common = 'Plant models compare repeated observations and measured responses. '
+    const previous = `${common.repeat(20)}A stable interpretation. ${common.repeat(20)}The measured result was 12 units. ${common.repeat(20)}`
+    const current = previous.replace('stable', 'revised').replace('measured result was 12', 'reproducible result was 18')
+    const diff = compareRecoverySources(previous, current)
+    const added = diff.rows.find((row) => row.kind === 'added')!
+    const before = added.inlineSegments!.filter((segment) => segment.kind !== 'added').map((segment) => segment.text).join('')
+    const after = added.inlineSegments!.filter((segment) => segment.kind !== 'removed').map((segment) => segment.text).join('')
+    expect(before).toBe(previous)
+    expect(after).toBe(current)
+    expect(added.inlineSegments!.filter((segment) => segment.kind === 'removed').map((segment) => segment.text)).toEqual(['stable', 'measured', '12'])
+    expect(added.inlineSegments!.filter((segment) => segment.kind === 'added').map((segment) => segment.text)).toEqual(['revised', 'reproducible', '18'])
+  })
+
+  it('preserves exact Unicode, whitespace and punctuation with small changes in long text', () => {
+    const context = 'Les observations écophysiologiques restent reproductibles. '.repeat(60)
+    const previous = `${context}Café αβ: 12 µmol; plante 🪴. ${context}A\tB  C.`
+    const current = `${context}Café αβ: 18 µmol—plante 🌱! ${context}A B C.`
+    const diff = compareRecoverySources(previous, current)
+    const inline = diff.rows.find((row) => row.kind === 'added')!.inlineSegments!
+    expect(inline).toBeDefined()
+    expect(inline.filter((segment) => segment.kind !== 'added').map((segment) => segment.text).join('')).toBe(previous)
+    expect(inline.filter((segment) => segment.kind !== 'removed').map((segment) => segment.text).join('')).toBe(current)
+    expect(inline.filter((segment) => segment.kind === 'equal').map((segment) => segment.text).join('')).toContain('observations écophysiologiques')
+  })
+
+  it('handles pure word insertions or deletions without disabling emphasis for long paragraphs', () => {
+    const source = `${'Common unchanged prose. '.repeat(160)}A measured response.`
+    for (const [previous, current, kind] of [
+      [source, source.replace('A measured', 'A newly measured'), 'added'],
+      [source.replace('A measured', 'A newly measured'), source, 'removed'],
+    ] as const) {
+      const diff = compareRecoverySources(previous, current)
+      const inline = diff.rows.find((row) => row.kind === 'added')!.inlineSegments!
+      expect(inline.filter((segment) => segment.kind !== 'added').map((segment) => segment.text).join('')).toBe(previous)
+      expect(inline.filter((segment) => segment.kind !== 'removed').map((segment) => segment.text).join('')).toBe(current)
+      expect(inline.filter((segment) => segment.kind === kind).map((segment) => segment.text).join('').trim()).toBe('newly')
+      expect(inline.filter((segment) => segment.kind !== kind && segment.kind !== 'equal')).toEqual([])
+    }
+  })
+
+  it('reconstructs both sides of sparse long-paragraph edits including repeated words and insertion/deletion shifts', () => {
+    let state = 37
+    const next = () => { state = (Math.imul(state, 1664525) + 1013904223) >>> 0; return state }
+    for (let sample = 0; sample < 80; sample++) {
+      const oldWords = Array.from({ length: 350 }, (_, index) => index % 7 ? `token${index}` : 'repeated')
+      const newWords = [...oldWords]
+      for (let edit = 0; edit < 4; edit++) newWords.splice(next() % newWords.length, next() % 3, `change${sample}_${edit}`)
+      const previous = oldWords.join(sample % 2 ? '  ' : ' '), current = newWords.join(sample % 2 ? '  ' : ' ')
+      const diff = compareRecoverySources(previous, current)
+      const inline = diff.rows.find((row) => row.kind === 'added')!.inlineSegments!
+      expect(inline).toBeDefined()
+      expect(inline.filter((segment) => segment.kind !== 'added').map((segment) => segment.text).join('')).toBe(previous)
+      expect(inline.filter((segment) => segment.kind !== 'removed').map((segment) => segment.text).join('')).toBe(current)
+    }
+  })
+
+  it('falls back explicitly for a long extensive rewrite instead of allocating a quadratic word matrix', () => {
+    const previous = Array.from({ length: 3_000 }, (_, index) => `original${index}`).join(' ')
+    const current = Array.from({ length: 3_000 }, (_, index) => `replacement${index}`).join(' ')
+    const diff = compareRecoverySources(previous, current)
+    expect(diff.rows.find((row) => row.kind === 'removed')?.segments).toBeUndefined()
+    expect(diff.rows.find((row) => row.kind === 'added')?.inlineSegments).toBeUndefined()
+    expect(diff.notices.join(' ')).toContain('word-level comparison reached its work limit')
+    expect(reconstructed(diff.rows, 'oldLine')).toEqual([previous])
+    expect(reconstructed(diff.rows, 'newLine')).toEqual([current])
+  })
+
+  it('pairs an edited paragraph with its matching text rather than an unrelated line inserted before it', () => {
+    const previous = 'Measured leaf area increased by 12 percent under the same climate conditions.\n'
+    const current = 'A new introductory observation.\nMeasured leaf area increased by 18 percent under the same climate conditions.\n'
+    const diff = compareRecoverySources(previous, current)
+    const intro = diff.rows.find((row) => row.newLine === 1)!
+    const edited = diff.rows.find((row) => row.newLine === 2)!
+    expect(intro.inlineSegments).toBeUndefined()
+    expect(edited.pairedOldLine).toBe(1)
+    expect(edited.inlineSegments?.filter((segment) => segment.kind === 'removed')).toEqual([{ kind: 'removed', text: '12' }])
+    expect(edited.inlineSegments?.filter((segment) => segment.kind === 'added')).toEqual([{ kind: 'added', text: '18' }])
+  })
+
+  it('does not overflow function argument limits near the source character bound', () => {
+    const previous = '.'.repeat(180_000)
+    const current = `:${'.'.repeat(179_998)};`
+    const diff = compareRecoverySources(previous, current)
+    const inline = diff.rows.find((row) => row.kind === 'added')!.inlineSegments!
+    expect(inline).toBeDefined()
+    expect(inline.filter((segment) => segment.kind !== 'added').map((segment) => segment.text).join('')).toBe(previous)
+    expect(inline.filter((segment) => segment.kind !== 'removed').map((segment) => segment.text).join('')).toBe(current)
+    expect(diff.truncated).toBe(false)
+  })
 })
