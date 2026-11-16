@@ -10,6 +10,12 @@
   --home-white: #fff;
 }
 
+/* Editor routes fill the window independently of their sidebar contents. */
+.draftmatter-editor-route {
+  height: 100%;
+  min-height: 0;
+}
+
 .home-welcome,
 .home-catalogue,
 .home-invitation,

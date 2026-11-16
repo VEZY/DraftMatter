@@ -1,5 +1,5 @@
 import { isTauri } from '@tauri-apps/api/core'
-import { lazy, Suspense, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useRef, useState, type ReactNode } from 'react'
 import type { EditorSaveGuard } from './App'
 import { desktopLaunchTarget } from './desktopLaunch'
 import { Home } from './Home'
@@ -28,6 +28,10 @@ import './home.css'
 
 // The home/account routes do not need the editor, export engines or language modes.
 const App = lazy(() => import('./App'))
+
+function withEditorLayout(editor: ReactNode) {
+  return <div className="draftmatter-editor-route">{editor}</div>
+}
 
 function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorSaveGuard }) {
   const session = useCollaborationSession()
@@ -189,7 +193,7 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
 
   if (route.destination === 'collaborative-editor') {
     if (launch) {
-      return <App saveBeforeLeaveRef={saveBeforeLeaveRef} collaborationLaunch={launch} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLaunch(null); navigate({ destination: 'home', workspaceId: launch.workspaceId }) }} />
+      return withEditorLayout(<App saveBeforeLeaveRef={saveBeforeLeaveRef} collaborationLaunch={launch} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLaunch(null); navigate({ destination: 'home', workspaceId: launch.workspaceId }) }} />)
     }
     if (!session.profile) {
       return home()
@@ -201,10 +205,10 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
   if (route.destination === 'local-editor') {
     if (!localLaunch && desktopHost.available && route.localProjectId !== 'open') return <main className="home-route-status" role="status">Opening manuscript…</main>
     if (!localLaunch) return <main className="home-route-status"><section><h1>Open the local project from Home</h1><p>DraftMatter needs permission to read a project folder on this computer.</p><button onClick={() => navigate({ destination: 'home' })}>Return to Home</button></section></main>
-    return <App key={localLaunch.project.root} saveBeforeLeaveRef={saveBeforeLeaveRef} desktopProjectLaunch={localLaunch.project} selectedManuscriptPath={localLaunch.selectedPath} startCollaborationOnMount={startCollaborationRoot === localLaunch.project.root} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLocalProjects(readLocalProjectRecents(localStorage)); setStartCollaborationRoot(''); setLocalLaunch(null); navigate({ destination: 'home' }) }} />
+    return withEditorLayout(<App key={localLaunch.project.root} saveBeforeLeaveRef={saveBeforeLeaveRef} desktopProjectLaunch={localLaunch.project} selectedManuscriptPath={localLaunch.selectedPath} startCollaborationOnMount={startCollaborationRoot === localLaunch.project.root} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLocalProjects(readLocalProjectRecents(localStorage)); setStartCollaborationRoot(''); setLocalLaunch(null); navigate({ destination: 'home' }) }} />)
   }
 
-  if (route.destination === 'example') return <App saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience="complete-example" onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />
+  if (route.destination === 'example') return withEditorLayout(<App saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience="complete-example" onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />)
   if (route.destination === 'learn') return <Learn onBack={() => navigate({ destination: 'home' })} onStartTour={() => navigate({ destination: 'tutorial' })} />
   if (route.destination === 'learn-ai') return (
     <>
@@ -213,8 +217,8 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
     </>
   )
   if (route.destination === 'languages') return <ProgrammingLanguages onBack={() => navigate({ destination: 'home' })} />
-  if (route.destination === 'tutorial') return <App saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience="complete-example" startExampleTour onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />
-  if (route.destination === 'browser-editor') return <App saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience={browserDraftIsNew ? 'browser-new' : undefined} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setBrowserDraftIsNew(false); navigate({ destination: 'home' }) }} />
+  if (route.destination === 'tutorial') return withEditorLayout(<App saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience="complete-example" startExampleTour onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />)
+  if (route.destination === 'browser-editor') return withEditorLayout(<App saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience={browserDraftIsNew ? 'browser-new' : undefined} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setBrowserDraftIsNew(false); navigate({ destination: 'home' }) }} />)
 
   return home(route.workspaceId)
 }

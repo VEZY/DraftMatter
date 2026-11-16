@@ -59,11 +59,11 @@
 .project-file-browser-shared-data .project-files-panel { margin: 0; }
 .project-files-workspace-notice { background: #f0f7f1; border-radius: 5px; color: #668171; font-size: 11px; padding: 10px; }
 .project-files-workspace-footnote { border-top: 1px solid #edf0ed; color: #94a096; font-size: 10px; line-height: 1.6; margin: 18px 0 0; padding-top: 13px; }
-.project-files-workspace.project-files-workspace-sidebar { background: transparent; border: 0; border-radius: 0; box-shadow: none; flex: 1; height: 100%; max-height: none; min-height: 0; min-width: 0; width: 100%; }
-.project-files-workspace-sidebar .project-files-workspace-header { align-items: center; gap: 10px; padding: 17px 16px 13px; }
+.project-files-workspace.project-files-workspace-sidebar { background: transparent; border: 0; border-radius: 0; box-shadow: none; flex: 1 1 0; height: auto; max-height: none; min-height: 0; min-width: 0; overflow: hidden; width: 100%; }
+.project-files-workspace-sidebar .project-files-workspace-header { align-items: center; flex: none; gap: 10px; padding: 17px 16px 13px; }
 .project-files-workspace-sidebar .project-files-workspace-header h2 { color: #394a40; font-size: 17px; margin: 0; }
 .project-files-workspace-sidebar .project-files-workspace-header .icon-button { height: 26px; min-height: 26px; padding: 4px; width: 26px; }
-.project-files-workspace-sidebar .project-files-workspace-body { flex: 1; padding: 0 10px 14px; }
+.project-files-workspace-sidebar .project-files-workspace-body { flex: 1 1 0; overscroll-behavior-y: contain; padding: 0 10px 14px; }
 .project-file-explorer { min-width: 0; }
 .project-file-explorer-project { align-items: center; display: flex; gap: 8px; justify-content: space-between; margin: 10px 2px; min-width: 0; }
 .project-file-explorer-project > span { color: #526359; font-size: 11px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
