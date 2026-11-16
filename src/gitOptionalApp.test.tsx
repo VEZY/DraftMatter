@@ -34,6 +34,8 @@ describe('optional local Git in the writing workspace', () => {
     vi.spyOn(desktopHost, 'gitInitialize').mockResolvedValue({ repositoryRoot: projectRoot, createdIgnore: false, status: repository() })
     vi.spyOn(desktopHost, 'gitHistory').mockResolvedValue([])
     vi.spyOn(desktopHost, 'gitBranches').mockResolvedValue({ current: 'main', detached: false, branches: [{ name: 'main', current: true }], remotes: ['origin'] })
+    vi.spyOn(desktopHost, 'gitRemotes').mockResolvedValue([{ name: 'origin', url: 'https://git.example.org/research/paper.git' }])
+    vi.spyOn(desktopHost, 'gitSetRemote').mockRejectedValue(new Error('Remote configuration must be explicitly requested'))
     vi.spyOn(desktopHost, 'gitCreateCheckpoint').mockRejectedValue(new Error('A commit must be explicitly requested'))
     vi.spyOn(desktopHost, 'gitFetch').mockResolvedValue({ action: 'fetch', summary: 'Fetched origin', status: repository() })
     vi.spyOn(desktopHost, 'gitPull').mockResolvedValue({ action: 'pull', summary: 'Already up to date', status: repository() })
@@ -116,23 +118,37 @@ describe('optional local Git in the writing workspace', () => {
     for (const method of ['gitCreateCheckpoint', 'gitFetch', 'gitPull', 'gitPush'] as const) expect(desktopHost[method]).not.toHaveBeenCalled()
   })
 
-  it('offers initialization only in the project actions and initializes only after an explicit click', async () => {
+  it('opens Git for an unversioned local project and initializes only from an explicit panel action', async () => {
     let initialized = false
+    let finishInitialize!: () => void
     vi.mocked(desktopHost.gitStatus).mockImplementation(async () => repository(projectRoot, initialized))
-    vi.mocked(desktopHost.gitInitialize).mockImplementation(async () => {
-      initialized = true
-      return { repositoryRoot: projectRoot, createdIgnore: false, status: repository() }
-    })
+    vi.mocked(desktopHost.gitInitialize).mockImplementation(() => new Promise((resolve) => {
+      finishInitialize = () => {
+        initialized = true
+        resolve({ repositoryRoot: projectRoot, createdIgnore: false, status: repository() })
+      }
+    }))
     await openLocal()
     await waitFor(() => expect(desktopHost.gitStatus).toHaveBeenCalledWith(projectRoot))
-    expect(railGit()).toBeNull()
+    expect(railGit()).not.toBeNull()
     expect(desktopHost.gitInitialize).not.toHaveBeenCalled()
-    await act(async () => container.querySelector<HTMLButtonElement>('.project-switcher')!.click())
-    const initialize = namedButton('Initialize Git')
-    expect(initialize).toBeDefined()
+    await act(async () => railGit()!.click())
+    const panel = container.querySelector('.git-history-panel')!
+    expect(panel).not.toBeNull()
+    expect(panel.textContent).toContain('No Git repository')
+    const initialize = panel.querySelector<HTMLButtonElement>('[aria-label="Initialize Git…"]')!
+    expect(initialize).not.toBeNull()
+    expect(initialize.disabled).toBe(false)
     expect(desktopHost.gitInitialize).not.toHaveBeenCalled()
+    expect(desktopHost.gitHistory).not.toHaveBeenCalled()
     await act(async () => initialize.click())
-    await waitFor(() => expect(railGit()).not.toBeNull())
+    expect(initialize.disabled).toBe(true)
+    await act(async () => initialize.click())
+    expect(desktopHost.gitInitialize).toHaveBeenCalledTimes(1)
+    await act(async () => finishInitialize())
+    await waitFor(() => expect(container.querySelector('.git-branch-summary')).not.toBeNull())
+    expect(container.querySelector('.git-history-panel')).toBe(panel)
+    expect(railGit()).not.toBeNull()
     expect(desktopHost.gitInitialize).toHaveBeenCalledExactlyOnceWith(projectRoot)
     expect(desktopHost.gitCreateCheckpoint).not.toHaveBeenCalled()
     expect(desktopHost.gitPush).not.toHaveBeenCalled()
@@ -143,10 +159,12 @@ describe('optional local Git in the writing workspace', () => {
     vi.mocked(desktopHost.gitStatus).mockResolvedValue({ ...repository(projectRoot, false), gitAvailable: false, gitVersion: undefined })
     await openLocal()
     await waitFor(() => expect(desktopHost.gitStatus).toHaveBeenCalledWith(projectRoot))
-    expect(railGit()).toBeNull()
-    await act(async () => container.querySelector<HTMLButtonElement>('.project-switcher')!.click())
-    const initialize = namedButton('Initialize Git')
+    expect(railGit()).not.toBeNull()
+    await act(async () => railGit()!.click())
+    expect(container.querySelector('.git-history-panel')?.textContent).toContain('Git is not installed')
+    const initialize = container.querySelector<HTMLButtonElement>('.git-history-panel [aria-label="Initialize Git…"]')
     expect(!initialize || initialize.disabled).toBe(true)
+    expect(container.querySelector('.structured-manuscript-editor')?.textContent).toContain('The manuscript remains independent of Git.')
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="History"]')!.click())
     expect(container.querySelector('[role="dialog"][aria-label="Recovery history"]')).not.toBeNull()
     expect(desktopHost.gitInitialize).not.toHaveBeenCalled()
@@ -162,9 +180,55 @@ describe('optional local Git in the writing workspace', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('.project-switcher')!.click())
     await act(async () => namedButton('Open project folder').click())
     await waitFor(() => expect(desktopHost.gitStatus).toHaveBeenCalledWith(otherRoot))
+    expect(railGit()).not.toBeNull()
+    await act(async () => railGit()!.click())
+    await waitFor(() => expect(container.querySelector('.git-history-panel')?.textContent).toContain('No Git repository'))
     await act(async () => resolveFirst(repository(projectRoot)))
-    expect(railGit()).toBeNull()
+    expect(railGit()).not.toBeNull()
+    expect(container.querySelector('.git-history-panel')?.textContent).toContain('No Git repository')
+    expect(container.querySelector('.git-branch-summary')).toBeNull()
     expect(desktopHost.gitHistory).not.toHaveBeenCalled()
+    expect(desktopHost.gitInitialize).not.toHaveBeenCalled()
+  })
+
+  it('keeps Git accessible after a detection failure and recovers through an explicit refresh', async () => {
+    let readable = false
+    vi.mocked(desktopHost.gitStatus).mockImplementation(async () => {
+      if (!readable) throw { kind: 'conflict', message: 'Another DraftMatter client is writing this project.' }
+      return repository()
+    })
+    await openLocal()
+    await waitFor(() => expect(desktopHost.gitStatus).toHaveBeenCalledWith(projectRoot))
+    expect(railGit()).not.toBeNull()
+    await act(async () => railGit()!.click())
+    const panel = container.querySelector('.git-history-panel')!
+    await waitFor(() => expect(panel.querySelector('[role="alert"]')?.textContent).toContain('Another DraftMatter client'))
+    expect(panel.querySelector('[aria-label="Initialize Git…"]')).toBeNull()
+    expect(desktopHost.gitInitialize).not.toHaveBeenCalled()
+    expect(desktopHost.gitHistory).not.toHaveBeenCalled()
+    readable = true
+    await act(async () => panel.querySelector<HTMLButtonElement>('[aria-label="Refresh Git status"]')!.click())
+    await waitFor(() => expect(panel.querySelector('.git-branch-summary')?.textContent).toContain('main'))
+    expect(panel.querySelector('[role="alert"]')).toBeNull()
+    expect(railGit()).not.toBeNull()
+    expect(desktopHost.gitInitialize).not.toHaveBeenCalled()
+  })
+
+  it('allows opening Git before detection finishes and keeps the panel open for an unversioned project', async () => {
+    const pending: ((status: GitRepositoryStatus) => void)[] = []
+    vi.mocked(desktopHost.gitStatus).mockImplementation(() => new Promise((resolve) => { pending.push(resolve) }))
+    await openLocal()
+    expect(railGit()).not.toBeNull()
+    await act(async () => railGit()!.click())
+    const panel = container.querySelector('.git-history-panel')!
+    expect(panel).not.toBeNull()
+    expect(panel.textContent).toContain('Reading local repository')
+    expect(panel.querySelector('[aria-label="Initialize Git…"]')).toBeNull()
+    await waitFor(() => expect(pending.length).toBe(2))
+    await act(async () => { for (const resolve of pending) resolve(repository(projectRoot, false)) })
+    expect(container.querySelector('.git-history-panel')).toBe(panel)
+    expect(panel.textContent).toContain('No Git repository')
+    expect(panel.querySelector<HTMLButtonElement>('[aria-label="Initialize Git…"]')?.disabled).toBe(false)
     expect(desktopHost.gitInitialize).not.toHaveBeenCalled()
   })
 

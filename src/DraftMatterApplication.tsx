@@ -5,6 +5,7 @@ import { desktopLaunchTarget } from './desktopLaunch'
 import { Home } from './Home'
 import { InvitationEntry } from './InvitationEntry'
 import { NewDraftWizard } from './NewDraftWizard'
+import { ClonePaperDialog } from './ClonePaperDialog'
 import { Learn } from './Learn'
 import { AiLearn } from './AiLearn'
 import { AssistantConnectionsDialog } from './AssistantConnectionsDialog'
@@ -40,6 +41,7 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
   const [localLaunch, setLocalLaunch] = useState<{ project: ProjectSnapshot; selectedPath?: string } | null>(null)
   const [startCollaborationRoot, setStartCollaborationRoot] = useState('')
   const [newDraftOpen, setNewDraftOpen] = useState(false)
+  const [clonePaperOpen, setClonePaperOpen] = useState(false)
   const [newDraftLocation, setNewDraftLocation] = useState<'collaborative' | 'local'>('collaborative')
   const [localProjects, setLocalProjects] = useState(() => readLocalProjectRecents(localStorage))
   const [localProblem, setLocalProblem] = useState('')
@@ -92,6 +94,7 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
     setStartCollaborationRoot(startCollaboration ? project.root : '')
     setLocalLaunch({ project, selectedPath })
     setNewDraftOpen(false)
+    setClonePaperOpen(false)
     navigate({ destination: 'local-editor', localProjectId: project.root, ...(startCollaboration ? { startCollaboration: true } : {}) })
   }
 
@@ -125,6 +128,7 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
         onOpenDraft={openDraft}
         onNewDraft={() => { setNewDraftLocation('collaborative'); setNewDraftOpen(true) }}
         onNewLocalDraft={() => { setNewDraftLocation('local'); setNewDraftOpen(true) }}
+        onClonePaper={() => setClonePaperOpen(true)}
         onOpenLocalPaper={() => void openLocalPaper()}
         onOpenLocalProject={() => void openLocalProject()}
         onOpenLocalRecent={(project) => void openLocalProject(project)}
@@ -157,6 +161,7 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
         }}
         onLocalCreated={openLocalDraft}
       />
+      <ClonePaperDialog open={clonePaperOpen} onClose={() => setClonePaperOpen(false)} onCloned={openLocalDraft} />
     </>
   )
 

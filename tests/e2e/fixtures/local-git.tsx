@@ -9,11 +9,12 @@ import 'katex/dist/katex.min.css'
 const root = '/fixture/local-git'
 const mode = new URLSearchParams(location.search).get('git')
 let initialized = mode !== 'off'
+let remotes = mode === 'off' || mode === 'unlinked' ? [] : [{ name: 'origin', url: 'https://git.example.org/research/paper.git' }]
 let source = '# Optional Git study\n\nThe current article stays editable while Git is open.\n'
 const operations: { kind: string; request?: unknown }[] = []
 const change = (path: string, kind = 'modified') => ({ path, kind, indexStatus: ' ', worktreeStatus: kind === 'untracked' ? '?' : 'M', staged: false, unstaged: true, conflicted: false, binary: false })
 let entries = mode === 'clean' ? [] : [change('paper.md'), change('data/observations.csv', 'untracked')]
-const status = () => ({ gitAvailable: true, gitVersion: 'git version 2.50.0', repository: initialized, repositoryRoot: initialized ? root : undefined, projectPrefix: '', branch: initialized ? 'main' : undefined, upstream: initialized ? 'origin/main' : undefined, detached: false, ahead: 0, behind: 0, entries: initialized ? entries : [] })
+const status = () => ({ gitAvailable: true, gitVersion: 'git version 2.50.0', repository: initialized, repositoryRoot: initialized ? root : undefined, projectPrefix: '', branch: initialized ? 'main' : undefined, upstream: initialized && mode !== 'off' && mode !== 'unlinked' ? 'origin/main' : undefined, detached: false, ahead: 0, behind: 0, entries: initialized ? entries : [] })
 const history = [{ hash: 'a'.repeat(40), shortHash: 'aaaaaaaa', authoredAt: '2026-11-16T10:00:00Z', author: 'A researcher', message: 'Initial article' }]
 const project = () => ({ root, config: { schemaVersion: 1, name: 'Optional Git study', mainDocument: 'paper.md', citationStyle: 'draftmatter-author-date', citationLocale: 'en-US' }, documents: [{ path: 'paper.md', kind: 'manuscript', bytes: source.length, hash: 'paper-hash', modifiedMs: 1 }], bibliographies: [] })
 desktopHost.available = true
@@ -34,7 +35,15 @@ desktopHost.saveDocument = async (request) => {
 }
 desktopHost.listProjectFiles = async () => ({ files: [{ path: 'paper.md', bytes: source.length, modifiedMs: 1 }, { path: '.gitignore', bytes: 20, modifiedMs: 1 }, { path: 'data/observations.csv', bytes: 128, modifiedMs: 1 }], truncated: false })
 desktopHost.gitStatus = async () => status()
-desktopHost.gitBranches = async () => ({ current: 'main', detached: false, branches: [{ name: 'main', current: true }], remotes: ['origin'] })
+desktopHost.gitBranches = async () => ({ current: 'main', detached: false, branches: [{ name: 'main', current: true }], remotes: remotes.map((remote) => remote.name) })
+desktopHost.gitRemotes = async () => remotes.map((remote) => ({ ...remote }))
+desktopHost.gitSetRemote = async (request) => {
+  const existing = remotes.find((remote) => remote.name === request.name)
+  if ((existing?.url ?? null) !== request.expectedUrl) throw new Error('The remote configuration changed. Refresh before saving.')
+  operations.push({ kind: 'set-remote', request })
+  remotes = [...remotes.filter((remote) => remote.name !== request.name), { name: request.name, url: request.url }]
+  return remotes.map((remote) => ({ ...remote }))
+}
 desktopHost.gitHistory = async () => [...history]
 desktopHost.gitInitialize = async (requestedRoot) => {
   operations.push({ kind: 'initialize', request: requestedRoot }); initialized = true

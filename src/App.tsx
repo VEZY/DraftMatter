@@ -809,7 +809,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const [citationAcquisitionState, setCitationAcquisitionState] = useState<'idle' | 'saving'>('idle')
   const [desktopSession, setDesktopSession] = useState<DesktopSession | null>(null)
   const currentGit = gitRepository?.root === desktopSession?.root ? gitRepository?.status : undefined
-  useEffect(() => { if (!currentGit?.repository) setGitPanelOpen(false) }, [currentGit?.repository])
   useEffect(() => {
     let disposed = false
     setGitRepository(undefined)
@@ -4578,7 +4577,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
 
   const initializeProjectGit = async () => {
     const session = desktopSessionRef.current
-    if (!session || projectBusy || gitOperationRunningRef.current) return
+    if (!session || projectBusy || gitOperationRunningRef.current) throw new Error('Finish the current project operation before initializing Git.')
     gitOperationRunningRef.current = true
     setProjectBusy(true)
     setProjectMenuOpen(false)
@@ -4592,6 +4591,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       setToast(result.createdIgnore ? 'Git initialized locally with a .gitignore. Select files to create the first commit.' : 'Git initialized locally. Your existing .gitignore is preserved.')
     } catch (error) {
       if (desktopSessionRef.current?.root === session.root) setToast(`Git could not be initialized: ${readableError(error)}`)
+      throw error
     } finally {
       gitOperationRunningRef.current = false
       setProjectBusy(false)
@@ -5997,8 +5997,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
                     <button onClick={() => fileInputRef.current?.click()}><Icon name="document" size={16} /><span><strong>Open manuscript…</strong><small>DraftMatter manuscript, up to 5 MB</small></span></button>
                   )}
                   <button onClick={() => { setProjectMenuOpen(false); openProjectFiles() }}><Icon name="folder" size={16} /><span><strong>Browse project files</strong><small>Figures, data, local and online copies</small></span></button>
-                  {desktopSession && !currentGit?.repository && <button aria-label="Initialize Git…" onClick={() => void initializeProjectGit()} disabled={projectBusy || !currentGit?.gitAvailable}>
-                    <Icon name="branch" size={16} /><span><strong>Initialize Git…</strong><small>{gitRepository?.problem ?? (currentGit?.gitAvailable === false ? 'Install Git on this computer to use local commits' : currentGit ? 'Optional local commits; preserve the existing .gitignore' : 'Checking for a local Git repository…')}</small></span>
+                  {desktopSession && <button aria-label="Open Git" onClick={() => { setProjectMenuOpen(false); setGitPanelOpen(true); setLeftPanelOpen(true) }}>
+                    <Icon name="branch" size={16} /><span><strong>Git</strong><small>{currentGit?.repository ? 'Local commits and remote synchronization' : 'Set up Git or inspect local version control'}</small></span>
                   </button>}
                   <button aria-label="Enter focus mode" onClick={() => { setProjectMenuOpen(false); setFocusMode(true) }}><Icon name="focus" size={16} /><span><strong>Enter focus mode</strong><small>Keep only the paper and writing tools</small></span></button>
                   {onOpenLearn && <button aria-label="Learn DraftMatter" onClick={() => { setProjectMenuOpen(false); void leaveEditor(onOpenLearn) }}><Icon name="info" size={16} /><span><strong>Learn DraftMatter</strong><small>Writing, figures, references, and collaboration</small></span></button>}
@@ -6129,7 +6129,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
             <button className={leftPanelOpen && !gitPanelOpen && projectFilesOpen ? 'active' : ''} onClick={() => toggleNavigationPanel(true)} data-label="Files" aria-label="Files" aria-pressed={leftPanelOpen && !gitPanelOpen && projectFilesOpen} aria-controls={leftPanelOpen ? "project-navigation-panel" : undefined}><Icon name="folder" />{(synchronizationProblems > 0 || selectiveSync.snapshot?.error) && <span className="rail-notice" aria-label="File synchronization needs attention">{synchronizationProblems || '!'}</span>}</button>
             <button className={leftPanelOpen && !gitPanelOpen && !projectFilesOpen ? 'active' : ''} onClick={() => toggleNavigationPanel(false)} data-label="Outline" aria-label="Outline" aria-pressed={leftPanelOpen && !gitPanelOpen && !projectFilesOpen} aria-controls={leftPanelOpen ? "project-navigation-panel" : undefined}><Icon name="document" /></button>
             <button className={recoveryOpen ? 'active' : ''} onClick={() => setRecoveryOpen(true)} data-label="History" aria-label="History" aria-haspopup="dialog" aria-expanded={recoveryOpen}><Icon name="history" /></button>
-            {currentGit?.repository && <button className={leftPanelOpen && gitPanelOpen ? 'active' : ''} onClick={() => { setLeftPanelOpen(!leftPanelOpen || !gitPanelOpen); setGitPanelOpen(true) }} data-label="Git" aria-label="Git" aria-pressed={leftPanelOpen && gitPanelOpen} aria-controls={leftPanelOpen && gitPanelOpen ? 'project-navigation-panel' : undefined}><Icon name="branch" /></button>}
+            {desktopSession && <button className={leftPanelOpen && gitPanelOpen ? 'active' : ''} onClick={() => { setLeftPanelOpen(!leftPanelOpen || !gitPanelOpen); setGitPanelOpen(true) }} data-label="Git" aria-label="Git" aria-pressed={leftPanelOpen && gitPanelOpen} aria-controls={leftPanelOpen && gitPanelOpen ? 'project-navigation-panel' : undefined}><Icon name="branch" /></button>}
             <button className={findOpen ? 'active' : ''} onClick={openDocumentFind} data-label="Find in document" aria-label="Find in document" aria-pressed={findOpen} title={`Find in document (${commandUsesMetaKey ? '⌘F' : 'Ctrl+F'})`}><Icon name="search" /></button>
           </div>
           <div className="rail-footer-actions">
@@ -6151,10 +6151,11 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
           </div>
         </nav>
 
-        {leftPanelOpen && gitPanelOpen && currentGit?.repository ? <GitHistoryPanel
+        {leftPanelOpen && gitPanelOpen && desktopSession ? <GitHistoryPanel
           key={desktopSession!.root}
           root={desktopSession!.root} manuscriptPath={desktopSession!.path}
           onNotice={setToast} onClose={() => setLeftPanelOpen(false)}
+          onInitialize={initializeProjectGit} initializationBusy={projectBusy}
           onBeforeCommit={prepareGitCommit} onPull={pullProjectGit}
           onRepositoryChange={(status) => { if (desktopSessionRef.current?.root === desktopSession!.root) { gitDetectionRequestRef.current++; setGitRepository({ root: desktopSession!.root, status }) } }}
         /> : leftPanelOpen && (

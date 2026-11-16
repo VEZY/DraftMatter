@@ -16,6 +16,7 @@ const MAX_SELECTED_PATHS: usize = 512;
 const MAX_COMMIT_MESSAGE_BYTES: usize = 4_096;
 const MAX_HISTORY_ENTRIES: usize = 50;
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
+const GIT_CLONE_TIMEOUT: Duration = Duration::from_secs(300);
 
 #[derive(Debug, Clone)]
 struct RepositoryContext {
@@ -197,6 +198,38 @@ pub struct GitRemoteResult {
     pub status: GitRepositoryStatus,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitRemoteConfiguration {
+    pub name: String,
+    pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub push_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitSetRemoteRequest {
+    pub root: String,
+    pub name: String,
+    pub url: String,
+    pub expected_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCloneRequest {
+    pub url: String,
+    pub parent: String,
+    pub folder_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct GitCloneResult {
+    pub root: String,
+}
+
 fn empty_status(version: Option<String>) -> GitRepositoryStatus {
     GitRepositoryStatus {
         git_available: version.is_some(),
@@ -225,9 +258,10 @@ fn git_command(current_dir: &Path) -> Command {
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "Never")
         .env("SSH_ASKPASS_REQUIRE", "never")
+        .env("GIT_ALLOW_PROTOCOL", "https:ssh:file")
         .env("GIT_LITERAL_PATHSPECS", "1")
         .env("GIT_OPTIONAL_LOCKS", "0")
-        .env("GIT_CONFIG_COUNT", "4")
+        .env("GIT_CONFIG_COUNT", "8")
         .env("GIT_CONFIG_KEY_0", "core.hooksPath")
         .env("GIT_CONFIG_VALUE_0", disabled_hooks)
         .env("GIT_CONFIG_KEY_1", "core.fsmonitor")
@@ -236,6 +270,16 @@ fn git_command(current_dir: &Path) -> Command {
         .env("GIT_CONFIG_VALUE_2", "false")
         .env("GIT_CONFIG_KEY_3", "diff.ignoreSubmodules")
         .env("GIT_CONFIG_VALUE_3", "dirty")
+        // Also constrain effective transports after Git's insteadOf rewrites.
+        // In particular an HTTPS URL must never invoke an ext/remote helper.
+        .env("GIT_CONFIG_KEY_4", "protocol.allow")
+        .env("GIT_CONFIG_VALUE_4", "never")
+        .env("GIT_CONFIG_KEY_5", "protocol.https.allow")
+        .env("GIT_CONFIG_VALUE_5", "always")
+        .env("GIT_CONFIG_KEY_6", "protocol.ssh.allow")
+        .env("GIT_CONFIG_VALUE_6", "always")
+        .env("GIT_CONFIG_KEY_7", "protocol.file.allow")
+        .env("GIT_CONFIG_VALUE_7", "always")
         .env("LC_ALL", "C");
     command
 }
@@ -1322,6 +1366,248 @@ pub fn git_switch_branch_impl(request: GitBranchRequest) -> Result<GitBranchStat
     git_branches_impl(&request.root)
 }
 
+fn validate_remote_name(name: &str) -> Result<(), HostError> {
+    if name.is_empty()
+        || name.len() > 128
+        || !name.as_bytes()[0].is_ascii_alphanumeric()
+        || name.contains("..")
+        || !name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+    {
+        return Err(HostError::InvalidProject(
+            "Use a remote name such as origin, containing only letters, numbers, dots, underscores or hyphens.".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_remote_url(value: &str) -> Result<(), HostError> {
+    let invalid = || {
+        HostError::InvalidProject(
+        "Use an HTTPS or SSH Git URL, an SSH address such as git@host:owner/paper.git, or an absolute local repository path. Passwords, tokens and URL query parameters must stay in your system Git credential manager.".into(),
+    )
+    };
+    if value.is_empty()
+        || value.len() > 4096
+        || value.starts_with('-')
+        || value.chars().any(char::is_control)
+    {
+        return Err(invalid());
+    }
+    if Path::new(value).is_absolute() {
+        return Ok(());
+    }
+    if value.chars().any(char::is_whitespace) {
+        return Err(invalid());
+    }
+    if value.contains("://") {
+        let url = tauri::Url::parse(value).map_err(|_| invalid())?;
+        if url.password().is_some() || url.query().is_some() || url.fragment().is_some() {
+            return Err(invalid());
+        }
+        match url.scheme() {
+            "https" if url.host_str().is_some() && url.username().is_empty() => Ok(()),
+            "ssh"
+                if url.host_str().is_some_and(|host| !host.starts_with('-'))
+                    && (url.username().is_empty()
+                        || (!url.username().starts_with('-')
+                            && url.username().bytes().all(|byte| {
+                                byte.is_ascii_alphanumeric() || b"._-".contains(&byte)
+                            }))) =>
+            {
+                Ok(())
+            }
+            "file"
+                if url.username().is_empty()
+                    && matches!(url.host_str(), None | Some("localhost"))
+                    && url.to_file_path().is_ok() =>
+            {
+                Ok(())
+            }
+            _ => Err(invalid()),
+        }
+    } else if let Some((host, path)) = value.split_once(':') {
+        let host = if let Some((user, host)) = host.split_once('@') {
+            if user.is_empty()
+                || user.starts_with('-')
+                || !user
+                    .bytes()
+                    .all(|byte| byte.is_ascii_alphanumeric() || b"._-".contains(&byte))
+            {
+                return Err(invalid());
+            }
+            host
+        } else {
+            host
+        };
+        if host.is_empty()
+            || host.starts_with('-')
+            || !host
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b".-".contains(&byte))
+            || path.is_empty()
+            || path.starts_with(':')
+            || path.starts_with('-')
+        {
+            return Err(invalid());
+        }
+        Ok(())
+    } else {
+        Err(invalid())
+    }
+}
+
+fn config_values(root: &Path, key: &str) -> Result<Vec<String>, HostError> {
+    let output = run_git(root, &["config", "--null", "--get-all", key])?;
+    if output.status.code() == Some(1) && output.stdout.is_empty() {
+        return Ok(Vec::new());
+    }
+    let output = require_success(output, "read remote configuration")?;
+    Ok(output
+        .stdout
+        .split(|byte| *byte == 0)
+        .filter(|value| !value.is_empty())
+        .map(|value| String::from_utf8_lossy(value).into_owned())
+        .collect())
+}
+
+fn remote_configurations(
+    context: &RepositoryContext,
+) -> Result<Vec<GitRemoteConfiguration>, HostError> {
+    let output = require_success(
+        run_git(&context.repository_root, &["remote"])?,
+        "list remotes",
+    )?;
+    let mut remotes = Vec::new();
+    for name in String::from_utf8_lossy(&output.stdout)
+        .lines()
+        .filter(|name| !name.is_empty())
+    {
+        let urls = config_values(&context.repository_root, &format!("remote.{name}.url"))?;
+        let push_urls = config_values(&context.repository_root, &format!("remote.{name}.pushurl"))?;
+        if urls.len() != 1 || push_urls.len() > 1 {
+            return Err(HostError::Integration(format!("Remote {name:?} has multiple or missing URLs. Manage its advanced configuration in your Git client.")));
+        }
+        for url in urls.iter().chain(push_urls.iter()) {
+            // Do not return stored passwords/tokens to the renderer. They cannot
+            // be safely redacted while also serving as the edit fingerprint.
+            validate_remote_url(url).map_err(|_| HostError::Integration(format!("Remote {name:?} uses an unsupported URL or contains credentials. Configure a plain HTTPS or SSH URL in your Git client; keep authentication in your system credential manager.")))?;
+        }
+        remotes.push(GitRemoteConfiguration {
+            name: name.into(),
+            url: urls[0].clone(),
+            push_url: push_urls.into_iter().next().filter(|url| url != &urls[0]),
+        });
+    }
+    remotes.sort_by(|left, right| left.name.cmp(&right.name));
+    Ok(remotes)
+}
+
+pub fn git_remotes_impl(raw_root: &str) -> Result<Vec<GitRemoteConfiguration>, HostError> {
+    let context = require_repository(raw_root)?;
+    let _project_guard = crate::project_guard(&context.project_root)?;
+    remote_configurations(&context)
+}
+
+pub fn git_set_remote_impl(
+    request: GitSetRemoteRequest,
+) -> Result<Vec<GitRemoteConfiguration>, HostError> {
+    validate_remote_name(&request.name)?;
+    validate_remote_url(&request.url)?;
+    let context = require_repository(&request.root)?;
+    let _project_guard = crate::project_guard(&context.project_root)?;
+    let remotes = remote_configurations(&context)?;
+    let current = remotes.iter().find(|remote| remote.name == request.name);
+    if current.map(|remote| &remote.url) != request.expected_url.as_ref() {
+        return Err(HostError::Conflict("The remote changed since it was opened. Refresh Git and review the current URL before saving.".into()));
+    }
+    let arguments = if current.is_some() {
+        vec!["remote", "set-url", "--", &request.name, &request.url]
+    } else {
+        vec!["remote", "add", "--", &request.name, &request.url]
+    };
+    require_success(
+        run_git(&context.repository_root, &arguments)?,
+        "save the remote URL",
+    )?;
+    remote_configurations(&context)
+}
+
+pub fn git_clone_impl(request: GitCloneRequest) -> Result<GitCloneResult, HostError> {
+    validate_remote_url(&request.url)?;
+    let name = &request.folder_name;
+    if name.is_empty()
+        || name.len() > 200
+        || name.starts_with(['.', '-'])
+        || name.ends_with(['.', ' '])
+        || name
+            .chars()
+            .any(|character| character.is_control() || "/\\:<>\"|?*".contains(character))
+    {
+        return Err(HostError::InvalidPath(
+            "Choose a new folder name without path separators or special filename characters."
+                .into(),
+        ));
+    }
+    let parent = canonical_root(&request.parent)?;
+    let destination = parent.join(name);
+    // create_dir is the reservation: never accept a pre-existing directory,
+    // including an empty one or a symlink. Never recursively clean up a path
+    // after an error; another process may have put files there in the meantime.
+    fs::create_dir(&destination).map_err(|error| if error.kind() == std::io::ErrorKind::AlreadyExists {
+        HostError::Conflict("That folder already exists. Choose a new folder name; existing files were preserved.".into())
+    } else { HostError::Io(format!("Could not create the clone folder: {error}")) })?;
+    let clone = (|| {
+        let target = destination.to_str().ok_or_else(|| {
+            HostError::InvalidPath("The clone folder path is not valid Unicode.".into())
+        })?;
+        require_success(
+            run_git_with_timeout(
+                &parent,
+                &[
+                    "clone",
+                    "--no-checkout",
+                    "--no-local",
+                    "--no-recurse-submodules",
+                    "--template=",
+                    "--",
+                    &request.url,
+                    target,
+                ],
+                GIT_CLONE_TIMEOUT,
+            )?,
+            "clone the repository",
+        )?;
+        if fs::symlink_metadata(&destination)?.file_type().is_symlink()
+            || fs::canonicalize(&destination)?.parent() != Some(parent.as_path())
+        {
+            return Err(HostError::InvalidPath(
+                "The clone folder moved outside its selected parent.".into(),
+            ));
+        }
+        // Repository config is checked before creating any working-tree files.
+        // Checkout uses the same disabled hook/fsmonitor and submodule settings.
+        check_repository_filters(&destination)?;
+        let head = run_git(&destination, &["rev-parse", "--verify", "HEAD"])?;
+        if head.status.success() {
+            require_success(
+                run_git_with_timeout(&destination, &["checkout", "--force"], GIT_CLONE_TIMEOUT)?,
+                "check out the cloned paper",
+            )?;
+        }
+        let root = fs::canonicalize(&destination)?;
+        if root.parent() != Some(parent.as_path()) {
+            return Err(HostError::InvalidPath(
+                "The clone folder moved outside its selected parent.".into(),
+            ));
+        }
+        Ok(GitCloneResult {
+            root: root.to_string_lossy().into_owned(),
+        })
+    })();
+    clone.map_err(|error: HostError| HostError::Integration(format!("{error} The incomplete clone folder was kept at {}. Choose another folder name or remove that incomplete copy before retrying.", destination.display())))
+}
 fn validate_remote(
     context: &RepositoryContext,
     remote: Option<&str>,
@@ -1456,16 +1742,20 @@ pub fn git_push_impl(request: GitRemoteRequest) -> Result<GitRemoteResult, HostE
     // also prevents repository configuration from turning this into a forced push.
     let refspec = format!("refs/heads/{current}:{destination}");
     let mirror = format!("remote.{remote}.mirror=false");
-    let arguments = [
+    let mut arguments = vec![
         "-c",
         &mirror,
         "push",
         "--no-force",
         "--no-follow-tags",
         "--recurse-submodules=no",
-        &remote,
-        &refspec,
     ];
+    // A configured upstream may not resolve yet because it has never been
+    // fetched. Preserve that configuration instead of replacing its target.
+    if config_values(&context.repository_root, &format!("branch.{current}.remote"))?.is_empty()
+        && config_values(&context.repository_root, &format!("branch.{current}.merge"))?.is_empty()
+    { arguments.push("--set-upstream"); }
+    arguments.extend([remote.as_str(), refspec.as_str()]);
     let output = require_success(
         run_git(&context.repository_root, &arguments)?,
         "push the current branch",
@@ -1513,6 +1803,289 @@ mod tests {
     fn commit_all(root: &Path, message: &str) {
         git(root, ["add", "--all"]);
         git(root, ["commit", "-m", message]);
+    }
+
+    #[test]
+    fn remote_configuration_preserves_working_files_and_distinct_push_url() {
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("paper.md"), "base\n").unwrap();
+        fs::write(project.path().join(".gitignore"), "data/\n").unwrap();
+        commit_all(project.path(), "base");
+        fs::write(project.path().join("paper.md"), "staged\n").unwrap();
+        git(project.path(), ["add", "paper.md"]);
+        fs::write(project.path().join("paper.md"), "working draft\n").unwrap();
+        let index_before = fs::read(project.path().join(".git/index")).unwrap();
+        let root = project.path().to_string_lossy().into_owned();
+        let initial = git_set_remote_impl(GitSetRemoteRequest {
+            root: root.clone(),
+            name: "origin".into(),
+            url: "https://example.invalid/research/paper.git".into(),
+            expected_url: None,
+        })
+        .unwrap();
+        assert_eq!(initial.len(), 1);
+        git(
+            project.path(),
+            [
+                "remote",
+                "set-url",
+                "--push",
+                "origin",
+                "git@example.invalid:research/publish.git",
+            ],
+        );
+        let updated = git_set_remote_impl(GitSetRemoteRequest {
+            root: root.clone(),
+            name: "origin".into(),
+            url: "https://example.invalid/research/renamed.git".into(),
+            expected_url: Some(initial[0].url.clone()),
+        })
+        .unwrap();
+        assert_eq!(
+            updated[0].url,
+            "https://example.invalid/research/renamed.git"
+        );
+        assert_eq!(
+            updated[0].push_url.as_deref(),
+            Some("git@example.invalid:research/publish.git")
+        );
+        assert_eq!(
+            fs::read(project.path().join(".git/index")).unwrap(),
+            index_before
+        );
+        assert_eq!(
+            fs::read_to_string(project.path().join("paper.md")).unwrap(),
+            "working draft\n"
+        );
+        assert_eq!(
+            fs::read_to_string(project.path().join(".gitignore")).unwrap(),
+            "data/\n"
+        );
+        assert!(upstream_name(&require_repository(&root).unwrap())
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn remote_save_rejects_stale_snapshot_and_unsafe_urls_without_overwriting_config() {
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        git(
+            project.path(),
+            [
+                "remote",
+                "add",
+                "origin",
+                "https://example.invalid/current.git",
+            ],
+        );
+        let root = project.path().to_string_lossy().into_owned();
+        let before = fs::read(project.path().join(".git/config")).unwrap();
+        for expected in [None, Some("https://example.invalid/old.git".into())] {
+            assert!(matches!(
+                git_set_remote_impl(GitSetRemoteRequest {
+                    root: root.clone(),
+                    name: "origin".into(),
+                    url: "https://example.invalid/replacement.git".into(),
+                    expected_url: expected
+                }),
+                Err(HostError::Conflict(_))
+            ));
+        }
+        for url in [
+            "ext::sh -c echo unsafe",
+            "https://user:SECRET@example.invalid/paper.git",
+            "https://SECRET@example.invalid/paper.git",
+            "https://example.invalid/paper.git?token=SECRET",
+            "-uanything",
+            "git://example.invalid/paper.git",
+            "http://example.invalid/paper.git",
+            "ssh://-option/paper.git",
+            "ssh://-oProxyCommand=anything@example.invalid/paper.git",
+            "git@host::command",
+            "bad\naddress",
+        ] {
+            let error = git_set_remote_impl(GitSetRemoteRequest {
+                root: root.clone(),
+                name: "other".into(),
+                url: url.into(),
+                expected_url: None,
+            })
+            .unwrap_err();
+            assert!(!error.to_string().contains("SECRET"));
+        }
+        assert_eq!(
+            fs::read(project.path().join(".git/config")).unwrap(),
+            before
+        );
+        git(
+            project.path(),
+            [
+                "config",
+                "remote.origin.url",
+                "https://user:SECRET@example.invalid/paper.git",
+            ],
+        );
+        assert!(!git_remotes_impl(&root)
+            .unwrap_err()
+            .to_string()
+            .contains("SECRET"));
+    }
+
+    #[test]
+    fn first_explicit_push_configures_tracking_without_implicit_network_on_remote_save() {
+        let remote = tempdir().unwrap();
+        git(remote.path(), ["init", "--bare", "-b", "main"]);
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("paper.md"), "paper\n").unwrap();
+        commit_all(project.path(), "paper");
+        let root = project.path().to_string_lossy().into_owned();
+        git_set_remote_impl(GitSetRemoteRequest {
+            root: root.clone(),
+            name: "origin".into(),
+            url: remote.path().to_string_lossy().into_owned(),
+            expected_url: None,
+        })
+        .unwrap();
+        assert!(!remote.path().join("refs/heads/main").exists());
+        let result = git_push_impl(GitRemoteRequest {
+            root,
+            remote: Some("origin".into()),
+            branch: Some("main".into()),
+        })
+        .unwrap();
+        assert_eq!(result.status.upstream.as_deref(), Some("origin/main"));
+        assert!(remote.path().join("refs/heads/main").exists());
+    }
+
+    #[test]
+    fn explicit_push_preserves_configured_upstream_before_it_has_been_fetched() {
+        let remote = tempdir().unwrap();
+        git(remote.path(), ["init", "--bare", "-b", "main"]);
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("paper.md"), "paper\n").unwrap();
+        commit_all(project.path(), "paper");
+        git(project.path(), ["remote", "add", "origin", &remote.path().to_string_lossy()]);
+        git(project.path(), ["config", "branch.main.remote", "origin"]);
+        git(project.path(), ["config", "branch.main.merge", "refs/heads/published"]);
+        let root = project.path().to_string_lossy().into_owned();
+        assert!(upstream_name(&require_repository(&root).unwrap()).unwrap().is_none());
+        git_push_impl(GitRemoteRequest { root, remote: Some("origin".into()), branch: Some("main".into()) }).unwrap();
+        assert_eq!(config_values(project.path(), "branch.main.merge").unwrap(), vec!["refs/heads/published"]);
+    }
+
+    #[test]
+    fn clone_creates_an_independent_repository_with_inert_manuscript_and_code() {
+        let source = tempdir().unwrap();
+        initialise(source.path());
+        fs::write(source.path().join("paper.md"), "# A paper\n").unwrap();
+        fs::write(
+            source.path().join("setup.py"),
+            "raise RuntimeError('must not run')\n",
+        )
+        .unwrap();
+        commit_all(source.path(), "paper");
+        let parent = tempdir().unwrap();
+        let result = git_clone_impl(GitCloneRequest {
+            url: source.path().to_string_lossy().into_owned(),
+            parent: parent.path().to_string_lossy().into_owned(),
+            folder_name: "Cloned paper".into(),
+        })
+        .unwrap();
+        let root = Path::new(&result.root);
+        assert_eq!(
+            fs::read_to_string(root.join("paper.md")).unwrap(),
+            "# A paper\n"
+        );
+        assert!(root.join("setup.py").is_file());
+        assert!(root.join(".git").is_dir());
+        let status = git_status_impl(&result.root).unwrap();
+        assert_eq!(status.upstream.as_deref(), Some("origin/main"));
+        assert!(status.entries.is_empty());
+    }
+
+    #[test]
+    fn clone_never_overwrites_existing_folders_or_accepts_traversal() {
+        let source = tempdir().unwrap();
+        initialise(source.path());
+        let parent = tempdir().unwrap();
+        let occupied = parent.path().join("occupied");
+        fs::create_dir(&occupied).unwrap();
+        fs::write(occupied.join("keep.txt"), "keep\n").unwrap();
+        for name in [
+            "occupied",
+            "../escape",
+            ".",
+            ".git",
+            "nested/child",
+            "nested\\child",
+            "bad:name",
+            "-option",
+        ] {
+            assert!(git_clone_impl(GitCloneRequest {
+                url: source.path().to_string_lossy().into_owned(),
+                parent: parent.path().to_string_lossy().into_owned(),
+                folder_name: name.into()
+            })
+            .is_err());
+        }
+        assert_eq!(
+            fs::read_to_string(occupied.join("keep.txt")).unwrap(),
+            "keep\n"
+        );
+        assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn clone_failure_keeps_only_its_reserved_folder_and_reports_it() {
+        let parent = tempdir().unwrap();
+        let error = git_clone_impl(GitCloneRequest {
+            url: parent
+                .path()
+                .join("missing-source")
+                .to_string_lossy()
+                .into_owned(),
+            parent: parent.path().to_string_lossy().into_owned(),
+            folder_name: "incomplete".into(),
+        })
+        .unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("incomplete clone folder was kept"));
+        assert!(parent.path().join("incomplete").is_dir());
+        assert_eq!(fs::read_dir(parent.path()).unwrap().count(), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn git_runner_rejects_transport_helpers_after_url_rewrite() {
+        let parent = tempdir().unwrap();
+        let marker = parent.path().join("helper-ran");
+        let rewrite = format!(
+            "url.ext::sh -c touch% {}.insteadOf=https://example.invalid/",
+            marker.display()
+        );
+        let output = run_git(
+            parent.path(),
+            &[
+                "-c",
+                &rewrite,
+                "-c",
+                "protocol.ext.allow=always",
+                "clone",
+                "--no-checkout",
+                "--",
+                "https://example.invalid/paper.git",
+                "blocked",
+            ],
+        )
+        .unwrap();
+        assert!(!output.status.success());
+        assert!(!marker.exists());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("transport 'ext' not allowed"));
     }
 
     #[test]

@@ -1,0 +1,21 @@
+.clone-paper-backdrop { align-items: center; background: rgba(30, 38, 34, .25); display: flex; inset: 0; justify-content: center; padding: 24px; position: fixed; z-index: 210; }
+.clone-paper-dialog { background: #fff; border: 1px solid #d6dfd8; border-radius: 12px; box-shadow: 0 16px 60px #263b2b24; color: #34483b; max-height: calc(100dvh - 48px); overflow: auto; padding: 24px; width: min(100%, 560px); }
+.clone-paper-dialog > header { align-items: flex-start; display: flex; gap: 16px; justify-content: space-between; }
+.clone-paper-dialog h1 { font-size: 26px; margin: 5px 0 0; }
+.clone-paper-dialog > p, .clone-paper-dialog form > p { font-size: 13px; line-height: 1.6; }
+.clone-paper-dialog form { display: grid; gap: 16px; margin-top: 22px; }
+.clone-paper-dialog label, .clone-paper-destination { display: grid; gap: 7px; font-size: 13px; font-weight: 600; }
+.clone-paper-dialog input { background: #fff; border: 1px solid #cbd7ce; border-radius: 6px; color: inherit; font: inherit; font-weight: 400; min-width: 0; padding: 10px 12px; width: 100%; }
+.clone-paper-dialog small { color: #65776a; font-size: 12px; font-weight: 400; line-height: 1.6; }
+.clone-paper-dialog form > small { margin-top: -10px; }
+.clone-paper-dialog button { align-items: center; border: 1px solid #cbd7ce; border-radius: 6px; display: inline-flex; font: inherit; gap: 6px; justify-content: center; padding: 8px 12px; }
+.clone-paper-dialog button:disabled { cursor: default; opacity: .5; }
+.clone-paper-dialog > header > button { background: transparent; border: 0; padding: 5px; }
+.clone-paper-destination > div { align-items: center; display: flex; gap: 12px; justify-content: space-between; }
+.clone-paper-destination code, .clone-paper-complete code { font-size: 12px; font-weight: 400; line-height: 1.6; overflow-wrap: anywhere; }
+.clone-paper-destination button { flex: none; font-size: 12px; }
+.clone-paper-complete { background: #f3f7f3; border: 1px solid #d9e3da; border-radius: 7px; display: grid; gap: 8px; padding: 14px; }
+.clone-paper-complete p { font-size: 12px; line-height: 1.6; margin: 0; }
+.clone-paper-dialog .clone-paper-problem { background: #fff1ee; border: 1px solid #e9c9c0; border-radius: 6px; color: #8d392b; margin: 0; padding: 10px 12px; }
+.clone-paper-dialog footer { display: flex; gap: 10px; justify-content: flex-end; margin-top: 4px; }
+@media (max-width: 600px) { .clone-paper-backdrop { padding: 12px; } .clone-paper-dialog { max-height: calc(100dvh - 24px); padding: 20px; } .clone-paper-destination > div { align-items: stretch; flex-direction: column; } }

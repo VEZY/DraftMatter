@@ -9,6 +9,27 @@ const project: ProjectSnapshot = {
 }
 
 describe('desktop host adapter', () => {
+  it('exposes explicit local remote configuration and cloning without browser access', async () => {
+    const invoke = vi.fn().mockResolvedValue([])
+    const host = createDesktopHost(invoke, vi.fn(), true)
+    const remote = { root: '/research/canopy', name: 'origin', url: 'https://git.example.org/canopy.git', expectedUrl: null }
+    const clone = { url: remote.url, parent: '/research', folderName: 'canopy-clone' }
+    await host.gitRemotes(remote.root)
+    await host.gitSetRemote(remote)
+    await host.gitClone(clone)
+    expect(invoke.mock.calls).toEqual([
+      ['git_remotes', { root: remote.root }],
+      ['git_set_remote', { request: remote }],
+      ['git_clone', { request: clone }],
+    ])
+    invoke.mockClear()
+    const browser = createDesktopHost(invoke, vi.fn(), false)
+    await expect(browser.gitRemotes(remote.root)).rejects.toMatchObject({ kind: 'integration' })
+    await expect(browser.gitSetRemote(remote)).rejects.toMatchObject({ kind: 'integration' })
+    await expect(browser.gitClone(clone)).rejects.toMatchObject({ kind: 'integration' })
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
   it('opens bounded inert previews and explicitly saves text against its exact fingerprint', async () => {
     const invoke = vi.fn(async () => ({ hash: 'saved' }))
     const host = createDesktopHost(invoke as never, vi.fn(), true)

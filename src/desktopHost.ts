@@ -507,6 +507,29 @@ export interface GitRemoteRequest {
   branch?: string
 }
 
+export interface GitRemoteConfiguration {
+  name: string
+  url: string
+  pushUrl?: string
+}
+
+export interface GitSetRemoteRequest {
+  root: string
+  name: string
+  url: string
+  expectedUrl: string | null
+}
+
+export interface GitCloneRequest {
+  url: string
+  parent: string
+  folderName: string
+}
+
+export interface GitCloneResult {
+  root: string
+}
+
 export interface GitRemoteResult {
   action: 'fetch' | 'pull' | 'push'
   summary: string
@@ -1018,6 +1041,21 @@ export function createDesktopHost(
     gitInitialize(root: string) {
       return available
         ? invokeBridge<GitInitializeResult>('git_initialize', { root })
+        : gitUnavailable()
+    },
+    gitRemotes(root: string) {
+      return available
+        ? invokeBridge<GitRemoteConfiguration[]>('git_remotes', { root })
+        : gitUnavailable()
+    },
+    gitSetRemote(request: GitSetRemoteRequest) {
+      return available
+        ? invokeBridge<GitRemoteConfiguration[]>('git_set_remote', { request })
+        : gitUnavailable()
+    },
+    gitClone(request: GitCloneRequest) {
+      return available
+        ? invokeBridge<GitCloneResult>('git_clone', { request })
         : gitUnavailable()
     },
     gitDiff(request: GitDiffRequest) {

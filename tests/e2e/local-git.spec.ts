@@ -44,13 +44,20 @@ test('keeps Git commits separate from recovery and only sends selected files to 
   await page.screenshot({ path: testInfo.outputPath('local-git-panel.png') })
 })
 
-test('offers Git initialization in the project menu without automatically initializing or committing', async ({ page }) => {
+test('opens Git for an unversioned project and offers explicit initialization in its panel', async ({ page }) => {
   await page.goto('/tests/e2e/fixtures/local-git.html?git=off')
   await expect(page.getByRole('article', { name: 'Editable manuscript', exact: true })).toBeVisible()
-  await expect(rail(page).getByRole('button', { name: 'Git', exact: true })).toHaveCount(0)
+  await expect(rail(page).getByRole('button', { name: 'Git', exact: true })).toBeVisible()
   expect(await page.evaluate(() => window.localGitFixture.operations())).toEqual([])
-  await page.locator('.project-switcher').click()
-  await page.getByRole('button', { name: /Initialize Git/ }).click()
+  await rail(page).getByRole('button', { name: 'Git', exact: true }).click()
+  const panel = gitPanel(page)
+  await expect(panel).toBeVisible()
+  await expect(panel).toContainText('No Git repository')
+  const initialize = panel.getByRole('button', { name: 'Initialize Git…', exact: true })
+  await expect(initialize).toBeEnabled()
+  expect(await page.evaluate(() => window.localGitFixture.operations())).toEqual([])
+  await initialize.click()
+  await expect(panel.getByLabel('Commit message', { exact: true })).toBeVisible()
   await expect(rail(page).getByRole('button', { name: 'Git', exact: true })).toBeVisible()
   expect(await page.evaluate(() => window.localGitFixture.operations())).toEqual([{ kind: 'initialize', request: '/fixture/local-git' }])
 })
@@ -62,4 +69,36 @@ test('reloads the open manuscript after an explicit successful fast-forward pull
   await panel.getByRole('button', { name: 'Pull fast-forward', exact: true }).click()
   await expect(page.getByRole('article', { name: 'Editable manuscript', exact: true })).toContainText('A fast-forwarded article from the configured remote.')
   expect((await page.evaluate(() => window.localGitFixture.operations())).filter((entry) => ['fetch', 'pull', 'push'].includes(entry.kind))).toEqual([{ kind: 'pull', request: { root: '/fixture/local-git' } }])
+})
+
+test('adds and edits a project remote without contacting it or changing the manuscript', async ({ page }, testInfo) => {
+  await page.goto('/tests/e2e/fixtures/local-git.html?git=unlinked')
+  await rail(page).getByRole('button', { name: 'Git', exact: true }).click()
+  const panel = gitPanel(page)
+  const source = await page.evaluate(() => window.localGitFixture.source())
+  await expect(panel.getByLabel('Remote name', { exact: true })).toHaveValue('origin')
+  await expect(panel.getByLabel('Remote URL', { exact: true })).toBeEmpty()
+  expect(await page.evaluate(() => window.localGitFixture.operations())).toEqual([])
+  const firstUrl = 'https://git.example.org/team/paper.git'
+  await panel.getByLabel('Remote URL', { exact: true }).fill(firstUrl)
+  await panel.getByRole('button', { name: 'Save remote', exact: true }).scrollIntoViewIfNeeded()
+  await page.screenshot({ path: testInfo.outputPath('git-remote-configuration.png') })
+  await panel.getByRole('button', { name: 'Save remote', exact: true }).click()
+  await expect(panel.getByRole('button', { name: 'Edit remote', exact: true })).toBeVisible()
+  expect(await page.evaluate(() => window.localGitFixture.operations())).toEqual([
+    { kind: 'set-remote', request: { root: '/fixture/local-git', name: 'origin', url: firstUrl, expectedUrl: null } },
+  ])
+  await panel.getByRole('button', { name: 'Edit remote', exact: true }).click()
+  await expect(panel.getByLabel('Remote name', { exact: true })).toHaveValue('origin')
+  await expect(panel.getByLabel('Remote name', { exact: true })).not.toBeEditable()
+  await expect(panel.getByLabel('Remote URL', { exact: true })).toHaveValue(firstUrl)
+  const nextUrl = 'git@git.example.org:team/paper.git'
+  await panel.getByLabel('Remote URL', { exact: true }).fill(nextUrl)
+  await panel.getByRole('button', { name: 'Save remote', exact: true }).click()
+  await expect(panel.getByRole('button', { name: 'Edit remote', exact: true })).toBeVisible()
+  expect(await page.evaluate(() => window.localGitFixture.operations())).toEqual([
+    { kind: 'set-remote', request: { root: '/fixture/local-git', name: 'origin', url: firstUrl, expectedUrl: null } },
+    { kind: 'set-remote', request: { root: '/fixture/local-git', name: 'origin', url: nextUrl, expectedUrl: firstUrl } },
+  ])
+  expect(await page.evaluate(() => window.localGitFixture.source())).toBe(source)
 })

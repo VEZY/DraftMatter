@@ -72,10 +72,12 @@ use git_adapter::{
     git_create_checkpoint_impl, git_create_commit_impl, git_diff_impl, git_fetch_impl,
     git_history_impl, git_initialize_impl, git_pull_impl, git_push_impl,
     git_restore_checkpoint_impl, git_stage_impl, git_status_impl, git_switch_branch_impl,
+    git_remotes_impl, git_set_remote_impl, git_clone_impl,
     GitBranchRequest, GitBranchStatus, GitCheckpointDiffRequest, GitCheckpointDiffResult,
     GitCheckpointRequest, GitCommitRequest, GitCommitResult, GitDiffRequest, GitDiffResult,
     GitHistoryEntry, GitInitializeResult, GitRemoteRequest, GitRemoteResult, GitRepositoryStatus,
-    GitRestoreCheckpointRequest, GitStageRequest,
+    GitRestoreCheckpointRequest, GitStageRequest, GitRemoteConfiguration, GitSetRemoteRequest,
+    GitCloneRequest, GitCloneResult,
 };
 use julia_tools::{
     add_julia_package_with_progress_impl, format_julia_code_impl,
@@ -3795,6 +3797,21 @@ async fn git_initialize(root: String) -> Result<GitInitializeResult, HostError> 
 }
 
 #[tauri::command]
+async fn git_remotes(root: String) -> Result<Vec<GitRemoteConfiguration>, HostError> {
+    git_task(move || git_remotes_impl(&root)).await
+}
+
+#[tauri::command]
+async fn git_set_remote(request: GitSetRemoteRequest) -> Result<Vec<GitRemoteConfiguration>, HostError> {
+    git_task(move || git_set_remote_impl(request)).await
+}
+
+#[tauri::command]
+async fn git_clone(request: GitCloneRequest) -> Result<GitCloneResult, HostError> {
+    git_task(move || git_clone_impl(request)).await
+}
+
+#[tauri::command]
 async fn git_diff(request: GitDiffRequest) -> Result<GitDiffResult, HostError> {
     git_task(move || git_diff_impl(request)).await
 }
@@ -3995,6 +4012,9 @@ pub fn run() {
             format_code,
             git_status,
             git_initialize,
+            git_remotes,
+            git_set_remote,
+            git_clone,
             git_diff,
             git_history,
             git_checkpoint_diff,

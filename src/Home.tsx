@@ -18,6 +18,7 @@ interface HomeProps {
   onOpenDraft: (launch: CollaborationProjectLaunch) => void
   onNewDraft: () => void
   onNewLocalDraft: () => void
+  onClonePaper?: () => void
   onOpenLocalPaper: () => void
   onOpenLocalProject: () => void
   onOpenLocalRecent: (project: LocalProjectRecent) => void
@@ -121,6 +122,7 @@ function AppHome({
   onForgetLocalRecent,
   onStartLocalCollaboration,
   onNewLocalDraft,
+  onClonePaper,
   localProjects,
   localProblem,
   onOpenExample,
@@ -131,7 +133,7 @@ function AppHome({
   onConnectAssistants,
   onOpenAiLearn,
   onOpenLegal,
-}: Pick<HomeProps, 'onOpenLocalPaper' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenBrowserDraft' | 'onOpenLearn' | 'onOpenAiLearn' | 'onOpenLanguages' | 'onOpenTutorial' | 'onOpenLegal'> & { onConnectAssistants: () => void }) {
+}: Pick<HomeProps, 'onOpenLocalPaper' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'onClonePaper' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenBrowserDraft' | 'onOpenLearn' | 'onOpenAiLearn' | 'onOpenLanguages' | 'onOpenTutorial' | 'onOpenLegal'> & { onConnectAssistants: () => void }) {
   const session = useCollaborationSession()
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLocaleLowerCase()
@@ -180,7 +182,10 @@ function AppHome({
               ? <button className="home-primary" onClick={onOpenLocalPaper}><Icon name="document" size={16} />Open existing paper</button>
               : <button className="home-primary" onClick={onOpenBrowserDraft}><Icon name="plus" size={16} />New browser draft</button>}
             {desktopHost.available && <button onClick={onOpenLocalProject}><Icon name="folder" size={16} />Open project folder</button>}
-            {desktopHost.available && <button onClick={onNewLocalDraft}><Icon name="plus" size={16} />New paper</button>}
+            {desktopHost.available && <div className="home-paper-create-actions">
+              <button onClick={onNewLocalDraft}><Icon name="plus" size={16} />New paper</button>
+              {onClonePaper && <button onClick={onClonePaper}><Icon name="branch" size={16} />Clone a paper</button>}
+            </div>}
           </div>
         </section>
 
@@ -247,6 +252,7 @@ function Catalogue({
   onOpenDraft,
   onNewDraft,
   onNewLocalDraft,
+  onClonePaper,
   onOpenLocalPaper,
   onOpenLocalProject,
   onOpenLocalRecent,
@@ -259,7 +265,7 @@ function Catalogue({
   onOpenTutorial,
   onConnectAssistants,
   onOpenLegal,
-}: Pick<HomeProps, 'preferredWorkspaceId' | 'onOpenDraft' | 'onNewDraft' | 'onNewLocalDraft' | 'onOpenLocalPaper' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'localProjects' | 'localProblem' | 'onOpenLearn' | 'onOpenLanguages' | 'onOpenTutorial' | 'onOpenLegal'> & { onConnectAssistants: () => void }) {
+}: Pick<HomeProps, 'preferredWorkspaceId' | 'onOpenDraft' | 'onNewDraft' | 'onNewLocalDraft' | 'onClonePaper' | 'onOpenLocalPaper' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'localProjects' | 'localProblem' | 'onOpenLearn' | 'onOpenLanguages' | 'onOpenTutorial' | 'onOpenLegal'> & { onConnectAssistants: () => void }) {
   const session = useCollaborationSession()
   const [query, setQuery] = useState('')
   const [workspaceId, setWorkspaceId] = useState(() => (
@@ -349,7 +355,7 @@ function Catalogue({
           </div>
         )}
 
-        {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenPaper={onOpenLocalPaper} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} />}
+        {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenPaper={onOpenLocalPaper} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} onClone={onClonePaper} />}
         <HomeLearningGuide onStartTour={onOpenTutorial} />
       </div>
       <AlphaLegalFooter onOpenLegal={onOpenLegal} />
@@ -372,6 +378,7 @@ function LocalProjectsSection({
   onOpenPaper,
   onOpenFolder,
   onCreate,
+  onClone,
   kicker = 'Desktop',
   title = 'On this computer',
   showActions = true,
@@ -384,6 +391,7 @@ function LocalProjectsSection({
   onOpenPaper: () => void
   onOpenFolder: () => void
   onCreate: () => void
+  onClone?: () => void
   kicker?: string
   title?: string
   showActions?: boolean
@@ -392,7 +400,7 @@ function LocalProjectsSection({
     <section className="home-local-projects" aria-labelledby="local-projects-title">
       <div className="home-local-heading">
         <div><span className="home-kicker">{kicker}</span><h2 id="local-projects-title">{title}</h2></div>
-        {showActions && <div><button onClick={onOpenPaper}><Icon name="document" size={15} />Open existing paper</button><button onClick={onOpenFolder}><Icon name="folder" size={15} />Open project folder</button><button onClick={onCreate}><Icon name="plus" size={15} />New local draft</button></div>}
+        {showActions && <div><button onClick={onOpenPaper}><Icon name="document" size={15} />Open existing paper</button><button onClick={onOpenFolder}><Icon name="folder" size={15} />Open project folder</button><button onClick={onCreate}><Icon name="plus" size={15} />New local draft</button>{onClone && <button onClick={onClone}><Icon name="branch" size={15} />Clone a paper</button>}</div>}
       </div>
       {problem && <p className="home-account-error" role="alert">{problem}</p>}
       {projects.length ? (

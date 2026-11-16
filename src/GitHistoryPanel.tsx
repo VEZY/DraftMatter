@@ -5,6 +5,7 @@ import {
   type GitHistoryEntry,
   type GitRemoteRequest,
   type GitRemoteResult,
+  type GitRemoteConfiguration,
   type GitRepositoryStatus,
   type GitStatusEntry,
 } from './desktopHost'
@@ -19,6 +20,8 @@ export interface GitHistoryPanelProps {
   root?: string
   manuscriptPath?: string
   onNotice: (message: string) => void
+  onInitialize?: () => Promise<void>
+  initializationBusy?: boolean
   onBeforeCommit?: (paths: string[]) => Promise<boolean>
   onPull?: (request: GitRemoteRequest) => Promise<GitRemoteResult>
   onRepositoryChange?: (status: GitRepositoryStatus) => void
@@ -41,9 +44,15 @@ export function GitHistoryPanel(props: GitHistoryPanelProps) {
   return <GitHistorySession key={`${props.root ?? ''}\0${props.manuscriptPath ?? ''}`} {...props} />
 }
 
-function GitHistorySession({ root, onNotice, onBeforeCommit, onPull, onRepositoryChange, onClose }: GitHistoryPanelProps) {
+function GitHistorySession({ root, onNotice, onInitialize, initializationBusy = false, onBeforeCommit, onPull, onRepositoryChange, onClose }: GitHistoryPanelProps) {
   const [status, setStatus] = useState<GitRepositoryStatus>()
   const [remotes, setRemotes] = useState<string[]>([])
+  const [remoteConfigurations, setRemoteConfigurations] = useState<GitRemoteConfiguration[]>([])
+  const [remoteConfigurationAvailable, setRemoteConfigurationAvailable] = useState(false)
+  const [remoteEditorOpen, setRemoteEditorOpen] = useState(false)
+  const [remoteName, setRemoteName] = useState('origin')
+  const [remoteUrl, setRemoteUrl] = useState('')
+  const [expectedRemoteUrl, setExpectedRemoteUrl] = useState<string | null>(null)
   const [selected, setSelected] = useState<string[]>([])
   const [message, setMessage] = useState('')
   const [problem, setProblem] = useState('')
@@ -55,8 +64,8 @@ function GitHistorySession({ root, onNotice, onBeforeCommit, onPull, onRepositor
   const mounted = useRef(false)
   const epoch = useRef(0)
   const operating = useRef(false)
-  const callbacks = useRef({ onNotice, onBeforeCommit, onPull, onRepositoryChange })
-  callbacks.current = { onNotice, onBeforeCommit, onPull, onRepositoryChange }
+  const callbacks = useRef({ onNotice, onInitialize, onBeforeCommit, onPull, onRepositoryChange })
+  callbacks.current = { onNotice, onInitialize, onBeforeCommit, onPull, onRepositoryChange }
   const current = (token: number) => mounted.current && epoch.current === token
   const semantic = useMemo(() => preview ? summarizeSemanticGitDiff(preview.text) : undefined, [preview])
 
@@ -67,15 +76,18 @@ function GitHistorySession({ root, onNotice, onBeforeCommit, onPull, onRepositor
     setStatus(next)
     callbacks.current.onRepositoryChange?.(next)
     setSelected((paths) => paths.filter((path) => next.entries.some((entry) => entry.path === path)))
-    if (!next.repository) { setRemotes([]); setRemote(''); setHistory([]); setPreview(undefined); return }
-    const [branches, commits] = await Promise.allSettled([desktopHost.gitBranches(root), desktopHost.gitHistory(root)])
+    if (!next.repository) { setRemotes([]); setRemoteConfigurations([]); setRemoteConfigurationAvailable(false); setRemote(''); setHistory([]); setPreview(undefined); return }
+    const [configuration, commits] = await Promise.allSettled([desktopHost.gitRemotes(root), desktopHost.gitHistory(root)])
     if (!current(token)) return
     const problems: string[] = []
-    if (branches.status === 'fulfilled') {
-      setRemotes(branches.value.remotes)
-      const upstreamRemote = branches.value.remotes.filter((name) => next.upstream?.startsWith(`${name}/`)).sort((a, b) => b.length - a.length)[0]
-      setRemote((value) => branches.value.remotes.includes(value) ? value : upstreamRemote ?? branches.value.remotes[0] ?? '')
-    } else { setRemotes([]); setRemote(''); problems.push(normaliseHostFailure(branches.reason).message) }
+    if (configuration.status === 'fulfilled') {
+      const names = configuration.value.map((entry) => entry.name)
+      setRemotes(names)
+      setRemoteConfigurations(configuration.value)
+      setRemoteConfigurationAvailable(true)
+      const upstreamRemote = names.filter((name) => next.upstream?.startsWith(`${name}/`)).sort((a, b) => b.length - a.length)[0]
+      setRemote((value) => names.includes(value) ? value : upstreamRemote ?? names[0] ?? '')
+    } else { setRemotes([]); setRemoteConfigurations([]); setRemoteConfigurationAvailable(false); setRemote(''); problems.push(normaliseHostFailure(configuration.reason).message) }
     if (commits.status === 'fulfilled') setHistory(commits.value)
     else { setHistory([]); problems.push(normaliseHostFailure(commits.reason).message) }
     if (problems.length) setProblem(problems.join(' '))
@@ -105,9 +117,34 @@ function GitHistorySession({ root, onNotice, onBeforeCommit, onPull, onRepositor
 
   const upstreamRemote = useMemo(() => remotes.filter((name) => status?.upstream?.startsWith(`${name}/`)).sort((a, b) => b.length - a.length)[0], [remotes, status?.upstream])
   const remoteTarget = remote === upstreamRemote ? status?.upstream : status?.branch ? `${remote}/${status.branch}` : remote
+  const selectedRemote = remoteConfigurations.find((entry) => entry.name === remote)
+  const editedRemote = expectedRemoteUrl === null ? undefined : remoteConfigurations.find((entry) => entry.name === remoteName)
   const conflicts = status?.entries.some((entry) => entry.conflicted) ?? false
   const canCommit = Boolean(selected.length && message.trim() && !busy && !conflicts && !status?.detached)
   const togglePath = (path: string) => setSelected((paths) => paths.includes(path) ? paths.filter((candidate) => candidate !== path) : [...paths, path])
+
+  const initialize = () => operation('initialize', async (token) => {
+    if (!callbacks.current.onInitialize || initializationBusy || !status?.gitAvailable || status.repository) return
+    await callbacks.current.onInitialize()
+    if (current(token)) await readRepository(token)
+  })
+
+  const editRemote = (configuration?: GitRemoteConfiguration) => {
+    setRemoteName(configuration?.name ?? (remotes.includes('origin') ? '' : 'origin'))
+    setRemoteUrl(configuration?.url ?? '')
+    setExpectedRemoteUrl(configuration?.url ?? null)
+    setRemoteEditorOpen(true)
+  }
+
+  const saveRemote = () => operation('remote-configuration', async (token) => {
+    if (!root || !remoteConfigurationAvailable || !remoteName.trim() || !remoteUrl.trim()) return
+    await desktopHost.gitSetRemote({ root, name: remoteName.trim(), url: remoteUrl.trim(), expectedUrl: expectedRemoteUrl })
+    if (!current(token)) return
+    setRemote(remoteName.trim())
+    setRemoteEditorOpen(false); setRemoteName('origin'); setRemoteUrl(''); setExpectedRemoteUrl(null)
+    callbacks.current.onNotice('Git remote saved locally. Use Fetch, Pull or Push when you are ready.')
+    await readRepository(token)
+  })
 
   const createCommit = () => operation('commit', async (token) => {
     if (!canCommit || !root) return
@@ -162,9 +199,9 @@ function GitHistorySession({ root, onNotice, onBeforeCommit, onPull, onRepositor
     <div className="git-panel-body" aria-busy={Boolean(busy)}>
       {problem && <p className="git-problem" role="alert">{problem}</p>}
       {!root ? <div className="git-empty"><Icon name="folder" size={24} /><strong>Open a local project</strong><p>Git is available for desktop project folders.</p></div>
-        : !status ? <p className="git-loading" role="status">{problem ? 'Git status is unavailable. Refresh to try again.' : 'Reading local repository…'}</p>
+        : !status ? <div className="git-loading"><p role="status">{problem ? 'Git status is unavailable.' : 'Reading local repository…'}</p>{problem && <button type="button" onClick={() => void operation('refresh', readRepository)} disabled={Boolean(busy)}>Retry</button>}</div>
           : !status.gitAvailable ? <div className="git-empty"><strong>Git is not installed</strong><p>Install Git on this computer, then refresh. Writing and recovery history remain available without Git.</p></div>
-            : !status.repository ? <div className="git-empty"><Icon name="branch" size={24} /><strong>No Git repository detected</strong><p>Choose Initialize Git… from the project menu to start local version control.</p></div>
+            : !status.repository ? <div className="git-empty"><Icon name="branch" size={24} /><strong>No Git repository detected</strong><p>Keep local commits of the files you choose. Your existing .gitignore is preserved.</p>{onInitialize ? <button type="button" className="primary-button" aria-label="Initialize Git…" onClick={() => void initialize()} disabled={Boolean(busy) || initializationBusy}>{busy === 'initialize' ? 'Initializing Git…' : 'Initialize Git…'}</button> : <p>Open Git from the project navigation to initialize this folder.</p>}<small>Initialization creates a local repository. Files are committed only after you select them.</small></div>
               : <>
                 <div className="git-branch-summary">
                   <span><Icon name="branch" size={15} /><strong>{status.detached ? 'Detached HEAD' : status.branch ?? 'New repository'}</strong></span>
@@ -202,7 +239,31 @@ function GitHistorySession({ root, onNotice, onBeforeCommit, onPull, onRepositor
                   <small>The latest 50 project commits. Browsing leaves files unchanged.</small>
                 </section>
                 <section className="git-remote-section" aria-label="Git remotes"><h3>Remote</h3>
-                  {remotes.length ? <><label>Git remote<select value={remote} onChange={(event) => setRemote(event.target.value)} disabled={Boolean(busy)}>{remotes.map((name) => <option value={name} key={name}>{name}</option>)}</select></label><small>Pull / Push target: {remoteTarget}</small><div className="git-remote-actions"><button type="button" disabled={!remote || Boolean(busy)} onClick={() => void remoteAction('fetch')}>{busy === 'fetch' ? 'Fetching…' : 'Fetch'}</button><button type="button" disabled={!remote || !status.branch || status.detached || Boolean(busy)} onClick={() => void remoteAction('pull')}>{busy === 'pull' ? 'Pulling…' : 'Pull fast-forward'}</button><button type="button" disabled={!remote || !status.branch || status.detached || Boolean(busy)} onClick={() => void remoteAction('push')}>{busy === 'push' ? 'Pushing…' : 'Push'}</button></div><small>Remote actions apply to the whole branch. Pull uses fast-forward only; Push sends all outgoing commits without force.</small></> : <p>Configure a remote in your Git tool to enable Fetch, Pull and Push.</p>}
+                  {remotes.length > 0 && <>
+                    <label>Git remote<select value={remote} onChange={(event) => setRemote(event.target.value)} disabled={Boolean(busy)}>{remotes.map((name) => <option value={name} key={name}>{name}</option>)}</select></label>
+                    {selectedRemote && <div className="git-remote-address"><code>{selectedRemote.url}</code>{selectedRemote.pushUrl && <small>Push URL: <code>{selectedRemote.pushUrl}</code></small>}</div>}
+                    <small>Pull / Push target: {remoteTarget}</small>
+                    <div className="git-remote-actions">
+                      <button type="button" disabled={!remote || Boolean(busy)} onClick={() => void remoteAction('fetch')}>{busy === 'fetch' ? 'Fetching…' : 'Fetch'}</button>
+                      <button type="button" disabled={!remote || !status.branch || status.detached || Boolean(busy)} onClick={() => void remoteAction('pull')}>{busy === 'pull' ? 'Pulling…' : 'Pull fast-forward'}</button>
+                      <button type="button" disabled={!remote || !status.branch || status.detached || Boolean(busy)} onClick={() => void remoteAction('push')}>{busy === 'push' ? 'Pushing…' : 'Push'}</button>
+                    </div>
+                    <small>Remote actions apply to the whole branch. Pull uses fast-forward only; Push sends all outgoing commits without force.</small>
+                    {!remoteEditorOpen && <div className="git-remote-actions">
+                      <button type="button" disabled={Boolean(busy) || !selectedRemote} onClick={() => editRemote(selectedRemote)}>Edit remote</button>
+                      <button type="button" disabled={Boolean(busy)} onClick={() => editRemote()}>Add remote</button>
+                    </div>}
+                  </>}
+                  {remoteConfigurationAvailable && (remoteEditorOpen || remotes.length === 0) && <form className="git-remote-form" onSubmit={(event) => { event.preventDefault(); void saveRemote() }}>
+                    <p>{expectedRemoteUrl === null ? 'Connect this repository to a remote.' : 'Update the repository address.'}</p>
+                    <label>Remote name<input value={remoteName} onChange={(event) => setRemoteName(event.target.value)} disabled={Boolean(busy) || expectedRemoteUrl !== null} autoComplete="off" autoCapitalize="off" spellCheck={false} placeholder="origin" required /></label>
+                    <label>{editedRemote?.pushUrl ? 'Fetch URL' : 'Remote URL'}<input value={remoteUrl} onChange={(event) => setRemoteUrl(event.target.value)} disabled={Boolean(busy)} autoComplete="off" autoCapitalize="off" spellCheck={false} placeholder="https://github.com/your-team/paper.git" required /></label>
+                    {editedRemote?.pushUrl && <small>The separate push URL is preserved: <code>{editedRemote.pushUrl}</code></small>}
+                    <small>Use an HTTPS or SSH repository URL. Authentication uses your computer’s Git credentials or SSH keys; keep passwords and tokens out of the URL.</small>
+                    {status.projectPrefix && <small>This changes the remote for the whole repository at {status.repositoryRoot}.</small>}
+                    <div className="git-remote-actions"><button className="primary-button" type="submit" disabled={Boolean(busy) || !remoteName.trim() || !remoteUrl.trim()}>{busy === 'remote-configuration' ? 'Saving remote…' : 'Save remote'}</button>{remotes.length > 0 && <button type="button" disabled={Boolean(busy)} onClick={() => setRemoteEditorOpen(false)}>Cancel</button>}</div>
+                    <small>Saving the address does not transfer files. Use Fetch, Pull or Push explicitly.</small>
+                  </form>}
                 </section>
                 <p className="git-recovery-note">Git commits are separate from automatic Recovery History.</p>
               </>}

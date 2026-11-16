@@ -32,11 +32,13 @@ vi.mock('./AssistantConnectionsDialog', () => ({
 }))
 
 import { Home } from './Home'
+import { desktopHost } from './desktopHost'
 
 const props = {
   onOpenDraft: vi.fn(),
   onNewDraft: vi.fn(),
   onNewLocalDraft: vi.fn(),
+  onClonePaper: vi.fn(),
   onOpenLocalPaper: vi.fn(),
   onOpenLocalProject: vi.fn(),
   onOpenLocalRecent: vi.fn(),
@@ -78,6 +80,7 @@ describe('DraftMatter desktop home', () => {
 
     expect(container.querySelector('h1')?.textContent).toBe('Your papers')
     expect(container.textContent).toContain('Open existing paper')
+    expect(container.textContent).toContain('Clone a paper')
     expect(container.textContent).toContain('Canopy recovery paper')
     expect(container.textContent).toContain('Manage AI connections')
     expect(container.textContent).toContain('Account & collaboration')
@@ -86,6 +89,20 @@ describe('DraftMatter desktop home', () => {
     expect(container.textContent).not.toContain('Your paper should be as reproducible as your research.')
     expect([...container.querySelectorAll('footer .legal-links a')].map((link) => link.textContent)).toEqual(['Legal notice', 'Privacy policy', 'Terms of use'])
     expect(container.textContent).toContain('Pre-production: data loss is possible. Keep independent backups of your work outside DraftMatter.')
+  })
+
+  it('offers cloning next to New paper on desktop and leaves it out of browser drafts', async () => {
+    await act(async () => root.render(<Home {...props} />))
+    const actions = container.querySelector('.home-app-heading-actions')!
+    const clone = [...actions.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Clone a paper')!
+    expect(clone.previousElementSibling?.textContent).toBe('New paper')
+    await act(async () => clone.click())
+    expect(props.onClonePaper).toHaveBeenCalledTimes(1)
+    desktopHost.available = false
+    try {
+      await act(async () => root.render(<Home {...props} />))
+      expect(container.textContent).not.toContain('Clone a paper')
+    } finally { desktopHost.available = true }
   })
 
   it('filters recent papers and exposes collaboration account setup', async () => {

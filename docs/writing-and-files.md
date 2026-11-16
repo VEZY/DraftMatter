@@ -96,11 +96,12 @@ from online sharing and recovery history.
 
 ## Use local Git when you want commits
 
-For a desktop project in an existing Git repository, **Git** appears in the left
-navigation beside **History** and **Search**. If the project has no repository,
-open the project menu and choose **Initialize Git…**. Initialization is explicit;
+For every local desktop project, **Git** appears in the left navigation beside
+**History** and **Search**, including folders without a Git repository. Open it
+and choose **Initialize Git…** to start local version control. Initialization is explicit;
 an existing `.gitignore` is preserved. Git must already be installed on this
-computer. Browser drafts do not expose local Git controls.
+computer. If detection fails, the panel shows the error and **Retry**; a missing
+Git installation is explained there too. Browser drafts do not expose local Git controls.
 
 The Git panel lists changed files with unchecked selection boxes. Select only
 the files you want to commit, enter a **Commit message**, then choose **Create
@@ -110,13 +111,29 @@ commit in **Commit history** to read its changes. Browsing changes neither files
 nor branches. **History** continues to show the separate automatic recovery
 versions.
 
+In **Git → Remote**, enter a **Remote name** (usually `origin`) and its HTTPS or
+SSH **Remote URL**, then choose **Save remote**. **Edit remote** changes an
+existing address; **Add remote** adds another. Saving these settings is local
+and does not contact the remote. Authentication uses your computer's existing
+Git credentials or SSH keys; do not paste passwords or access tokens into URLs.
+An existing separate push URL is displayed and preserved when editing its fetch
+address. Settings apply to the whole repository, including when the paper is
+inside a larger one.
+
 Configured Git remotes have explicit **Fetch**, **Pull fast-forward**, and
 **Push** actions. Creating a commit does not push it. Pull refuses an unclean
 working tree or a change that needs a merge or rebase; push never forces. After a
-successful pull, DraftMatter reloads the manuscript from disk. Configure remotes,
-switch branches, and perform advanced Git operations using your usual Git tools.
+successful pull, DraftMatter reloads the manuscript from disk. Switch branches
+and perform advanced Git operations using your usual Git tools.
 If the project is inside a larger repository, its repository location is shown;
 remote operations apply to that repository's branch, not only the paper's folder.
+
+To start from an existing repository, choose **Clone a paper** beside **New paper**
+on the desktop home screen. Enter its repository URL, choose a parent folder and
+the new folder's name, then choose **Clone paper**. Existing folders are never
+overwritten. DraftMatter opens the local copy and uses the normal manuscript
+selector when several Markdown or Quarto files are available. Opening the clone
+does not run project code.
 
 ## Synchronize a selected part of a local project
 
@@ -166,7 +183,8 @@ silently start synchronization.
 
 Git remains optional and independent of file synchronization. The **Git** panel
 provides selected local commits and explicit remote actions; **History** opens
-recovery versions. Git remotes and advanced operations use your usual Git tools.
+recovery versions. Remote URLs can be configured in **Git → Remote**; advanced
+operations use your usual Git tools.
 
 ## Share the paper, then choose any additional data
 

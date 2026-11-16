@@ -6998,6 +6998,12 @@
   gap: 8px;
 }
 
+.home-paper-create-actions {
+  display: flex;
+  flex: none;
+  gap: 8px;
+}
+
 .home-showcase-hint {
   margin: 2px 8px 12px;
   color: var(--home-muted);
