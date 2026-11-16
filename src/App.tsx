@@ -87,6 +87,8 @@ import { LinkDialog } from './LinkDialog'
 import { CollaborationDialog, type CollaborationFileService } from './CollaborationDialog'
 import { ProjectFilesWorkspace } from './ProjectFilesWorkspace'
 import { GitHistoryPanel } from './GitHistoryPanel'
+import { GitInitializationDialog } from './GitInitializationDialog'
+import type { GitInitializationPlan } from './desktopHost'
 import type { GitRemoteRequest, GitRemoteResult, GitRepositoryStatus } from './desktopHost'
 import { ProjectDocumentWorkspace, type ProjectDocumentWorkspaceHandle } from './ProjectDocumentWorkspace'
 import { useProjectSynchronization } from './useProjectSynchronization'
@@ -719,6 +721,8 @@ function App({ active = true, saveBeforeLeaveRef, collaborationLaunch, desktopPr
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
   const [projectFilesOpen, setProjectFilesOpen] = useState(false)
   const [gitPanelOpen, setGitPanelOpen] = useState(false)
+  const [gitInitializationReview, setGitInitializationReview] = useState<{ root: string; manuscriptPath: string; plan: GitInitializationPlan; suggestedPaths: string[]; discoveryNotice?: string }>()
+  const [gitInitializationRevision, setGitInitializationRevision] = useState(0)
   const [gitRepository, setGitRepository] = useState<{ root: string; status?: GitRepositoryStatus; problem?: string }>()
   const gitDetectionRequestRef = useRef(0)
   const gitOperationRunningRef = useRef(false)
@@ -4696,21 +4700,69 @@ function App({ active = true, saveBeforeLeaveRef, collaborationLaunch, desktopPr
     setProjectBusy(true)
     setProjectMenuOpen(false)
     try {
-      const result = await desktopHost.gitInitialize(session.root)
-      if (desktopSessionRef.current?.root !== session.root) return
-      gitDetectionRequestRef.current++
-      setGitRepository({ root: session.root, status: result.status })
-      setGitPanelOpen(true)
-      setLeftPanelOpen(true)
-      setToast(result.createdIgnore ? 'Git initialized locally with a .gitignore. Select files to create the first commit.' : 'Git initialized locally. Your existing .gitignore is preserved.')
+      if (!await flushDraftBeforeLeave()) throw new Error('Save the manuscript and edited file tabs before preparing the first Git commit.')
+      const plan = await desktopHost.gitInitializationPlan(session.root)
+      if (desktopSessionRef.current?.root !== session.root || desktopSessionRef.current.path !== session.path) return
+      if (plan.hasCommits) throw new Error('This repository already has commits. Use the Git panel to commit selected changes.')
+      const suggestedPaths = [session.path]
+      const notices: string[] = []
+      try { suggestedPaths.push(...referencedBibliographyPaths(manuscriptSourceRef.current, session.path)) }
+      catch { notices.push('Bibliography paths could not be identified from the current manuscript metadata.') }
+      try { suggestedPaths.push(...publicationAssetPaths(manuscriptSourceRef.current)) }
+      catch { notices.push('Some figure paths could not be identified from the current manuscript.') }
+      setGitInitializationReview({ root: session.root, manuscriptPath: session.path, plan, suggestedPaths, discoveryNotice: notices.length ? `${notices.join(' ')} Select any additional files you need below.` : undefined })
     } catch (error) {
-      if (desktopSessionRef.current?.root === session.root) setToast(`Git could not be initialized: ${readableError(error)}`)
+      if (desktopSessionRef.current?.root === session.root) setToast(`Git initialization could not be prepared: ${readableError(error)}`)
       throw error
     } finally {
       gitOperationRunningRef.current = false
       setProjectBusy(false)
     }
   }
+
+  const confirmGitInitialization = async (paths: string[], message: string) => {
+    const review = gitInitializationReview
+    const session = desktopSessionRef.current
+    if (!review || !session || session.root !== review.root || session.path !== review.manuscriptPath) throw new Error('The project changed. Review the current project before initializing Git.')
+    if (projectBusy || gitOperationRunningRef.current) throw new Error('Finish the current project operation before initializing Git.')
+    // Save before the native stat check. A changed manuscript then requires a fresh
+    // plan, rather than committing an older disk version or unreviewed files.
+    if (!await prepareGitCommit(paths)) throw new Error('The selected files could not be saved. No commit was created.')
+    gitOperationRunningRef.current = true
+    setProjectBusy(true)
+    try {
+      const selected = new Set(paths)
+      const result = await desktopHost.gitInitialize(session.root, {
+        paths,
+        message,
+        expectedIgnore: review.plan.originalIgnoreContent,
+        expectedFiles: review.plan.entries.filter((entry) => selected.has(entry.path) && entry.path !== '.gitignore').map(({ path, bytes, modifiedMs }) => ({ path, bytes, modifiedMs })),
+      })
+      if (desktopSessionRef.current?.root !== session.root) return
+      gitDetectionRequestRef.current++
+      setGitRepository({ root: session.root, status: result.status })
+      setGitInitializationRevision((current) => current + 1)
+      setGitPanelOpen(true)
+      setLeftPanelOpen(true)
+      setGitInitializationReview(undefined)
+      setToast(result.initialCommit ? `Git initialized · first commit ${result.initialCommit.shortHash} created locally.` : 'Git initialized locally.')
+    } catch (error) {
+      // Refresh reviewed metadata for retry after a save or an external edit. The
+      // failed action never silently retries with newly discovered files.
+      try {
+        const plan = await desktopHost.gitInitializationPlan(session.root)
+        if (desktopSessionRef.current?.root === session.root && !plan.hasCommits) setGitInitializationReview((current) => current?.root === session.root ? { ...current, plan } : current)
+      } catch { /* Keep the original plan and surface the native failure. */ }
+      throw error
+    } finally {
+      gitOperationRunningRef.current = false
+      setProjectBusy(false)
+    }
+  }
+
+  useEffect(() => {
+    setGitInitializationReview((current) => current && (current.root !== desktopSession?.root || current.manuscriptPath !== desktopSession.path) ? undefined : current)
+  }, [desktopSession?.root, desktopSession?.path])
 
   const prepareGitCommit = async (paths: string[]) => {
     const session = desktopSessionRef.current
@@ -6283,6 +6335,7 @@ function App({ active = true, saveBeforeLeaveRef, collaborationLaunch, desktopPr
         </nav>
 
         {leftPanelOpen && gitPanelOpen && desktopSession ? <GitHistoryPanel
+          refreshToken={gitInitializationRevision}
           key={desktopSession!.root}
           root={desktopSession!.root} manuscriptPath={desktopSession!.path}
           onNotice={setToast} onClose={() => setLeftPanelOpen(false)}
@@ -7239,6 +7292,25 @@ function App({ active = true, saveBeforeLeaveRef, collaborationLaunch, desktopPr
       )}
 
 
+
+      {gitInitializationReview && <GitInitializationDialog
+        root={gitInitializationReview.root}
+        files={gitInitializationReview.plan.entries.map((entry) => ({
+          path: entry.path, bytes: entry.bytes, detail: entry.reason,
+          category: entry.suggested ? 'infrastructure' as const : 'project' as const,
+          required: entry.path === '.gitignore',
+          suggested: entry.suggested || gitInitializationReview.suggestedPaths.includes(entry.path),
+        }))}
+        ignoreNotice={gitInitializationReview.plan.existingIgnore
+          ? gitInitializationReview.plan.ignoreWillChange ? 'Your existing .gitignore rules are preserved. DraftMatter adds a block excluding local caches, recovery and synchronization state; your own rules retain precedence.' : 'Your existing .gitignore is preserved. Its exclusions also apply to this first commit.'
+          : 'A .gitignore excluding local caches, recovery and synchronization state will be included in this first commit.'}
+        ignoreContent={gitInitializationReview.plan.ignoreContent}
+        discoveryNotice={gitInitializationReview.discoveryNotice}
+        unavailablePaths={gitInitializationReview.suggestedPaths.filter((path) => !gitInitializationReview.plan.entries.some((entry) => entry.path === path))}
+        truncated={gitInitializationReview.plan.truncated}
+        onConfirm={confirmGitInitialization}
+        onClose={() => setGitInitializationReview(undefined)}
+      />}
 
       <CollaborationDialog
         open={collaborationOpen}

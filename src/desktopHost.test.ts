@@ -338,3 +338,20 @@ describe('bounded native project file download bridge', () => {
     expect(invoke).toHaveBeenCalledTimes(5)
   })
 })
+
+describe('reviewed Git initialization bridge', () => {
+  it('keeps preview read-only and sends the selected first commit and snapshot through the desktop bridge', async () => {
+    const invoke = vi.fn().mockResolvedValue(undefined)
+    const host = createDesktopHost(invoke, vi.fn(), true)
+    const root = '/research/canopy'
+    const options = { paths: ['.gitignore', 'AGENTS.md', 'paper.qmd'], message: 'Start project', expectedIgnore: '# Existing rules\n', expectedFiles: [{ path: 'AGENTS.md', bytes: 20, modifiedMs: 42 }, { path: 'paper.qmd', bytes: 30, modifiedMs: 43 }] }
+    await host.gitInitializationPlan(root)
+    expect(invoke.mock.calls).toEqual([['git_initialization_plan', { root }]])
+    await host.gitInitialize(root, options)
+    expect(invoke).toHaveBeenLastCalledWith('git_initialize', { root, ...options })
+    const browser = createDesktopHost(invoke, vi.fn(), false)
+    await expect(browser.gitInitializationPlan(root)).rejects.toMatchObject({ kind: 'integration' })
+    await expect(browser.gitInitialize(root, options)).rejects.toMatchObject({ kind: 'integration' })
+    expect(invoke).toHaveBeenCalledTimes(2)
+  })
+})

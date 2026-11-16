@@ -44,7 +44,7 @@ test('keeps Git commits separate from recovery and only sends selected files to 
   await page.screenshot({ path: testInfo.outputPath('local-git-panel.png') })
 })
 
-test('opens Git for an unversioned project and offers explicit initialization in its panel', async ({ page }) => {
+test('reviews durable infrastructure and creates the first local commit only after confirmation', async ({ page }) => {
   await page.goto('/tests/e2e/fixtures/local-git.html?git=off')
   await expect(page.getByRole('article', { name: 'Editable manuscript', exact: true })).toBeVisible()
   await expect(rail(page).getByRole('button', { name: 'Git', exact: true })).toBeVisible()
@@ -57,9 +57,37 @@ test('opens Git for an unversioned project and offers explicit initialization in
   await expect(initialize).toBeEnabled()
   expect(await page.evaluate(() => window.localGitFixture.operations())).toEqual([])
   await initialize.click()
+  const review = page.getByRole('dialog', { name: 'Initialize Git and first commit', exact: true })
+  await expect(review).toBeVisible()
+  expect(await page.evaluate(() => window.localGitFixture.initialized())).toBe(false)
+  expect((await page.evaluate(() => window.localGitFixture.operations())).filter((operation) => ['initialize', 'commit', 'fetch', 'pull', 'push'].includes(operation.kind))).toEqual([])
+  const infrastructure = ['.gitignore', 'AGENTS.md', '.agents/skills/draftmatter-authoring/SKILL.md', '.draftmatter/project.json']
+  for (const path of [...infrastructure, 'paper.md']) await expect(review.getByRole('checkbox', { name: `Include ${path}`, exact: true })).toBeChecked()
+  await expect(review.getByRole('checkbox', { name: 'Include .gitignore', exact: true })).toBeDisabled()
+  await expect(review.getByRole('checkbox', { name: 'Include data/observations.csv', exact: true })).not.toBeChecked()
+  await review.getByLabel('First commit message', { exact: true }).fill('Initial project infrastructure')
+  await review.getByRole('button', { name: 'Initialize and create first commit', exact: true }).click()
+  await expect(review).toHaveCount(0)
   await expect(panel.getByLabel('Commit message', { exact: true })).toBeVisible()
   await expect(rail(page).getByRole('button', { name: 'Git', exact: true })).toBeVisible()
-  expect(await page.evaluate(() => window.localGitFixture.operations())).toEqual([{ kind: 'initialize', request: '/fixture/local-git' }])
+  const initializations = (await page.evaluate(() => window.localGitFixture.operations())).filter((operation) => operation.kind === 'initialize')
+  expect(initializations).toHaveLength(1)
+  expect(initializations[0].request).toMatchObject({ root: '/fixture/local-git', message: 'Initial project infrastructure', expectedIgnore: 'private/\n' })
+  expect(((initializations[0].request as { paths: string[] }).paths).sort()).toEqual([...infrastructure, 'paper.md'].sort())
+  await expect(panel.getByRole('button', { name: 'View commit cccccccc', exact: true })).toBeVisible()
+  expect((await page.evaluate(() => window.localGitFixture.operations())).some((operation) => ['fetch', 'pull', 'push'].includes(operation.kind))).toBe(false)
+})
+
+test('cancels first-commit review without creating a repository or committing files', async ({ page }) => {
+  await page.goto('/tests/e2e/fixtures/local-git.html?git=off')
+  await rail(page).getByRole('button', { name: 'Git', exact: true }).click()
+  await gitPanel(page).getByRole('button', { name: 'Initialize Git…', exact: true }).click()
+  const review = page.getByRole('dialog', { name: 'Initialize Git and first commit', exact: true })
+  await expect(review).toBeVisible()
+  await review.getByRole('button', { name: 'Cancel', exact: true }).click()
+  await expect(review).toHaveCount(0)
+  expect(await page.evaluate(() => window.localGitFixture.initialized())).toBe(false)
+  expect((await page.evaluate(() => window.localGitFixture.operations())).filter((operation) => ['initialize', 'commit', 'fetch', 'pull', 'push'].includes(operation.kind))).toEqual([])
 })
 
 test('reloads the open manuscript after an explicit successful fast-forward pull', async ({ page }) => {

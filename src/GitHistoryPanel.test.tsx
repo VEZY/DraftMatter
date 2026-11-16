@@ -250,6 +250,27 @@ async function message(value: string) {
     expect(desktopHost.gitPush).not.toHaveBeenCalled()
   })
 
+  it('reopens first-commit review for an existing repository without commits', async () => {
+    vi.mocked(desktopHost.gitStatus).mockResolvedValue({ ...repository, branch: undefined })
+    vi.mocked(desktopHost.gitHistory).mockResolvedValue([])
+    const initialize = vi.fn(async () => {})
+    await render({ onInitialize: initialize })
+    expect(container.textContent).toContain('No commits in this project yet.')
+    expect(initialize).not.toHaveBeenCalled()
+    await click('Review first commit…')
+    expect(initialize).toHaveBeenCalledTimes(1)
+    expect(desktopHost.gitInitialize).not.toHaveBeenCalled()
+    expect(desktopHost.gitCreateCheckpoint).not.toHaveBeenCalled()
+    expect(desktopHost.gitPush).not.toHaveBeenCalled()
+  })
+
+  it('does not offer first-commit review for an existing committed history', async () => {
+    const initialize = vi.fn(async () => {})
+    await render({ onInitialize: initialize })
+    expect(container.textContent).not.toContain('Review first commit…')
+    expect(initialize).not.toHaveBeenCalled()
+  })
+
   it('describes a parent repository and disables commits in detached HEAD or conflicted states', async () => {
     vi.mocked(desktopHost.gitStatus).mockResolvedValue({ ...repository, repositoryRoot: '/research', projectPrefix: 'canopy', detached: true })
     await render(); await select('paper.qmd'); await message('Results')

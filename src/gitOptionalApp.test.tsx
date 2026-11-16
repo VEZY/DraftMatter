@@ -31,6 +31,13 @@ describe('optional local Git in the writing workspace', () => {
     available = desktopHost.available
     desktopHost.available = false
     vi.spyOn(desktopHost, 'gitStatus').mockResolvedValue(repository())
+    vi.spyOn(desktopHost, 'gitInitializationPlan').mockResolvedValue({ repositoryRoot: projectRoot, entries: [
+      { path: '.gitignore', bytes: 0, modifiedMs: 0, suggested: true, reason: 'Local exclusions' },
+      { path: 'AGENTS.md', bytes: 30, modifiedMs: 1, suggested: true, reason: 'Shared instructions' },
+      { path: '.draftmatter/project.json', bytes: 80, modifiedMs: 1, suggested: true, reason: 'Portable project settings' },
+      { path: 'paper.md', bytes: source.length, modifiedMs: 1, suggested: false, reason: 'Project file' },
+      { path: 'data/observations.csv', bytes: 100, modifiedMs: 1, suggested: false, reason: 'Project file' },
+    ], originalIgnoreContent: null, ignoreContent: '# DraftMatter local files\n', ignoreWillChange: true, existingIgnore: false, truncated: false, repositoryExists: false, hasCommits: false })
     vi.spyOn(desktopHost, 'gitInitialize').mockResolvedValue({ repositoryRoot: projectRoot, createdIgnore: false, status: repository() })
     vi.spyOn(desktopHost, 'gitHistory').mockResolvedValue([])
     vi.spyOn(desktopHost, 'gitBranches').mockResolvedValue({ current: 'main', detached: false, branches: [{ name: 'main', current: true }], remotes: ['origin'] })
@@ -142,17 +149,64 @@ describe('optional local Git in the writing workspace', () => {
     expect(desktopHost.gitInitialize).not.toHaveBeenCalled()
     expect(desktopHost.gitHistory).not.toHaveBeenCalled()
     await act(async () => initialize.click())
-    expect(initialize.disabled).toBe(true)
-    await act(async () => initialize.click())
+    expect(desktopHost.gitInitializationPlan).toHaveBeenCalledExactlyOnceWith(projectRoot)
+    expect(desktopHost.gitInitialize).not.toHaveBeenCalled()
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="git-initialization-title"]') ?? container.querySelector<HTMLElement>('[role="dialog"]')!
+    expect(dialog).not.toBeNull()
+    expect(dialog.querySelector<HTMLInputElement>('[aria-label="Include paper.md"]')?.checked).toBe(true)
+    expect(dialog.querySelector<HTMLInputElement>('[aria-label="Include AGENTS.md"]')?.checked).toBe(true)
+    expect(dialog.querySelector<HTMLInputElement>('[aria-label="Include data/observations.csv"]')?.checked).toBe(false)
+    const confirm = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Initialize and create first commit')!
+    await act(async () => confirm.click())
+    expect(confirm.disabled).toBe(true)
+    await act(async () => confirm.click())
     expect(desktopHost.gitInitialize).toHaveBeenCalledTimes(1)
     await act(async () => finishInitialize())
     await waitFor(() => expect(container.querySelector('.git-branch-summary')).not.toBeNull())
     expect(container.querySelector('.git-history-panel')).toBe(panel)
     expect(railGit()).not.toBeNull()
-    expect(desktopHost.gitInitialize).toHaveBeenCalledExactlyOnceWith(projectRoot)
+    expect(desktopHost.gitInitialize).toHaveBeenCalledExactlyOnceWith(projectRoot, { paths: ['.gitignore', 'AGENTS.md', '.draftmatter/project.json', 'paper.md'], message: 'Initialize DraftMatter project', expectedIgnore: null, expectedFiles: [
+      { path: 'AGENTS.md', bytes: 30, modifiedMs: 1 }, { path: '.draftmatter/project.json', bytes: 80, modifiedMs: 1 }, { path: 'paper.md', bytes: source.length, modifiedMs: 1 },
+    ] })
     expect(desktopHost.gitCreateCheckpoint).not.toHaveBeenCalled()
     expect(desktopHost.gitPush).not.toHaveBeenCalled()
     expect(container.querySelector('.structured-manuscript-editor')?.textContent).toContain('The manuscript remains independent of Git.')
+  })
+
+  it('suggests referenced bibliography and figures while leaving unrelated data out of a cancelled first commit', async () => {
+    const manuscript = '---\nbibliography: references.bib\n---\n# Optional Git study\n\n![Summary](figures/summary.svg)\n'
+    vi.mocked(desktopHost.gitStatus).mockResolvedValue(repository(projectRoot, false))
+    vi.mocked(desktopHost.readDocument).mockResolvedValue({ path: 'paper.md', content: manuscript, hash: 'paper-hash', modifiedMs: 1 })
+    vi.spyOn(desktopHost, 'readProjectAssets').mockResolvedValue([])
+    vi.spyOn(desktopHost, 'readBibliography').mockResolvedValue({ path: 'references.bib', content: '@article{study,title={Study}}', hash: 'bibliography-hash', modifiedMs: 1 })
+    const plan = await desktopHost.gitInitializationPlan(projectRoot)
+    vi.mocked(desktopHost.gitInitializationPlan).mockClear().mockResolvedValue({ ...plan, entries: [...plan.entries, { path: 'references.bib', bytes: 10, modifiedMs: 1, suggested: false, reason: 'Bibliography' }, { path: 'figures/summary.svg', bytes: 20, modifiedMs: 1, suggested: false, reason: 'Figure' }] })
+    await openLocal()
+    await act(async () => railGit()!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Initialize Git…"]')!.click())
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"]')!
+    expect(dialog.querySelector<HTMLInputElement>('[aria-label="Include references.bib"]')?.checked).toBe(true)
+    expect(dialog.querySelector<HTMLInputElement>('[aria-label="Include figures/summary.svg"]')?.checked).toBe(true)
+    expect(dialog.querySelector<HTMLInputElement>('[aria-label="Include data/observations.csv"]')?.checked).toBe(false)
+    await act(async () => [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Cancel')!.click())
+    expect(container.querySelector('.git-initialization-dialog')).toBeNull()
+    expect(desktopHost.gitInitialize).not.toHaveBeenCalled()
+    expect(desktopHost.gitCreateCheckpoint).not.toHaveBeenCalled()
+    expect(desktopHost.gitPush).not.toHaveBeenCalled()
+  })
+
+  it('keeps initialization available when reference metadata needs repair', async () => {
+    const manuscript = '---\nbibliography: references.bib\nbibliography: other.bib\n---\n# Optional Git study\n'
+    vi.mocked(desktopHost.gitStatus).mockResolvedValue(repository(projectRoot, false))
+    vi.mocked(desktopHost.readDocument).mockResolvedValue({ path: 'paper.md', content: manuscript, hash: 'paper-hash', modifiedMs: 1 })
+    await openLocal()
+    await act(async () => railGit()!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Initialize Git…"]')!.click())
+    const dialog = container.querySelector<HTMLElement>('.git-initialization-dialog')!
+    expect(dialog).not.toBeNull()
+    expect(dialog.textContent).toContain('Bibliography paths could not be identified')
+    expect(dialog.querySelector<HTMLInputElement>('[aria-label="Include paper.md"]')?.checked).toBe(true)
+    expect(desktopHost.gitInitialize).not.toHaveBeenCalled()
   })
 
   it('keeps writing and recovery available when system Git is missing', async () => {

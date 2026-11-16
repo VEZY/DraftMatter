@@ -70,12 +70,12 @@ use export_adapter::{
 use git_adapter::{
     git_branches_impl, git_checkpoint_diff_impl, git_create_branch_impl,
     git_create_checkpoint_impl, git_create_commit_impl, git_diff_impl, git_fetch_impl,
-    git_history_impl, git_initialize_impl, git_pull_impl, git_push_impl,
+    git_history_impl, git_initialize_impl, git_initialization_plan_impl, git_initialize_with_commit_impl, git_pull_impl, git_push_impl,
     git_restore_checkpoint_impl, git_stage_impl, git_status_impl, git_switch_branch_impl,
     git_remotes_impl, git_set_remote_impl, git_clone_impl,
     GitBranchRequest, GitBranchStatus, GitCheckpointDiffRequest, GitCheckpointDiffResult,
     GitCheckpointRequest, GitCommitRequest, GitCommitResult, GitDiffRequest, GitDiffResult,
-    GitHistoryEntry, GitInitializeResult, GitRemoteRequest, GitRemoteResult, GitRepositoryStatus,
+    GitHistoryEntry, GitInitializeResult, GitInitializationPlan, GitInitializeRequest, GitInitializationExpectedFile, GitRemoteRequest, GitRemoteResult, GitRepositoryStatus,
     GitRestoreCheckpointRequest, GitStageRequest, GitRemoteConfiguration, GitSetRemoteRequest,
     GitCloneRequest, GitCloneResult,
 };
@@ -3792,8 +3792,17 @@ async fn git_status(root: String) -> Result<GitRepositoryStatus, HostError> {
 }
 
 #[tauri::command]
-async fn git_initialize(root: String) -> Result<GitInitializeResult, HostError> {
-    git_task(move || git_initialize_impl(&root)).await
+async fn git_initialization_plan(root: String) -> Result<GitInitializationPlan, HostError> {
+    git_task(move || git_initialization_plan_impl(&root)).await
+}
+
+#[tauri::command]
+async fn git_initialize(root: String, paths: Option<Vec<String>>, message: Option<String>, expected_ignore: Option<String>, expected_files: Option<Vec<GitInitializationExpectedFile>>) -> Result<GitInitializeResult, HostError> {
+    git_task(move || match (paths, message) {
+        (Some(paths), Some(message)) => git_initialize_with_commit_impl(GitInitializeRequest { root, paths, message, expected_ignore, expected_files }),
+        (None, None) => git_initialize_impl(&root),
+        _ => Err(HostError::InvalidProject("Review the selected files and first commit message before initializing Git.".into())),
+    }).await
 }
 
 #[tauri::command]
@@ -4011,6 +4020,7 @@ pub fn run() {
             install_code_formatter,
             format_code,
             git_status,
+            git_initialization_plan,
             git_initialize,
             git_remotes,
             git_set_remote,

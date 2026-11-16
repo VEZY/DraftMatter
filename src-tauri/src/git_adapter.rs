@@ -18,6 +18,13 @@ const MAX_HISTORY_ENTRIES: usize = 50;
 const GIT_TIMEOUT: Duration = Duration::from_secs(60);
 const GIT_CLONE_TIMEOUT: Duration = Duration::from_secs(300);
 
+#[path = "git_initialization.rs"]
+mod initialization;
+pub use initialization::{
+    git_initialization_plan_impl, git_initialize_with_commit_impl,
+    GitInitializationExpectedFile, GitInitializationPlan, GitInitializeRequest,
+};
+
 #[derive(Debug, Clone)]
 struct RepositoryContext {
     project_root: PathBuf,
@@ -157,6 +164,8 @@ pub struct GitInitializeResult {
     pub repository_root: String,
     pub created_ignore: bool,
     pub status: GitRepositoryStatus,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub initial_commit: Option<GitCommitResult>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -813,6 +822,7 @@ pub fn git_initialize_impl(raw_root: &str) -> Result<GitInitializeResult, HostEr
         repository_root: root.to_string_lossy().to_string(),
         created_ignore,
         status: git_status_impl(raw_root)?,
+        initial_commit: None,
     })
 }
 

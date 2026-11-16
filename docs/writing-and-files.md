@@ -117,12 +117,38 @@ from online sharing and recovery history.
 
 For every local desktop project, **Git** appears in the left navigation beside
 **History** and **Search**, including folders without a Git repository. Open it
-and choose **Initialize Git…** to start local version control. Initialization is explicit;
-an existing `.gitignore` is preserved. Git must already be installed on this
-computer. If detection fails, the panel shows the error and **Retry**; a missing
-Git installation is explained there too. Browser drafts do not expose local Git controls.
+and choose **Initialize Git…** to review the first local commit. Opening this
+review does not initialize the repository or create a commit. Check the proposed
+files and commit message, then confirm the initialization and first commit.
+Nothing is pushed automatically. Git must already be installed on this computer.
+If detection fails, the panel shows the error and **Retry**; a missing Git
+installation is explained there too. Browser drafts do not expose local Git controls.
+If a repository already exists but has no commits, **Review first commit…**
+reopens the same review. This also lets you retry after correcting an initial
+commit error, without reinitializing the repository or changing existing history.
 
-The Git panel lists changed files with unchecked selection boxes. Select only
+The first commit can retain the infrastructure needed to reopen a cloned paper:
+`.gitignore`, `.gitattributes`, `AGENTS.md`, `CLAUDE.md`, existing portable skills
+under `.agents/skills/`, and the durable DraftMatter configuration, reference
+records and execution manifests. DraftMatter creates the plural `.agents`
+directory for its optional portable skill fallback; it is not a cache directory.
+The reviewed list distinguishes these files from optional scripts, datasets and
+other project files, which you can include explicitly.
+
+Local caches, automatic recovery copies, runtime files, locks, transactions,
+synchronization state and transfer journals do not belong in this first commit.
+Generated ignore rules exclude those local files while keeping durable project
+metadata available. Existing ignore rules remain in effect; initialization does
+not force ignored files into a commit. The portable project AI manifest may be
+included with its instructions and skill. Cloning it does not register an
+assistant on the new computer or grant code-execution trust.
+
+Review `.draftmatter/project.json` before including it. It retains the selected
+manuscript and citation settings, and can also contain environment/kernel choices
+and collaboration server links. Initialization preserves this configuration;
+it does not silently remove local choices from the file.
+
+After initialization, the Git panel lists changed files with unchecked selection boxes. Select only
 the files you want to commit, enter a **Commit message**, then choose **Create
 commit**. Unselected staged and working changes stay outside that commit, and
 datasets are never selected automatically. Inspect working changes or select a

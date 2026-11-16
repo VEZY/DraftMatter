@@ -22,6 +22,7 @@ export interface GitHistoryPanelProps {
   onNotice: (message: string) => void
   onInitialize?: () => Promise<void>
   initializationBusy?: boolean
+  refreshToken?: number
   onBeforeCommit?: (paths: string[]) => Promise<boolean>
   onPull?: (request: GitRemoteRequest) => Promise<GitRemoteResult>
   onRepositoryChange?: (status: GitRepositoryStatus) => void
@@ -44,7 +45,7 @@ export function GitHistoryPanel(props: GitHistoryPanelProps) {
   return <GitHistorySession key={`${props.root ?? ''}\0${props.manuscriptPath ?? ''}`} {...props} />
 }
 
-function GitHistorySession({ root, onNotice, onInitialize, initializationBusy = false, onBeforeCommit, onPull, onRepositoryChange, onClose }: GitHistoryPanelProps) {
+function GitHistorySession({ root, onNotice, onInitialize, initializationBusy = false, refreshToken, onBeforeCommit, onPull, onRepositoryChange, onClose }: GitHistoryPanelProps) {
   const [status, setStatus] = useState<GitRepositoryStatus>()
   const [remotes, setRemotes] = useState<string[]>([])
   const [remoteConfigurations, setRemoteConfigurations] = useState<GitRemoteConfiguration[]>([])
@@ -115,6 +116,8 @@ function GitHistorySession({ root, onNotice, onInitialize, initializationBusy = 
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  useEffect(() => { void operation('refresh', readRepository) }, [refreshToken])
+
   const upstreamRemote = useMemo(() => remotes.filter((name) => status?.upstream?.startsWith(`${name}/`)).sort((a, b) => b.length - a.length)[0], [remotes, status?.upstream])
   const remoteTarget = remote === upstreamRemote ? status?.upstream : status?.branch ? `${remote}/${status.branch}` : remote
   const selectedRemote = remoteConfigurations.find((entry) => entry.name === remote)
@@ -124,7 +127,7 @@ function GitHistorySession({ root, onNotice, onInitialize, initializationBusy = 
   const togglePath = (path: string) => setSelected((paths) => paths.includes(path) ? paths.filter((candidate) => candidate !== path) : [...paths, path])
 
   const initialize = () => operation('initialize', async (token) => {
-    if (!callbacks.current.onInitialize || initializationBusy || !status?.gitAvailable || status.repository) return
+    if (!callbacks.current.onInitialize || initializationBusy || !status?.gitAvailable || status.repository && history.length > 0) return
     await callbacks.current.onInitialize()
     if (current(token)) await readRepository(token)
   })
@@ -201,7 +204,7 @@ function GitHistorySession({ root, onNotice, onInitialize, initializationBusy = 
       {!root ? <div className="git-empty"><Icon name="folder" size={24} /><strong>Open a local project</strong><p>Git is available for desktop project folders.</p></div>
         : !status ? <div className="git-loading"><p role="status">{problem ? 'Git status is unavailable.' : 'Reading local repository…'}</p>{problem && <button type="button" onClick={() => void operation('refresh', readRepository)} disabled={Boolean(busy)}>Retry</button>}</div>
           : !status.gitAvailable ? <div className="git-empty"><strong>Git is not installed</strong><p>Install Git on this computer, then refresh. Writing and recovery history remain available without Git.</p></div>
-            : !status.repository ? <div className="git-empty"><Icon name="branch" size={24} /><strong>No Git repository detected</strong><p>Keep local commits of the files you choose. Your existing .gitignore is preserved.</p>{onInitialize ? <button type="button" className="primary-button" aria-label="Initialize Git…" onClick={() => void initialize()} disabled={Boolean(busy) || initializationBusy}>{busy === 'initialize' ? 'Initializing Git…' : 'Initialize Git…'}</button> : <p>Open Git from the project navigation to initialize this folder.</p>}<small>Initialization creates a local repository. Files are committed only after you select them.</small></div>
+            : !status.repository ? <div className="git-empty"><Icon name="branch" size={24} /><strong>No Git repository detected</strong><p>Review the files for your first local commit. Existing ignore rules are respected.</p>{onInitialize ? <button type="button" className="primary-button" aria-label="Initialize Git…" onClick={() => void initialize()} disabled={Boolean(busy) || initializationBusy}>{busy === 'initialize' ? 'Preparing Git…' : 'Initialize Git…'}</button> : <p>Open Git from the project navigation to initialize this folder.</p>}<small>Review the infrastructure and project files before creating the repository and first commit. Nothing is pushed automatically.</small></div>
               : <>
                 <div className="git-branch-summary">
                   <span><Icon name="branch" size={15} /><strong>{status.detached ? 'Detached HEAD' : status.branch ?? 'New repository'}</strong></span>
@@ -235,7 +238,7 @@ function GitHistorySession({ root, onNotice, onInitialize, initializationBusy = 
                   {preview.truncated && <small className="git-diff-limit">Preview shortened at the display limit.</small>}
                 </section>}
                 <section className="git-commit-history" aria-label="Commit history"><h3>Commits <span>{history.length}</span></h3>
-                  {history.length === 0 ? <p>No commits in this project yet.</p> : <div className="git-history-list">{history.map((entry) => <button type="button" className="git-history-entry" key={entry.hash} disabled={Boolean(busy)} aria-label={`View commit ${entry.shortHash}`} onClick={() => void openCommitDiff(entry)}><strong>{entry.message}</strong><small>{entry.shortHash} · {entry.author} · {commitDate(entry.authoredAt)}</small></button>)}</div>}
+                  {history.length === 0 ? <><p>No commits in this project yet.</p>{onInitialize && <button type="button" disabled={Boolean(busy) || initializationBusy} onClick={() => void initialize()}>Review first commit…</button>}</> : <div className="git-history-list">{history.map((entry) => <button type="button" className="git-history-entry" key={entry.hash} disabled={Boolean(busy)} aria-label={`View commit ${entry.shortHash}`} onClick={() => void openCommitDiff(entry)}><strong>{entry.message}</strong><small>{entry.shortHash} · {entry.author} · {commitDate(entry.authoredAt)}</small></button>)}</div>}
                   <small>The latest 50 project commits. Browsing leaves files unchanged.</small>
                 </section>
                 <section className="git-remote-section" aria-label="Git remotes"><h3>Remote</h3>

@@ -1,0 +1,32 @@
+.git-initialization-backdrop { align-items: center; background: rgba(30, 38, 34, .25); display: flex; inset: 0; justify-content: center; padding: 24px; position: fixed; z-index: 215; }
+.git-initialization-dialog { background: #fff; border: 1px solid #d6dfd8; border-radius: 12px; box-shadow: 0 16px 60px #263b2b24; color: #34483b; max-height: calc(100dvh - 48px); overflow: auto; padding: 24px; width: min(100%, 660px); }
+.git-initialization-dialog > header { align-items: flex-start; display: flex; gap: 16px; justify-content: space-between; }
+.git-initialization-dialog h2 { font-size: 23px; margin: 5px 0 0; }
+.git-initialization-dialog > p, .git-initialization-dialog form > p { font-size: 13px; line-height: 1.6; }
+.git-initialization-root { color: #65776a; display: block; font-size: 11px; overflow-wrap: anywhere; }
+.git-initialization-dialog .git-initialization-help { color: #65776a; font-size: 12px; line-height: 1.6; }
+.git-initialization-dialog .git-initialization-ignore { background: #f3f7f3; border-radius: 6px; color: #4f6656; font-size: 12px; padding: 10px 12px; }
+.git-initialization-dialog .git-initialization-warning { background: #fff6df; border-radius: 6px; color: #715522; font-size: 12px; padding: 10px 12px; }
+.git-initialization-dialog form { display: grid; gap: 12px; margin-top: 18px; }
+.git-initialization-files { border: 1px solid #dce4dd; border-radius: 7px; max-height: min(38vh, 360px); overflow: auto; padding: 12px; }
+.git-initialization-group { border: 0; margin: 0 0 12px; min-width: 0; padding: 0; }
+.git-initialization-group:last-child { margin-bottom: 0; }
+.git-initialization-group legend { color: #516a59; font-size: 12px; font-weight: 600; margin-bottom: 6px; padding: 0; }
+.git-initialization-file { align-items: start; display: flex; font-size: 12px; gap: 9px; line-height: 1.5; padding: 6px 0; }
+.git-initialization-file input { flex: none; margin: 3px 0 0; }
+.git-initialization-file-description { display: grid; flex: 1; gap: 3px; min-width: 0; overflow-wrap: anywhere; }
+.git-initialization-file-description small { font-size: 10px; line-height: 1.5; padding-top: 0; }
+.git-initialization-file small { color: #65776a; flex: none; font-size: 10px; padding-top: 2px; }
+.git-initialization-selection { color: #65776a; margin: 0; }
+.git-initialization-message { display: grid; font-size: 12px; font-weight: 600; gap: 7px; }
+.git-initialization-message input { background: #fff; border: 1px solid #cbd7ce; border-radius: 6px; box-sizing: border-box; color: inherit; font: inherit; font-weight: 400; min-width: 0; padding: 10px 12px; width: 100%; }
+.git-initialization-dialog button { align-items: center; border: 1px solid #cbd7ce; border-radius: 6px; display: inline-flex; font: inherit; font-size: 12px; gap: 6px; justify-content: center; padding: 8px 12px; }
+.git-initialization-dialog button:disabled, .git-initialization-group:disabled { opacity: .55; }
+.git-initialization-dialog button:focus-visible, .git-initialization-dialog input:focus-visible { outline: 2px solid #62826c; outline-offset: 2px; }
+.git-initialization-dialog > header > button { background: transparent; border: 0; padding: 5px; }
+.git-initialization-dialog .git-initialization-problem { background: #fff1ee; border: 1px solid #e9c9c0; border-radius: 6px; color: #8d392b; margin: 0; padding: 10px 12px; }
+.git-initialization-dialog footer { display: flex; flex-wrap: wrap; gap: 10px; justify-content: flex-end; margin-top: 4px; }
+@media (max-width: 600px) { .git-initialization-backdrop { padding: 12px; } .git-initialization-dialog { max-height: calc(100dvh - 24px); padding: 18px; } .git-initialization-dialog h2 { font-size: 20px; } }
+.git-initialization-ignore-details { color: #526158; font-size: 12px; margin: 0 20px 12px; }
+.git-initialization-ignore-details summary { cursor: pointer; }
+.git-initialization-ignore-details pre { max-height: 180px; overflow: auto; padding: 10px; background: #f5f7f4; border: 1px solid #dce3de; border-radius: 5px; font-size: 11px; white-space: pre-wrap; }

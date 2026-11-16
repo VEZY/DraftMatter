@@ -421,6 +421,34 @@ export interface GitInitializeResult {
   repositoryRoot: string
   createdIgnore: boolean
   status: GitRepositoryStatus
+  initialCommit?: GitCommitResult | null
+}
+
+export interface GitInitializationEntry {
+  path: string
+  bytes: number
+  modifiedMs: number
+  suggested: boolean
+  reason: string
+}
+
+export interface GitInitializationPlan {
+  repositoryRoot: string
+  entries: GitInitializationEntry[]
+  originalIgnoreContent: string | null
+  ignoreContent: string
+  ignoreWillChange: boolean
+  existingIgnore: boolean
+  truncated: boolean
+  repositoryExists: boolean
+  hasCommits: boolean
+}
+
+export interface GitInitializeOptions {
+  paths: string[]
+  message: string
+  expectedIgnore: string | null
+  expectedFiles?: Array<{ path: string; bytes: number; modifiedMs: number }>
 }
 
 export interface GitDiffRequest {
@@ -1038,9 +1066,14 @@ export function createDesktopHost(
         ? invokeBridge<GitRepositoryStatus>('git_status', { root })
         : gitUnavailable()
     },
-    gitInitialize(root: string) {
+    gitInitializationPlan(root: string) {
       return available
-        ? invokeBridge<GitInitializeResult>('git_initialize', { root })
+        ? invokeBridge<GitInitializationPlan>('git_initialization_plan', { root })
+        : gitUnavailable()
+    },
+    gitInitialize(root: string, options?: GitInitializeOptions) {
+      return available
+        ? invokeBridge<GitInitializeResult>('git_initialize', { root, ...options })
         : gitUnavailable()
     },
     gitRemotes(root: string) {

@@ -15,7 +15,7 @@ const operations: { kind: string; request?: unknown }[] = []
 const change = (path: string, kind = 'modified') => ({ path, kind, indexStatus: ' ', worktreeStatus: kind === 'untracked' ? '?' : 'M', staged: false, unstaged: true, conflicted: false, binary: false })
 let entries = mode === 'clean' ? [] : [change('paper.md'), change('data/observations.csv', 'untracked')]
 const status = () => ({ gitAvailable: true, gitVersion: 'git version 2.50.0', repository: initialized, repositoryRoot: initialized ? root : undefined, projectPrefix: '', branch: initialized ? 'main' : undefined, upstream: initialized && mode !== 'off' && mode !== 'unlinked' ? 'origin/main' : undefined, detached: false, ahead: 0, behind: 0, entries: initialized ? entries : [] })
-const history = [{ hash: 'a'.repeat(40), shortHash: 'aaaaaaaa', authoredAt: '2026-11-16T10:00:00Z', author: 'A researcher', message: 'Initial article' }]
+const history = mode === 'off' ? [] : [{ hash: 'a'.repeat(40), shortHash: 'aaaaaaaa', authoredAt: '2026-11-16T10:00:00Z', author: 'A researcher', message: 'Initial article' }]
 const project = () => ({ root, config: { schemaVersion: 1, name: 'Optional Git study', mainDocument: 'paper.md', citationStyle: 'draftmatter-author-date', citationLocale: 'en-US' }, documents: [{ path: 'paper.md', kind: 'manuscript', bytes: source.length, hash: 'paper-hash', modifiedMs: 1 }], bibliographies: [] })
 desktopHost.available = true
 desktopHost.openProject = async () => project()
@@ -45,9 +45,36 @@ desktopHost.gitSetRemote = async (request) => {
   return remotes.map((remote) => ({ ...remote }))
 }
 desktopHost.gitHistory = async () => [...history]
-desktopHost.gitInitialize = async (requestedRoot) => {
-  operations.push({ kind: 'initialize', request: requestedRoot }); initialized = true
-  return { repositoryRoot: root, createdIgnore: false, status: status() }
+const originalIgnoreContent = 'private/\n'
+const ignoreContent = `${originalIgnoreContent}\n# DraftMatter local files\n.draftmatter/cache/\n.draftmatter/recovery/\n.draftmatter/runtime/\n.draftmatter/sync/\n.draftmatter/transactions/\n.draftmatter/write-locks/\n`
+desktopHost.gitInitializationPlan = async (requestedRoot) => {
+  operations.push({ kind: 'initialization-plan', request: requestedRoot })
+  return {
+    repositoryRoot: root,
+    existingIgnore: true,
+    originalIgnoreContent,
+    ignoreContent,
+    ignoreWillChange: true,
+    truncated: false,
+    repositoryExists: initialized,
+    hasCommits: initialized && history.length > 0,
+    entries: [
+      { path: '.gitignore', bytes: originalIgnoreContent.length, modifiedMs: 1, suggested: true, reason: 'Git ignore rules' },
+      { path: 'AGENTS.md', bytes: 80, modifiedMs: 1, suggested: true, reason: 'Project instructions' },
+      { path: '.agents/skills/draftmatter-authoring/SKILL.md', bytes: 120, modifiedMs: 1, suggested: true, reason: 'Portable authoring skill' },
+      { path: '.draftmatter/project.json', bytes: JSON.stringify(project().config).length, modifiedMs: 1, suggested: true, reason: 'Project configuration' },
+      { path: 'paper.md', bytes: source.length, modifiedMs: 1, suggested: false, reason: 'Project file' },
+      { path: 'data/observations.csv', bytes: 128, modifiedMs: 1, suggested: false, reason: 'Project file' },
+    ],
+  }
+}
+desktopHost.gitInitialize = async (requestedRoot, options) => {
+  operations.push({ kind: 'initialize', request: { root: requestedRoot, ...options } }); initialized = true
+  if (!options) return { repositoryRoot: root, createdIgnore: false, status: status() }
+  const commit = { hash: 'c'.repeat(40), shortHash: 'cccccccc', authoredAt: '2026-11-16T11:00:00Z', author: 'A researcher', message: options.message }
+  entries = entries.filter((entry) => !options.paths.includes(entry.path))
+  history.unshift(commit)
+  return { repositoryRoot: root, createdIgnore: false, status: status(), initialCommit: { ...commit, files: options.paths } }
 }
 desktopHost.gitCreateCheckpoint = async (request) => {
   operations.push({ kind: 'commit', request })
