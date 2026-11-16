@@ -44,10 +44,9 @@ describe('rendered local execution workflow', () => {
       health: 'available', searchedLocations: ['/kernels'],
       kernels: [{ name: 'python-fixture', displayName: 'Python · DraftMatter', language: 'python', health: 'available', resourceDir: '/kernels/python-fixture' }],
     })
-    vi.spyOn(desktopHost, 'executionTrustStatus')
-      .mockResolvedValueOnce({ trusted: false, scope: 'session', warning: 'Project code has the user permissions. Local execution is not a sandbox.' })
-      .mockResolvedValue({ trusted: true, scope: 'session', warning: 'Project code has the user permissions. Local execution is not a sandbox.' })
-    vi.spyOn(desktopHost, 'trustProjectForSession').mockResolvedValue({ trusted: true, scope: 'session', warning: 'trusted' })
+    let trusted = false
+    vi.spyOn(desktopHost, 'executionTrustStatus').mockImplementation(async () => ({ trusted, scope: 'session', warning: 'Project code has the user permissions. Local execution is not a sandbox.' }))
+    vi.spyOn(desktopHost, 'trustProjectForSession').mockImplementation(async () => { trusted = true; return { trusted, scope: 'session', warning: 'trusted' } })
     vi.spyOn(desktopHost, 'inspectExecutionArtifacts').mockResolvedValue([{ path: 'figures/generated/fig-canopy.svg', hash: `sha256:${'a'.repeat(64)}` }])
     vi.spyOn(desktopHost, 'executeKernel').mockResolvedValue({
       status: 'ok',
@@ -101,7 +100,7 @@ describe('rendered local execution workflow', () => {
     expect(container.querySelector('[aria-labelledby="execution-trust-title"]')).toBeNull()
   })
 
-  it('prepares detected code after one project-trust prompt, then executes and materializes the result', async () => {
+  it('trusts separately before preparation, then executes and materializes the result', async () => {
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 350))
     })
@@ -110,14 +109,18 @@ describe('rendered local execution workflow', () => {
     expect(desktopHost.probeRuntime).not.toHaveBeenCalled()
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
     const prepare = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Prepare project languages')!
-    await act(async () => prepare.click())
+    expect(prepare.disabled).toBe(true)
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Trust this project')!.click())
     const trustDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-labelledby="execution-trust-title"]')!
     expect(trustDialog.textContent).toContain('Local execution is not a sandbox')
-    expect(trustDialog.textContent).toContain('Trust and prepare this project')
+    expect(trustDialog.textContent).toContain('Trust this project?')
 
     await act(async () => {
-      [...trustDialog.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Trust project and continue'))!.click()
+      [...trustDialog.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Trust project')!.click()
     })
+    expect(desktopHost.probeRuntime).not.toHaveBeenCalled()
+    expect(desktopHost.executeKernel).not.toHaveBeenCalled()
+    await act(async () => prepare.click())
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 80))
     })

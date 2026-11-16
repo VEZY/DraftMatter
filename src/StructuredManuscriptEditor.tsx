@@ -31,7 +31,7 @@ import type { ExecutionFreshnessStatus } from './executionFreshness'
 import { extractExecutableCells, type ExecutionLanguage } from './executionCells'
 import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
 import { motionAwareScrollBehavior } from './accessibility'
-import { createManuscriptSearchPlugin, EMPTY_MANUSCRIPT_SEARCH, manuscriptInlinePreview, manuscriptSearchKey, navigateManuscriptSearch, setManuscriptSearch, type ManuscriptSearchOptions, type ManuscriptSearchRegions, type ManuscriptSearchState } from './manuscriptSearch'
+import { createManuscriptSearchPlugin, EMPTY_MANUSCRIPT_SEARCH, manuscriptInlinePreview, manuscriptSearchKey, navigateManuscriptSearch, replaceManuscriptSearch, setManuscriptSearch, type ManuscriptSearchSettings, type ManuscriptReplacementResult, type ManuscriptSearchOptions, type ManuscriptSearchRegions, type ManuscriptSearchState } from './manuscriptSearch'
 import './manuscriptFind.css'
 import type { PublicationByline } from './publicationMetadata'
 import { embeddedExecutionImageFromHtml, executionTableFromHtml, safeEmbeddedImageDataUrl } from './outputRenderer'
@@ -216,7 +216,8 @@ export function shouldRequestStructuredCommands(state: EditorState, event: Pick<
 
 export interface StructuredManuscriptEditorHandle {
   focus: () => void
-  setSearch: (query: string) => ManuscriptSearchState
+  setSearch: (query: string, settings?: ManuscriptSearchSettings) => ManuscriptSearchState
+  replaceSearch: (replacement: string, all?: boolean) => ManuscriptReplacementResult
   findNext: (direction?: 1 | -1) => ManuscriptSearchState
   toggleBold: () => boolean
   toggleItalic: () => boolean
@@ -3565,6 +3566,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const onSearchChangeRef = useRef(onSearchChange)
   const searchRegionsRef = useRef(searchRegions)
   const searchQueryRef = useRef('')
+  const searchSettingsRef = useRef<ManuscriptSearchSettings>({ regex: false, wholeWord: false, matchCase: false })
   const publicationBylineRef = useRef(publicationByline)
   const onDiagnosticsRef = useRef(onDiagnostics)
   const onOutlineRef = useRef(onOutlineChange)
@@ -3644,6 +3646,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
 
   const searchOptions = (): ManuscriptSearchOptions => ({
     initialQuery: searchQueryRef.current,
+    initialSettings: searchSettingsRef.current,
     regions: () => searchRegionsRef.current?.() ?? {},
     inlineRegions: (document) => {
       const view = viewRef.current
@@ -3800,9 +3803,17 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
 
   useImperativeHandle(forwardedRef, () => ({
     focus: () => viewRef.current?.focus(),
-    setSearch: (query) => {
+    setSearch: (query, settings) => {
       searchQueryRef.current = query
-      return viewRef.current ? setManuscriptSearch(viewRef.current, query) : { ...EMPTY_MANUSCRIPT_SEARCH, query }
+      if (settings) searchSettingsRef.current = settings
+      return viewRef.current ? setManuscriptSearch(viewRef.current, query, searchSettingsRef.current) : { ...EMPTY_MANUSCRIPT_SEARCH, query }
+    },
+    replaceSearch: (replacement, all = false) => {
+      const view = viewRef.current
+      if (!view || readOnlyRef.current) return { replaced: 0, skipped: 0, error: 'Editing access is required to replace text.' }
+      if (suggestionModeRef.current) return { replaced: 0, skipped: 0, error: 'Turn off Track Changes to replace text. No text was changed.' }
+      finishPendingSuggestion(view)
+      return replaceManuscriptSearch(view, replacement, all)
     },
     findNext: (direction = 1) => viewRef.current ? navigateManuscriptSearch(viewRef.current, direction) : EMPTY_MANUSCRIPT_SEARCH,
     toggleBold: () => run(toggleMark(manuscriptSchema.marks.strong)),

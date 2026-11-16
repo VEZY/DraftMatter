@@ -146,4 +146,18 @@ describe('connected project files workspace', () => {
     expect(sharing.textContent).toContain('Shared data versions for project-1')
     expect(container.querySelector('.project-file-tree')!.textContent).not.toContain('Compare shared copies')
   })
+
+  it('uses the persisted project manuscript rather than the selected file to mark the paper', async () => {
+    const setManuscript = vi.fn()
+    const withNotes = { ...project, documents: [...project.documents, { path: 'README.md', kind: 'manuscript' as const, bytes: 50, modifiedMs: 1, hash: 'notes-hash' }] }
+    await act(async () => root.render(<ProjectFilesWorkspace layout="sidebar" project={withNotes} currentManuscriptPath="README.md" source="# Read me" location="local"
+      onSetManuscript={setManuscript} onClose={vi.fn()} />))
+    const tree = container.querySelector('[aria-label="Project file tree"]')!
+    expect(tree.querySelectorAll('.project-file-manuscript-badge')).toHaveLength(1)
+    expect(tree.querySelector('.designated-manuscript')?.getAttribute('data-path')).toBe('paper.qmd')
+    await act(async () => button('Set README.md as manuscript').click())
+    expect(setManuscript).toHaveBeenCalledExactlyOnceWith('README.md')
+    expect(desktopHost.gitStatus).not.toHaveBeenCalled()
+    expect(desktopHost.gitInitialize).not.toHaveBeenCalled()
+  })
 })

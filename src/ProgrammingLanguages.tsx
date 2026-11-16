@@ -31,11 +31,11 @@ const languages = [
   },
 ] as const
 
-export function ProgrammingLanguages({ onBack }: { onBack: () => void }) {
+export function ProgrammingLanguages({ onBack, backLabel = 'Back to DraftMatter' }: { onBack: () => void; backLabel?: string }) {
   return (
     <main className="languages-page">
       <header>
-        <button onClick={onBack}><Icon name="arrowRight" size={15} />Back to DraftMatter</button>
+        <button onClick={onBack}><Icon name="arrowRight" size={15} />{backLabel}</button>
         <span className="home-brand"><img src="/draftmatter-pencil-mark.svg" alt="" /><span>DraftMatter</span></span>
       </header>
 

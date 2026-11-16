@@ -30,9 +30,7 @@ import './home.css'
 // The home/account routes do not need the editor, export engines or language modes.
 const App = lazy(() => import('./App'))
 
-function withEditorLayout(editor: ReactNode) {
-  return <div className="draftmatter-editor-route">{editor}</div>
-}
+const isEditorRoute = (route: ApplicationRoute) => ['collaborative-editor', 'local-editor', 'example', 'tutorial', 'browser-editor'].includes(route.destination)
 
 function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorSaveGuard }) {
   const session = useCollaborationSession()
@@ -48,6 +46,7 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
   const [browserDraftIsNew, setBrowserDraftIsNew] = useState(false)
   const [assistantConnectionsOpen, setAssistantConnectionsOpen] = useState(false)
   const legalReturnRouteRef = useRef<ApplicationRoute>({ destination: 'home' })
+  const languagesReturnRouteRef = useRef<ApplicationRoute | null>(null)
 
   useEffect(() => {
     let active = true
@@ -55,15 +54,22 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
     const onPopState = async () => {
       const navigation = ++latestNavigation
       const destination = parseApplicationRoute(window.location)
-      const canLeave = await saveBeforeLeaveRef.current?.()
+      const returningToPaper = route.destination === 'languages' && languagesReturnRouteRef.current
+        && applicationRoutePath(destination) === applicationRoutePath(languagesReturnRouteRef.current)
+      const openingGuide = destination.destination === 'languages' && isEditorRoute(route)
+      const canLeave = returningToPaper || openingGuide ? true : await saveBeforeLeaveRef.current?.()
       if (!active || navigation !== latestNavigation) return
       if (canLeave === false) {
         window.history.pushState({}, '', applicationRoutePath(route))
         return
       }
-      setLaunch(null)
-      setLocalLaunch(null)
-      setStartCollaborationRoot('')
+      if (openingGuide) languagesReturnRouteRef.current = route
+      if (!returningToPaper && !openingGuide) {
+        setLaunch(null)
+        setLocalLaunch(null)
+        setStartCollaborationRoot('')
+        languagesReturnRouteRef.current = null
+      }
       setRoute(destination)
     }
     window.addEventListener('popstate', onPopState)
@@ -83,6 +89,18 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
     if (route.destination !== 'legal') legalReturnRouteRef.current = route
     navigate({ destination: 'legal', documentId })
   }
+
+  const openLanguages = () => {
+    languagesReturnRouteRef.current = isEditorRoute(route) ? route : null
+    navigate({ destination: 'languages' })
+  }
+
+  const languagesOverEditor = route.destination === 'languages' && languagesReturnRouteRef.current !== null
+  const editorRoute = languagesOverEditor ? languagesReturnRouteRef.current! : route
+  const withLanguageGuide = (editor: ReactNode) => <>
+    <div className="draftmatter-editor-route" hidden={languagesOverEditor} inert={languagesOverEditor}>{editor}</div>
+    {languagesOverEditor && <ProgrammingLanguages backLabel="Back to manuscript" onBack={() => navigate(languagesReturnRouteRef.current!)} />}
+  </>
 
   const openDraft = (nextLaunch: CollaborationProjectLaunch) => {
     setLaunch(nextLaunch)
@@ -147,7 +165,7 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
         onOpenBrowserDraft={() => { setBrowserDraftIsNew(true); navigate({ destination: 'browser-editor' }) }}
         onOpenLearn={() => navigate({ destination: 'learn' })}
         onOpenAiLearn={() => navigate({ destination: 'learn-ai' })}
-        onOpenLanguages={() => navigate({ destination: 'languages' })}
+        onOpenLanguages={openLanguages}
         onOpenTutorial={() => navigate({ destination: 'tutorial' })}
         onOpenLegal={openLegal}
       />
@@ -196,9 +214,9 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
     return <InvitationEntry onOpenDraft={openDraft} onBack={() => navigate({ destination: 'home' })} onOpenLegal={openLegal} />
   }
 
-  if (route.destination === 'collaborative-editor') {
+  if (editorRoute.destination === 'collaborative-editor') {
     if (launch) {
-      return withEditorLayout(<App saveBeforeLeaveRef={saveBeforeLeaveRef} collaborationLaunch={launch} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLaunch(null); navigate({ destination: 'home', workspaceId: launch.workspaceId }) }} />)
+      return withLanguageGuide(<App active={!languagesOverEditor} saveBeforeLeaveRef={saveBeforeLeaveRef} collaborationLaunch={launch} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={openLanguages} onNavigateHome={() => { setLaunch(null); navigate({ destination: 'home', workspaceId: launch.workspaceId }) }} />)
     }
     if (!session.profile) {
       return home()
@@ -207,13 +225,13 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
     return <main className="home-route-status"><section><h1>Manuscript unavailable</h1><p>This draft is not available to your account, or its workspace could not be loaded.</p><button onClick={() => navigate({ destination: 'home' })}>Return to Home</button></section></main>
   }
 
-  if (route.destination === 'local-editor') {
-    if (!localLaunch && desktopHost.available && route.localProjectId !== 'open') return <main className="home-route-status" role="status">Opening manuscript…</main>
+  if (editorRoute.destination === 'local-editor') {
+    if (!localLaunch && desktopHost.available && editorRoute.localProjectId !== 'open') return <main className="home-route-status" role="status">Opening manuscript…</main>
     if (!localLaunch) return <main className="home-route-status"><section><h1>Open the local project from Home</h1><p>DraftMatter needs permission to read a project folder on this computer.</p><button onClick={() => navigate({ destination: 'home' })}>Return to Home</button></section></main>
-    return withEditorLayout(<App key={localLaunch.project.root} saveBeforeLeaveRef={saveBeforeLeaveRef} desktopProjectLaunch={localLaunch.project} selectedManuscriptPath={localLaunch.selectedPath} startCollaborationOnMount={startCollaborationRoot === localLaunch.project.root} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setLocalProjects(readLocalProjectRecents(localStorage)); setStartCollaborationRoot(''); setLocalLaunch(null); navigate({ destination: 'home' }) }} />)
+    return withLanguageGuide(<App active={!languagesOverEditor} key={localLaunch.project.root} saveBeforeLeaveRef={saveBeforeLeaveRef} desktopProjectLaunch={localLaunch.project} selectedManuscriptPath={localLaunch.selectedPath} startCollaborationOnMount={startCollaborationRoot === localLaunch.project.root} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenAiLearn={() => navigate({ destination: 'learn-ai' })} onOpenLanguages={openLanguages} onNavigateHome={() => { setLocalProjects(readLocalProjectRecents(localStorage)); setStartCollaborationRoot(''); setLocalLaunch(null); navigate({ destination: 'home' }) }} />)
   }
 
-  if (route.destination === 'example') return withEditorLayout(<App saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience="complete-example" onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />)
+  if (editorRoute.destination === 'example') return withLanguageGuide(<App active={!languagesOverEditor} saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience="complete-example" onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={openLanguages} onNavigateHome={() => navigate({ destination: 'home' })} />)
   if (route.destination === 'learn') return <Learn onBack={() => navigate({ destination: 'home' })} onStartTour={() => navigate({ destination: 'tutorial' })} />
   if (route.destination === 'learn-ai') return (
     <>
@@ -221,11 +239,11 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
       <AssistantConnectionsDialog open={assistantConnectionsOpen} onClose={() => setAssistantConnectionsOpen(false)} />
     </>
   )
-  if (route.destination === 'languages') return <ProgrammingLanguages onBack={() => navigate({ destination: 'home' })} />
-  if (route.destination === 'tutorial') return withEditorLayout(<App saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience="complete-example" startExampleTour onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => navigate({ destination: 'home' })} />)
-  if (route.destination === 'browser-editor') return withEditorLayout(<App saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience={browserDraftIsNew ? 'browser-new' : undefined} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={() => navigate({ destination: 'languages' })} onNavigateHome={() => { setBrowserDraftIsNew(false); navigate({ destination: 'home' }) }} />)
+  if (route.destination === 'languages' && !languagesOverEditor) return <ProgrammingLanguages onBack={() => navigate({ destination: 'home' })} />
+  if (editorRoute.destination === 'tutorial') return withLanguageGuide(<App active={!languagesOverEditor} saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience="complete-example" startExampleTour onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={openLanguages} onNavigateHome={() => navigate({ destination: 'home' })} />)
+  if (editorRoute.destination === 'browser-editor') return withLanguageGuide(<App active={!languagesOverEditor} saveBeforeLeaveRef={saveBeforeLeaveRef} initialExperience={browserDraftIsNew ? 'browser-new' : undefined} onOpenLearn={() => navigate({ destination: 'learn' })} onOpenLanguages={openLanguages} onNavigateHome={() => { setBrowserDraftIsNew(false); navigate({ destination: 'home' }) }} />)
 
-  return home(route.workspaceId)
+  return home(route.destination === 'home' ? route.workspaceId : undefined)
 }
 
 export interface DraftMatterApplicationProps {

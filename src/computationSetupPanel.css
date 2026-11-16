@@ -25,3 +25,33 @@
 .computed-value-create-calculation { border-top: 1px solid #e2e7de; color: #5c6d5d; margin-top: 12px; padding-top: 12px; }
 .computed-value-create-calculation p { font-size: 11px; line-height: 1.5; margin: 0 0 8px; }
 .computed-value-create-calculation button { background: #f2f6ee; border: 1px solid #cfdbc7; border-radius: 5px; color: #42603e; font-size: 11px; padding: 7px 10px; }
+.computation-project-trust { align-items: center; background: #fbf6ec; border: 1px solid #e5d9be; border-radius: 7px; display: flex; gap: 12px; justify-content: space-between; margin: 12px 0 8px; padding: 11px; }
+.computation-project-trust.trusted { background: #f0f6ee; border-color: #d4e1d0; }
+.computation-project-trust > span, .computation-formatter-option > span { display: flex; flex: 1; flex-direction: column; gap: 3px; min-width: 0; }
+.computation-project-trust strong { color: #3a4e3e; font-size: 12px; }
+.computation-project-trust small, .computation-formatter-option small { color: #5e6d62; font-size: 11px; line-height: 1.5; }
+.computation-project-trust button, .computation-check-language, .computation-language-options button { background: #fff; border: 1px solid #d5ded1; border-radius: 5px; color: #405c45; flex-shrink: 0; font-size: 11px; min-height: 32px; padding: 6px 9px; }
+.computation-project-trust button:hover:not(:disabled), .computation-check-language:hover:not(:disabled), .computation-language-options button:hover:not(:disabled) { background: #edf4e9; border-color: #b4c5ad; }
+.computation-language-help { align-items: center; background: transparent; border: 0; border-radius: 4px; color: #49654e; display: inline-flex; font-size: 11px; gap: 5px; margin: 4px 0 5px; min-height: 28px; padding: 2px 3px; }
+.computation-language-help:hover { text-decoration: underline; }
+.computation-runtime-list > li { display: block; padding: 0; }
+.computation-runtime-list > li > .computation-language-header { align-items: center; display: flex; flex-direction: row; gap: 8px; padding: 7px 9px 7px 5px; }
+.computation-language-toggle { align-items: center; background: transparent; border: 0; border-radius: 4px; display: flex; flex: 1; gap: 7px; min-height: 36px; min-width: 0; padding: 5px; text-align: left; }
+.computation-language-toggle small { color: #5c6b60; }
+.computation-language-toggle:hover { background: #f5f8f2; }
+.computation-language-toggle > svg { flex-shrink: 0; transform: rotate(-90deg); }
+.computation-language-toggle > svg.expanded { transform: none; }
+.computation-language-toggle > span:first-of-type { display: flex; flex: 1; flex-direction: column; min-width: 0; }
+.computation-check-language { min-width: 53px; }
+.computation-check-language:disabled, .computation-project-trust button:disabled, .computation-language-options button:disabled { cursor: default; opacity: .5; }
+.computation-language-options { border: 0; border-top: 1px solid #e8ece4; font: inherit; margin: 0; min-width: 0; padding: 13px; }
+.computation-language-options:disabled { opacity: .55; }
+.computation-environment-select { display: flex; flex-direction: column; gap: 7px; }
+.computation-environment-select select { background: #fff; border: 1px solid #d4ddcf; border-radius: 5px; color: #354d3c; font: inherit; padding: 7px; width: 100%; }
+.computation-formatter-option { align-items: center; border-top: 1px solid #e4e9e0; display: flex; gap: 10px; justify-content: space-between; margin-top: 13px; padding-top: 12px; }
+.computation-language-actions { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 12px; }
+.computation-language-problem { color: #8a3d2b; margin: 12px 20px; overflow-wrap: anywhere; }
+.computation-language-options .computation-language-problem { margin: 10px 0; }
+.computation-project-actions { border-bottom: 0; border-left: 0; border-right: 0; margin: 0; min-width: 0; }
+.computation-project-actions:disabled { opacity: .55; }
+@media (max-width: 480px) { .computation-project-trust, .computation-formatter-option { align-items: flex-start; flex-direction: column; } }

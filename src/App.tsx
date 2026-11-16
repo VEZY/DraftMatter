@@ -23,11 +23,12 @@ import { ManuscriptOutlineTree, type ManuscriptOutlineItem } from './ManuscriptO
 import './writingWorkspace.css'
 import { FloatingWritingToolbar } from './FloatingWritingToolbar'
 import { ComputationSetupPanel } from './ComputationSetupPanel'
+import { LanguageEnvironmentOptions } from './LanguageEnvironmentOptions'
 import { ManuscriptFind } from './ManuscriptFind'
 import { RecoveryHistory, type RecoveryHistoryVersion } from './RecoveryHistory'
 import { selectAutomaticRecoveryIds } from './recoveryRetention'
 import { useRecoveryAutosave } from './useRecoveryAutosave'
-import type { ManuscriptSearchState } from './manuscriptSearch'
+import { DEFAULT_MANUSCRIPT_SEARCH_SETTINGS, type ManuscriptSearchSettings, type ManuscriptSearchState } from './manuscriptSearch'
 import { ExampleTour } from './ExampleTour'
 import { ManuscriptTextEditor } from './ManuscriptTextEditor'
 import { StructuredManuscriptEditor, type StructuredManuscriptEditorHandle, type StructuredOutlineItem, type StructuredReviewSelection } from './StructuredManuscriptEditor'
@@ -600,6 +601,7 @@ type HistoryVersion = RecoveryHistoryVersion & { archiveId?: string }
 type LoadedHistoryVersion = RecoverySnapshot & { archiveId?: string }
 
 export interface AppProps {
+  active?: boolean
   saveBeforeLeaveRef?: EditorSaveGuard
   collaborationLaunch?: CollaborationProjectLaunch
   desktopProjectLaunch?: ProjectSnapshot
@@ -630,7 +632,7 @@ format:
 Start writing here.
 `
 
-function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, selectedManuscriptPath, onNavigateHome, initialExperience, startExampleTour = false, startCollaborationOnMount = false, browserDocumentLaunch, onOpenLearn, onOpenAiLearn, onOpenLanguages }: AppProps = {}) {
+function App({ active = true, saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, selectedManuscriptPath, onNavigateHome, initialExperience, startExampleTour = false, startCollaborationOnMount = false, browserDocumentLaunch, onOpenLearn, onOpenAiLearn, onOpenLanguages }: AppProps = {}) {
   const collaborationSession = useOptionalCollaborationSession()
   const collaborativeProject = collaborationLaunch?.projects.find((project) => project.id === collaborationLaunch.projectId)
   const collaborativeInitialSource = collaborationLaunch
@@ -758,6 +760,9 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const [findOpen, setFindOpen] = useState(false)
   const [findFocusRequest, setFindFocusRequest] = useState(0)
   const [findQuery, setFindQuery] = useState('')
+  const [findSettings, setFindSettings] = useState<ManuscriptSearchSettings>({ ...DEFAULT_MANUSCRIPT_SEARCH_SETTINGS })
+  const [findReplacement, setFindReplacement] = useState('')
+  const [findReplacementMessage, setFindReplacementMessage] = useState('')
   const [findResult, setFindResult] = useState<ManuscriptSearchState>({ query: '', total: 0, current: 0 })
   const [collaborationOpen, setCollaborationOpen] = useState(Boolean(collaborationLaunch))
   const [startCollaborationOpen, setStartCollaborationOpen] = useState(false)
@@ -861,8 +866,11 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const [localExecutionCopyProblem, setLocalExecutionCopyProblem] = useState('')
   const [pendingProject, setPendingProject] = useState<{ project: ProjectSnapshot; announce: boolean } | null>(null)
   const [runtimeInventory, setRuntimeInventory] = useState<RuntimeInventory>()
+  const [checkedEnvironmentLanguages, setCheckedEnvironmentLanguages] = useState<ExecutionLanguage[]>([])
+  const [checkingEnvironmentLanguage, setCheckingEnvironmentLanguage] = useState<ExecutionLanguage>()
   const [runtimeDiscoveryState, setRuntimeDiscoveryState] = useState<'idle' | 'discovering' | 'ready'>('idle')
-  const [environmentOpen, setEnvironmentOpen] = useState(false)
+  const [expandedEnvironmentLanguage, setExpandedEnvironmentLanguage] = useState<ExecutionLanguage>()
+  const [projectExecutionTrust, setProjectExecutionTrust] = useState<ExecutionTrustStatus>()
   const [selectedEnvironmentLanguage, setSelectedEnvironmentLanguage] = useState<ExecutionLanguage>('python')
   const [selectedKernelNames, setSelectedKernelNames] = useState<Partial<Record<ExecutionLanguage, string>>>({})
   const [selectedEnvironmentPaths, setSelectedEnvironmentPaths] = useState<Partial<Record<ExecutionLanguage, string>>>({})
@@ -899,7 +907,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const [executionTrustOpen, setExecutionTrustOpen] = useState(false)
   const [executionTrustWarning, setExecutionTrustWarning] = useState('')
   const [executionTrustBusy, setExecutionTrustBusy] = useState(false)
-  const [executionTrustPurpose, setExecutionTrustPurpose] = useState<'run' | 'packages' | 'format' | 'formatter-setup' | 'console' | 'kernel-setup' | 'project-setup'>('run')
+  const [executionTrustPurpose, setExecutionTrustPurpose] = useState<'trust' | 'run' | 'packages' | 'format' | 'formatter-setup' | 'console' | 'kernel-setup' | 'project-setup'>('run')
   const [kernelSetupLanguage, setKernelSetupLanguage] = useState<ExecutionLanguage>()
   const [kernelSetupBusy, setKernelSetupBusy] = useState(false)
   const [formatterSetupLanguage, setFormatterSetupLanguage] = useState<Exclude<ExecutionLanguage, 'julia'>>()
@@ -952,18 +960,34 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const setupActivityIdRef = useRef<string | undefined>(undefined)
   const pendingSetupLanguagesRef = useRef<ExecutionLanguage[]>([])
   const projectSetupRunningRef = useRef(false)
+  const manuscriptSelectionRunningRef = useRef(false)
   const recoveryActionRunningRef = useRef(false)
+  const environmentCheckRequestRef = useRef(false)
   const executionActiveCellRef = useRef<string | undefined>(undefined)
   const executionActiveLanguageRef = useRef<ExecutionLanguage | undefined>(undefined)
   const kernelCellFailureSequenceRef = useRef(0)
   const crossrefSessionRef = useRef<CrossrefSearchSession | null>(null)
+
+  const openExecutionEnvironment = (language = selectedEnvironmentLanguage) => {
+    setSelectedEnvironmentLanguage(language)
+    setExpandedEnvironmentLanguage(language)
+    setExecutionWorkspaceOpen(true)
+  }
+
+  useEffect(() => {
+    let cancelled = false
+    setProjectExecutionTrust(undefined)
+    if (executionWorkspaceOpen && desktopSession?.root) void desktopHost.executionTrustStatus(desktopSession.root).then((status) => {
+      if (!cancelled) setProjectExecutionTrust(status)
+    }).catch(() => { /* Keep language actions locked if trust cannot be verified. */ })
+    return () => { cancelled = true }
+  }, [desktopSession?.root, executionWorkspaceOpen])
 
   const startSetupActivity = (title: string, message: string, language?: ExecutionLanguage, origin: SetupOrigin = 'user') => {
     const id = globalThis.crypto?.randomUUID?.() ?? `setup-${Date.now()}-${Math.random().toString(16).slice(2)}`
     setupActivityIdRef.current = id
     const command = language === 'julia' ? '$ julia --project=.\n' : ''
     setSetupActivity({ id, title, status: 'running', output: `${command}${message.trim()}\n`, language })
-    if (origin === 'user') setExecutionWorkspaceOpen(false)
     return id
   }
 
@@ -973,7 +997,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       setKernelConsolePreferredLanguageEpoch((current) => current + 1)
     }
     setJuliaPackagesOpen(false)
-    setEnvironmentOpen(false)
+    setExpandedEnvironmentLanguage(undefined)
     setKernelConsoleOpen(true)
   }
 
@@ -1227,8 +1251,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     renderedCitations[cluster.id] || fallbackCitationLabel(cluster.items),
   ])), [citations, manuscriptCitationClusters, renderedCitations])
   useEffect(() => {
-    if (findOpen) structuredEditorRef.current?.setSearch(findQuery)
-  }, [findOpen, findQuery, manuscriptSource, renderedBibliography])
+    if (findOpen) structuredEditorRef.current?.setSearch(findQuery, findSettings)
+  }, [findOpen, findQuery, findSettings, manuscriptSource, renderedBibliography])
 
   const detailCitationItems = structuredMode && structuredCitationSelection ? structuredCitationSelection.items : draftCitationItems
   const citationLabel = renderedCitations.introduction ?? formatCitationCluster(citations, draftCitationItems)
@@ -1356,6 +1380,15 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     setFindOpen(false)
     structuredEditorRef.current?.setSearch('')
     structuredEditorRef.current?.focus()
+  }
+
+  const replaceDocumentMatch = (all = false) => {
+    if (!canEditManuscript || !structuredMode || structuredReviewProjection || suggestionMode) return
+    const editor = structuredEditorRef.current
+    if (!editor) return
+    editor.setSearch(findQuery, findSettings)
+    const result = editor.replaceSearch(findReplacement, all)
+    setFindReplacementMessage(result.error ?? `${result.replaced} replacement${result.replaced === 1 ? '' : 's'}${result.skipped ? ` · ${result.skipped} protected match${result.skipped === 1 ? '' : 'es'} unchanged` : ''}`)
   }
 
   const documentSearchRegions = useMemo(() => () => ({
@@ -1953,6 +1986,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
 
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
+      if (!active) return
       if (recoveryOpen) {
         if (event.key === 'Escape') setRecoveryOpen(false)
         return
@@ -1997,7 +2031,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         setProjectMenuOpen(false)
         setCreateProjectOpen(false)
         setLocalExecutionCopyOpen(false)
-        setEnvironmentOpen(false)
+        setExpandedEnvironmentLanguage(undefined)
         setLinkDialogOpen(false)
         if (!juliaPackageBusy) setJuliaPackagesOpen(false)
         setOutlineOptionsOpen(false)
@@ -2010,7 +2044,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     }
     window.addEventListener('keydown', onKeyDown)
     return () => window.removeEventListener('keydown', onKeyDown)
-  }, [canRedo, canUndo, draft, executionTrustBusy, juliaPackageBusy, pendingProject, projectBusy, awaitingDesktopLaunch, structuredMode, structuredCitationSelection, findOpen, manuscriptFileActive, recoveryOpen])
+  }, [active, canRedo, canUndo, draft, executionTrustBusy, juliaPackageBusy, pendingProject, projectBusy, awaitingDesktopLaunch, structuredMode, structuredCitationSelection, findOpen, manuscriptFileActive, recoveryOpen])
 
   useEffect(() => {
     if (!commandOpen) return
@@ -2020,7 +2054,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
 
 
   useEffect(() => {
-    if (!focusMode || recoveryOpen) return
+    if (!focusMode || !active || recoveryOpen) return
     const exitFocus = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return
       event.preventDefault()
@@ -2028,7 +2062,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     }
     globalThis.addEventListener('keydown', exitFocus)
     return () => globalThis.removeEventListener('keydown', exitFocus)
-  }, [focusMode, recoveryOpen])
+  }, [focusMode, active, recoveryOpen])
 
   useEffect(() => {
     if (!toast) return
@@ -2131,7 +2165,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   })
   const executionView = primaryCell ? executionViews.find((view) => view.cellId === primaryCell.id) : undefined
   const executionSummaryStatus = executionActiveCell ? 'running' : executionView?.freshness ?? 'never-run'
-  const selectedEnvironmentKernels = runtimeInventory ? healthyKernelsFor(runtimeInventory, selectedEnvironmentLanguage) : []
   const selectedEnvironmentKernel = selectedKernelForLanguage(selectedEnvironmentLanguage)
   const selectedEnvironmentRuntime = runtimeInventory?.executables[selectedEnvironmentLanguage]
   const selectedEnvironmentSetupExecutable = runtimeExecutableForKernelSetup(
@@ -2139,9 +2172,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     selectedEnvironmentPaths[selectedEnvironmentLanguage],
     selectedEnvironmentRuntime,
   )
-  const unavailableSelectedKernelName = selectedKernelNames[selectedEnvironmentLanguage] && !selectedEnvironmentKernel
-    ? selectedKernelNames[selectedEnvironmentLanguage]
-    : undefined
   const terminalLauncherLanguage = kernelCellFailure?.language ?? primaryCell?.language ?? selectedEnvironmentLanguage
   const terminalKernelStatus = kernelConsoleStatuses[terminalLauncherLanguage]
   const terminalLauncherStatus = setupActivity?.status === 'running'
@@ -2691,7 +2721,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     if (inserted) {
       if (output === 'values') setExecutionWorkspaceOpen(true)
       setToast(output === 'values'
-        ? 'Published-values computation added to Code & computation'
+        ? 'Computed value calculation added to Code & computation'
         : `Reproducible ${output} code block added to the manuscript`)
     }
     return inserted
@@ -2699,20 +2729,39 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
 
   const addStructuredSection = () => openInsertBlock('section')
 
-  const discoverExecutionEnvironments = async (showDialog = false) => {
-    if (showDialog) setEnvironmentOpen(true)
+  const discoverExecutionEnvironments = async (showPanel = false, checkedLanguage?: ExecutionLanguage) => {
+    if (showPanel) { openExecutionEnvironment(); return runtimeInventory }
     if (!desktopHost.available || !desktopSessionRef.current) {
       setToast('Local environments are available after opening a desktop project')
       return undefined
     }
     setRuntimeDiscoveryState('discovering')
+    setCheckingEnvironmentLanguage(checkedLanguage)
     setExecutionProblem('')
     try {
-      const inventory = await discoverRuntimeInventory(desktopHost)
+      const projectRoot = desktopSessionRef.current.root
+      const inventory = checkedLanguage ? await (async (): Promise<RuntimeInventory> => {
+        const [runtime, kernels] = await Promise.all([
+          desktopHost.probeRuntime(checkedLanguage).catch((error) => ({ language: checkedLanguage, health: 'unhealthy' as const, message: normaliseHostFailure(error).message })),
+          desktopHost.discoverJupyterKernels().catch((error) => ({ health: 'unhealthy' as const, kernels: [], searchedLocations: [], message: normaliseHostFailure(error).message })),
+        ])
+        return {
+          discoveredAt: new Date().toISOString(),
+          executables: {
+            python: runtimeInventory?.executables.python ?? { language: 'python', health: 'missing' },
+            r: runtimeInventory?.executables.r ?? { language: 'r', health: 'missing' },
+            julia: runtimeInventory?.executables.julia ?? { language: 'julia', health: 'missing' },
+            [checkedLanguage]: runtime,
+          },
+          jupyter: kernels,
+        }
+      })() : await discoverRuntimeInventory(desktopHost)
+      if (desktopSessionRef.current?.root !== projectRoot) return undefined
       if (desktopSessionRef.current) {
         const nextKernelNames: Partial<Record<ExecutionLanguage, string>> = { ...selectedKernelNames }
         const nextEnvironmentPaths: Partial<Record<ExecutionLanguage, string>> = { ...selectedEnvironmentPaths }
         for (const language of ['python', 'r', 'julia'] as const) {
+          if (checkedLanguage && language !== checkedLanguage) continue
           const healthy = healthyKernelsFor(inventory, language)
           const requestedName = nextKernelNames[language]
           const selected = requestedName
@@ -2730,6 +2779,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         setSelectedKernelNames(nextKernelNames)
         setSelectedEnvironmentPaths(nextEnvironmentPaths)
         setRuntimeInventory(inventory)
+        setCheckedEnvironmentLanguages((current) => checkedLanguage ? [...new Set([...current, checkedLanguage])] : ['python', 'r', 'julia'])
         setRuntimeDiscoveryState('ready')
         const tracker = executionTrackerRef.current
         if (tracker) {
@@ -2754,7 +2804,47 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       setExecutionProblem(message)
       setToast(message)
       return undefined
+    } finally {
+      setCheckingEnvironmentLanguage(undefined)
     }
+  }
+
+  const checkExecutionLanguage = async (language: ExecutionLanguage) => {
+    const session = desktopSessionRef.current
+    if (!session || environmentCheckRequestRef.current || projectSetupRunningRef.current || executionPlanBusyRef.current || kernelSetupBusy || formatterSetupBusy || juliaPackageBusy || runtimeDiscoveryState === 'discovering') return
+    environmentCheckRequestRef.current = true
+    const previousDiscoveryState = runtimeDiscoveryState
+    setRuntimeDiscoveryState('discovering')
+    setCheckingEnvironmentLanguage(language)
+    openExecutionEnvironment(language)
+    try {
+      const trust = await desktopHost.executionTrustStatus(session.root)
+      if (desktopSessionRef.current?.root !== session.root) return
+      setProjectExecutionTrust(trust)
+      if (!trust.trusted) { setToast('Trust this project before checking its language environments.'); return }
+      await discoverExecutionEnvironments(false, language)
+    } catch (error) { setExecutionProblem(normaliseHostFailure(error).message) }
+    finally {
+      environmentCheckRequestRef.current = false
+      if (desktopSessionRef.current?.root === session.root) {
+        setRuntimeDiscoveryState((current) => current === 'discovering' ? previousDiscoveryState : current)
+        setCheckingEnvironmentLanguage(undefined)
+      }
+    }
+  }
+
+  const requestProjectExecutionTrust = async () => {
+    const session = desktopSessionRef.current
+    if (!session) return
+    try {
+      const trust = await desktopHost.executionTrustStatus(session.root)
+      if (desktopSessionRef.current?.root !== session.root) return
+      setProjectExecutionTrust(trust)
+      if (trust.trusted) return
+      setExecutionTrustPurpose('trust')
+      setExecutionTrustWarning(trust.warning)
+      setExecutionTrustOpen(true)
+    } catch (error) { setExecutionProblem(normaliseHostFailure(error).message) }
   }
 
   const persistExecutionPreferences = async (
@@ -2816,7 +2906,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const setupKernelIntegrationTrusted = async (language: ExecutionLanguage, inventoryOverride = runtimeInventory, origin: SetupOrigin = 'user') => {
     const session = desktopSessionRef.current
     if (!session || kernelSetupBusy) return
-    if (origin === 'user') setEnvironmentOpen(false)
     setKernelSetupBusy(true)
     setExecutionProblem('')
     const taskId = startSetupActivity(
@@ -2838,6 +2927,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         return undefined
       }
       setRuntimeInventory({ ...inventory, jupyter: setup.inventory })
+      setCheckedEnvironmentLanguages(['python', 'r', 'julia'])
       setRuntimeDiscoveryState('ready')
       const selected = setup.kernelName
         ? setup.inventory.kernels.find((kernel) => kernel.name === setup.kernelName && kernel.health === 'available')
@@ -2863,7 +2953,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       const message = normaliseHostFailure(error).message
       finishSetupActivity(taskId, 'failed', message)
       setExecutionProblem(message)
-      setEnvironmentOpen(true)
+      openExecutionEnvironment(language)
       setToast(`${runtimeName(language)} setup needs attention`)
       return undefined
     } finally {
@@ -2955,13 +3045,13 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         if ((runtime.health !== 'available' || !runtime.executable) && language !== 'python') {
           setSelectedEnvironmentLanguage(language)
           setExecutionProblem(runtimeInstallationGuidance(language))
-          setEnvironmentOpen(true)
+          openExecutionEnvironment(language)
           return false
         }
         setSelectedEnvironmentLanguage(language)
         const updated = await setupKernelIntegrationTrusted(language, inventory, 'project-setup')
         if (!updated) {
-          setEnvironmentOpen(true)
+          openExecutionEnvironment(language)
           return false
         }
         inventory = updated
@@ -2989,6 +3079,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       if (!trust.trusted && trustedProjectRoots(localStorage).has(session.root)) {
         trust = await desktopHost.trustProjectForSession(session.root, EXECUTION_TRUST_ACKNOWLEDGEMENT)
       }
+      setProjectExecutionTrust(trust)
       if (desktopSessionRef.current?.root !== session.root || desktopSessionRef.current.path !== session.path) {
         pendingExecutionCommandRef.current = undefined
         return
@@ -3454,7 +3545,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     setCleanRunCertification(undefined)
   }
 
-  const mutateJuliaPackage = async (action: 'add' | 'remove', name: string) => {
+  const mutateJuliaPackage = async (action: 'add' | 'remove', name: string, showPackageManager = true) => {
     const session = desktopSessionRef.current
     if (!session || juliaPackageBusy) return
     setJuliaPackagesOpen(false)
@@ -3485,8 +3576,23 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       setJuliaPackageProblem(message)
     } finally {
       setJuliaPackageBusy(false)
-      if (desktopSessionRef.current?.root === session.root) setJuliaPackagesOpen(true)
+      if (desktopSessionRef.current?.root === session.root) {
+        if (showPackageManager) setJuliaPackagesOpen(true)
+        else openExecutionEnvironment('julia')
+      }
     }
+  }
+
+  const requestJuliaFormatterSetup = async () => {
+    const session = desktopSessionRef.current
+    if (!session || juliaPackageBusy) return
+    try {
+      const trust = await desktopHost.executionTrustStatus(session.root)
+      if (desktopSessionRef.current?.root !== session.root) return
+      setProjectExecutionTrust(trust)
+      if (!trust.trusted) { await requestProjectExecutionTrust(); return }
+      await mutateJuliaPackage('add', 'JuliaFormatter', false)
+    } catch (error) { setJuliaPackageProblem(normaliseHostFailure(error).message) }
   }
 
   const formatCodeCell = async (_cellId: string, language: ExecutionLanguage, code: string) => {
@@ -3566,7 +3672,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     const session = desktopSessionRef.current
     if (!session || formatterSetupBusy) return
     const packageName = language === 'python' ? 'Ruff' : 'styler'
-    setEnvironmentOpen(false)
     setFormatterSetupBusy(true)
     setExecutionProblem('')
     const taskId = startSetupActivity(
@@ -3591,7 +3696,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     } finally {
       setFormatterSetupBusy(false)
       setFormatterSetupLanguage(undefined)
-      if (desktopSessionRef.current?.root === session.root) setEnvironmentOpen(true)
+      if (desktopSessionRef.current?.root === session.root) openExecutionEnvironment(language)
     }
   }
 
@@ -3609,7 +3714,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       const trust = await desktopHost.executionTrustStatus(session.root)
       if (!trust.trusted) {
         setExecutionTrustPurpose('formatter-setup')
-        setExecutionTrustWarning(`${trust.warning} DraftMatter will install ${packageName} into the selected ${runtimeName(language)} environment; it is not bundled with the application.`)
+        setExecutionTrustWarning(`${trust.warning} DraftMatter will install ${packageName} into the selected ${runtimeName(language)} environment.`)
         setExecutionTrustOpen(true)
         return
       }
@@ -3622,10 +3727,11 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   }
 
   useEffect(() => {
-    if (!environmentOpen || selectedEnvironmentLanguage === 'julia' || formatterSetupBusy) return
-    const timeout = window.setTimeout(() => void probeCodeFormatter(selectedEnvironmentLanguage), 100)
+    if (!executionWorkspaceOpen || !expandedEnvironmentLanguage || expandedEnvironmentLanguage === 'julia' || !projectExecutionTrust?.trusted || !checkedEnvironmentLanguages.includes(expandedEnvironmentLanguage) || formatterSetupBusy) return
+    const language = expandedEnvironmentLanguage
+    const timeout = window.setTimeout(() => void probeCodeFormatter(language), 100)
     return () => window.clearTimeout(timeout)
-  }, [environmentOpen, selectedEnvironmentLanguage, selectedEnvironmentSetupExecutable, formatterSetupBusy])
+  }, [executionWorkspaceOpen, expandedEnvironmentLanguage, projectExecutionTrust?.trusted, checkedEnvironmentLanguages, selectedEnvironmentSetupExecutable, formatterSetupBusy])
 
   const executeConsoleTrusted = async (language: ExecutionLanguage, code: string) => {
     const session = desktopSessionRef.current
@@ -3648,7 +3754,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       await discoverExecutionEnvironments()
       if (!kernelSelections[language]) {
         setSelectedEnvironmentLanguage(language)
-        setEnvironmentOpen(true)
+        openExecutionEnvironment(language)
         throw new Error(`No healthy ${runtimeName(language)} Jupyter kernel is selected.`)
       }
     }
@@ -3689,7 +3795,12 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         return
       }
       rememberProjectTrust(localStorage, session.root)
+      setProjectExecutionTrust(trust)
       setExecutionTrustOpen(false)
+      if (executionTrustPurpose === 'trust') {
+        setToast('Project trusted · choose a language to check or set up')
+        return
+      }
       if (executionTrustPurpose === 'project-setup') {
         const languages = pendingSetupLanguagesRef.current
         const command = pendingExecutionCommandRef.current
@@ -3754,7 +3865,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     const session = desktopSessionRef.current
     if (!session) return
     try {
-      await desktopHost.revokeProjectTrust(session.root)
+      const trust = await desktopHost.revokeProjectTrust(session.root)
+      if (desktopSessionRef.current?.root === session.root) setProjectExecutionTrust(trust)
       forgetProjectTrust(localStorage, session.root)
       pendingSetupLanguagesRef.current = []
       setToast('Project trust forgotten · DraftMatter will ask before the next setup or execution')
@@ -4276,8 +4388,9 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     setExecutionDiagnostics([])
     setExecutionProblem('')
     setRuntimeInventory(undefined)
+    setCheckedEnvironmentLanguages([])
     setRuntimeDiscoveryState('idle')
-    setEnvironmentOpen(false)
+    setExpandedEnvironmentLanguage(undefined)
     setExecutionTrustOpen(false)
     citationLockRef.current = buildCitationLock(options.citations ?? [])
     citationLockHashRef.current = null
@@ -4454,8 +4567,9 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     setExecutionDiagnostics(manifestDiagnostics)
     setExecutionProblem('')
     setRuntimeInventory(undefined)
+    setCheckedEnvironmentLanguages([])
     setRuntimeDiscoveryState('idle')
-    setEnvironmentOpen(false)
+    setExpandedEnvironmentLanguage(undefined)
     setExecutionTrustOpen(false)
     resetDraftRevision()
     citationLockRef.current = projectLock
@@ -4885,6 +4999,23 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     } catch (error) {
       setToast(normaliseHostFailure(error).message)
     } finally {
+      setProjectBusy(false)
+    }
+  }
+
+  const setProjectManuscript = async (path: string) => {
+    const session = desktopSessionRef.current
+    if (!session || projectBusy || manuscriptSelectionRunningRef.current || liveDocumentSwitchBlocked()) return
+    manuscriptSelectionRunningRef.current = true
+    setProjectBusy(true)
+    try {
+      const project = await desktopHost.openProject(session.root)
+      if (desktopSessionRef.current?.root !== session.root || desktopSessionRef.current.path !== session.path) return
+      if (await applyDesktopProject(project, false, path)) setToast(`Manuscript set · ${path}`)
+    } catch (error) {
+      setToast(normaliseHostFailure(error).message)
+    } finally {
+      manuscriptSelectionRunningRef.current = false
       setProjectBusy(false)
     }
   }
@@ -6165,6 +6296,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
             layout="sidebar"
             project={desktopProject}
             currentManuscriptPath={desktopSession?.path ?? filename}
+            designatedManuscriptPath={desktopProject?.config.mainDocument ?? filename}
+            manuscriptSelectionBusy={projectBusy}
             source={manuscriptSource}
             browserImages={browserProjectImages}
             sharedImages={sharedResources.images}
@@ -6176,6 +6309,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
             onClose={() => setLeftPanelOpen(false)}
             onInsertFigure={canEditManuscript ? (path) => { void insertProjectFigure(path) } : undefined}
             onOpenFile={(path, options) => { fileWorkspaceRef.current?.openFile(path, options); if (window.innerWidth <= 640) setLeftPanelOpen(false) }}
+            onSetManuscript={desktopProject ? (path) => void setProjectManuscript(path) : undefined}
           />
             ) : (<>
             <div className="panel-heading-row">
@@ -6290,7 +6424,14 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
           } : undefined}
         >
         <main className="editor-area" ref={editorAreaRef}>
-          {findOpen && <ManuscriptFind query={findQuery} result={findResult} focusRequest={findFocusRequest} onQueryChange={setFindQuery}
+          {findOpen && <ManuscriptFind query={findQuery} result={findResult} focusRequest={findFocusRequest}
+            settings={findSettings} onSettingsChange={(settings) => { setFindSettings(settings); setFindReplacementMessage('') }}
+            replacement={findReplacement} onReplacementChange={(replacement) => { setFindReplacement(replacement); setFindReplacementMessage('') }}
+            onQueryChange={(query) => { setFindQuery(query); setFindReplacementMessage('') }}
+            onReplace={() => replaceDocumentMatch()} onReplaceAll={() => replaceDocumentMatch(true)}
+            canReplace={canEditManuscript && structuredMode && !structuredReviewProjection && !suggestionMode}
+            disabledReason={suggestionMode ? 'Turn off Track Changes to replace text; search remains available.' : structuredReviewProjection ? 'Return to a markup view to replace text.' : undefined}
+            replacementMessage={findReplacementMessage}
             onNext={() => structuredEditorRef.current?.findNext(1)}
             onPrevious={() => structuredEditorRef.current?.findNext(-1)} onClose={closeDocumentFind} />}
 
@@ -6737,13 +6878,51 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
                   runtimes={(['python', 'r', 'julia'] as const).map((language) => {
                     const runtime = runtimeInventory?.executables[language]
                     const kernel = selectedKernelForLanguage(language)
+                    const checked = checkedEnvironmentLanguages.includes(language)
                     return { language, label: runtimeName(language),
-                      status: kernel ? 'ready' : runtime?.health === 'available' ? 'available' : runtime?.health ?? 'not-checked',
-                      detail: kernel?.displayName ?? runtime?.version ?? runtime?.message }
+                      status: !checked ? 'not-checked' : kernel ? 'ready' : runtime?.health === 'available' ? 'available' : runtime?.health ?? 'not-checked',
+                      detail: checked ? kernel?.displayName ?? runtime?.version ?? runtime?.message : undefined }
                   })}
                   discovering={runtimeDiscoveryState === 'discovering'}
+                  checkingLanguage={checkingEnvironmentLanguage}
                   preparing={projectSetupRunningRef.current}
-                  onConfigureEnvironments={() => void discoverExecutionEnvironments(true)}
+                  trusted={projectExecutionTrust?.trusted}
+                  projectTrust={<div className={`computation-project-trust ${projectExecutionTrust?.trusted ? 'trusted' : ''}`} role="group" aria-label="Project execution trust">
+                    <span><strong>{projectExecutionTrust?.trusted ? 'Project trusted' : 'Project trust'}</strong><small>{projectExecutionTrust?.trusted ? 'Language checks, installation, and execution are enabled for this project.' : 'Code can access your files and the network. Trust only projects whose code you have reviewed.'}</small></span>
+                    {projectExecutionTrust?.trusted ? <button type="button" onClick={() => void forgetCurrentProjectTrust()} disabled={kernelSetupBusy || formatterSetupBusy || juliaPackageBusy}>Forget project trust</button> : <button type="button" onClick={() => void requestProjectExecutionTrust()} disabled={executionTrustBusy}>Trust this project</button>}
+                  </div>}
+                  onOpenDocumentation={onOpenLanguages}
+                  expandedLanguage={expandedEnvironmentLanguage}
+                  onToggleLanguage={(language) => { setSelectedEnvironmentLanguage(language); setExpandedEnvironmentLanguage((current) => current === language ? undefined : language) }}
+                  onCheckLanguage={(language) => void checkExecutionLanguage(language)}
+                  languageOptions={Object.fromEntries((['python', 'r', 'julia'] as const).map((language) => {
+                    const runtime = runtimeInventory?.executables[language]
+                    const kernel = selectedKernelForLanguage(language)
+                    const checked = checkedEnvironmentLanguages.includes(language)
+                    const executable = runtimeExecutableForKernelSetup(kernel, selectedEnvironmentPaths[language], runtime)
+                    const formatter = language === 'julia' ? undefined : formatterStatuses[language]
+                    return [language, <LanguageEnvironmentOptions
+                      key={language} language={language} label={runtimeName(language)} checked={checked}
+                      kernels={runtimeInventory ? healthyKernelsFor(runtimeInventory, language) : []}
+                      selectedKernel={checked ? kernel : undefined}
+                      unavailableKernelName={checked && selectedKernelNames[language] && !kernel ? selectedKernelNames[language] : undefined}
+                      environmentPath={selectedEnvironmentPaths[language]}
+                      setupAvailable={checked && Boolean(executable)}
+                      busy={runtimeDiscoveryState === 'discovering'}
+                      setupBusy={kernelSetupBusy}
+                      formatterBusy={language === 'julia' ? juliaPackageBusy : formatterSetupBusy}
+                      formatterAvailable={language === 'julia' ? juliaEnvironment?.packages.some((entry) => entry.name === 'JuliaFormatter') : formatter?.available}
+                      formatterVersion={formatter?.version}
+                      installationGuidance={checked && !executable && runtime?.health === 'missing' ? runtimeInstallationGuidance(language) : undefined}
+                      problem={language === 'julia' ? juliaPackageProblem : undefined}
+                      onSelectKernel={(name) => void selectExecutionKernel(language, name)}
+                      onSetup={() => void requestKernelIntegrationSetup(language)}
+                      onInstallFormatter={() => language === 'julia' ? void requestJuliaFormatterSetup() : void requestCodeFormatterSetup(language)}
+                      onRestart={() => void restartExecution(language)}
+                      onTerminate={() => void terminateExecution(language)}
+                      onManagePackages={language === 'julia' && checked ? () => void openJuliaPackages() : undefined}
+                    />]
+                  }))}
                   onPrepareEnvironments={executableCells.length ? () => void ensureProjectLanguageSetup([...new Set(executableCells.map((cell) => cell.language))]) : undefined}
                   onCreateSetup={canEditManuscript ? () => openInsertBlock('setup-cell') : undefined}
                   setupSource={setupCells.length ? setupCells.map(renderExecutionCellRow) : undefined}
@@ -6752,8 +6931,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
                   runControls={executableCells.length ? <>
                     {[...new Set(executableCells.map((cell) => cell.language))].map((language) => <button key={language} onClick={() => void requestExecution({ kind: 'language', language })} disabled={executionPlanBusy}><Icon name="play" size={12} />Run {runtimeName(language)}</button>)}
                     <button onClick={() => void requestExecution({ kind: 'clean-all' })} disabled={executionPlanBusy}><Icon name="history" size={13} />Clean run</button>
-                    {executableCells.some((cell) => cell.language === 'julia') && <button onClick={() => void openJuliaPackages()} disabled={juliaPackageBusy}>Julia packages</button>}
                   </> : undefined}
+                  notices={executionProblem ? <p className="computation-language-problem" role="alert">{executionProblem}</p> : undefined}
                 /> : (
                 <div className="execution-cell-list">
                   {panelManagedCells.length > 0 && <div className="execution-cell-group"><strong>Project code</strong><small>{desktopSession ? 'Setup and computed value calculations run with the document but are never displayed on the manuscript page.' : executionBoundaryKind === 'template' ? 'Example setup and computed value source · available after making a project copy.' : 'View-only setup and computed value source retained in the portable manuscript.'}</small></div>}
@@ -6997,13 +7176,13 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
           <div className="execution-trust-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="execution-trust-title">
             <div className="execution-dialog-head">
               <span className="execution-shield"><Icon name="code" size={19} /></span>
-              <div><span className="eyebrow">Local project trust</span><h2 id="execution-trust-title">{executionTrustPurpose === 'project-setup' ? pendingExecutionCommandRef.current ? 'Prepare computation and run?' : 'Trust and prepare this project?' : executionTrustPurpose === 'packages' ? 'Manage this project’s Julia packages?' : executionTrustPurpose === 'format' ? 'Format this project’s code?' : executionTrustPurpose === 'formatter-setup' ? `Install the ${formatterSetupLanguage === 'python' ? 'Ruff' : 'styler'} formatter?` : executionTrustPurpose === 'console' ? 'Run code in the shared kernel terminal?' : executionTrustPurpose === 'kernel-setup' ? `Set up ${runtimeName(kernelSetupLanguage ?? selectedEnvironmentLanguage)} integration?` : 'Run this project’s code?'}</h2></div>
+              <div><span className="eyebrow">Local project trust</span><h2 id="execution-trust-title">{executionTrustPurpose === 'trust' ? 'Trust this project?' : executionTrustPurpose === 'project-setup' ? pendingExecutionCommandRef.current ? 'Prepare computation and run?' : 'Trust and prepare this project?' : executionTrustPurpose === 'packages' ? 'Manage this project’s Julia packages?' : executionTrustPurpose === 'format' ? 'Format this project’s code?' : executionTrustPurpose === 'formatter-setup' ? `Install the ${formatterSetupLanguage === 'python' ? 'Ruff' : 'styler'} formatter?` : executionTrustPurpose === 'console' ? 'Run code in the shared kernel terminal?' : executionTrustPurpose === 'kernel-setup' ? `Set up ${runtimeName(kernelSetupLanguage ?? selectedEnvironmentLanguage)} integration?` : 'Run this project’s code?'}</h2></div>
               <button className="icon-button" onClick={cancelExecutionTrust} disabled={executionTrustBusy} aria-label="Close execution trust dialog"><Icon name="close" /></button>
             </div>
             <div className="execution-trust-body">
               <p>{executionTrustWarning || 'Project code can read and change files and use the network with your user permissions. Local execution is not a sandbox.'}</p>
               <div className="execution-project-root"><Icon name="folder" size={15} /><span>{desktopSession?.root}</span></div>
-              <p className="execution-trust-note">DraftMatter remembers this choice on this device. On later opens it may check or repair detected language environments, but manuscript cells run only when you ask. You can forget trust from Local runtimes.</p>
+              <p className="execution-trust-note">DraftMatter remembers this choice on this device. Manuscript cells run only when you ask. You can forget trust from Code & computation.</p>
             </div>
             <div className="execution-dialog-actions">
               <button onClick={cancelExecutionTrust} disabled={executionTrustBusy}>Cancel</button>
@@ -7045,99 +7224,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
               ))}
             </div>
             <div className="execution-dialog-actions"><button onClick={() => void loadJuliaPackagesTrusted()} disabled={juliaPackageBusy || !desktopSession}>Refresh</button><span /><button className="primary-button" onClick={() => setJuliaPackagesOpen(false)} disabled={juliaPackageBusy}>Done</button></div>
-          </div>
-        </div>
-      )}
-
-      {environmentOpen && (
-        <div className="modal-backdrop execution-dialog-backdrop" onMouseDown={() => setEnvironmentOpen(false)}>
-          <div className="execution-environment-dialog" onMouseDown={(event) => event.stopPropagation()} role="dialog" aria-modal="true" aria-labelledby="execution-environment-title">
-            <div className="execution-dialog-head">
-              <span className="execution-shield"><Icon name="code" size={19} /></span>
-              <div><span className="eyebrow">Execution environments</span><h2 id="execution-environment-title">Local runtimes</h2><p>Choose a language and kernel for this project. Detected installations are listed below; DraftMatter verifies the connection when you run a calculation.</p></div>
-              <button className="icon-button" onClick={() => setEnvironmentOpen(false)} aria-label="Close execution environments"><Icon name="close" /></button>
-            </div>
-            <div className="execution-environment-list">
-              {(['python', 'r', 'julia'] as const).map((language) => {
-                const runtime = runtimeInventory?.executables[language]
-                const selected = language === selectedEnvironmentLanguage
-                const projectKernel = runtimeInventory && healthyKernelsFor(runtimeInventory, language)[0]
-                return <button className={selected ? 'selected' : ''} key={language} onClick={() => setSelectedEnvironmentLanguage(language)} aria-pressed={selected}>
-                  <span className={`runtime-language runtime-${language}`}>{language === 'python' ? 'Py' : language === 'julia' ? 'Jl' : 'R'}</span>
-                  <span><strong>{runtimeName(language)}</strong><small>{runtimeDiscoveryState === 'discovering' ? 'Checking…' : projectKernel ? `Detected kernel · ${projectKernel.displayName}` : runtime?.health === 'available' ? `${runtime.version ?? 'Version available'} · ${runtime.executable}` : runtime?.message ?? 'Not checked'}</small></span>
-                  <span className={`runtime-health ${projectKernel ? 'available' : runtime?.health ?? 'not-checked'}`}>{projectKernel ? 'Kernel detected' : runtime?.health === 'available' ? 'Installed only' : runtime?.health === 'unhealthy' ? 'Needs attention' : runtime?.health === 'missing' ? 'Missing' : 'Not checked'}</span>
-                </button>
-              })}
-            </div>
-            <div className="execution-environment-summary">
-              <label>
-                <strong>{runtimeName(selectedEnvironmentLanguage)} environment</strong>
-                <select
-                  aria-label="Jupyter kernel"
-                  value={selectedEnvironmentKernel?.name ?? ''}
-                  onChange={(event) => void selectExecutionKernel(selectedEnvironmentLanguage, event.target.value)}
-                  disabled={!runtimeInventory || selectedEnvironmentKernels.length === 0}
-                >
-                  {unavailableSelectedKernelName && <option value="" disabled>{unavailableSelectedKernelName} · unavailable</option>}
-                  {!runtimeInventory || (selectedEnvironmentKernels.length === 0 && !unavailableSelectedKernelName)
-                    ? <option value="">{runtimeInventory ? 'No healthy kernel found' : 'Not checked'}</option>
-                    : selectedEnvironmentKernels.map((kernel) => <option value={kernel.name} key={kernel.name}>{kernel.displayName}</option>)}
-                </select>
-                <span>{selectedEnvironmentKernel
-                  ? `${selectedEnvironmentKernel.displayName} · ${selectedEnvironmentKernel.executable ?? selectedEnvironmentKernel.resourceDir} · shared Jupyter kernel, no notebook server`
-                  : selectedEnvironmentPaths[selectedEnvironmentLanguage]
-                    ? `Saved environment · ${selectedEnvironmentPaths[selectedEnvironmentLanguage]} · integration unavailable`
-                    : runtimeInventory ? `${selectedEnvironmentKernels.length} ready ${runtimeName(selectedEnvironmentLanguage)} environment${selectedEnvironmentKernels.length === 1 ? '' : 's'}` : 'Check local environments to choose one'}</span>
-              </label>
-            </div>
-            {selectedEnvironmentLanguage === 'python' && (
-              <div className="project-environment-callout" data-language="python">
-                <span><strong>Python projects use uv</strong><small>DraftMatter prefers an existing Python and uv. When needed, it acquires uv in application data, creates .venv here, and keeps dependencies in pyproject.toml and uv.lock.</small></span>
-              </div>
-            )}
-            {selectedEnvironmentLanguage === 'r' && (
-              <div className="project-environment-callout" data-language="r">
-                <span><strong>R projects use renv</strong><small>DraftMatter uses the detected R installation, bootstraps renv only for R projects, and restores or creates renv.lock without changing the system R installation.</small></span>
-              </div>
-            )}
-            {selectedEnvironmentLanguage === 'julia' && (
-              <div className="project-environment-callout" data-language="julia">
-                <span><strong>Julia uses its native project environment</strong><small>The detected Julia runs with --project=. and dependencies remain in Project.toml and Manifest.toml.</small></span>
-              </div>
-            )}
-            {selectedEnvironmentLanguage !== 'julia' && selectedEnvironmentSetupExecutable && (() => {
-              const status = formatterStatuses[selectedEnvironmentLanguage]
-              const packageName = selectedEnvironmentLanguage === 'python' ? 'Ruff' : 'styler'
-              return <div className="formatter-package-callout" data-language={selectedEnvironmentLanguage}>
-                <span>
-                  <strong>Format {runtimeName(selectedEnvironmentLanguage)} cells automatically</strong>
-                  <small>{status?.available
-                    ? `${packageName} ${status.version ?? ''} is available in the selected environment.`.trim()
-                    : `Install ${packageName} into the selected environment; nothing is bundled with DraftMatter.`}</small>
-                </span>
-                <button onClick={() => void requestCodeFormatterSetup(selectedEnvironmentLanguage)} disabled={formatterSetupBusy || kernelSetupBusy}>
-                  {formatterSetupBusy && formatterSetupLanguage === selectedEnvironmentLanguage ? 'Installing…' : status?.available ? `Repair ${packageName}` : `Install ${packageName}`}
-                </button>
-              </div>
-            })()}
-            {selectedEnvironmentLanguage === 'julia' && selectedEnvironmentSetupExecutable && (
-              <div className="formatter-package-callout" data-language="julia">
-                <span><strong>Format Julia cells automatically</strong><small>JuliaFormatter remains a project dependency and does not increase the DraftMatter application size.</small></span>
-                <button onClick={() => { setEnvironmentOpen(false); void openJuliaPackages() }} disabled={juliaPackageBusy || kernelSetupBusy}>Manage Julia packages</button>
-              </div>
-            )}
-            {!selectedEnvironmentSetupExecutable && selectedEnvironmentRuntime?.health === 'missing' && <div className="execution-environment-help" role="status">{runtimeInstallationGuidance(selectedEnvironmentLanguage)}</div>}
-            {executionProblem && <div className="execution-environment-help" role="alert">{executionProblem}</div>}
-            <div className="execution-dialog-actions environment-actions">
-              {desktopSession && <button onClick={() => void forgetCurrentProjectTrust()} disabled={kernelSetupBusy || formatterSetupBusy}>Forget project trust</button>}
-              {onOpenLanguages && <button onClick={() => { setEnvironmentOpen(false); void leaveEditor(onOpenLanguages) }}>How languages work</button>}
-              {(selectedEnvironmentSetupExecutable || selectedEnvironmentLanguage === 'python') && <button onClick={() => void requestKernelIntegrationSetup(selectedEnvironmentLanguage)} disabled={kernelSetupBusy || formatterSetupBusy || runtimeDiscoveryState === 'discovering'}>{kernelSetupBusy && kernelSetupLanguage === selectedEnvironmentLanguage ? 'Setting up…' : selectedEnvironmentKernel ? 'Repair integration' : `Set up ${runtimeName(selectedEnvironmentLanguage)}`}</button>}
-              <button onClick={() => void restartExecution(selectedEnvironmentLanguage)} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}>Restart {runtimeName(selectedEnvironmentLanguage)}</button>
-              <button onClick={() => void terminateExecution(selectedEnvironmentLanguage)} disabled={!desktopSession}>Terminate {runtimeName(selectedEnvironmentLanguage)}</button>
-              <span />
-              <button onClick={() => void discoverExecutionEnvironments()} disabled={!desktopSession || runtimeDiscoveryState === 'discovering'}>{runtimeDiscoveryState === 'discovering' ? 'Checking…' : 'Refresh'}</button>
-              <button className="primary-button" onClick={() => setEnvironmentOpen(false)}>Done</button>
-            </div>
           </div>
         </div>
       )}

@@ -123,8 +123,7 @@ describe('project file browser', () => {
     expect(open).toHaveBeenLastCalledWith('analysis.py', { location: 'local', keepOpen: false })
     await act(async () => button('Open analysis.py').dispatchEvent(new MouseEvent('dblclick', { bubbles: true })))
     expect(open).toHaveBeenLastCalledWith('analysis.py', { location: 'local', keepOpen: true })
-    await act(async () => button('Keep analysis.py open').click())
-    expect(open).toHaveBeenLastCalledWith('analysis.py', { location: 'local', keepOpen: true })
+    expect(button('Keep analysis.py open')).toBeNull()
     await act(async () => button('Open online copy of analysis.py').click())
     expect(open).toHaveBeenLastCalledWith('analysis.py', { location: 'online', keepOpen: false })
     const select = container.querySelector<HTMLSelectElement>('select[aria-label="File location"]')!
@@ -169,5 +168,79 @@ describe('downloads reflect where files actually live', () => {
     await render('browser')
     if (layout === 'sidebar') await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Select paper.md"]')!.click())
     expect(container.querySelector('[aria-label="Download paper.md"]')).not.toBeNull()
+  })
+})
+
+describe('explicit manuscript designation', () => {
+  it('opens ordinary file tabs while keeping manuscript designation an explicit action', async () => {
+    const open = vi.fn(), setManuscript = vi.fn()
+    const files = [{ path: 'paper.md' }, { path: 'concept.md' }, { path: 'README.md' }, { path: 'analysis.py' }]
+    const render = (designatedManuscriptPath = 'paper.md', manuscriptSelectionBusy = false) => act(async () => root.render(<ProjectFileBrowser layout="sidebar" location="local" currentManuscriptPath="paper.md" designatedManuscriptPath={designatedManuscriptPath}
+      localFiles={files} onOpenFile={open} onSetManuscript={setManuscript} manuscriptSelectionBusy={manuscriptSelectionBusy} />))
+    await render()
+    const tree = container.querySelector('[aria-label="Project file tree"]')!
+    expect(tree.querySelectorAll('.project-file-manuscript-badge')).toHaveLength(1)
+    expect(tree.querySelector('.designated-manuscript')?.getAttribute('data-path')).toBe('paper.md')
+    expect(tree.querySelector('.project-file-manuscript-badge')?.textContent).toBe('Manuscript')
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open README.md"]')!.click())
+    expect(open).toHaveBeenCalledExactlyOnceWith('README.md', { location: 'local', keepOpen: false })
+    expect(setManuscript).not.toHaveBeenCalled()
+    expect(tree.querySelector('.designated-manuscript')?.getAttribute('data-path')).toBe('paper.md')
+    expect(container.querySelector('[aria-label="Selected project file"]')?.textContent).toContain('Markdown document')
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Set README.md as manuscript"]')!.click())
+    expect(setManuscript).toHaveBeenCalledExactlyOnceWith('README.md')
+    expect(open).toHaveBeenCalledTimes(1)
+    // Only the persisted designation supplied by the parent moves the marker.
+    expect(tree.querySelector('.designated-manuscript')?.getAttribute('data-path')).toBe('paper.md')
+    await render('README.md')
+    expect(tree.querySelectorAll('.project-file-manuscript-badge')).toHaveLength(1)
+    expect(tree.querySelector('.designated-manuscript')?.getAttribute('data-path')).toBe('README.md')
+
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open concept.md"]')!.click())
+    expect(open).toHaveBeenLastCalledWith('concept.md', { location: 'local', keepOpen: false })
+    await render('README.md', true)
+    expect(container.querySelector<HTMLButtonElement>('[aria-label="Set concept.md as manuscript"]')?.disabled).toBe(true)
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Set concept.md as manuscript"]')!.click())
+    expect(setManuscript).toHaveBeenCalledTimes(1)
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open analysis.py"]')!.click())
+    expect(container.querySelector('[aria-label="Selected project file"]')?.textContent).not.toContain('Set as manuscript')
+    expect(open).toHaveBeenCalledTimes(3)
+    expect(open).toHaveBeenLastCalledWith('analysis.py', { location: 'local', keepOpen: false })
+    expect(setManuscript).toHaveBeenCalledTimes(1)
+  })
+
+  it('supports mouse and keyboard context menus without changing the manuscript by selection', async () => {
+    const setManuscript = vi.fn()
+    await act(async () => root.render(<ProjectFileBrowser layout="sidebar" location="local" currentManuscriptPath="paper.md"
+      localFiles={[{ path: 'paper.md' }, { path: 'notes.md' }]} onSetManuscript={setManuscript} />))
+    const notes = container.querySelector<HTMLButtonElement>('[aria-label="Select notes.md"]')!
+    await act(async () => notes.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: 100, clientY: 100 })))
+    const menu = container.querySelector('[role="menu"][aria-label="Actions for notes.md"]')!
+    expect(menu).not.toBeNull()
+    expect(setManuscript).not.toHaveBeenCalled()
+    expect(document.activeElement).toBe(menu.querySelector('button'))
+    await act(async () => menu.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click())
+    expect(setManuscript).toHaveBeenCalledExactlyOnceWith('notes.md')
+    expect(container.querySelector('[role="menu"]')).toBeNull()
+    await act(async () => notes.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true })))
+    expect(container.querySelector('[role="menu"]')).not.toBeNull()
+    await act(async () => document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })))
+    expect(container.querySelector('[role="menu"]')).toBeNull()
+    expect(document.activeElement).toBe(notes)
+    expect(setManuscript).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not offer designation for online-only files and marks the saved manuscript in the dialog view', async () => {
+    const setManuscript = vi.fn()
+    await act(async () => root.render(<ProjectFileBrowser location="local" currentManuscriptPath="README.md" designatedManuscriptPath="paper.md"
+      localFiles={[{ path: 'paper.md' }, { path: 'README.md' }, { path: 'analysis.jl' }]} onlineFiles={[{ path: 'remote.md' }]} onSetManuscript={setManuscript} />))
+    expect(container.querySelectorAll('.project-file-manuscript-badge')).toHaveLength(1)
+    expect(container.querySelector('.designated-manuscript')?.textContent).toContain('paper.md')
+    expect(container.querySelector('[aria-label="Set README.md as manuscript"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="Set paper.md as manuscript"]')).toBeNull()
+    expect(container.querySelector('[aria-label="Set remote.md as manuscript"]')).toBeNull()
+    expect(container.querySelector('[aria-label="Set analysis.jl as manuscript"]')).toBeNull()
+    expect(setManuscript).not.toHaveBeenCalled()
   })
 })

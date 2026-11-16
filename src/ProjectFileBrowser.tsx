@@ -16,6 +16,7 @@ export interface ProjectFileBrowserProps {
   localFiles?: readonly ProjectFileInventoryInput[]
   onlineFiles?: readonly ProjectFileInventoryInput[]
   currentManuscriptPath: string
+  designatedManuscriptPath?: string
   referencedPaths?: readonly string[]
   figureLabels?: Readonly<Record<string, readonly string[]>>
   location: 'local' | 'online' | 'browser' | 'example'
@@ -29,6 +30,8 @@ export interface ProjectFileBrowserProps {
   onRefresh?: () => void
   onRevealFolder?: () => void
   onOpenFile?: (path: string, options?: ProjectFileOpenOptions) => void
+  onSetManuscript?: (path: string) => void
+  manuscriptSelectionBusy?: boolean
   onInsertFigure?: (path: string) => void
   /** Restrict insertion to image copies already available to the manuscript. */
   insertablePaths?: readonly string[]
@@ -43,9 +46,9 @@ const usageLabels = { current: 'Current manuscript', referenced: 'Referenced in 
 /** Shows known file copies without treating file presence as synchronization or a Git commit. */
 export function ProjectFileBrowser({
   layout = 'dialog',
-  localFiles, onlineFiles, currentManuscriptPath, referencedPaths, figureLabels, location, projectName, rootPath,
+  localFiles, onlineFiles, currentManuscriptPath, designatedManuscriptPath = currentManuscriptPath, referencedPaths, figureLabels, location, projectName, rootPath,
   localInventoryComplete = false, onlineInventoryComplete = false, liveCollaboration = false,
-  loading = false, problem, onRefresh, onRevealFolder, onOpenFile, onInsertFigure, insertablePaths, onDownloadFile, downloadablePaths, children,
+  loading = false, problem, onRefresh, onRevealFolder, onOpenFile, onSetManuscript, manuscriptSelectionBusy = false, onInsertFigure, insertablePaths, onDownloadFile, downloadablePaths, children,
 }: ProjectFileBrowserProps) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<'all' | 'local' | 'online'>('all')
@@ -56,8 +59,8 @@ export function ProjectFileBrowser({
   const hasOnlineFiles = files.some((file) => file.online)
 
   if (layout === 'sidebar') return <ProjectFileExplorer files={files} {...{
-    currentManuscriptPath, projectName, location, rootPath, loading, problem, onRefresh, onRevealFolder,
-    onOpenFile, onInsertFigure, insertablePaths, onDownloadFile, downloadablePaths, localInventoryComplete, onlineInventoryComplete, liveCollaboration, children,
+    currentManuscriptPath, designatedManuscriptPath, projectName, location, rootPath, loading, problem, onRefresh, onRevealFolder,
+    onOpenFile, onSetManuscript, manuscriptSelectionBusy, onInsertFigure, insertablePaths, onDownloadFile, downloadablePaths, localInventoryComplete, onlineInventoryComplete, liveCollaboration, children,
   }} />
 
   return <section className="project-file-browser" aria-label="Project files">
@@ -86,16 +89,20 @@ export function ProjectFileBrowser({
       const locationLabel = file.local && file.online ? `${localLabel} + online copy` : file.online ? 'Online' : localLabel
       const fileLocation = filter === 'online' ? 'online' : file.local ? 'local' : 'online'
       const openFile = (keepOpen = false, selectedLocation: 'local' | 'online' = fileLocation) => onOpenFile?.(file.path, { location: selectedLocation, keepOpen })
-      return <li key={file.path} className={`project-file-browser-row ${file.usage}`}>
+      const designated = file.path === designatedManuscriptPath
+      const canSetManuscript = onSetManuscript && file.local && /\.(qmd|md)$/i.test(file.path) && !designated
+      const kindLabel = file.kind === 'manuscript' && !designated ? /\.qmd$/i.test(file.path) ? 'Quarto document' : 'Markdown document' : projectFileKindLabel(file.kind)
+      return <li key={file.path} className={`project-file-browser-row ${file.usage} ${designated ? 'designated-manuscript' : ''}`.trim()}>
         <Icon name={file.kind === 'figure' ? 'image' : file.kind === 'code' || file.kind === 'environment' ? 'code' : file.kind === 'bibliography' ? 'book' : file.kind === 'data' ? 'table' : 'document'} size={16} />
         <div className="project-file-browser-file">
           {onOpenFile ? <button type="button" className="project-file-browser-open" title={`Open ${file.path}`} onClick={() => openFile()} onDoubleClick={() => openFile(true)}>{file.path}</button> : <strong title={file.path}>{file.path}</strong>}
-          <span>{figureLabels?.[file.path]?.length ? `${figureLabels[file.path].join(' · ')} · ` : ''}{projectFileKindLabel(file.kind)}{size !== undefined ? ` · ${projectFileByteSize(size)}` : ''} · {usageLabels[file.usage]}</span>
+          <span>{figureLabels?.[file.path]?.length ? `${figureLabels[file.path].join(' · ')} · ` : ''}{kindLabel}{size !== undefined ? ` · ${projectFileByteSize(size)}` : ''} · {designated ? 'Current manuscript' : file.usage === 'current' ? 'Open document' : usageLabels[file.usage]}</span>
           {file.local && file.online && <small>{file.localBytes !== undefined && file.onlineBytes !== undefined && file.localBytes !== file.onlineBytes ? 'Local and online file sizes differ.' : 'An online copy exists; matching contents have not been checked.'}</small>}
         </div>
-        <div className="project-file-browser-badges"><span className={`project-file-presence ${file.online ? 'online' : 'local'}`}>{locationLabel}</span>{file.gitTracked !== undefined && <span className={`project-file-git ${file.gitTracked ? 'tracked' : 'untracked'}`}>{file.gitTracked ? 'Tracked by Git' : 'Not tracked by Git'}</span>}{file.gitStatus && <span className="project-file-git-status">{file.gitStatus}</span>}</div>
+        <div className="project-file-browser-badges">{designated && <span className="project-file-manuscript-badge" aria-label="Current manuscript"><Icon name="check" size={11} />Manuscript</span>}<span className={`project-file-presence ${file.online ? 'online' : 'local'}`}>{locationLabel}</span>{file.gitTracked !== undefined && <span className={`project-file-git ${file.gitTracked ? 'tracked' : 'untracked'}`}>{file.gitTracked ? 'Tracked by Git' : 'Not tracked by Git'}</span>}{file.gitStatus && <span className="project-file-git-status">{file.gitStatus}</span>}</div>
         {onOpenFile && <button type="button" className="project-file-browser-download" aria-label={`Keep ${file.path} open`} onClick={() => openFile(true)}>Keep open</button>}
         {onOpenFile && file.local && file.online && <button type="button" className="project-file-browser-download" aria-label={`Open online copy of ${file.path}`} onClick={() => openFile(false, 'online')}>Open online</button>}
+        {canSetManuscript && <button type="button" className="project-file-set-manuscript" aria-label={`Set ${file.path} as manuscript`} disabled={manuscriptSelectionBusy} onClick={() => onSetManuscript(file.path)}><Icon name="document" size={13} />Set as manuscript</button>}
         {file.kind === 'figure' && /\.(?:png|jpe?g|gif|webp|svg)$/i.test(file.path) && onInsertFigure && (!insertablePaths || insertablePaths.includes(file.path)) && <button type="button" className="project-file-browser-insert" aria-label={`Insert ${file.path} as a figure`} onClick={() => onInsertFigure(file.path)}><Icon name="plus" size={12} /> Insert figure</button>}
         {onDownloadFile && !(location === 'local' && file.local) && (!downloadablePaths || downloadablePaths.includes(file.path)) && <button type="button" className="project-file-browser-download" aria-label={`Download ${file.path}`} onClick={() => onDownloadFile(file.path)}><Icon name="download" size={12} /> Download</button>}
       </li>

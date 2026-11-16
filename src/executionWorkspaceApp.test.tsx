@@ -155,6 +155,13 @@ describe('shared Jupyter execution workspace', () => {
 
   async function prepareEnvironments() {
     await openCodeWorkspace()
+    await settle()
+    const trust = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Trust this project')
+    if (trust) {
+      await act(async () => trust.click())
+      const confirm = container.querySelector<HTMLButtonElement>('[aria-labelledby="execution-trust-title"] .primary-button')!
+      await act(async () => confirm.click())
+    }
     const prepare = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Prepare project languages')!
     await act(async () => prepare.click())
   }
@@ -195,7 +202,7 @@ describe('shared Jupyter execution workspace', () => {
     await act(async () => repair.finish())
     await settleUntil(() => container.querySelector('.rail-terminal-button')?.getAttribute('data-label') === 'Terminal · Ready')
     expect(workspace.isConnected).toBe(true)
-    expect(workspace.textContent).toContain('Environments')
+    expect(container.querySelector('[aria-label="Check Python"]')).not.toBeNull()
   })
 
   it('keeps optional computation accessible through a compact tool with its state in the tooltip', () => {
@@ -395,6 +402,7 @@ describe('shared Jupyter execution workspace', () => {
   it('keeps Julia package work in the background until the terminal is opened', async () => {
     await settle(420)
     await openCodeWorkspace()
+    await checkLanguage('Julia')
     let resolveAdd: (environment: JuliaEnvironment) => void = () => undefined
     vi.mocked(desktopHost.addJuliaPackage).mockImplementationOnce(() => new Promise((resolve) => { resolveAdd = resolve }))
     const packages = [...container.querySelectorAll<HTMLButtonElement>('button')]
@@ -499,44 +507,122 @@ describe('shared Jupyter execution workspace', () => {
     expect(savedSources.join('\n')).not.toContain('dm-output:start cell="py-setup"')
   })
 
-  it('shows only language environments and shared kernels', async () => {
+  async function checkLanguage(label: 'Python' | 'R' | 'Julia') {
     await openCodeWorkspace()
-    const findEnvironments = () => [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
-      .find((button) => button.textContent?.includes('Environments'))
-    await settleUntil(() => Boolean(findEnvironments()))
-    const environments = findEnvironments()!
-    await act(async () => environments.click())
-    await settleUntil(() => Boolean(container.querySelector('[aria-labelledby="execution-environment-title"]')))
-    const dialog = container.querySelector<HTMLElement>('[aria-labelledby="execution-environment-title"]')!
-    expect(dialog.textContent).toContain('shared Jupyter kernel, no notebook server')
+    await settleUntil(() => !container.querySelector<HTMLButtonElement>(`[aria-label="Check ${label}"]`)!.disabled)
+    await act(async () => container.querySelector<HTMLButtonElement>(`[aria-label="Check ${label}"]`)!.click())
+    await settleUntil(() => container.querySelector(`[aria-label="Check ${label}"]`)?.textContent === 'Check')
+  }
+
+  it('checks only the requested language and shows its options inline without running manuscript code', async () => {
+    await checkLanguage('Python')
+    expect(vi.mocked(desktopHost.probeRuntime).mock.calls.map(([language]) => language)).toEqual(['python'])
+    expect(desktopHost.setupKernelIntegration).not.toHaveBeenCalled()
+    expect(desktopHost.executeKernel).not.toHaveBeenCalled()
+    expect(container.querySelector('[aria-labelledby="execution-environment-title"]')).toBeNull()
+    expect(container.querySelector('[aria-label="Python environment controls"]')?.textContent).toContain('Python · DraftMatter')
+    expect(container.querySelector('[aria-label="Python Jupyter kernel"]')).not.toBeNull()
+    expect(container.querySelector('[aria-label="R Jupyter kernel"]')).toBeNull()
+    expect(container.querySelector('[aria-label="R environment options"]')?.textContent).not.toContain('Kernel detected')
+    expect(container.querySelector('[aria-label="Julia environment options"]')?.textContent).not.toContain('Kernel detected')
   })
 
-  it('keeps Python and R formatter packages outside the application bundle', async () => {
+  it('keeps language checks and setup locked until a separate trust confirmation, which runs nothing', async () => {
+    let trusted = false
+    vi.mocked(desktopHost.executionTrustStatus).mockImplementation(async () => ({ trusted, scope: 'session', warning: 'Local code can read files.' }))
+    vi.mocked(desktopHost.trustProjectForSession).mockImplementation(async () => { trusted = true; return { trusted, scope: 'session', warning: 'trusted' } })
     await openCodeWorkspace()
-    const findEnvironments = () => [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
-      .find((button) => button.textContent?.includes('Environments'))
-    await settleUntil(() => Boolean(findEnvironments()))
-    const environments = findEnvironments()!
-    await act(async () => environments.click())
-    await settleUntil(() => Boolean(container.querySelector('[aria-labelledby="execution-environment-title"]')))
+    await settle()
+    const check = container.querySelector<HTMLButtonElement>('[aria-label="Check Python"]')!
+    expect(check.disabled).toBe(true)
+    expect(desktopHost.probeRuntime).not.toHaveBeenCalled()
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Trust this project')!.click())
+    expect(container.querySelector('[aria-labelledby="execution-trust-title"] h2')?.textContent).toBe('Trust this project?')
+    expect(desktopHost.trustProjectForSession).not.toHaveBeenCalled()
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-labelledby="execution-trust-title"] .primary-button')!.click())
+    expect(check.disabled).toBe(false)
+    expect(desktopHost.probeRuntime).not.toHaveBeenCalled()
+    expect(desktopHost.discoverJupyterKernels).not.toHaveBeenCalled()
+    expect(desktopHost.setupKernelIntegration).not.toHaveBeenCalled()
+    expect(desktopHost.installCodeFormatter).not.toHaveBeenCalled()
+    expect(desktopHost.executeKernel).not.toHaveBeenCalled()
+    await act(async () => check.click())
+    await settleUntil(() => container.querySelector('[aria-label="Python Jupyter kernel"]') !== null)
+    expect(vi.mocked(desktopHost.probeRuntime).mock.calls.map(([language]) => language)).toEqual(['python'])
+  })
 
-    let dialog = container.querySelector<HTMLElement>('[aria-labelledby="execution-environment-title"]')!
-    await settleUntil(() => dialog.querySelector('.formatter-package-callout')?.textContent?.includes('Ruff 0.12.0 is available') ?? false)
-    expect(dialog.querySelector('.formatter-package-callout')?.textContent).toContain('Ruff 0.12.0 is available')
-    expect(dialog.querySelector('.formatter-package-callout')?.textContent).toContain('Repair Ruff')
-    await act(async () => dialog.querySelector<HTMLButtonElement>('.formatter-package-callout button')!.click())
-    await settle(140)
-    expect(desktopHost.installCodeFormatter).toHaveBeenCalledWith(
-      expect.objectContaining({ root: rootPath, language: 'python' }),
-      expect.any(String),
-    )
+  it('installs formatters from the selected language options with concise environment-specific labels', async () => {
+    await checkLanguage('Python')
+    let options = container.querySelector<HTMLElement>('[aria-label="Python environment controls"]')!
+    await settleUntil(() => options.textContent?.includes('Ruff 0.12.0 is available') ?? false)
+    expect(options.textContent).not.toContain('bundled')
+    const repair = [...options.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Repair Ruff')!
+    await act(async () => repair.click())
+    await settleUntil(() => vi.mocked(desktopHost.installCodeFormatter).mock.calls.length === 1)
+    expect(desktopHost.installCodeFormatter).toHaveBeenCalledWith(expect.objectContaining({ root: rootPath, language: 'python' }), expect.any(String))
+    await checkLanguage('R')
+    options = container.querySelector<HTMLElement>('[aria-label="R environment controls"]')!
+    await settleUntil(() => options.textContent?.includes('styler 1.10.3 is available') ?? false)
+    expect(options.textContent).not.toContain('bundled')
+    expect([...options.querySelectorAll('button')].map((button) => button.textContent)).toEqual(expect.arrayContaining(['Restart R', 'Terminate R']))
+    expect(options.textContent).not.toContain('Restart Python')
+  })
 
-    dialog = container.querySelector<HTMLElement>('[aria-labelledby="execution-environment-title"]')!
-    const rRuntime = [...dialog.querySelectorAll<HTMLButtonElement>('.execution-environment-list button')]
-      .find((button) => button.querySelector('strong')?.textContent === 'R')!
-    await act(async () => rRuntime.click())
-    await settleUntil(() => dialog.querySelector('.formatter-package-callout')?.textContent?.includes('styler 1.10.3 is available') ?? false)
-    expect(dialog.querySelector('.formatter-package-callout')?.textContent).toContain('styler 1.10.3 is available')
+  it('installs JuliaFormatter directly without opening package management or executing manuscript cells', async () => {
+    vi.mocked(desktopHost.addJuliaPackage).mockResolvedValueOnce({ packages: [{ name: 'JuliaFormatter', version: '2.10.1', kind: 'package' }], projectFile: true, manifestFile: true })
+    await checkLanguage('Julia')
+    const options = container.querySelector<HTMLElement>('[aria-label="Julia environment controls"]')!
+    expect(options.textContent).toContain('Install JuliaFormatter into the selected environment.')
+    expect(options.textContent).not.toContain('application size')
+    await act(async () => [...options.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Install JuliaFormatter')!.click())
+    await settleUntil(() => options.textContent?.includes('JuliaFormatter is available') ?? false)
+    expect(desktopHost.addJuliaPackage).toHaveBeenCalledWith({ root: rootPath, name: 'JuliaFormatter' }, expect.any(String))
+    expect(container.querySelector('[aria-labelledby="julia-packages-title"]')).toBeNull()
+    expect(desktopHost.listJuliaPackages).not.toHaveBeenCalled()
+    expect(desktopHost.executeKernel).not.toHaveBeenCalled()
+  })
+
+  it('ignores a second Check while the first request is still verifying project trust', async () => {
+    await openCodeWorkspace()
+    await settleUntil(() => !container.querySelector<HTMLButtonElement>('[aria-label="Check Python"]')!.disabled)
+    const gate = pendingStep()
+    const trustCalls = vi.mocked(desktopHost.executionTrustStatus).mock.calls.length
+    vi.mocked(desktopHost.executionTrustStatus).mockImplementationOnce(async () => {
+      await gate.promise
+      return { trusted: true, scope: 'session', warning: 'trusted' }
+    })
+    const check = container.querySelector<HTMLButtonElement>('[aria-label="Check Python"]')!
+    await act(async () => { check.click(); check.click() })
+    expect(desktopHost.executionTrustStatus).toHaveBeenCalledTimes(trustCalls + 1)
+    expect(desktopHost.probeRuntime).not.toHaveBeenCalled()
+    expect(check.disabled).toBe(true)
+    await act(async () => gate.finish())
+    await settleUntil(() => !check.disabled)
+    expect(vi.mocked(desktopHost.probeRuntime).mock.calls.map(([language]) => language)).toEqual(['python'])
+  })
+
+  it('can retry a failed language probe without affecting the other languages or manuscript', async () => {
+    vi.mocked(desktopHost.probeRuntime).mockRejectedValueOnce(new Error('The Python interpreter could not be checked.'))
+    vi.mocked(desktopHost.discoverJupyterKernels).mockResolvedValueOnce({ health: 'missing', kernels: [], searchedLocations: [] })
+    await checkLanguage('Python')
+    expect(container.querySelector('[aria-label="Python environment options"]')?.textContent).toContain('Needs attention')
+    expect(container.textContent).toContain('The Python interpreter could not be checked.')
+    await checkLanguage('Python')
+    expect(container.querySelector('[aria-label="Python environment options"]')?.textContent).toContain('Kernel detected')
+    expect(vi.mocked(desktopHost.probeRuntime).mock.calls.map(([language]) => language)).toEqual(['python', 'python'])
+    expect(desktopHost.executeKernel).not.toHaveBeenCalled()
+  })
+
+  it('locks language controls immediately after project trust is forgotten', async () => {
+    vi.spyOn(desktopHost, 'revokeProjectTrust').mockResolvedValue({ trusted: false, scope: 'session', warning: 'not trusted' })
+    await checkLanguage('Python')
+    const forget = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Forget project trust')!
+    await act(async () => forget.click())
+    expect(desktopHost.revokeProjectTrust).toHaveBeenCalledWith(rootPath)
+    expect(container.querySelector('[aria-label="Check Python"]')?.matches(':disabled')).toBe(true)
+    expect(container.querySelector('[aria-label="Python Jupyter kernel"]')?.matches(':disabled')).toBe(true)
+    expect(container.querySelector('[aria-label="Python environment controls"] button')?.matches(':disabled')).toBe(true)
+    expect(desktopHost.executeKernel).not.toHaveBeenCalled()
   })
 
   it('keeps terminal history and shared kernel status when the bottom panel closes', async () => {

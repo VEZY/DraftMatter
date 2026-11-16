@@ -203,7 +203,7 @@ describe('full structured manuscript editor', () => {
     const selectionPrefix = () => { const range = document.createRange(); range.selectNodeContents(content); range.setEnd(getSelection()!.anchorNode!, getSelection()!.anchorOffset); return range.toString() }
     const beforeSelection = { prefix: selectionPrefix(), selected: getSelection()!.toString() }
     selected.mockClear()
-    await act(async () => { expect(editor.current?.setSearch('evidence')).toEqual({ query: 'evidence', total: 3, current: 1 }) })
+    await act(async () => { expect(editor.current?.setSearch('evidence')).toMatchObject({ query: 'evidence', total: 3, current: 1 }) })
     expect(content.querySelectorAll('.manuscript-find-match')).toHaveLength(3)
     await act(async () => { expect(editor.current?.findNext()?.current).toBe(2); expect(editor.current?.findNext(-1)?.current).toBe(1) })
     expect({ prefix: selectionPrefix(), selected: getSelection()!.toString() }).toEqual(beforeSelection)
@@ -216,7 +216,7 @@ describe('full structured manuscript editor', () => {
     await act(async () => { expect(editor.current?.undo()).toBe(true) })
     expect(onSearch.mock.calls.at(-1)?.[0].total).toBe(3)
     await act(async () => render('# Changed document\n\nOne evidence.\n'))
-    expect(onSearch.mock.calls.at(-1)?.[0]).toEqual({ query: 'evidence', total: 1, current: 1 })
+    expect(onSearch.mock.calls.at(-1)?.[0]).toMatchObject({ query: 'evidence', total: 1, current: 1 })
     await act(async () => { editor.current?.setSearch('') })
     expect(content.querySelector('.manuscript-find-match')).toBeNull()
   })
@@ -225,7 +225,7 @@ describe('full structured manuscript editor', () => {
     const manuscript = '# Results\n\nBefore evidence.\n\n```python {#find-table .execute output="table"}\nprint("secret_hidden_code evidence")\n```\n\n<!-- dm-output:start cell="find-table" run="sha256:find" -->\n| Treatment | Mean |\n| --- | --- |\n| evidence | 18 |\n: Generated evidence. {#tbl-find}\n<!-- dm-output:end -->\n\nAfter evidence.\n'
     const editor = createRef<StructuredManuscriptEditorHandle>(), changed = vi.fn()
     await act(async () => root.render(<StructuredManuscriptEditor ref={editor} source={manuscript} onChange={changed} />))
-    await act(async () => { expect(editor.current?.setSearch('evidence')).toEqual({ query: 'evidence', total: 4, current: 1 }) })
+    await act(async () => { expect(editor.current?.setSearch('evidence')).toMatchObject({ query: 'evidence', total: 4, current: 1 }) })
     expect(container.querySelector('.manuscript-find-active')?.parentElement?.textContent).toContain('Before evidence')
     await act(async () => { expect(editor.current?.findNext()?.current).toBe(2) })
     expect(container.querySelector('.structured-output-caption')?.classList).toContain('manuscript-find-external-active')
@@ -261,6 +261,58 @@ describe('full structured manuscript editor', () => {
     expect(Y.encodeStateAsUpdate(shared)).toEqual(encoded)
     expect(onChange).not.toHaveBeenCalled(); expect(publish).not.toHaveBeenCalled(); expect(onSuggestion).not.toHaveBeenCalled()
     await act(async () => { expect(editor.current?.undo()).toBe(false) })
+  })
+
+  it('replaces manuscript prose with one exact undo while retaining portable code, citations and review metadata', async () => {
+    const manuscript = source.replace('Evidence [@vezy2024]', 'Evidence leaf and **leaf** [@vezy2024]')
+    const editor = createRef<StructuredManuscriptEditorHandle>(), onChange = vi.fn()
+    await act(async () => root.render(<StructuredManuscriptEditor ref={editor} source={manuscript} onChange={onChange} />))
+    await act(async () => { expect(editor.current?.setSearch('leaf')).toMatchObject({ total: 2, replaceable: 2 }) })
+    await act(async () => { expect(editor.current?.replaceSearch('bud', true)).toEqual({ replaced: 2, skipped: 0 }) })
+    const replaced = editor.current!.source()
+    expect(replaced).toContain('Evidence bud and **bud** [@vezy2024]')
+    expect(replaced).toContain('print("before")')
+    expect(replaced).toContain('Check this statement.')
+    expect(replaced).toContain('data-anchor="dm-comment"')
+    expect(onChange).toHaveBeenCalledOnce()
+    await act(async () => { expect(editor.current?.undo()).toBe(true) })
+    expect(editor.current?.source()).toBe(manuscript)
+    await act(async () => { expect(editor.current?.undo()).toBe(false) })
+    await act(async () => { expect(editor.current?.redo()).toBe(true) })
+    expect(editor.current?.source()).toBe(replaced)
+  })
+
+  it('refuses replacement while Track Changes is enabled without touching prose, code, history or review metadata', async () => {
+    const manuscript = '# Study\n\nA leaf grows.\n\n```python\nprint("leaf")\n```\n\nAnother leaf grows.\n'
+    const editor = createRef<StructuredManuscriptEditorHandle>(), changed = vi.fn(), captured = vi.fn()
+    await act(async () => root.render(<StructuredManuscriptEditor ref={editor} source={manuscript} onChange={changed} suggestionMode suggestionAuthor={{ id: 'dm-author', name: 'Reviewer' }} onSuggestionCapture={captured} />))
+    await act(async () => {
+      editor.current?.setSearch('leaf')
+      expect(editor.current?.replaceSearch('bud', true)).toEqual({ replaced: 0, skipped: 0, error: 'Turn off Track Changes to replace text. No text was changed.' })
+    })
+    expect(changed).not.toHaveBeenCalled(); expect(captured).not.toHaveBeenCalled()
+    expect(editor.current?.source()).toBe(manuscript)
+    await act(async () => { expect(editor.current?.undo()).toBe(false) })
+    await act(async () => root.render(<StructuredManuscriptEditor ref={editor} source={manuscript} onChange={changed} readOnly />))
+    await act(async () => { editor.current?.setSearch('leaf'); expect(editor.current?.replaceSearch('lost').error).toContain('Editing access') })
+    expect(editor.current?.source()).toBe(manuscript)
+    expect(changed).not.toHaveBeenCalled()
+  })
+
+  it('publishes replacement through collaboration and restores it through collaborative undo', async () => {
+    const manuscript = '# Shared search\n\nShared evidence and more evidence.\n'
+    const shared = new Y.Doc(), awareness = new Awareness(shared)
+    collaborativeDocuments.push(shared); collaborativeAwareness.push(awareness)
+    createCollaborativeProseMirrorState({ document: shared, awareness, schema: manuscriptSchema, initialDocument: parseStructuredManuscript(manuscript).document })
+    const editor = createRef<StructuredManuscriptEditorHandle>(), changed = vi.fn(), publish = vi.fn()
+    await act(async () => root.render(<StructuredManuscriptEditor ref={editor} source={manuscript} onChange={changed} collaboration={{ document: shared, awareness, publishPortableSource: publish }} />))
+    await act(async () => { editor.current?.setSearch('evidence'); expect(editor.current?.replaceSearch('finding', true).replaced).toBe(2) })
+    expect(changed).toHaveBeenCalledOnce(); expect(publish).toHaveBeenCalledOnce()
+    expect(shared.getXmlFragment(COLLABORATIVE_PROSEMIRROR_ROOT).toJSON()).toContain('finding')
+    await act(async () => { expect(editor.current?.undo()).toBe(true) })
+    expect(editor.current?.source()).toBe(manuscript)
+    expect(shared.getXmlFragment(COLLABORATIVE_PROSEMIRROR_ROOT).toJSON()).not.toContain('finding')
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)) })
   })
 
   it.each([

@@ -34,6 +34,20 @@ document** on the left. Enter a phrase, then use **Enter / Shift+Enter** for the
 next or previous match. The search includes the visible title and bibliography.
 **Escape** closes it and returns to the manuscript without changing the text.
 
+The **Match case**, **Whole words**, and **Use regular expression** buttons add
+the corresponding search options. Regular expressions use a linear-time engine:
+lookaround and pattern backreferences are not supported. Invalid or unsupported
+patterns show an error without changing the manuscript.
+
+Expand the arrow beside the search field to **Replace** the current occurrence
+or **Replace all** editable matches. Replacements support undo and require
+editing access with Track Changes turned off. Search remains available in
+read-only views and while Track Changes is enabled. The title is edited directly;
+references, generated output, table/equation captions, footnotes and protected items are
+searchable but stay unchanged by replacement. Regex replacements accept `$1`,
+`$<name>`, `$&` and `$$`; empty matches are ignored. Very broad searches are
+limited to 10,000 results and must be narrowed before replacing all.
+
 Choose **History** on the left to browse recovery versions for the current
 manuscript only. Histories are identified by both project and manuscript path;
 two projects containing `paper.md` have separate histories. On desktop, verified
@@ -72,10 +86,15 @@ with the figures in the manuscript; the file tree keeps their stable names.
 ## Know where the files live
 
 Choose **Files** on the left to browse folders without leaving the paper.
-Select a file to see its available actions: open another manuscript, insert an
+Select a file to see its available actions: designate another manuscript, insert an
 image, or download a copy when it lives online or only in this browser. Files
 already in a local desktop project do not offer a redundant download. The
-current manuscript is marked in the tree. Search
+project's manuscript has an outlined row and a visible **Manuscript** badge.
+Selecting a README, note, or another file does not change the paper. To make a
+local Markdown/Quarto file the paper, select it and choose **Set as manuscript**,
+or use the same action from its right-click/Shift+F10 menu. DraftMatter saves the
+current paper before switching and remembers the choice in the project. A failed
+save leaves the current paper open. Opening and selecting files never run code. Search
 finds files inside closed folders. **Outline** switches the same pane back to
 the manuscript plan.
 
@@ -224,7 +243,17 @@ every collaborator's files.
 ## Use computation when it helps
 
 The **Code & computation** panel separates language environments from manuscript
-calculations. **Installed only** means a runtime was found; **Kernel detected**
+calculations. Project trust and **How languages work** appear above the language
+cards. Trust authorizes language checks, installations and execution; reading
+and editing the paper remains possible without it. Trusting a project alone
+does not run its code.
+
+Choose **Check** beside Python, R or Julia, then expand that language's card to
+select its kernel, set up or repair integration, install its formatter, restart
+or terminate its session. These actions stay with their language. Returning from
+the language guide takes you back to the same open manuscript.
+
+**Installed only** means a runtime was found; **Kernel detected**
 means an available execution connection was found and will be checked again
 when you run a calculation.
 

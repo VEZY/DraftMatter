@@ -26,6 +26,7 @@ export interface ProjectFilesWorkspaceProps {
   layout?: 'dialog' | 'sidebar'
   project: ProjectSnapshot | null
   currentManuscriptPath: string
+  designatedManuscriptPath?: string
   source: string
   browserImages?: readonly SharedProjectImage[]
   sharedImages?: readonly SharedProjectImage[]
@@ -36,6 +37,8 @@ export interface ProjectFilesWorkspaceProps {
   onClose: () => void
   onInsertFigure?: (path: string) => void
   onOpenFile?: (path: string, options?: ProjectFileOpenOptions) => void
+  onSetManuscript?: (path: string) => void
+  manuscriptSelectionBusy?: boolean
   onDownloadFile?: (path: string) => void | Promise<void>
   synchronizationPanel?: ReactNode
 }
@@ -89,9 +92,9 @@ export function ProjectFilesWorkspace(props: ProjectFilesWorkspaceProps) {
 
 function ProjectFilesWorkspaceSession({
   layout = 'dialog',
-  project, currentManuscriptPath, source, browserImages = EMPTY_IMAGES, sharedImages = EMPTY_IMAGES,
+  project, currentManuscriptPath, designatedManuscriptPath = project?.config.mainDocument ?? currentManuscriptPath, source, browserImages = EMPTY_IMAGES, sharedImages = EMPTY_IMAGES,
   builtInFiles = EMPTY_FILES, location, projectName, collaborationFileContext, onClose, onInsertFigure,
-  onOpenFile, onDownloadFile, synchronizationPanel,
+  onOpenFile, onSetManuscript, manuscriptSelectionBusy, onDownloadFile, synchronizationPanel,
 }: ProjectFilesWorkspaceProps) {
   const [inventory, setInventory] = useState<ProjectFileInventory | null>(null)
   const [loading, setLoading] = useState(false)
@@ -209,7 +212,7 @@ function ProjectFilesWorkspaceSession({
     <header className="project-files-workspace-header"><div>{layout !== 'sidebar' && <span className="eyebrow">Your manuscript and its files</span>}<h2 id="project-files-workspace-title">Files</h2>{layout !== 'sidebar' && <p>Add images to the paper and see where every available file lives.</p>}</div><button type="button" className="icon-button" onClick={onClose} aria-label="Close project files"><Icon name="close" size={layout === 'sidebar' ? 16 : 18} /></button></header>
     <div className="project-files-workspace-body">
       {layout !== 'sidebar' && synchronizationPanel}
-      <ProjectFileBrowser layout={layout} localFiles={localFiles} onlineFiles={onlineFiles} currentManuscriptPath={currentManuscriptPath} referencedPaths={usage.referencedPaths} figureLabels={usage.figureLabels} location={location} projectName={projectName ?? project?.config.name} rootPath={project?.root} localInventoryComplete={Boolean(inventory && !inventory.truncated)} onlineInventoryComplete={!collaborationFileContext || Boolean(remoteCatalogue)} liveCollaboration={Boolean(collaborationFileContext)} loading={loading} problem={[problem, remoteProblem].filter(Boolean).join(' ')} onRefresh={project || remoteClient ? () => setRefreshSequence((value) => value + 1) : undefined} onOpenFile={openFile} onInsertFigure={onInsertFigure} insertablePaths={insertablePaths} onDownloadFile={(path) => void download(path)} downloadablePaths={onDownloadFile ? undefined : downloadablePaths}>
+      <ProjectFileBrowser layout={layout} localFiles={localFiles} onlineFiles={onlineFiles} currentManuscriptPath={currentManuscriptPath} designatedManuscriptPath={designatedManuscriptPath} referencedPaths={usage.referencedPaths} figureLabels={usage.figureLabels} location={location} projectName={projectName ?? project?.config.name} rootPath={project?.root} localInventoryComplete={Boolean(inventory && !inventory.truncated)} onlineInventoryComplete={!collaborationFileContext || Boolean(remoteCatalogue)} liveCollaboration={Boolean(collaborationFileContext)} loading={loading} problem={[problem, remoteProblem].filter(Boolean).join(' ')} onRefresh={project || remoteClient ? () => setRefreshSequence((value) => value + 1) : undefined} onOpenFile={openFile} onSetManuscript={onSetManuscript} manuscriptSelectionBusy={manuscriptSelectionBusy} onInsertFigure={onInsertFigure} insertablePaths={insertablePaths} onDownloadFile={(path) => void download(path)} downloadablePaths={onDownloadFile ? undefined : downloadablePaths}>
         {collaborationFileContext || (layout === 'sidebar' && synchronizationPanel) ? <>
           {layout === 'sidebar' && synchronizationPanel}
           {collaborationFileContext && <ProjectFilesPanel {...collaborationFileContext} onOpenFile={openFile} onCatalogueChange={setRemoteCatalogue} />}

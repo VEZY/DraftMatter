@@ -6,7 +6,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DraftMatterApplication } from './DraftMatterApplication'
 
 vi.mock('./App', () => ({
-  default: ({ initialExperience, startExampleTour }: { initialExperience?: string; startExampleTour?: boolean }) => <div data-testid="editor" data-example-tour={startExampleTour ? 'open' : 'closed'}>{initialExperience ?? 'editor'}</div>,
+  default: ({ initialExperience, startExampleTour, active = true, onOpenLanguages }: { initialExperience?: string; startExampleTour?: boolean; active?: boolean; onOpenLanguages?: () => void }) => <>
+    <div data-testid="editor" data-example-tour={startExampleTour ? 'open' : 'closed'} data-active={active}>{initialExperience ?? 'editor'}<input aria-label="Mock manuscript" defaultValue="Original draft" /></div>
+    <button onClick={onOpenLanguages}>Mock language guide</button>
+  </>,
 }))
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
@@ -171,6 +174,47 @@ describe('DraftMatter application entry', () => {
     expect(container.querySelector('h1')?.textContent).toBe('Code that belongs to the project.')
     expect(container.textContent).toContain('Existing installations come first.')
 
+    await act(async () => root.unmount())
+  })
+
+  it.each(['/draft', '/?example=complete', '/tutorial'])('returns from language help to the same mounted manuscript at %s', async (path) => {
+    window.history.replaceState({}, '', path)
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<DraftMatterApplication />))
+    await waitFor(() => Boolean(container.querySelector('[data-testid="editor"]')))
+    const editor = container.querySelector<HTMLElement>('[data-testid="editor"]')!
+    const manuscript = container.querySelector<HTMLInputElement>('[aria-label="Mock manuscript"]')!
+    manuscript.value = 'Work still in progress'
+    const open = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Mock language guide')!
+    await act(async () => open.click())
+
+    expect(window.location.pathname).toBe('/languages')
+    expect(container.querySelector('h1')?.textContent).toBe('Code that belongs to the project.')
+    expect(editor.closest('[hidden]')).not.toBeNull()
+    expect(editor.dataset.active).toBe('false')
+    const back = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Back to manuscript')!
+    await act(async () => back.click())
+
+    expect(window.location.pathname + window.location.search).toBe(path)
+    expect(container.querySelector('[data-testid="editor"]')).toBe(editor)
+    expect(manuscript.value).toBe('Work still in progress')
+    expect(editor.closest('[hidden]')).toBeNull()
+    expect(editor.dataset.active).toBe('true')
+
+    // Browser Back and Forward through the help route must preserve the editor too.
+    await act(async () => {
+      window.history.replaceState({}, '', '/languages')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    expect(editor.closest('[hidden]')).not.toBeNull()
+    await act(async () => {
+      window.history.replaceState({}, '', path)
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    expect(container.querySelector('[data-testid="editor"]')).toBe(editor)
+    expect(manuscript.value).toBe('Work still in progress')
+    expect(editor.closest('[hidden]')).toBeNull()
     await act(async () => root.unmount())
   })
 

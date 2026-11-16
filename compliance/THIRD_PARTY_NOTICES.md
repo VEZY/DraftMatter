@@ -640,6 +640,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | randexp | 0.4.6 | MIT | development |
 | npm | range-parser | 1.3.0 | MIT | required |
 | npm | raw-body | 3.0.2 | MIT | required |
+| npm | re2js | 2.10.0 | MIT | required |
 | npm | react | 19.2.7 | MIT | required |
 | npm | react-dom | 19.2.7 | MIT | required |
 | npm | remark-parse | 11.0.0 | MIT | required |

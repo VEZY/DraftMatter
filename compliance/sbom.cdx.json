@@ -20,7 +20,7 @@
       },
       {
         "name": "draftmatter:dependency-fingerprint",
-        "value": "sha256:1ada2457eb012bda1f8d4ca8e44a7c6f6bf5e40f7626b0a3e1ab669bc681991e"
+        "value": "sha256:5262958e963af577315ec961cd175cdd28626f2cdfe2e72737197e8417fbb6e0"
       }
     ]
   },
@@ -16610,6 +16610,35 @@
         {
           "type": "distribution",
           "url": "https://registry.npmjs.org/raw-body/-/raw-body-3.0.2.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/re2js@2.10.0",
+      "name": "re2js",
+      "version": "2.10.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT"
+        }
+      ],
+      "purl": "pkg:npm/re2js@2.10.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/re2js/-/re2js-2.10.0.tgz"
         }
       ],
       "properties": [

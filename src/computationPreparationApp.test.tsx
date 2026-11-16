@@ -152,7 +152,7 @@ describe('prepare a computation from its first Run action', () => {
     await settleUntil(() => Boolean(container.textContent?.includes('Package download failed')))
     expect(desktopHost.executeKernel).not.toHaveBeenCalled()
 
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close execution environments"]')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close Code and computation"]')!.click())
     await requestRun()
     await settleUntil(() => vi.mocked(desktopHost.executeKernel).mock.calls.length === 2)
     expect(vi.mocked(desktopHost.executeKernel).mock.calls.map(([request]) => request.cellId)).toEqual(['analysis-setup', 'requested-result'])
@@ -166,9 +166,12 @@ describe('prepare a computation from its first Run action', () => {
 
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
     const prepare = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Prepare project languages')!
-    await act(async () => prepare.click())
-    expect(container.querySelector('[aria-labelledby="execution-trust-title"]')?.textContent).toContain('Preparation does not run manuscript computations')
+    expect(prepare.disabled).toBe(true)
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Trust this project')!.click())
+    expect(container.querySelector('[aria-labelledby="execution-trust-title"]')?.textContent).toContain('Trust this project?')
     await confirmPreparation()
+    expect(desktopHost.setupKernelIntegration).not.toHaveBeenCalled()
+    await act(async () => prepare.click())
     await settleUntil(() => vi.mocked(desktopHost.setupKernelIntegration).mock.calls.length === 1)
     expect(desktopHost.executeKernel).not.toHaveBeenCalled()
   })
@@ -182,7 +185,7 @@ describe('prepare a computation from its first Run action', () => {
     await act(async () => appRoot.render(<App desktopProjectLaunch={project} />))
     await settleUntil(() => Boolean(container.querySelector('[data-dm-id="requested-result"] .structured-code-run')))
     await requestRun()
-    await settleUntil(() => Boolean(container.querySelector('[aria-labelledby="execution-environment-title"]')))
+    await settleUntil(() => Boolean(container.querySelector('[aria-label="R environment controls"]')))
     expect(container.textContent).toContain('Install R')
     expect(desktopHost.setupKernelIntegration).not.toHaveBeenCalled()
     expect(desktopHost.executeKernel).not.toHaveBeenCalled()

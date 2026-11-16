@@ -1,10 +1,24 @@
-.manuscript-find { align-items: center; background: #fff; border: 1px solid #d7dfd8; border-radius: 8px; box-shadow: 0 5px 20px #20382b18; color: #52665a; display: flex; gap: 5px; padding: 6px 7px 6px 10px; position: fixed; right: 22px; top: 70px; width: min(430px, calc(100vw - 24px)); z-index: 75; }
+.manuscript-find { background: #fff; border: 1px solid #d7dfd8; border-radius: 8px; box-shadow: 0 5px 20px #20382b18; color: #52665a; padding: 6px 7px; position: fixed; right: 22px; top: 70px; width: min(470px, calc(100vw - 24px)); z-index: 75; }
+.manuscript-find-row { align-items: center; display: flex; gap: 5px; }
 .manuscript-find input { background: transparent; border: 0; color: #304c3d; flex: 1; font: inherit; font-size: 12px; min-width: 0; outline-offset: 2px; padding: 5px; }
-.manuscript-find output { color: #627268; font-size: 11px; white-space: nowrap; }
+.manuscript-find input[aria-invalid="true"] { outline: 1px solid #b14735; border-radius: 3px; }
+.manuscript-find output { color: #58695e; font-size: 11px; white-space: nowrap; }
 .manuscript-find button { align-items: center; border-radius: 4px; color: #4e6657; display: inline-flex; flex: 0 0 28px; height: 28px; justify-content: center; }
 .manuscript-find button:hover:not(:disabled) { background: #edf3ed; }
+.manuscript-find button[aria-pressed="true"] { background: #e1eee3; box-shadow: inset 0 0 0 1px #9aaf9c; color: #294d36; }
 .manuscript-find button:disabled { opacity: .4; }
 .manuscript-find-previous { transform: rotate(180deg); }
+.manuscript-find-collapsed { transform: rotate(-90deg); }
+.manuscript-find-options { align-items: center; display: flex; gap: 4px; margin: 3px 0 0 32px; }
+.manuscript-find-options button { font-family: ui-monospace, monospace; font-size: 12px; height: 24px; }
+.manuscript-find-options small { color: #5c6d61; font-size: 10px; margin-left: 4px; }
+.manuscript-find-whole-word { border-bottom: 1px solid currentColor; padding: 0 1px; }
+.manuscript-replace-row { border-top: 1px solid #e3e9e3; margin-top: 5px; padding-top: 6px; }
+.manuscript-find .manuscript-replace-action { background: #f2f6f0; border: 1px solid #d5dfd2; flex-basis: auto; font-size: 11px; padding: 0 8px; white-space: nowrap; }
+.manuscript-find-hint, .manuscript-find-message, .manuscript-find-error { font-size: 10px; line-height: 1.5; margin: 6px 5px 3px; overflow-wrap: anywhere; }
+.manuscript-find-hint { color: #5b6c60; }
+.manuscript-find-message { color: #355a40; }
+.manuscript-find-error { color: #963b2c; }
 .manuscript-find-match { background: #fff0a6; box-shadow: 0 0 0 1px #e2c66a55; }
 .manuscript-find-active { background: #ffc86b; box-shadow: 0 0 0 1px #b77324; }
 ::highlight(draftmatter-find-all) { background: #fff0a6; color: #172d20; }
