@@ -6,6 +6,8 @@ import { ProjectFilesWorkspace, projectFilesManuscriptUsage } from './ProjectFil
 import { desktopHost, type ProjectSnapshot } from './desktopHost'
 import { CollaborationServiceClient } from './collaboration/serviceClient'
 import { sharedImage } from './sharedEditor/projectResources'
+import { ProjectFileClient } from './collaboration/projectFileClient'
+import { PROJECT_FILE_CHUNK_BYTES, PROJECT_FILE_QUOTA_BYTES, type ProjectFile } from './collaboration/projectFiles'
 
 vi.mock('./ProjectFilesPanel', () => ({ ProjectFilesPanel: ({ projectId }: { projectId: string }) => <div data-testid="data-files">Shared data versions for {projectId}</div> }))
 
@@ -42,6 +44,23 @@ function button(label: string) {
 }
 
 describe('connected project files workspace', () => {
+  it('opens local data without switching manuscripts and resolves exact current online versions separately', async () => {
+    const open = vi.fn()
+    const client = new CollaborationServiceClient('https://collaboration.example.test', async () => 'token')
+    const remote: ProjectFile = { id: 'file-current', path: 'data/input.csv', size: 3, mediaType: 'text/csv', createdAt: '2026-11-13T10:00:00Z', createdBy: 'alice', chunkSize: PROJECT_FILE_CHUNK_BYTES, parts: [{ partNumber: 1, size: 3, sha256: 'a'.repeat(64) }] }
+    const remoteImage = { ...remote, id: 'file-image', path: 'figures/online-only.png', mediaType: 'image/png' }
+    const laterDatedOld = { ...remote, id: 'file-old', createdAt: '2026-11-14T10:00:00Z' }
+    vi.spyOn(ProjectFileClient.prototype, 'catalogue').mockResolvedValue({ files: [laterDatedOld, remote, remoteImage], uploads: [], heads: [{ path: remote.path, versionId: remote.id, deleted: false }, { path: remoteImage.path, versionId: remoteImage.id, deleted: false }], quota: { limitBytes: PROJECT_FILE_QUOTA_BYTES, usedBytes: 9, reservedBytes: 0 } })
+    await act(async () => root.render(<ProjectFilesWorkspace project={project} currentManuscriptPath="paper.qmd" source="# Paper" location="local" collaborationFileContext={{ client, workspace: { id: 'workspace-1', name: 'Team', role: 'viewer', createdAt: remote.createdAt }, projectId: 'project-1', currentUserId: 'alice' }} onClose={vi.fn()} onOpenFile={open} onInsertFigure={vi.fn()} />))
+    await act(async () => container.querySelector<HTMLButtonElement>('button[title="Open data/input.csv"]')!.click())
+    expect(open).toHaveBeenLastCalledWith('data/input.csv', { location: 'local', keepOpen: false })
+    await act(async () => button('Open online copy of data/input.csv').click())
+    expect(open).toHaveBeenLastCalledWith('data/input.csv', { location: 'online', keepOpen: false, file: remote })
+    expect(container.querySelector('button[title="Open figures/online-only.png"]')).not.toBeNull()
+    expect(button('Insert figures/used.png as a figure')).not.toBeNull()
+    expect(button('Insert figures/online-only.png as a figure')).toBeNull()
+  })
+
   it('lists local files and current figure numbers without requiring or probing Git', async () => {
     const insert = vi.fn()
     await act(async () => root.render(<ProjectFilesWorkspace project={project} currentManuscriptPath="paper.qmd" source="![A response](figures/used.png){#fig-response}" location="local" onClose={vi.fn()} onInsertFigure={insert} />))

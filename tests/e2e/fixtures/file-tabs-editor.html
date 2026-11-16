@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Project file editor browser test</title>
+    <style>
+      body { margin: 0; padding: 20px; background: #edf0f3; font: 14px system-ui; }
+      #file-tabs-editor-test { max-width: 1100px; margin: auto; }
+      .project-document-workspace { height: 76vh; }
+      .fixture-files { display: flex; flex-wrap: wrap; gap: 10px; padding-bottom: 16px; }
+      .fixture-files button { font: inherit; padding: 8px 12px; }
+      .fixture-manuscript { background: white; padding: 40px; min-height: 300px; }
+      [contenteditable] { outline-offset: 4px; }
+    </style>
+  </head>
+  <body>
+    <main id="file-tabs-editor-test"></main>
+    <script type="module">
+      import React, { useRef, useState } from 'react'
+      import { createRoot } from 'react-dom/client'
+      import { ProjectDocumentWorkspace } from '/src/ProjectDocumentWorkspace.tsx'
+      import { desktopHost } from '/src/desktopHost.ts'
+
+      const encoder = new TextEncoder()
+      const files = new Map([
+        ['scripts/analysis.js', 'globalThis.__fixtureScriptExecuted = true;\nlet threshold = 1;\n'],
+        ['notes/methods.md', '# Methods note\n\nA **rendered** note with an inert image.\n\n![External image](https://untrusted.example/image.png)\n\n<script>globalThis.__fixtureScriptExecuted = true<\/script>'],
+        ['.gitignore', 'node_modules/\noutputs/\n'],
+        ['data/archive.bin', Uint8Array.from([0, 255, 16, 128])],
+      ])
+      const reads = [], writes = []
+      globalThis.__fixtureScriptExecuted = false
+      const hash = async (bytes) => `sha256:${Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', bytes))).map((value) => value.toString(16).padStart(2, '0')).join('')}`
+      const bytesOf = (value) => typeof value === 'string' ? encoder.encode(value) : value
+      desktopHost.available = true
+      desktopHost.readProjectFilePreview = async (root, path, maxBytes) => {
+        if (root !== '/fixture/project') throw new Error('Wrong project scope.')
+        const content = files.get(path)
+        if (content === undefined) throw new Error('Missing fixture file.')
+        const bytes = bytesOf(content)
+        const limit = Math.min(maxBytes, bytes.length)
+        reads.push({ path, maxBytes, returnedBytes: limit })
+        return { path, bytes: [...bytes.slice(0, limit)], size: bytes.length, modifiedMs: 1, truncated: limit < bytes.length, hash: limit === bytes.length ? await hash(bytes) : null }
+      }
+      desktopHost.saveProjectFileText = async ({ root, path, content, expectedHash }) => {
+        if (root !== '/fixture/project') throw new Error('Wrong project scope.')
+        const current = files.get(path)
+        if (current === undefined || await hash(bytesOf(current)) !== expectedHash) throw new Error('The file changed outside DraftMatter. Reload it before saving.')
+        files.set(path, content)
+        writes.push({ path, content, expectedHash })
+        const bytes = encoder.encode(content)
+        return { path, bytes: bytes.length, hash: await hash(bytes), recoveryPath: null }
+      }
+      window.fileTabsFixture = {
+        editOnDisk(path, text) { files.set(path, text) },
+        text(path) { const value = files.get(path); return typeof value === 'string' ? value : null },
+        reads() { return reads },
+        writes() { return writes },
+      }
+      function Fixture() {
+        const workspaceRef = useRef(null)
+        const [notice, setNotice] = useState('')
+        return React.createElement(React.Fragment, null,
+          React.createElement('nav', { className: 'fixture-files', 'aria-label': 'Fixture project files' },
+            ...[['Open script', 'scripts/analysis.js'], ['Open notes', 'notes/methods.md'], ['Open binary', 'data/archive.bin'], ['Open .gitignore', '.gitignore']].map(([label, path]) => React.createElement('button', { key: path, type: 'button', onClick: () => workspaceRef.current.openFile(path, { location: 'local' }) }, label))),
+          notice && React.createElement('p', { role: 'status' }, notice),
+          React.createElement(ProjectDocumentWorkspace, {
+            workspaceRef, scope: 'file-tabs-editor-fixture', root: '/fixture/project', manuscriptPath: 'paper.qmd',
+            images: [], sharedImages: [], bundledFiles: [], onNotice: setNotice,
+          }, React.createElement('section', { className: 'fixture-manuscript' },
+            React.createElement('h1', null, 'The manuscript stays open'),
+            React.createElement('div', { contentEditable: true, suppressContentEditableWarning: true, role: 'textbox', 'aria-label': 'Manuscript editor' }, 'Unsaved manuscript text.'))))
+      }
+      createRoot(document.getElementById('file-tabs-editor-test')).render(React.createElement(Fixture))
+    </script>
+  </body>
+</html>

@@ -104,6 +104,17 @@ async function openFiles() {
 }
 
 describe('project files panel', () => {
+  it('opens a selected immutable shared version for a reader without starting a download', async () => {
+    const server = backend()
+    const open = vi.fn()
+    await act(async () => root.render(<ProjectFilesPanel client={server.client} workspace={{ id: 'lab', name: 'Lab', role: 'viewer', createdAt: '2026-11-11T09:00:00Z' }} projectId="paper" currentUserId="alice" onOpenFile={open} />))
+    await openFiles()
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open data/shared.csv version file-1"]')!.click())
+    expect(open).toHaveBeenLastCalledWith('data/shared.csv', { location: 'online', keepOpen: false, file: server.files[0] })
+    expect(download).not.toHaveBeenCalled()
+    expect(server.requests).toHaveLength(1)
+  })
+
   it.each(['owner', 'editor', 'commenter', 'viewer'] as WorkspaceRole[])('shows file versions and download access for %s with the correct write controls', async (role) => {
     const server = backend()
     await render(server, role)

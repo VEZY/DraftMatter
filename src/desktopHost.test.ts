@@ -9,6 +9,20 @@ const project: ProjectSnapshot = {
 }
 
 describe('desktop host adapter', () => {
+  it('opens bounded inert previews and explicitly saves text against its exact fingerprint', async () => {
+    const invoke = vi.fn(async () => ({ hash: 'saved' }))
+    const host = createDesktopHost(invoke as never, vi.fn(), true)
+    await host.readProjectFilePreview('/research/canopy', 'scripts/analysis.py', 1024)
+    expect(invoke).toHaveBeenLastCalledWith('read_project_file_preview', { root: '/research/canopy', path: 'scripts/analysis.py', maxBytes: 1024 })
+    const expectedHash = `sha256:${'a'.repeat(64)}`
+    await host.saveProjectFileText({ root: '/research/canopy', path: '.gitignore', content: 'résultats/\n', expectedHash })
+    expect(invoke).toHaveBeenLastCalledWith('apply_project_sync_file', { request: { root: '/research/canopy', path: '.gitignore', bytes: [...new TextEncoder().encode('résultats/\n')], expectedHash } })
+    invoke.mockClear()
+    await expect(host.saveProjectFileText({ root: '/research/canopy', path: 'data.txt', content: 'x', expectedHash: '' })).rejects.toThrow('Reopen')
+    await expect(host.saveProjectFileText({ root: '/research/canopy', path: 'data.txt', content: 'x'.repeat(1024 * 1024 + 1), expectedHash })).rejects.toThrow('1 MiB')
+    expect(invoke).not.toHaveBeenCalled()
+  })
+
   it('keeps native command names and payloads typed and narrow', async () => {
     const calls: Array<[string, Record<string, unknown> | undefined]> = []
     const invoke = async <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {

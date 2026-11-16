@@ -1,6 +1,14 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Icon } from './Icon'
 import { buildProjectFileInventory, projectFileByteSize, projectFileKindLabel, type ProjectFileInventoryInput } from './projectFileInventory'
+import type { ProjectFile } from './collaboration/projectFiles'
+
+export interface ProjectFileOpenOptions {
+  keepOpen?: boolean
+  location?: 'local' | 'online'
+  /** A specific immutable shared version, when one was selected. */
+  file?: ProjectFile
+}
 
 export interface ProjectFileBrowserProps {
   localFiles?: readonly ProjectFileInventoryInput[]
@@ -18,8 +26,10 @@ export interface ProjectFileBrowserProps {
   problem?: string
   onRefresh?: () => void
   onRevealFolder?: () => void
-  onOpenFile?: (path: string) => void
+  onOpenFile?: (path: string, options?: ProjectFileOpenOptions) => void
   onInsertFigure?: (path: string) => void
+  /** Restrict insertion to image copies already available to the manuscript. */
+  insertablePaths?: readonly string[]
   onDownloadFile?: (path: string) => void
   downloadablePaths?: readonly string[]
   children?: ReactNode
@@ -32,7 +42,7 @@ const usageLabels = { current: 'Current manuscript', referenced: 'Referenced in 
 export function ProjectFileBrowser({
   localFiles, onlineFiles, currentManuscriptPath, referencedPaths, figureLabels, location, projectName, rootPath,
   localInventoryComplete = false, onlineInventoryComplete = false, liveCollaboration = false,
-  loading = false, problem, onRefresh, onRevealFolder, onOpenFile, onInsertFigure, onDownloadFile, downloadablePaths, children,
+  loading = false, problem, onRefresh, onRevealFolder, onOpenFile, onInsertFigure, insertablePaths, onDownloadFile, downloadablePaths, children,
 }: ProjectFileBrowserProps) {
   const [query, setQuery] = useState('')
   const [filter, setFilter] = useState<'all' | 'local' | 'online'>('all')
@@ -66,16 +76,19 @@ export function ProjectFileBrowser({
     {visible.length > 0 ? <ul className="project-file-browser-list" aria-label="Files and locations">{visible.map((file) => {
       const size = file.localBytes ?? file.onlineBytes
       const locationLabel = file.local && file.online ? `${localLabel} + online copy` : file.online ? 'Online' : localLabel
-      const canOpen = onOpenFile && file.kind === 'manuscript' && file.local && file.usage !== 'current'
+      const fileLocation = filter === 'online' ? 'online' : file.local ? 'local' : 'online'
+      const openFile = (keepOpen = false, selectedLocation: 'local' | 'online' = fileLocation) => onOpenFile?.(file.path, { location: selectedLocation, keepOpen })
       return <li key={file.path} className={`project-file-browser-row ${file.usage}`}>
         <Icon name={file.kind === 'figure' ? 'image' : file.kind === 'code' || file.kind === 'environment' ? 'code' : file.kind === 'bibliography' ? 'book' : file.kind === 'data' ? 'table' : 'document'} size={16} />
         <div className="project-file-browser-file">
-          {canOpen ? <button type="button" className="project-file-browser-open" title={`Open ${file.path}`} onClick={() => onOpenFile(file.path)}>{file.path}</button> : <strong title={file.path}>{file.path}</strong>}
+          {onOpenFile ? <button type="button" className="project-file-browser-open" title={`Open ${file.path}`} onClick={() => openFile()} onDoubleClick={() => openFile(true)}>{file.path}</button> : <strong title={file.path}>{file.path}</strong>}
           <span>{figureLabels?.[file.path]?.length ? `${figureLabels[file.path].join(' · ')} · ` : ''}{projectFileKindLabel(file.kind)}{size !== undefined ? ` · ${projectFileByteSize(size)}` : ''} · {usageLabels[file.usage]}</span>
           {file.local && file.online && <small>{file.localBytes !== undefined && file.onlineBytes !== undefined && file.localBytes !== file.onlineBytes ? 'Local and online file sizes differ.' : 'An online copy exists; matching contents have not been checked.'}</small>}
         </div>
         <div className="project-file-browser-badges"><span className={`project-file-presence ${file.online ? 'online' : 'local'}`}>{locationLabel}</span>{file.gitTracked !== undefined && <span className={`project-file-git ${file.gitTracked ? 'tracked' : 'untracked'}`}>{file.gitTracked ? 'Tracked by Git' : 'Not tracked by Git'}</span>}{file.gitStatus && <span className="project-file-git-status">{file.gitStatus}</span>}</div>
-        {file.kind === 'figure' && /\.(?:png|jpe?g|gif|webp|svg)$/i.test(file.path) && onInsertFigure && <button type="button" className="project-file-browser-insert" aria-label={`Insert ${file.path} as a figure`} onClick={() => onInsertFigure(file.path)}><Icon name="plus" size={12} /> Insert figure</button>}
+        {onOpenFile && <button type="button" className="project-file-browser-download" aria-label={`Keep ${file.path} open`} onClick={() => openFile(true)}>Keep open</button>}
+        {onOpenFile && file.local && file.online && <button type="button" className="project-file-browser-download" aria-label={`Open online copy of ${file.path}`} onClick={() => openFile(false, 'online')}>Open online</button>}
+        {file.kind === 'figure' && /\.(?:png|jpe?g|gif|webp|svg)$/i.test(file.path) && onInsertFigure && (!insertablePaths || insertablePaths.includes(file.path)) && <button type="button" className="project-file-browser-insert" aria-label={`Insert ${file.path} as a figure`} onClick={() => onInsertFigure(file.path)}><Icon name="plus" size={12} /> Insert figure</button>}
         {onDownloadFile && (!downloadablePaths || downloadablePaths.includes(file.path)) && <button type="button" className="project-file-browser-download" aria-label={`Download ${file.path}`} onClick={() => onDownloadFile(file.path)}><Icon name="download" size={12} /> Download</button>}
       </li>
     })}</ul> : <p className="project-file-browser-empty">{search || filter !== 'all' ? 'No files match this search.' : loading ? 'Loading files…' : 'No project files are available here yet.'}</p>}

@@ -4,6 +4,7 @@ import { once } from 'node:events'
 import { DataType, newDb } from 'pg-mem'
 import { afterEach, describe, expect, it } from 'vitest'
 import { CollaborationServiceClient } from '../../src/collaboration/serviceClient'
+import { ProjectFileClient } from '../../src/collaboration/projectFileClient'
 import { PROJECT_FILE_CHUNK_BYTES, PROJECT_FILE_QUOTA_BYTES, type ProjectFile, type ProjectFileUpload } from '../../src/collaboration/projectFiles'
 import { WorkspaceAccessError } from '../../src/collaboration/workspaceService'
 import { createCollaborationHttpApi, handleNodeHttpRequest, collaborationRequestBodyLimit } from './httpApi'
@@ -59,6 +60,39 @@ async function fixture() {
 }
 
 describe('authenticated project file HTTP contract', () => {
+  it('returns a bounded authenticated immutable preview and guards explicit text saves against concurrent changes', async () => {
+    const { request, api, files, workspaces } = await fixture()
+    const bytes = new TextEncoder().encode('name,value\nplant,42\n')
+    const upload = await files.begin('editor', scope, { path: 'data/values.csv', size: bytes.length, mediaType: 'text/csv', expectedVersionId: null })
+    await files.putPart('editor', scope, upload.id, 1, bytes, digest(bytes))
+    const original = await files.complete('editor', scope, upload.id)
+    const response = await request(`${base}/${original.id}/preview?maxBytes=5`, 'reader', { headers: { origin: 'https://app.example.test' } })
+    expect(response.status).toBe(200)
+    expect(new Uint8Array(await response.arrayBuffer())).toEqual(bytes.slice(0, 5))
+    expect(response.headers.get('x-draftmatter-sha256')).toBe(digest(bytes.slice(0, 5)))
+    expect(response.headers.get('x-draftmatter-version')).toBe(original.id)
+    expect(response.headers.get('x-draftmatter-file-size')).toBe(String(bytes.length))
+    expect(response.headers.get('access-control-expose-headers')).toContain('x-draftmatter-version')
+    expect((await request(`${base}/${original.id}/preview?maxBytes=0`, 'reader')).status).toBe(400)
+    expect((await request(`${base}/${original.id}/preview?maxBytes=${PROJECT_FILE_CHUNK_BYTES + 1}`, 'reader')).status).toBe(400)
+    expect((await request(`${base}/${original.id}/preview`, 'stranger')).status).toBe(404)
+
+    const client = (token: string) => new ProjectFileClient(new CollaborationServiceClient('https://sync.example.test', async () => token, async (url, init) => api(new Request(String(url), init))), scope.workspaceId, scope.projectId, token)
+    const reader = client('reader')
+    const partial = await reader.readPreview(original, 5)
+    expect(partial).toEqual({ bytes: bytes.slice(0, 5), truncated: true, versionId: original.id })
+    expect((await reader.readPreview(original, 1024)).truncated).toBe(false)
+    await expect(reader.saveText(original, 'reader overwrite')).rejects.toThrow()
+    const editor = client('editor')
+    const saved = await editor.saveText(original, 'name,value\nplant,43\n')
+    expect(saved.id).not.toBe(original.id)
+    await expect(editor.saveText(original, 'stale overwrite')).rejects.toThrow()
+    // Earlier versions remain accessible and retain their original bytes.
+    expect((await reader.readPreview(original)).bytes).toEqual(bytes)
+    await workspaces.revokeMember('owner', scope.workspaceId, 'reader')
+    await expect(reader.readPreview(saved)).rejects.toThrow()
+  })
+
   it('uploads binary data, exposes durable resume progress, and lets an invited reader download the immutable version', async () => {
     const { request, files } = await fixture()
     const bytes = new TextEncoder().encode('date,temperature\n2026-11-11,25\n')

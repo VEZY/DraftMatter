@@ -18,6 +18,27 @@ afterEach(async () => {
 })
 
 describe('project file browser', () => {
+  it('opens every file as a preview and distinguishes retained tabs and online copies', async () => {
+    const open = vi.fn()
+    const paths = ['paper.qmd', 'notes/context.md', 'scripts/fit.py', 'data/input.csv', '.gitignore', '.gitattributes', 'assets/binary.bin']
+    await act(async () => root.render(<ProjectFileBrowser location="local" currentManuscriptPath="paper.qmd" localFiles={paths.map((path) => ({ path }))} onlineFiles={[{ path: 'scripts/fit.py' }]} onOpenFile={open} />))
+    for (const path of paths) {
+      const entry = container.querySelector<HTMLButtonElement>(`button[title="Open ${path}"]`)!
+      await act(async () => entry.click())
+      expect(open).toHaveBeenLastCalledWith(path, { location: 'local', keepOpen: false })
+    }
+    await act(async () => container.querySelector<HTMLButtonElement>('button[title="Open scripts/fit.py"]')!.dispatchEvent(new MouseEvent('dblclick', { bubbles: true })))
+    expect(open).toHaveBeenLastCalledWith('scripts/fit.py', { location: 'local', keepOpen: true })
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Keep data/input.csv open"]')!.click())
+    expect(open).toHaveBeenLastCalledWith('data/input.csv', { location: 'local', keepOpen: true })
+    await act(async () => container.querySelector<HTMLButtonElement>('button[aria-label="Open online copy of scripts/fit.py"]')!.click())
+    expect(open).toHaveBeenLastCalledWith('scripts/fit.py', { location: 'online', keepOpen: false })
+    const location = container.querySelector<HTMLSelectElement>('select[aria-label="File location"]')!
+    await act(async () => { location.value = 'online'; location.dispatchEvent(new Event('change', { bubbles: true })) })
+    await act(async () => container.querySelector<HTMLButtonElement>('button[title="Open scripts/fit.py"]')!.click())
+    expect(open).toHaveBeenLastCalledWith('scripts/fit.py', { location: 'online', keepOpen: false })
+  })
+
   it('shows other project files, honest copy status, and usable image insertion', async () => {
     const insert = vi.fn()
     await act(async () => root.render(<ProjectFileBrowser location="local" currentManuscriptPath="paper.qmd" localInventoryComplete localFiles={[{ path: 'paper.qmd', gitTracked: true }, { path: 'figures/unused.png', bytes: 20 }, { path: 'data/measurements.csv', bytes: 31, gitTracked: false }]} onlineFiles={[{ path: 'figures/unused.png', bytes: 20 }]} onInsertFigure={insert} />))

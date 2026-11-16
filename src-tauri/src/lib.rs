@@ -24,6 +24,7 @@ mod execution_manifests;
 mod project_transactions;
 mod project_file_download;
 mod project_inventory;
+mod project_file_preview;
 mod project_sync;
 mod execution_trust;
 mod export_adapter;
@@ -3558,6 +3559,7 @@ pub fn run() {
             read_bibliography,
             read_project_assets,
             list_project_files,
+            project_file_preview::read_project_file_preview,
             project_sync::read_project_sync_state,
             project_sync::save_project_sync_state,
             project_sync::inspect_project_sync_files,

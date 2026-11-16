@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { desktopHost, type ProjectFileInventory, type ProjectSnapshot } from './desktopHost'
-import { ProjectFileBrowser, type ProjectFileBrowserProps } from './ProjectFileBrowser'
+import { ProjectFileBrowser, type ProjectFileBrowserProps, type ProjectFileOpenOptions } from './ProjectFileBrowser'
 import { ProjectFilesPanel } from './ProjectFilesPanel'
+import { ProjectFileClient } from './collaboration/projectFileClient'
+import type { ProjectFile, ProjectFileCatalogue } from './collaboration/projectFiles'
 import type { CollaborationServiceClient, WorkspaceSummary } from './collaboration/serviceClient'
 import { base64ToBytes, type SharedProjectImage } from './sharedEditor/projectResources'
 import { parseStructuredManuscript } from './structuredManuscript'
@@ -32,7 +34,7 @@ export interface ProjectFilesWorkspaceProps {
   collaborationFileContext?: CollaborationFileContext | null
   onClose: () => void
   onInsertFigure?: (path: string) => void
-  onOpenFile?: (path: string) => void
+  onOpenFile?: (path: string, options?: ProjectFileOpenOptions) => void
   onDownloadFile?: (path: string) => void | Promise<void>
   synchronizationPanel?: ReactNode
 }
@@ -93,6 +95,9 @@ function ProjectFilesWorkspaceSession({
   const [problem, setProblem] = useState('')
   const [downloadStatus, setDownloadStatus] = useState('')
   const [refreshSequence, setRefreshSequence] = useState(0)
+  const [remoteCatalogue, setRemoteCatalogue] = useState<ProjectFileCatalogue | null>(null)
+  const [remoteProblem, setRemoteProblem] = useState('')
+  const remoteClient = useMemo(() => collaborationFileContext ? new ProjectFileClient(collaborationFileContext.client, collaborationFileContext.workspace.id, collaborationFileContext.projectId, collaborationFileContext.currentUserId) : null, [collaborationFileContext?.client, collaborationFileContext?.workspace.id, collaborationFileContext?.projectId, collaborationFileContext?.currentUserId])
   const mounted = useRef(true)
   useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
   useEffect(() => {
@@ -110,6 +115,36 @@ function ProjectFilesWorkspaceSession({
     return () => { cancelled = true }
   }, [project?.root, refreshSequence])
 
+  useEffect(() => {
+    if (!remoteClient || !onOpenFile) return
+    const controller = new AbortController()
+    setRemoteProblem('')
+    void remoteClient.catalogue(controller.signal).then((catalogue) => {
+      if (!controller.signal.aborted) setRemoteCatalogue(catalogue)
+    }).catch((error) => {
+      if (!controller.signal.aborted) setRemoteProblem(errorMessage(error))
+    })
+    return () => controller.abort()
+  }, [remoteClient, Boolean(onOpenFile), refreshSequence])
+
+  const onlineVersions = useMemo(() => {
+    const versions = new Map<string, ProjectFile>()
+    if (!remoteCatalogue) return versions
+    if (remoteCatalogue.heads) {
+      for (const head of remoteCatalogue.heads) {
+        const file = !head.deleted && remoteCatalogue.files.find((item) => item.id === head.versionId)
+        if (file) versions.set(file.path, file)
+      }
+    } else {
+      for (const file of [...remoteCatalogue.files].sort((a, b) => b.createdAt.localeCompare(a.createdAt))) if (!versions.has(file.path)) versions.set(file.path, file)
+    }
+    return versions
+  }, [remoteCatalogue])
+
+  const openFile = onOpenFile ? (path: string, options?: ProjectFileOpenOptions) => {
+    onOpenFile(path, options?.location === 'online' ? { ...options, file: options.file ?? onlineVersions.get(path) } : options)
+  } : undefined
+
   const usage = useMemo(() => projectFilesManuscriptUsage(source, currentManuscriptPath), [source, currentManuscriptPath])
   const localFiles = useMemo<ProjectFileInventoryInput[]>(() => {
     if (project) {
@@ -125,11 +160,15 @@ function ProjectFilesWorkspaceSession({
   const onlineFiles = useMemo<ProjectFileInventoryInput[]>(() => [
     ...(location === 'online' || collaborationFileContext ? [{ path: currentManuscriptPath, kind: 'manuscript' as const }] : []),
     ...sharedImages.map((image) => ({ path: image.path, bytes: imageSize(image), kind: 'figure' as const })),
-  ], [location, collaborationFileContext, currentManuscriptPath, sharedImages])
+    ...[...onlineVersions.values()].map((file) => ({ path: file.path, bytes: file.size })),
+  ], [location, collaborationFileContext, currentManuscriptPath, sharedImages, onlineVersions])
   const downloadablePaths = useMemo(() => [...new Set([
     currentManuscriptPath, ...builtInFiles.map((file) => file.path), ...browserImages.map((image) => image.path), ...sharedImages.map((image) => image.path),
     ...localFiles.filter((file) => ['figure', 'manuscript', 'bibliography'].includes(file.kind ?? projectFileKind(file.path))).map((file) => file.path),
   ])], [currentManuscriptPath, builtInFiles, browserImages, sharedImages, localFiles])
+  const insertablePaths = useMemo(() => [...new Set([
+    ...localFiles.map((file) => file.path), ...browserImages.map((image) => image.path), ...sharedImages.map((image) => image.path), ...builtInFiles.map((file) => file.path),
+  ])], [localFiles, browserImages, sharedImages, builtInFiles])
 
   const download = async (path: string) => {
     setDownloadStatus('')
@@ -166,8 +205,8 @@ function ProjectFilesWorkspaceSession({
     <header className="project-files-workspace-header"><div><span className="eyebrow">Your manuscript and its files</span><h2 id="project-files-workspace-title">Files</h2><p>Add images to the paper and see where every available file lives.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close project files"><Icon name="close" /></button></header>
     <div className="project-files-workspace-body">
       {synchronizationPanel}
-      <ProjectFileBrowser localFiles={localFiles} onlineFiles={onlineFiles} currentManuscriptPath={currentManuscriptPath} referencedPaths={usage.referencedPaths} figureLabels={usage.figureLabels} location={location} projectName={projectName ?? project?.config.name} rootPath={project?.root} localInventoryComplete={Boolean(inventory && !inventory.truncated)} onlineInventoryComplete={!collaborationFileContext} liveCollaboration={Boolean(collaborationFileContext)} loading={loading} problem={problem} onRefresh={project ? () => setRefreshSequence((value) => value + 1) : undefined} onOpenFile={onOpenFile} onInsertFigure={onInsertFigure} onDownloadFile={(path) => void download(path)} downloadablePaths={onDownloadFile ? undefined : downloadablePaths}>
-        {collaborationFileContext && <ProjectFilesPanel {...collaborationFileContext} />}
+      <ProjectFileBrowser localFiles={localFiles} onlineFiles={onlineFiles} currentManuscriptPath={currentManuscriptPath} referencedPaths={usage.referencedPaths} figureLabels={usage.figureLabels} location={location} projectName={projectName ?? project?.config.name} rootPath={project?.root} localInventoryComplete={Boolean(inventory && !inventory.truncated)} onlineInventoryComplete={!collaborationFileContext || Boolean(remoteCatalogue)} liveCollaboration={Boolean(collaborationFileContext)} loading={loading} problem={[problem, remoteProblem].filter(Boolean).join(' ')} onRefresh={project || remoteClient ? () => setRefreshSequence((value) => value + 1) : undefined} onOpenFile={openFile} onInsertFigure={onInsertFigure} insertablePaths={insertablePaths} onDownloadFile={(path) => void download(path)} downloadablePaths={onDownloadFile ? undefined : downloadablePaths}>
+        {collaborationFileContext && <ProjectFilesPanel {...collaborationFileContext} onOpenFile={openFile} onCatalogueChange={setRemoteCatalogue} />}
       </ProjectFileBrowser>
       {downloadStatus && <p className="project-files-workspace-notice" role="status">{downloadStatus}</p>}
       {inventory?.truncated && <p className="project-file-browser-help">This is a bounded view of a large project folder. Open the folder in your file manager to see every file.</p>}

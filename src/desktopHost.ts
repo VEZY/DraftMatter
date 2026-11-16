@@ -169,6 +169,16 @@ export interface ProjectFileInventory {
   truncated: boolean
 }
 
+export interface ProjectFilePreview {
+  path: string
+  bytes: number[]
+  size: number
+  modifiedMs: number
+  /** A SHA-256 fingerprint exists only when the entire file was read. */
+  hash: string | null
+  truncated: boolean
+}
+
 export interface ProjectSyncScope {
   serviceUrl: string
   workspaceId: string
@@ -739,6 +749,15 @@ export function createDesktopHost(
     },
     listProjectFiles(root: string) {
       return invokeBridge<ProjectFileInventory>('list_project_files', { root })
+    },
+    readProjectFilePreview(root: string, path: string, maxBytes = 262144) {
+      return invokeBridge<ProjectFilePreview>('read_project_file_preview', { root, path, maxBytes })
+    },
+    saveProjectFileText(request: { root: string; path: string; content: string; expectedHash: string }) {
+      const bytes = new TextEncoder().encode(request.content)
+      if (bytes.byteLength > 1024 * 1024) return Promise.reject(new Error('Text editing supports complete files up to 1 MiB.'))
+      if (!/^sha256:[a-f0-9]{64}$/.test(request.expectedHash)) return Promise.reject(new Error('Reopen the complete file before saving its text.'))
+      return invokeBridge<ApplyProjectSyncFileResult>('apply_project_sync_file', { request: { root: request.root, path: request.path, bytes: [...bytes], expectedHash: request.expectedHash } })
     },
     readProjectSyncState(root: string, scope: ProjectSyncScope) {
       return invokeBridge<ProjectSyncStateSnapshot>('read_project_sync_state', { root, scope })

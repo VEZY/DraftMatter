@@ -4,6 +4,7 @@ import { ProjectFileClient, type ProjectFileProgress } from './collaboration/pro
 import { PROJECT_FILE_QUOTA_BYTES, type ProjectFile, type ProjectFileCatalogue, type ProjectFileUpload } from './collaboration/projectFiles'
 import { downloadProjectFile, projectFileScopeKey } from './collaboration/projectFileDownload'
 import { Icon } from './Icon'
+import type { ProjectFileOpenOptions } from './ProjectFileBrowser'
 import './projectFiles.css'
 
 export interface ProjectFilesPanelProps {
@@ -11,6 +12,8 @@ export interface ProjectFilesPanelProps {
   workspace: WorkspaceSummary
   projectId: string
   currentUserId: string
+  onOpenFile?: (path: string, options?: ProjectFileOpenOptions) => void
+  onCatalogueChange?: (catalogue: ProjectFileCatalogue) => void
 }
 
 export function projectFileSize(bytes: number) {
@@ -30,7 +33,7 @@ export function ProjectFilesPanel(props: ProjectFilesPanelProps) {
 
 interface ActiveTransfer { kind: 'upload' | 'download'; path: string; completedBytes: number; totalBytes: number; phase: string }
 
-function ProjectFilesPanelSession({ client, workspace, projectId, currentUserId, api }: ProjectFilesPanelProps & { api: ProjectFileClient }) {
+function ProjectFilesPanelSession({ client, workspace, projectId, currentUserId, api, onOpenFile, onCatalogueChange }: ProjectFilesPanelProps & { api: ProjectFileClient }) {
   const [open, setOpen] = useState(false)
   const [catalogue, setCatalogue] = useState<ProjectFileCatalogue | null>(null)
   const [loading, setLoading] = useState(false)
@@ -74,7 +77,7 @@ function ProjectFilesPanelSession({ client, workspace, projectId, currentUserId,
     setLoading(true)
     try {
       const next = await api.catalogue(controller.signal)
-      if (mounted.current && catalogueController.current === controller) setCatalogue(next)
+      if (mounted.current && catalogueController.current === controller) { setCatalogue(next); onCatalogueChange?.(next) }
     } catch (error) {
       if (mounted.current && !controller.signal.aborted) setProblem(error instanceof Error ? error.message : String(error))
     } finally {
@@ -196,7 +199,7 @@ function ProjectFilesPanelSession({ client, workspace, projectId, currentUserId,
       {active && <div className="project-files-transfer" role="status" aria-live="polite"><strong>{active.phase} · {active.path}</strong><progress aria-label={`${active.kind === 'upload' ? 'Upload' : 'Download'} progress`} max={active.totalBytes || 1} value={active.completedBytes} /><small>{projectFileSize(active.completedBytes)} / {projectFileSize(active.totalBytes)}</small><button onClick={() => transferController.current?.abort()}>Pause {active.kind}</button></div>}
       {notice && <p className="project-files-notice" role="status">{notice}</p>}
       {problem && <p className="project-files-problem" role="alert">{problem}</p>}
-      <section aria-label="Shared files and versions"><h3>Files and versions{catalogue ? ` · ${files.length}` : ''}</h3>{files.length ? <ul className="project-files-list">{files.map((file, index) => <li key={file.id}><div><strong>{file.path}</strong><small>{index === 0 || files[index - 1].path !== file.path ? 'Latest version' : 'Earlier version'} · {projectFileSize(file.size)} · {new Date(file.createdAt).toLocaleString()}</small><small>Shared by {file.createdBy}</small></div><div className="project-files-actions"><button onClick={() => void download(file)} disabled={unavailable} aria-label={`Download ${file.path} from ${file.createdAt}`}>Download</button>{canWrite && <button onClick={() => setDeleteTarget(file)} disabled={unavailable} aria-label={`Delete version of ${file.path} from ${file.createdAt}`}>Delete version</button>}</div></li>)}</ul> : <p className="project-files-help">{loading ? 'Loading files…' : 'No data files have been shared yet.'}</p>}</section>
+      <section aria-label="Shared files and versions"><h3>Files and versions{catalogue ? ` · ${files.length}` : ''}</h3>{files.length ? <ul className="project-files-list">{files.map((file, index) => <li key={file.id}><div><strong>{file.path}</strong><small>{index === 0 || files[index - 1].path !== file.path ? 'Latest version' : 'Earlier version'} · {projectFileSize(file.size)} · {new Date(file.createdAt).toLocaleString()}</small><small>Shared by {file.createdBy}</small></div><div className="project-files-actions">{onOpenFile && <button onClick={() => onOpenFile(file.path, { location: 'online', file, keepOpen: false })} onDoubleClick={() => onOpenFile(file.path, { location: 'online', file, keepOpen: true })} aria-label={`Open ${file.path} version ${file.id}`}>Open</button>}<button onClick={() => void download(file)} disabled={unavailable} aria-label={`Download ${file.path} from ${file.createdAt}`}>Download</button>{canWrite && <button onClick={() => setDeleteTarget(file)} disabled={unavailable} aria-label={`Delete version of ${file.path} from ${file.createdAt}`}>Delete version</button>}</div></li>)}</ul> : <p className="project-files-help">{loading ? 'Loading files…' : 'No data files have been shared yet.'}</p>}</section>
       {deleteTarget && <div className="project-files-confirm" role="group" aria-label="Confirm file version deletion"><p>Delete this saved version of {deleteTarget.path}? Other versions stay available.</p><button onClick={() => setDeleteTarget(null)} disabled={Boolean(busyRecord)}>Keep version</button><button onClick={() => void remove('file', deleteTarget.id)} disabled={unavailable}>{busyRecord ? 'Deleting…' : 'Delete this version'}</button></div>}
       {uploads.length > 0 && <section aria-label="Your unfinished uploads"><h3>Unfinished uploads · {uploads.length}</h3><ul className="project-files-list">{uploads.map((item) => <li key={item.id}><div><strong>{item.path}</strong><small>{projectFileSize(item.parts.reduce((total, part) => total + part.size, 0))} received / {projectFileSize(item.size)} reserved</small><small>Choose the original file to verify and resume.</small></div>{canWrite && <div className="project-files-actions"><button onClick={() => { resumeTarget.current = item; resumePicker.current?.click() }} disabled={unavailable} aria-label={`Resume upload of ${item.path}`}>Resume…</button><button onClick={() => void remove('upload', item.id)} disabled={unavailable} aria-label={`Cancel upload of ${item.path}`}>Cancel upload</button></div>}</li>)}</ul></section>}
     </div>}

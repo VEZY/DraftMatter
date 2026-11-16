@@ -162,7 +162,7 @@ fn reserved_windows_name(name: &str) -> bool {
             && stem.as_bytes()[3] != b'0'
 }
 
-fn sync_relative(relative: &str) -> Result<PathBuf, HostError> {
+pub(super) fn sync_relative(relative: &str) -> Result<PathBuf, HostError> {
     if relative.len() > 1024
         || relative.contains('\\')
         || relative.chars().any(|character| {

@@ -82,6 +82,31 @@ function server() {
 }
 
 describe('bounded and resumable project file transfers', () => {
+  it('bounds preview responses and binds their bytes to the requested immutable version', async () => {
+    const bytes = new TextEncoder().encode('safe preview')
+    const hash = await projectFilePartHash(bytes)
+    const file: ProjectFile = { id: 'file-version', path: 'notes.txt', size: bytes.length, mediaType: 'text/plain', createdBy: 'alice', createdAt: '2026-11-16T12:00:00Z', chunkSize: PROJECT_FILE_CHUNK_BYTES, parts: [{ partNumber: 1, size: bytes.length, sha256: hash }] }
+    let mode: 'normal' | 'overflow' | 'wrong-version' | 'bad-hash' = 'normal'
+    const authenticatedFetch = vi.fn(async (_path: string) => new Response(mode === 'overflow' ? bytes : bytes.slice(0, 4), { headers: {
+      'x-draftmatter-version': mode === 'wrong-version' ? 'another-version' : file.id,
+      'x-draftmatter-file-size': String(file.size),
+      'x-draftmatter-sha256': mode === 'bad-hash' ? '0'.repeat(64) : await projectFilePartHash(bytes.slice(0, 4)),
+    } }))
+    const client = new ProjectFileClient({ authenticatedFetch }, 'lab', 'paper', 'alice')
+    expect(await client.readPreview(file, 4)).toEqual({ bytes: bytes.slice(0, 4), truncated: true, versionId: file.id })
+    expect(authenticatedFetch).toHaveBeenCalledWith('/api/workspaces/lab/projects/paper/files/file-version/preview?maxBytes=4', { signal: undefined })
+    mode = 'overflow'
+    await expect(client.readPreview(file, 4)).rejects.toThrow('exceeds')
+    mode = 'wrong-version'
+    await expect(client.readPreview(file, 4)).rejects.toThrow('does not match')
+    mode = 'bad-hash'
+    await expect(client.readPreview(file, 4)).rejects.toThrow('integrity')
+    authenticatedFetch.mockClear()
+    await expect(client.readPreview(file, PROJECT_FILE_CHUNK_BYTES + 1)).rejects.toThrow('8 MiB')
+    await expect(client.saveText(file, 'x'.repeat(1024 * 1024 + 1))).rejects.toThrow('1 MiB')
+    expect(authenticatedFetch).not.toHaveBeenCalled()
+  })
+
   it('pauses a multipart upload and resumes in a new client after checking received bytes', async () => {
     const backend = server()
     const chosen = selectedFile(PROJECT_FILE_CHUNK_BYTES + 19)

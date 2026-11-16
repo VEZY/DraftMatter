@@ -1,6 +1,9 @@
 /** Data files travel as bounded binary parts, independently of live manuscript state. */
 export const PROJECT_FILE_QUOTA_BYTES = 1_000_000_000
 export const PROJECT_FILE_CHUNK_BYTES = 8 * 1024 * 1024
+/** A preview never transfers more than one ordinary file part. */
+export const PROJECT_FILE_PREVIEW_MAX_BYTES = PROJECT_FILE_CHUNK_BYTES
+export const PROJECT_FILE_TEXT_MAX_BYTES = 1024 * 1024
 
 export interface ProjectFileScope {
   workspaceId: string

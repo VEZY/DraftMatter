@@ -337,6 +337,27 @@ export class PostgresProjectFileService {
     })
   }
 
+  /** Read only the first bounded part, even for files much larger than memory. */
+  async readPreview(token: string, scope: ProjectFileScope, versionId: string, maximum: number): Promise<{ bytes: Uint8Array; sha256: string; size: number; versionId: string }> {
+    if (!Number.isSafeInteger(maximum) || maximum < 1 || maximum > PROJECT_FILE_CHUNK_BYTES) throw new ProjectFileError('invalid-preview-limit', 400, 'Choose a preview limit between 1 byte and 8 MiB.')
+    await this.authorized(token, scope, 'read')
+    return this.locked(scope, async (client) => {
+      const row = await this.row(client, scope, versionId)
+      if (row.state !== 'ready') throw notFound()
+      const size = Number(row.size)
+      if (!size) return { bytes: new Uint8Array(), sha256: digest(new Uint8Array()), size, versionId }
+      const part = (await this.parts(client, scope, versionId)).find((candidate) => Number(candidate.part_number) === 1 && candidate.etag !== null)
+      if (!part) throw notFound()
+      if (Number(part.size) !== Math.min(size, PROJECT_FILE_CHUNK_BYTES)) throw new ProjectFileError('integrity-error', 503, 'The stored preview part has invalid boundaries. No file content was returned.')
+      // Verify the stored part before returning a prefix. Storage and network
+      // reads stay bounded by the fixed 8 MiB part size, never total file size.
+      const first = await this.storage.readPart(row.object_key, 0, Number(part.size))
+      if (first.byteLength !== Number(part.size) || digest(first) !== part.sha256) throw new ProjectFileError('integrity-error', 503, 'The preview failed its SHA-256 check. No file content was returned.')
+      const bytes = first.slice(0, maximum)
+      return { bytes, sha256: digest(bytes), size, versionId }
+    })
+  }
+
   async deleteVersion(token: string, scope: ProjectFileScope, versionId: string): Promise<void> {
     await this.authorized(token, scope, 'edit')
     await this.locked(scope, async (client) => {

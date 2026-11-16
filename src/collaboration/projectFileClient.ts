@@ -1,5 +1,5 @@
 import type { CollaborationServiceClient } from './serviceClient'
-import { PROJECT_FILE_CHUNK_BYTES, PROJECT_FILE_QUOTA_BYTES, isSyncProjectFilePath, type BeginProjectFileUpload, type ProjectFile, type ProjectFileCatalogue, type ProjectFilePart, type ProjectFileUpload } from './projectFiles'
+import { PROJECT_FILE_CHUNK_BYTES, PROJECT_FILE_QUOTA_BYTES, PROJECT_FILE_PREVIEW_MAX_BYTES, PROJECT_FILE_TEXT_MAX_BYTES, isSyncProjectFilePath, type BeginProjectFileUpload, type ProjectFile, type ProjectFileCatalogue, type ProjectFilePart, type ProjectFileUpload } from './projectFiles'
 
 export interface ProjectFileProgress {
   phase: 'verifying' | 'uploading' | 'completing'
@@ -11,6 +11,12 @@ export interface ProjectFileSource {
   size: number
   type?: string
   slice(start: number, end: number): { arrayBuffer(): Promise<ArrayBuffer> }
+}
+
+export interface ProjectFilePreview {
+  bytes: Uint8Array
+  truncated: boolean
+  versionId: string
 }
 
 export interface ProjectFileTransferOptions {
@@ -159,6 +165,29 @@ export class ProjectFileClient {
     if (bytes.byteLength !== expectedSize || await projectFilePartHash(bytes) !== hash) throw new Error('The downloaded file part failed its integrity check. Retry the download.')
     abortIfNeeded(signal)
     return bytes
+  }
+
+  async readPreview(file: ProjectFile, maxBytes = 262144, signal?: AbortSignal): Promise<ProjectFilePreview> {
+    validateMetadata(file, true)
+    if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || maxBytes > PROJECT_FILE_PREVIEW_MAX_BYTES) throw new Error('Preview limits must be between 1 byte and 8 MiB.')
+    abortIfNeeded(signal)
+    const response = await this.service.authenticatedFetch(`${this.basePath}/${encodeURIComponent(file.id)}/preview?maxBytes=${maxBytes}`, { signal })
+    if (response.headers.get('x-draftmatter-version') !== file.id || response.headers.get('x-draftmatter-file-size') !== String(file.size)) throw new Error('The preview does not match this online file version. Refresh the file list.')
+    const bytes = await boundedResponseBytes(response, Math.min(maxBytes, file.size), signal)
+    const expectedSize = Math.min(maxBytes, file.size)
+    if (bytes.byteLength !== expectedSize || await projectFilePartHash(bytes) !== response.headers.get('x-draftmatter-sha256')?.toLowerCase()) throw new Error('The preview failed its integrity check. Retry the preview.')
+    // A complete first part can also be verified against the catalogue itself.
+    if (file.size && bytes.length === file.parts[0].size && await projectFilePartHash(bytes) !== file.parts[0].sha256) throw new Error('The preview does not match the selected file version.')
+    abortIfNeeded(signal)
+    return { bytes, truncated: file.size > bytes.byteLength, versionId: file.id }
+  }
+
+  /** Explicit save creates an immutable version, with server-side head conflict checks. */
+  async saveText(file: ProjectFile, text: string, signal?: AbortSignal): Promise<ProjectFile> {
+    validateMetadata(file, true)
+    const bytes = new TextEncoder().encode(text)
+    if (file.size > PROJECT_FILE_TEXT_MAX_BYTES || bytes.byteLength > PROJECT_FILE_TEXT_MAX_BYTES) throw new Error('Text editing supports complete files up to 1 MiB.')
+    return this.transfer({ size: bytes.byteLength, type: file.mediaType, slice: (start, end) => ({ arrayBuffer: async () => bytes.slice(start, end).buffer }) }, file.path, { expectedVersionId: file.id, signal })
   }
 
   async transfer(file: ProjectFileSource, path: string, options: ProjectFileTransferOptions = {}): Promise<ProjectFile> {

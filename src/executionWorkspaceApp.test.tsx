@@ -221,7 +221,7 @@ describe('shared Jupyter execution workspace', () => {
       await act(async () => container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel terminal"]')!.click())
     }
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('[role="tab"]')].find((tab) => tab.textContent?.includes('Python'))!.click())
-    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('ready')
+    expect(container.querySelector('[aria-label="Shared kernel terminal"] [role="tab"][aria-selected="true"]')?.textContent).toContain('ready')
   })
 
   it('runs preceding computations from the manuscript hover toolbar', async () => {
@@ -454,7 +454,7 @@ describe('shared Jupyter execution workspace', () => {
     const reopen = container.querySelector<HTMLButtonElement>('[aria-label^="Open shared kernel terminal"]')!
     expect(reopen.getAttribute('aria-label')).toContain('Needs attention')
     await act(async () => reopen.click())
-    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('Julia')
+    expect(container.querySelector('[aria-label="Shared kernel terminal"] [role="tab"][aria-selected="true"]')?.textContent).toContain('Julia')
     expect(container.querySelector('[aria-label="Shared kernel terminal"]')?.textContent).toContain('Figure at Makie/src/figureplotting.jl:117')
   })
 
@@ -529,7 +529,7 @@ describe('shared Jupyter execution workspace', () => {
       input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true }))
     })
     await settle()
-    expect(container.querySelector('[role="tab"][aria-selected="true"]')?.textContent).toContain('ready')
+    expect(container.querySelector('[aria-label="Shared kernel terminal"] [role="tab"][aria-selected="true"]')?.textContent).toContain('ready')
     expect(container.textContent).toContain('Interactive · clean run will restart this kernel')
 
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close kernel terminal"]')!.click())

@@ -30,7 +30,7 @@ export interface CollaborationHttpApiOptions {
   allowedOrigins: string[]
   publicConfig: { oidcIssuer: string; oidcClientId: string }
   maxBodyBytes?: number
-  files?: Pick<PostgresProjectFileService, 'list' | 'begin' | 'getUpload' | 'putPart' | 'complete' | 'cancel' | 'readPart' | 'deleteVersion'>
+  files?: Pick<PostgresProjectFileService, 'list' | 'begin' | 'getUpload' | 'putPart' | 'complete' | 'cancel' | 'readPart' | 'deleteVersion'> & Partial<Pick<PostgresProjectFileService, 'readPreview'>>
   fileAuthorization?: ProjectAuthorizationService
   maintenanceMetrics?: () => MaintenanceMetrics
   onProjectRestored?: (scope: { workspaceId: string; projectId: string }) => void
@@ -343,6 +343,18 @@ export function createCollaborationHttpApi(options: CollaborationHttpApiOptions)
               return json(200, await files.putPart(token, scope, uploadId, Number(parts[9]), bytes, hash), headers)
             }
           } else if (parts[6]) {
+            if (parts.length === 8 && parts[7] === 'preview' && request.method === 'GET' && files.readPreview) {
+              const maximum = Number(new URL(request.url).searchParams.get('maxBytes') ?? 262144)
+              const preview = await files.readPreview(token, scope, parts[6], maximum)
+              headers.set('content-type', 'application/octet-stream')
+              headers.set('content-disposition', 'attachment')
+              headers.set('content-length', String(preview.bytes.byteLength))
+              headers.set('x-draftmatter-sha256', preview.sha256)
+              headers.set('x-draftmatter-file-size', String(preview.size))
+              headers.set('x-draftmatter-version', preview.versionId)
+              headers.set('access-control-expose-headers', 'x-draftmatter-sha256, x-draftmatter-file-size, x-draftmatter-version, content-length')
+              return new Response(Uint8Array.from(preview.bytes), { status: 200, headers })
+            }
             if (parts.length === 7 && request.method === 'DELETE') {
               await files.deleteVersion(token, scope, parts[6])
               return new Response(null, { status: 204, headers })

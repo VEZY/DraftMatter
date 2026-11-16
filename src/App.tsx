@@ -75,6 +75,7 @@ import { InsertBlockDialog, type InsertBlockKind, type InsertBlockRequest } from
 import { LinkDialog } from './LinkDialog'
 import { CollaborationDialog, type CollaborationFileService } from './CollaborationDialog'
 import { ProjectFilesWorkspace } from './ProjectFilesWorkspace'
+import { ProjectDocumentWorkspace, type ProjectDocumentWorkspaceHandle } from './ProjectDocumentWorkspace'
 import { useProjectSynchronization } from './useProjectSynchronization'
 import { SelectiveSyncPanel } from './SelectiveSyncPanel'
 import type { CollaborationCheckpoint, CollaborationClientStatus, CollaborativeEditorBinding } from './sharedEditor'
@@ -701,6 +702,8 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const [toast, setToast] = useState('')
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
   const [projectFilesOpen, setProjectFilesOpen] = useState(false)
+  const fileWorkspaceRef = useRef<ProjectDocumentWorkspaceHandle>(null)
+  const [manuscriptFileActive, setManuscriptFileActive] = useState(true)
   const [collaborationFileService, setCollaborationFileService] = useState<CollaborationFileService | null>(null)
   const [localSyncSource, setLocalSyncSource] = useState<string>()
   const [browserAssetScope, setBrowserAssetScope] = useState(() => initialExperience === 'browser-new' || browserDocumentLaunch
@@ -1430,6 +1433,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   }
 
   const flushDraftBeforeLeave = async () => {
+    if (fileWorkspaceRef.current && !fileWorkspaceRef.current.canLeave()) return false
     if (sourceEditing && sourceBuffer !== manuscriptSourceRef.current) {
       setToast('Apply or cancel your source edits before leaving the manuscript.')
       return false
@@ -1850,14 +1854,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     const dialog = document.querySelector<HTMLElement>('.project-files-workspace-dialog')
     const controls = () => [...(dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), input:not(:disabled), select:not(:disabled), summary, a[href]') ?? [])].filter((element) => !element.closest('details:not([open])') || element.tagName === 'SUMMARY')
     const frame = requestAnimationFrame(() => (dialog?.querySelector<HTMLInputElement>('input[type="search"]') ?? controls()[0])?.focus())
-    const trap = (event: KeyboardEvent) => {
-      if (event.key !== 'Tab') return
-      const elements = controls()
-      const target = event.shiftKey ? elements.at(-1) : elements[0]
-      if (target && (event.shiftKey && document.activeElement === elements[0] || !event.shiftKey && document.activeElement === elements.at(-1))) { event.preventDefault(); target.focus() }
-    }
-    dialog?.addEventListener('keydown', trap)
-    return () => { cancelAnimationFrame(frame); dialog?.removeEventListener('keydown', trap); if (previous?.isConnected) previous.focus() }
+    return () => { cancelAnimationFrame(frame); if (previous?.isConnected) previous.focus() }
   }, [projectFilesOpen])
 
   useEffect(() => {
@@ -4162,6 +4159,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
 
   const applyDesktopProject = async (project: ProjectSnapshot, announce = true, selectedPath?: string, remember = true, reloadDisk = false) => {
     if (liveDocumentSwitchBlocked()) return false
+    if (fileWorkspaceRef.current && !fileWorkspaceRef.current.canLeave()) return false
     const mainPath = resolveMainDocument(project, selectedPath)
     if (!mainPath) {
       if (selectedPath !== undefined) throw new Error(`The selected manuscript is unavailable in this folder: ${selectedPath}`)
@@ -4675,6 +4673,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   }
 
   const restoreSnapshot = (snapshot: RecoverySnapshot) => {
+    if (fileWorkspaceRef.current && !fileWorkspaceRef.current.canLeave()) return
     if (collaborationSessionActiveRef.current) {
       setRecoveryOpen(false)
       setCollaborationOpen(true)
@@ -5750,7 +5749,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
           </div>
         </nav>
 
-        {leftPanelOpen && (
+        {leftPanelOpen && !projectFilesOpen && (
           <aside className="left-panel" aria-label="Manuscript outline">
             <div className="panel-heading-row">
               <div>
@@ -5855,6 +5854,43 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
           </aside>
         )}
 
+        {projectFilesOpen && <aside className="project-files-workspace-dialog project-files-dock" aria-label="Project file browser">
+          <ProjectFilesWorkspace
+            project={desktopProject}
+            currentManuscriptPath={desktopSession?.path ?? filename}
+            source={manuscriptSource}
+            browserImages={browserProjectImages}
+            sharedImages={sharedResources.images}
+            builtInFiles={builtInProject === 'complete-example' ? [...completeExampleProjectFiles, { path: 'references.json', content: completeExampleReferences }] : []}
+            location={desktopSession ? 'local' : collaborationSessionActive ? 'online' : builtInProject === 'complete-example' ? 'example' : 'browser'}
+            projectName={projectName}
+            collaborationFileContext={collaborationFileService}
+            synchronizationPanel={selectiveSync.active ? <SelectiveSyncPanel model={selectiveSync} /> : desktopProject ? <div className="selective-sync-disconnected"><strong>Keep selected files in sync</strong><p>Connect this project to its collaboration server to synchronize the manuscript, figures, and references. Choose additional files after connecting.</p><button onClick={() => { setProjectFilesOpen(false); if (!desktopProject.config.collaboration && collaborationSession) setStartCollaborationOpen(true); else setCollaborationOpen(true) }}>Connect project…</button></div> : undefined}
+            onClose={() => setProjectFilesOpen(false)}
+            onInsertFigure={canEditManuscript ? (path) => { setProjectFilesOpen(false); void insertProjectFigure(path) } : undefined}
+            onOpenFile={(path, options) => { fileWorkspaceRef.current?.openFile(path, options); if (window.innerWidth <= 640) setProjectFilesOpen(false) }}
+          />
+        </aside>}
+
+        <ProjectDocumentWorkspace
+          workspaceRef={fileWorkspaceRef}
+          onManuscriptActiveChange={setManuscriptFileActive}
+          scope={desktopProject?.root ?? `${builtInProject === 'complete-example' ? 'example' : browserAssetScope}:${activeCollaborationLaunch?.serviceUrl ?? ''}:${activeCollaborationLaunch?.workspaceId ?? ''}:${activeCollaborationLaunch?.projectId ?? ''}`}
+          root={desktopProject?.root}
+          manuscriptPath={desktopSession?.path ?? filename}
+          context={collaborationFileService}
+          images={browserProjectImages}
+          sharedImages={sharedResources.images}
+          bundledFiles={builtInProject === 'complete-example' ? [...completeExampleProjectFiles, { path: 'references.json', content: completeExampleReferences }] : []}
+          onNotice={setToast}
+          onInsertFigure={canEditManuscript ? async (path, bytes, online) => {
+            fileWorkspaceRef.current?.showManuscript()
+            if (online) {
+              const [figure] = await importFigureFiles([new File([bytes.slice().buffer], path.split('/').at(-1) ?? 'figure')])
+              if (figure) runStructuredCommand((editor) => editor.insertFigure(figure.source, figure.alt), 'Insert figure')
+            } else await insertProjectFigure(path)
+          } : undefined}
+        >
         <main className="editor-area" ref={editorAreaRef}>
           <div className="format-toolbar" aria-label="Formatting toolbar">
             <label className="style-select">
@@ -6241,6 +6277,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
             <span><Icon name="clock" size={14} /> Autosave on</span>
           </div>
         </main>
+        </ProjectDocumentWorkspace>
 
         {structuredMode && executionWorkspaceOpen && (
           <div className="code-workspace-backdrop" onMouseDown={() => setExecutionWorkspaceOpen(false)}>
@@ -6340,7 +6377,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
           </div>
         )}
 
-          <aside className="review-panel review-margin" aria-label="Manuscript comments" hidden={!rightPanelOpen || (!reviewQueue.length && !commentComposerOpen)}>
+          <aside className="review-panel review-margin" aria-label="Manuscript comments" hidden={!manuscriptFileActive || !rightPanelOpen || (!reviewQueue.length && !commentComposerOpen)}>
             <button className="icon-button review-margin-close" onClick={() => setRightPanelOpen(false)} aria-label="Hide comments"><Icon name="close" size={15} /></button>
             <AlignedReviewRail editorRef={editorAreaRef}>
 
@@ -6407,7 +6444,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       <SelectionCommentButton
         editorRef={editorAreaRef}
         selection={structuredReviewSelection}
-        enabled={structuredMode && canCommentReview && !commentComposerOpen && !focusMode && !reviewContextMenu}
+        enabled={manuscriptFileActive && structuredMode && canCommentReview && !commentComposerOpen && !focusMode && !reviewContextMenu}
         onAddComment={addCommentToSelection}
       />
 
@@ -6721,25 +6758,6 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         />
       )}
 
-      {projectFilesOpen && <div className="modal-backdrop project-files-workspace-backdrop" onMouseDown={() => setProjectFilesOpen(false)}>
-        <div className="project-files-workspace-dialog" role="dialog" aria-modal="true" aria-labelledby="project-files-workspace-title" onMouseDown={(event) => event.stopPropagation()}>
-          <ProjectFilesWorkspace
-            project={desktopProject}
-            currentManuscriptPath={desktopSession?.path ?? filename}
-            source={manuscriptSource}
-            browserImages={browserProjectImages}
-            sharedImages={sharedResources.images}
-            builtInFiles={builtInProject === 'complete-example' ? [...completeExampleProjectFiles, { path: 'references.json', content: completeExampleReferences }] : []}
-            location={desktopSession ? 'local' : collaborationSessionActive ? 'online' : builtInProject === 'complete-example' ? 'example' : 'browser'}
-            projectName={projectName}
-            collaborationFileContext={collaborationFileService}
-            synchronizationPanel={selectiveSync.active ? <SelectiveSyncPanel model={selectiveSync} /> : desktopProject ? <div className="selective-sync-disconnected"><strong>Keep selected files in sync</strong><p>Connect this project to its collaboration server to synchronize the manuscript, figures, and references. Choose additional files after connecting.</p><button onClick={() => { setProjectFilesOpen(false); if (!desktopProject.config.collaboration && collaborationSession) setStartCollaborationOpen(true); else setCollaborationOpen(true) }}>Connect project…</button></div> : undefined}
-            onClose={() => setProjectFilesOpen(false)}
-            onInsertFigure={canEditManuscript ? (path) => { setProjectFilesOpen(false); void insertProjectFigure(path) } : undefined}
-            onOpenFile={desktopProject ? (path) => { setProjectFilesOpen(false); if (!liveDocumentSwitchBlocked()) void applyDesktopProject(desktopProject, true, path).catch((error) => setToast(readableError(error))) } : undefined}
-          />
-        </div>
-      </div>}
 
       <CollaborationDialog
         open={collaborationOpen}
@@ -7261,7 +7279,7 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       {toast && <div className="toast" role="status"><Icon name="check" size={16} /> {toast}</div>}
 
       {!citationSearchOpen && !commandOpen && (
-        <button className="quick-cite" onClick={() => openCitationPicker()} aria-label="Insert citation" disabled={!canEditManuscript}><span>@</span> Cite</button>
+        <button hidden={!manuscriptFileActive} className="quick-cite" onClick={() => openCitationPicker()} aria-label="Insert citation" disabled={!canEditManuscript}><span>@</span> Cite</button>
       )}
     </div>
     </>
