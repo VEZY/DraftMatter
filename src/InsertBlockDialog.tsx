@@ -33,9 +33,9 @@ const details: Record<InsertBlockKind, { eyebrow: string; title: string; descrip
   footnote: { eyebrow: 'Supporting note', title: 'Insert footnote', description: 'Add supporting text at the current position.' },
   'figure-cell': { eyebrow: 'Reproducible result', title: 'Add reproducible figure', description: 'Create a manuscript code block whose retained figure appears with the paper.' },
   'table-cell': { eyebrow: 'Reproducible result', title: 'Add reproducible table', description: 'Create a manuscript code block whose retained table appears with the paper.' },
-  'values-cell': { eyebrow: 'Code & computation', title: 'Add published values', description: 'Add project-only code that publishes named scalar results for manuscript text.' },
-  'setup-cell': { eyebrow: 'Code & computation', title: 'Add language setup', description: 'Initialize packages, functions, datasets, and constants before ordinary cells run.' },
-  'published-value': { eyebrow: 'Reproducible result', title: 'Insert published value', description: 'Place an explicitly published result directly in the sentence.' },
+  'values-cell': { eyebrow: 'Computed values', title: 'Create a value calculation', description: 'Write a calculation that produces named results for your manuscript. Its code stays in Code & computation.' },
+  'setup-cell': { eyebrow: 'Optional project code', title: 'Add shared setup', description: 'Keep imports, functions, and shared data in one setup cell. Standalone calculations do not require it.' },
+  'published-value': { eyebrow: 'Reproducibility', title: 'Insert computed value', description: 'Place a named result from a calculation directly in the sentence.' },
 }
 
 function cleanLabel(value: string) {
@@ -50,6 +50,7 @@ export function InsertBlockDialog({
   semanticObjects = [],
   onImportFigure,
   availableFigures = [],
+  onCreateComputation,
 }: {
   kind: InsertBlockKind
   onClose: () => void
@@ -58,6 +59,7 @@ export function InsertBlockDialog({
   semanticObjects?: SemanticManuscriptObject[]
   onImportFigure?: (file: File) => Promise<{ source: string; alt: string }>
   availableFigures?: Array<{ path: string; label?: string }>
+  onCreateComputation?: () => void
 }) {
   const detail = details[kind]
   const [title, setTitle] = useState('')
@@ -168,13 +170,16 @@ export function InsertBlockDialog({
             <label><span>Footnote text</span><textarea autoFocus value={content} onChange={(event) => setContent(event.target.value)} rows={4} placeholder="Supporting detail…" /></label>
           </>}
           {(kind === 'figure-cell' || kind === 'table-cell') && <label><span>Language</span><select autoFocus value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>The code block remains in the manuscript editor; publication exports use its retained result.</small></label>}
-          {kind === 'values-cell' && <label><span>Language</span><select autoFocus value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>The computation is edited in Code &amp; computation; only the values you insert into prose appear in the manuscript.</small></label>}
-          {kind === 'setup-cell' && <label><span>Language</span><select autoFocus value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>Setup is edited in Code &amp; computation, runs first in a fresh shared kernel, and is omitted from the manuscript view.</small></label>}
-          {kind === 'published-value' && <label><span>Published name</span><input autoFocus value={publishedName} onChange={(event) => setPublishedName(event.target.value)} list="published-value-options" placeholder="mean_height" spellCheck={false} /><datalist id="published-value-options">{publishedValues.map((value) => <option key={value.name} value={value.name}>{value.rendered}</option>)}</datalist><small>{publishedValues.length ? 'Choose a retained publication or enter the name a values cell will publish.' : 'Enter the name a values cell will publish. It will show “Value unavailable” until that cell has run.'}</small></label>}
+          {kind === 'values-cell' && <label><span>Language</span><select autoFocus value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>Edit and run the calculation in Code &amp; computation, then choose Insert → Computed value to place one of its named results in the text. A shared setup cell is optional.</small></label>}
+          {kind === 'setup-cell' && <label><span>Language</span><select autoFocus value={language} onChange={(event) => setLanguage(event.target.value as typeof language)}><option value="python">Python</option><option value="r">R</option><option value="julia">Julia</option></select><small>The shared setup runs first for this language in a fresh session. Its code stays in Code &amp; computation and does not appear in the manuscript.</small></label>}
+          {kind === 'published-value' && <>
+            <label><span>Value name</span><input autoFocus value={publishedName} onChange={(event) => setPublishedName(event.target.value)} list="published-value-options" placeholder="mean_height" spellCheck={false} /><datalist id="published-value-options">{publishedValues.map((value) => <option key={value.name} value={value.name}>{value.rendered}</option>)}</datalist><small>{publishedValues.length ? 'Choose a result from an existing calculation, or enter its name.' : 'A named result appears after its calculation has run. You can insert its name now; it shows “Value unavailable” until the result exists.'}</small></label>
+            {onCreateComputation && <div className="computed-value-create-calculation"><p>Need to calculate a new result? Create its calculation, run it, then insert the result here.</p><button type="button" onClick={onCreateComputation}>Create a calculation…</button></div>}
+          </>}
           {problem && <div className="insert-block-problem" role="alert">{problem}</div>}
         </div>
 
-        <div className="execution-dialog-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={!valid || importing}>{kind === 'setup-cell' || kind === 'values-cell' ? 'Add to code panel' : 'Insert'}</button></div>
+        <div className="execution-dialog-actions"><button type="button" onClick={onClose}>Cancel</button><button className="primary-button" type="submit" disabled={!valid || importing}>{kind === 'values-cell' ? 'Create calculation' : kind === 'setup-cell' ? 'Add shared setup' : 'Insert'}</button></div>
       </form>
     </div>
   )

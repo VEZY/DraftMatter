@@ -1,0 +1,99 @@
+.manuscript-outline-tree,
+.manuscript-outline-tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.manuscript-outline-tree ul {
+  border-left: 1px solid rgba(83, 99, 89, .13);
+  margin-left: 10px;
+  padding-left: 8px;
+}
+
+.manuscript-outline-tree li {
+  margin: 1px 0;
+}
+
+.manuscript-outline-tree .outline-section-row {
+  align-items: flex-start;
+  display: flex;
+  gap: 2px;
+}
+
+.manuscript-outline-tree .outline-disclosure,
+.manuscript-outline-tree .outline-disclosure-spacer {
+  align-items: center;
+  box-sizing: border-box;
+  display: flex;
+  flex: 0 0 20px;
+  height: 32px;
+  justify-content: center;
+  min-height: 0;
+  padding: 0;
+  width: 20px;
+}
+
+.manuscript-outline-tree .outline-disclosure {
+  color: #7b8580;
+}
+
+.manuscript-outline-tree .outline-disclosure svg {
+  transform: rotate(-90deg);
+  transition: transform .14s ease;
+}
+
+.manuscript-outline-tree .outline-disclosure[aria-expanded="true"] svg {
+  transform: rotate(0);
+}
+
+.manuscript-outline-tree .outline-disclosure:disabled {
+  cursor: default;
+  opacity: .55;
+}
+
+.manuscript-outline-tree .outline-navigation {
+  align-items: flex-start;
+  border-radius: 5px;
+  flex: 1 1 auto;
+  gap: 8px;
+  justify-content: space-between;
+  line-height: 1.45;
+  min-width: 0;
+  min-height: 32px;
+  padding: 7px 6px;
+  width: 100%;
+}
+
+.manuscript-outline-tree .outline-navigation > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+
+
+.manuscript-outline-tree .outline-navigation.active {
+  background: rgba(206, 218, 226, .5);
+  box-shadow: inset 2px 0 #57758a;
+  color: #314d61;
+}
+
+.manuscript-outline-tree .outline-navigation.contains-current {
+  box-shadow: inset 2px 0 rgba(87, 117, 138, .6);
+  color: #405a6d;
+}
+
+.manuscript-outline-tree .outline-document-title {
+  margin-bottom: 5px;
+}
+
+.manuscript-outline-tree .outline-document-title .outline-navigation {
+  color: #46524b;
+  font-weight: 650;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .manuscript-outline-tree .outline-disclosure svg {
+    transition: none;
+  }
+}

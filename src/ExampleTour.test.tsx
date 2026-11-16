@@ -12,7 +12,7 @@ describe('complete example guided tour', () => {
   beforeEach(() => {
     ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
     container = document.createElement('div')
-    container.innerHTML = '<article class="structured-manuscript"></article><button class="command-button"></button><button aria-label="Sources"></button><button aria-label="Insert"></button><button aria-label="Browse project files"></button><button class="topbar-code-workspace"></button>'
+    container.innerHTML = '<article class="structured-manuscript"></article><button class="command-button"></button><button class="toolbar-cite-button"></button><button aria-label="Insert"></button><button aria-label="Files"></button><button class="topbar-code-workspace"></button>'
     document.body.append(container)
     root = createRoot(container.appendChild(document.createElement('div')))
   })
@@ -38,7 +38,7 @@ describe('complete example guided tour', () => {
 
     await act(async () => next().click())
     expect(container.textContent).toContain('Add a citation')
-    expect(container.querySelector('[aria-label="Sources"]')?.classList).toContain('example-tour-target')
+    expect(container.querySelector('.toolbar-cite-button')?.classList).toContain('example-tour-target')
 
     await act(async () => next().click())
     expect(container.textContent).toContain('Add a figure')
@@ -47,7 +47,7 @@ describe('complete example guided tour', () => {
 
     await act(async () => next().click())
     expect(container.textContent).toContain('Find your project files')
-    expect(container.querySelector('[aria-label="Browse project files"]')?.classList).toContain('example-tour-target')
+    expect(container.querySelector('[aria-label="Files"]')?.classList).toContain('example-tour-target')
     expect(container.textContent).not.toContain('Desktop only')
 
     await act(async () => next().click())

@@ -23,6 +23,7 @@ export interface CollaborationFileContext {
 }
 
 export interface ProjectFilesWorkspaceProps {
+  layout?: 'dialog' | 'sidebar'
   project: ProjectSnapshot | null
   currentManuscriptPath: string
   source: string
@@ -41,6 +42,7 @@ export interface ProjectFilesWorkspaceProps {
 
 const EMPTY_IMAGES: readonly SharedProjectImage[] = []
 const EMPTY_FILES: readonly { path: string; content: string }[] = []
+const EMPTY_USAGE = { figureLabels: {}, referencedPaths: [] }
 
 /** Read current manuscript figure numbers without changing any file name or source path. */
 export function projectFilesManuscriptUsage(source: string, manuscriptPath: string) {
@@ -86,6 +88,7 @@ export function ProjectFilesWorkspace(props: ProjectFilesWorkspaceProps) {
 }
 
 function ProjectFilesWorkspaceSession({
+  layout = 'dialog',
   project, currentManuscriptPath, source, browserImages = EMPTY_IMAGES, sharedImages = EMPTY_IMAGES,
   builtInFiles = EMPTY_FILES, location, projectName, collaborationFileContext, onClose, onInsertFigure,
   onOpenFile, onDownloadFile, synchronizationPanel,
@@ -145,7 +148,8 @@ function ProjectFilesWorkspaceSession({
     onOpenFile(path, options?.location === 'online' ? { ...options, file: options.file ?? onlineVersions.get(path) } : options)
   } : undefined
 
-  const usage = useMemo(() => projectFilesManuscriptUsage(source, currentManuscriptPath), [source, currentManuscriptPath])
+  // The persistent explorer needs file paths, not a fresh semantic parse on each keystroke.
+  const usage = useMemo(() => layout === 'sidebar' ? EMPTY_USAGE : projectFilesManuscriptUsage(source, currentManuscriptPath), [layout, source, currentManuscriptPath])
   const localFiles = useMemo<ProjectFileInventoryInput[]>(() => {
     if (project) {
       return [...project.documents, ...project.bibliographies, ...inventory?.files ?? []].map((file) => ({ path: file.path, bytes: file.bytes }))
@@ -201,16 +205,19 @@ function ProjectFilesWorkspaceSession({
     } catch (error) { if (mounted.current) setProblem(errorMessage(error)) }
   }
 
-  return <section className="project-files-workspace" aria-labelledby="project-files-workspace-title">
-    <header className="project-files-workspace-header"><div><span className="eyebrow">Your manuscript and its files</span><h2 id="project-files-workspace-title">Files</h2><p>Add images to the paper and see where every available file lives.</p></div><button type="button" className="icon-button" onClick={onClose} aria-label="Close project files"><Icon name="close" /></button></header>
+  return <section className={`project-files-workspace ${layout === 'sidebar' ? 'project-files-workspace-sidebar' : ''}`.trim()} aria-labelledby="project-files-workspace-title">
+    <header className="project-files-workspace-header"><div>{layout !== 'sidebar' && <span className="eyebrow">Your manuscript and its files</span>}<h2 id="project-files-workspace-title">Files</h2>{layout !== 'sidebar' && <p>Add images to the paper and see where every available file lives.</p>}</div><button type="button" className="icon-button" onClick={onClose} aria-label="Close project files"><Icon name="close" size={layout === 'sidebar' ? 16 : 18} /></button></header>
     <div className="project-files-workspace-body">
-      {synchronizationPanel}
-      <ProjectFileBrowser localFiles={localFiles} onlineFiles={onlineFiles} currentManuscriptPath={currentManuscriptPath} referencedPaths={usage.referencedPaths} figureLabels={usage.figureLabels} location={location} projectName={projectName ?? project?.config.name} rootPath={project?.root} localInventoryComplete={Boolean(inventory && !inventory.truncated)} onlineInventoryComplete={!collaborationFileContext || Boolean(remoteCatalogue)} liveCollaboration={Boolean(collaborationFileContext)} loading={loading} problem={[problem, remoteProblem].filter(Boolean).join(' ')} onRefresh={project || remoteClient ? () => setRefreshSequence((value) => value + 1) : undefined} onOpenFile={openFile} onInsertFigure={onInsertFigure} insertablePaths={insertablePaths} onDownloadFile={(path) => void download(path)} downloadablePaths={onDownloadFile ? undefined : downloadablePaths}>
-        {collaborationFileContext && <ProjectFilesPanel {...collaborationFileContext} onOpenFile={openFile} onCatalogueChange={setRemoteCatalogue} />}
+      {layout !== 'sidebar' && synchronizationPanel}
+      <ProjectFileBrowser layout={layout} localFiles={localFiles} onlineFiles={onlineFiles} currentManuscriptPath={currentManuscriptPath} referencedPaths={usage.referencedPaths} figureLabels={usage.figureLabels} location={location} projectName={projectName ?? project?.config.name} rootPath={project?.root} localInventoryComplete={Boolean(inventory && !inventory.truncated)} onlineInventoryComplete={!collaborationFileContext || Boolean(remoteCatalogue)} liveCollaboration={Boolean(collaborationFileContext)} loading={loading} problem={[problem, remoteProblem].filter(Boolean).join(' ')} onRefresh={project || remoteClient ? () => setRefreshSequence((value) => value + 1) : undefined} onOpenFile={openFile} onInsertFigure={onInsertFigure} insertablePaths={insertablePaths} onDownloadFile={(path) => void download(path)} downloadablePaths={onDownloadFile ? undefined : downloadablePaths}>
+        {collaborationFileContext || (layout === 'sidebar' && synchronizationPanel) ? <>
+          {layout === 'sidebar' && synchronizationPanel}
+          {collaborationFileContext && <ProjectFilesPanel {...collaborationFileContext} onOpenFile={openFile} onCatalogueChange={setRemoteCatalogue} />}
+        </> : null}
       </ProjectFileBrowser>
       {downloadStatus && <p className="project-files-workspace-notice" role="status">{downloadStatus}</p>}
       {inventory?.truncated && <p className="project-file-browser-help">This is a bounded view of a large project folder. Open the folder in your file manager to see every file.</p>}
-      <p className="project-files-workspace-footnote">Figure numbers follow their order in the manuscript. File names and paths stay the same when figures move.</p>
+      {layout !== 'sidebar' && <p className="project-files-workspace-footnote">Figure numbers follow their order in the manuscript. File names and paths stay the same when figures move.</p>}
     </div>
   </section>
 }

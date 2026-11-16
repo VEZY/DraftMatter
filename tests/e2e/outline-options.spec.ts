@@ -37,6 +37,9 @@ test.describe('DM-P1-06 manuscript outline', () => {
 
     const outline = page.getByRole('complementary', { name: 'Manuscript outline' })
     const tree = outline.locator('.outline-tree')
+    await expect(tree.getByText('Diagnostics', { exact: true })).toHaveCount(0)
+    await tree.getByRole('button', { name: 'Expand Methods', exact: true }).click()
+    await tree.getByRole('button', { name: 'Expand Analysis', exact: true }).click()
     await expect(tree.getByText('Diagnostics', { exact: true })).toBeVisible()
     await expect(page.locator('.editor-statusbar')).toContainText('6 headings')
     await expect(page.locator('.editor-statusbar')).toContainText('22 words · 1 min read')
@@ -68,7 +71,7 @@ test.describe('DM-P1-06 manuscript outline', () => {
     })
     await outline.getByRole('button', { name: 'Outline options' }).click()
     await expect(options).toBeHidden()
-    await tree.getByRole('button', { name: /Methods/ }).click()
+    await tree.getByRole('button', { name: 'Methods', exact: true }).click()
     await expect.poll(() => page.evaluate(() => (window as typeof window & { __lastOutlineScroll?: string | null }).__lastOutlineScroll)).not.toBeNull()
   })
 

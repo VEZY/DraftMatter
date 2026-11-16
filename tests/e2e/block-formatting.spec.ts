@@ -1,3 +1,4 @@
+import { showWritingTools } from './writing-tools'
 import { expect, test } from '@playwright/test'
 
 const source = `# Formatting controls
@@ -27,18 +28,22 @@ test.describe('DM-P1-03 rendered block formatting', () => {
     const styles = page.getByLabel('Block style')
 
     await manuscript.getByText('Bullet this paragraph.', { exact: true }).selectText()
+    await showWritingTools(page)
     await styles.selectOption('bullets')
     await expect(manuscript.getByRole('listitem').filter({ hasText: 'Bullet this paragraph.' })).toBeVisible()
 
     await manuscript.getByText('Promote this paragraph.', { exact: true }).selectText()
+    await showWritingTools(page)
     await styles.selectOption('heading-2')
     await expect(manuscript.getByRole('heading', { level: 2, name: 'Promote this paragraph.' })).toBeVisible()
 
     await manuscript.getByText('Number this paragraph.', { exact: true }).selectText()
+    await showWritingTools(page)
     await styles.selectOption('numbering')
     await expect(manuscript.getByRole('listitem').filter({ hasText: 'Number this paragraph.' })).toBeVisible()
 
     await manuscript.getByText('Quote this paragraph.', { exact: true }).selectText()
+    await showWritingTools(page)
     await styles.selectOption('quote')
     await expect(manuscript.getByRole('blockquote')).toContainText('Quote this paragraph.')
 

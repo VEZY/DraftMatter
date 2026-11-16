@@ -1,3 +1,4 @@
+import { showWritingTools } from './writing-tools'
 import { expect, test } from '@playwright/test'
 
 const source = `# Suggestion capture
@@ -75,10 +76,12 @@ test.describe('DM-P4-02 rendered suggestion transactions', () => {
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
 
     await manuscript.getByText('Format this phrase.', { exact: true }).selectText()
+    await showWritingTools(page)
     await page.getByRole('button', { name: 'Bold' }).click()
     await waitForChangeCount(page, 1)
 
     await manuscript.getByText('Promote this paragraph.', { exact: true }).selectText()
+    await showWritingTools(page)
     await page.getByLabel('Block style').selectOption('heading-2')
     await waitForChangeCount(page, 2)
 

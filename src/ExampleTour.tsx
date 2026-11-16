@@ -20,8 +20,8 @@ const steps: ReadonlyArray<{
   },
   {
     title: 'Add a citation',
-    detail: 'Place the cursor in the manuscript, then open Sources. Search or import a reference, select it, and insert the citation.',
-    target: '[aria-label="Sources"]',
+    detail: 'Place the cursor in the manuscript and choose Cite in the writing toolbar. Search your project references or your local Zotero library, select a reference, and insert it.',
+    target: '.toolbar-cite-button',
   },
   {
     title: 'Add a figure',
@@ -30,12 +30,12 @@ const steps: ReadonlyArray<{
   },
   {
     title: 'Find your project files',
-    detail: 'Use the folder icon to open Files. Find images and data, see each image’s current figure number, and check which files are on this computer, in this browser, or shared online. Moving a figure changes its number, not its filename.',
-    target: '[aria-label="Browse project files"]',
+    detail: 'Choose Files on the left to browse your project folders. Select a file to open a manuscript, insert an image, or download a copy. Sharing and transfers are available below the file tree.',
+    target: '[aria-label="Files"]',
   },
   {
     title: 'Optional: create a figure from code',
-    detail: 'In a local desktop copy, choose Insert → Optional computations → Reproducible figure, select a language, and add your code. Choose Run; DraftMatter helps prepare the language before continuing the computation.',
+    detail: 'In a local desktop copy, choose Insert → Reproducible figure, select a language, and add your code. Choose Run; DraftMatter helps prepare the language before continuing the computation.',
     target: '[aria-label="Insert"]',
     desktopOnly: true,
   },
@@ -47,7 +47,7 @@ const steps: ReadonlyArray<{
   },
   {
     title: 'Optional: insert a computed value',
-    detail: 'Publish a named value from a code cell, then use Published value to place its saved result in the text. Collaborators can read it online without running the code.',
+    detail: 'Create and run a named calculation, then choose Insert → Computed value to place its saved result in the text. Collaborators can read it online without running the code.',
     target: '[aria-label="Insert"]',
     desktopOnly: true,
   },

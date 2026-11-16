@@ -60,3 +60,95 @@
   .app-shell .topbar .topbar-completion-actions { gap: 3px; }
   .app-shell .topbar .review-toggle { gap: 3px; padding-inline: 5px; }
 }
+
+.app-shell .format-toolbar .toolbar-cite-button {
+  gap: 5px;
+  padding: 0 8px;
+}
+.toolbar-cite-button > span { font-size: 11px; font-weight: 650; }
+
+.tracking-controls {
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: inline-flex;
+  flex: 0 0 auto;
+  height: 32px;
+}
+.tracking-controls > .topbar-track-changes {
+  align-items: center;
+  border-radius: 6px 0 0 6px;
+  color: #536258;
+  display: inline-flex;
+  font-size: 11px;
+  font-weight: 600;
+  gap: 6px;
+  padding: 0 9px;
+  white-space: nowrap;
+}
+.tracking-controls > .topbar-track-changes:hover { background: #eff3ef; }
+.tracking-controls > .topbar-track-changes.active {
+  background: #e7f0e9;
+  color: #325c43;
+}
+.tracking-controls > .topbar-track-changes:disabled { opacity: .45; }
+.tracking-controls > .review-display-options-wrap > button {
+  align-items: center;
+  border-left: 1px solid var(--line);
+  border-radius: 0 6px 6px 0;
+  color: #69776e;
+  display: inline-flex;
+  justify-content: center;
+  min-width: 25px;
+}
+.tracking-controls > .review-display-options-wrap > button:hover,
+.tracking-controls > .review-display-options-wrap > button[aria-expanded="true"] { background: #eff3ef; }
+.tracking-controls .review-display-options-popover { text-align: left; }
+
+.app-shell .workspace { position: relative; }
+.app-shell .left-panel.files-sidebar {
+  flex-basis: 300px;
+  overflow: hidden;
+}
+.app-shell .outline-tree { padding-left: 8px; padding-right: 8px; }
+.app-shell .rail-notice { position: absolute; right: 0; top: 0; }
+
+@media (hover: none) {
+
+}
+@media (max-width: 1120px) {
+  .app-shell .left-panel {
+    bottom: 0;
+    box-shadow: 8px 0 24px rgba(35, 48, 40, .1);
+    display: flex;
+    left: 52px;
+    position: absolute;
+    top: 0;
+    width: min(300px, calc(100vw - 104px));
+    z-index: 35;
+  }
+}
+@media (max-width: 700px) {
+  .app-shell .app-rail { display: flex; flex-basis: 44px; }
+  .app-shell .left-panel { left: 44px; width: min(300px, calc(100vw - 64px)); }
+  .app-shell .format-toolbar > .toolbar-cite-button { display: flex; }
+  .app-shell .tracking-controls { height: 30px; }
+  .app-shell .topbar-track-changes { font-size: 10px; gap: 4px; padding: 0 6px; }
+  .app-shell .topbar-track-changes > svg { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .app-shell .format-toolbar { transition: none; }
+}
+
+
+.project-file-explorer .project-file-presence { color: #55695b; }
+.citation-picker :is(small, .citation-intake-actions > span, .picker-filter > span, .zotero-state, .crossref-state, .picker-footer > span) { color: #596a60; font-size: 10px; }
+.citation-picker .picker-filter > button { color: #596a60; font-size: 10px; }
+.citation-picker .source-result :is(small, em) { color: #596a60; font-size: 10px; }
+.citation-picker .source-result strong { font-size: 12px; }
+.app-shell .project-file-explorer .project-file-presence { color: #55695b; }
+
+.toolbar-reproducibility-heading { border-top: 1px solid #dde4df; color: #63766a; font-size: 10px; font-weight: 650; letter-spacing: .04em; margin-top: 4px; padding: 10px 8px 4px; }
+.recovery-dialog :is(.recovery-head p, .recovery-empty p, .recovery-footer) { color: #596b60; font-size: 11px; }
+.floating-writing-toolbar-shell .toolbar-insert-menu small { color: #596b60; font-size: 10px; }
+.floating-writing-toolbar-shell .toolbar-insert-menu strong { font-size: 11px; }

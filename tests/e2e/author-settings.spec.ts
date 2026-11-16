@@ -56,7 +56,6 @@ test.describe('local review identity settings', () => {
     await expect(page.locator('.topbar-actions .avatar')).toHaveText('ZD')
 
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
-    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     const review = page.getByRole('complementary', { name: 'Manuscript comments' })
     await selectRenderedText(manuscript.getByText('Comment on this sentence.', { exact: true }), 'Comment on this sentence.')
     await page.getByRole('button', { name: 'Add comment to selection', exact: true }).click()
@@ -80,7 +79,6 @@ test.describe('local review identity settings', () => {
 
     await page.reload()
     await expect(page.locator('.topbar-actions .avatar')).toHaveAttribute('aria-label', 'Zoé Dupont')
-    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
     await expect(page.getByRole('complementary', { name: 'Manuscript comments' }).getByText('Please retain the confidence interval.', { exact: true })).toBeVisible()
     await page.getByRole('button', { name: 'Settings' }).click()
     await expect(page.getByRole('dialog', { name: 'Review identity' }).getByLabel('Display name')).toHaveValue('Zoé Dupont')

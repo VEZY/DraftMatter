@@ -72,7 +72,7 @@ describe('generic portable manuscript app workflow', () => {
     expect(container.querySelector('.source-drawer pre')?.textContent).toContain('println("before")')
     await act(async () => (container.querySelector('[aria-label="Close source inspector"]') as HTMLButtonElement).click())
 
-    await act(async () => (container.querySelector('.quick-cite') as HTMLButtonElement).click())
+    await act(async () => (container.querySelector('.toolbar-cite-button') as HTMLButtonElement).click())
     const citationResult = [...container.querySelectorAll<HTMLButtonElement>('.source-result')]
       .find((button) => button.textContent?.includes('Growth coordination under fluctuating water availability'))
     await act(async () => citationResult?.click())

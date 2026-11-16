@@ -5,6 +5,40 @@ text, add citations, insert existing figures, edit tables, and preview equations
 in the browser or the desktop app. Computation is an optional way to connect
 figures, tables, and reported values to their analysis.
 
+## Write, cite, and review
+
+Place the cursor in the manuscript and choose **Cite** in the writing toolbar.
+Search the project references or, on desktop with Zotero open, your local Zotero
+library. Select the references and choose **Insert selected**. **⌘⇧C** on macOS
+or **Ctrl+Shift+C** on Windows and Linux opens the same picker at the cursor.
+**Insert → Citation** is another route to that picker.
+
+The writing toolbar groups text style, bold, italic, links, citations and
+insertions. It hides completely while idle. Hover or select **Writing tools** to
+reveal it, then use the pin to keep it visible. Drag its handle to move it, or
+choose **Position writing tools → Dock left / Dock right**. The pin and position
+are remembered on this device. Touch and keyboard access keep the tools usable.
+
+**Track changes** is in the main header. Its adjacent arrow opens **Changes
+display**, including margin or inline changes and original/final previews.
+Comments remain beside their text; select an anchor to open its conversation.
+
+Use **Outline** on the left for the manuscript plan. Main sections are visible
+by default; each arrow expands or collapses its subsections independently.
+Searching reveals matching headings and their parent sections.
+
+## Find text and recover a version
+
+Press **⌘F** on macOS or **Ctrl+F** on Windows and Linux, or choose **Find in
+document** on the left. Enter a phrase, then use **Enter / Shift+Enter** for the
+next or previous match. The search includes the visible title and bibliography.
+**Escape** closes it and returns to the manuscript without changing the text.
+
+Choose **History** on the left to browse this device’s recovery snapshots.
+Restoring an earlier snapshot creates a new saved state. The project menu also
+keeps its **Recovery history** entry. These safety copies are separate from Git
+commits and shared collaboration checkpoints.
+
 ## Add figures, tables, and equations
 
 - Choose **Insert → Figure** and pick an image, or drop an image directly into
@@ -18,15 +52,18 @@ figures, tables, and reported values to their analysis.
   Numbering follows the manuscript when you reorder its contents.
 
 Imported images receive a stable filename in `figures/`. DraftMatter does not
-rename the image to match its current figure number. The **Files** workspace
-shows both its filename and its current **Figure 1**, **Figure 2**, or other
-manuscript number.
+rename the image to match its current figure number. Figure numbers appear
+with the figures in the manuscript; the file tree keeps their stable names.
 
 ## Know where the files live
 
-Open the folder icon in the top bar to browse **Files**. It shows the current
-manuscript, available figures, references, and other known project files, with
-their locations.
+Choose **Files** on the left to browse folders without leaving the paper.
+Select a file to see its available actions: open another manuscript, insert an
+image, or download a copy when it lives online or only in this browser. Files
+already in a local desktop project do not offer a redundant download. The
+current manuscript is marked in the tree. Search
+finds files inside closed folders. **Outline** switches the same pane back to
+the manuscript plan.
 
 | Workspace | Where a newly imported image is saved |
 | --- | --- |
@@ -42,8 +79,8 @@ available without Git.
 
 ## Synchronize a selected part of a local project
 
-Connect a local desktop project to its collaboration server, then open **Files**.
-The **Selective synchronization** panel follows the manuscript, figures, and
+Connect a local desktop project to its collaboration server, then open
+**Files → Sharing & transfers**. The **Selective synchronization** panel follows the manuscript, figures, and
 references by default. Select additional files individually. Explicit exclusions
 are remembered, including for default files. New default files are discovered
 when the project is compared again.
@@ -97,7 +134,7 @@ are shared with the paper. Other files, including analysis datasets, stay local
 until you explicitly select them for synchronization or upload a version. You do not need to put a dataset online just
 to insert a finished figure.
 
-To share additional files, open **Files → Shared data files**. Owners and editors
+To share additional files, open **Files → Sharing & transfers → Shared data files**. Owners and editors
 can choose a file and upload a version; collaborators with access can download
 shared versions. These transfers are separate from inserting a figure and can
 be paused and resumed. Uploading data makes a version available for download. A desktop collaborator
@@ -127,6 +164,23 @@ every collaborator's files.
 
 ## Use computation when it helps
 
+The **Code & computation** panel separates language environments from manuscript
+calculations. **Installed only** means a runtime was found; **Kernel detected**
+means an available execution connection was found and will be checked again
+when you run a calculation.
+
+A **shared setup** cell is optional. It holds imports, reusable functions or
+shared data and runs before that language’s calculations in a fresh session.
+A standalone calculation can run without a shared setup cell.
+
+Use **Insert → Computed value** to put a named result inside a sentence. If it
+needs a new calculation, choose **Create a calculation…** there. Calculations
+and their source appear in Code & computation. **Reproducible figure** and
+**Reproducible table** are also directly visible in Insert, under the
+**Reproducibility** heading. Creating a calculation saves its source; use its
+**Run** action when you want to execute it.
+
+
 Python, R, and Julia run from an explicitly trusted local desktop project. On
 the first **Run**, DraftMatter offers the required language setup, then
 continues the computation you requested. Python can be acquired for the
@@ -146,7 +200,7 @@ publication exports show the saved results.
 ## Existing Git users
 
 The old built-in Git workspace has been removed from normal project navigation.
-The history icon now opens DraftMatter's local recovery journal. Existing `.git`
+The project menu’s **Recovery history** opens DraftMatter's local recovery journal. Existing `.git`
 folders, commits, branches, configuration, and remotes are left untouched. Continue
 using them through your own Git tools; no migration or repository setup is needed
 to keep writing in DraftMatter.

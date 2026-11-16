@@ -435,7 +435,7 @@ describe('DM-P1-GATE local project workflow', () => {
     expect(readRecoverySnapshots(localStorage).some((snapshot) => snapshot.source === editedSource)).toBe(true)
   })
 
-  it('opens local recovery from History and restores a saved version without managing Git', async () => {
+  it('opens local recovery from the History launcher and restores a saved version without managing Git', async () => {
     localStorage.setItem('draftmatter.last-project-root.v1', projectRoot)
     await act(async () => appRoot.render(<App />))
     await flush(50)
@@ -444,7 +444,7 @@ describe('DM-P1-GATE local project workflow', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close source inspector"]')!.click())
     const writesBeforeHistory = vi.mocked(desktopHost.saveDocument).mock.calls.length
 
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open local recovery history"]')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="History"]')!.click())
     await flush()
     const history = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Recovery history"]')!
     expect(history).not.toBeNull()

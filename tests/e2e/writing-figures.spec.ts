@@ -1,3 +1,4 @@
+import { showWritingTools } from './writing-tools'
 import { mkdir, readFile } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { expect, test } from '@playwright/test'
@@ -47,6 +48,7 @@ test.describe('ordinary writing and portable figure files', () => {
     await page.goto('/draft')
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
     await manuscript.getByText('The observed response belongs here.', { exact: true }).click()
+    await showWritingTools(page)
     await page.getByRole('button', { name: 'Insert', exact: true }).click()
     await page.locator('.toolbar-insert-menu').getByRole('button', { name: /^Figure/ }).click()
     const dialog = page.getByRole('dialog', { name: 'Insert figure', exact: true })
@@ -90,13 +92,16 @@ test.describe('ordinary writing and portable figure files', () => {
     const artifactsDirectory = resolve('test-results/writing-workspace')
     await mkdir(artifactsDirectory, { recursive: true })
     await page.screenshot({ path: resolve(artifactsDirectory, 'toolbar-and-manuscript.png') })
-    await page.getByRole('button', { name: 'Browse project files', exact: true }).click()
-    const files = page.getByRole('dialog', { name: 'Files', exact: true })
-    const row = files.locator('.project-file-browser-row').filter({ hasText: path })
-    await expect(row).toBeVisible()
-    await expect(row).toContainText('Figure 1')
-    await expect(row).toContainText('This browser')
-    await expect(row.getByRole('button', { name: `Download ${path}`, exact: true })).toBeVisible()
+    await expect(manuscript.locator('.structured-figure-label')).toContainText('Figure 1')
+    await page.getByRole('navigation', { name: 'Workspace navigation' }).getByRole('button', { name: 'Files', exact: true }).click()
+    const files = page.getByRole('complementary', { name: 'Project files', exact: true })
+    await files.getByRole('button', { name: 'Expand figures', exact: true }).click()
+    const imageFile = files.getByRole('button', { name: `Select ${path}`, exact: true })
+    await expect(imageFile).toBeVisible()
+    await imageFile.click()
+    const selected = files.getByRole('region', { name: 'Selected project file', exact: true })
+    await expect(selected).toContainText('This browser')
+    await expect(selected.getByRole('button', { name: `Download ${path}`, exact: true })).toBeVisible()
     await page.screenshot({ path: resolve(artifactsDirectory, 'project-files.png') })
   })
 
@@ -159,6 +164,7 @@ test.describe('ordinary writing and portable figure files', () => {
       return url.split(',')[1]
     })
     await page.getByText('The observed response belongs here.', { exact: true }).click()
+    await showWritingTools(page)
     await page.getByRole('button', { name: 'Insert', exact: true }).click()
     await page.locator('.toolbar-insert-menu').getByRole('button', { name: /^Figure/ }).click()
     const insertion = page.getByRole('dialog', { name: 'Insert figure', exact: true })

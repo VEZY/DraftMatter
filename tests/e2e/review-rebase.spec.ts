@@ -29,7 +29,6 @@ test.describe('DM-P4-04 atomic local rebase', () => {
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     }, source)
     await page.goto('/draft')
-    await page.locator('.topbar').getByRole('button', { name: /^Review,/ }).click()
 
     const review = page.getByRole('complementary', { name: 'Manuscript comments' })
     await review.getByRole('button', { name: /Marcus Chen/ }).click()

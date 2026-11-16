@@ -31,6 +31,8 @@ import type { ExecutionFreshnessStatus } from './executionFreshness'
 import { extractExecutableCells, type ExecutionLanguage } from './executionCells'
 import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
 import { motionAwareScrollBehavior } from './accessibility'
+import { createManuscriptSearchPlugin, EMPTY_MANUSCRIPT_SEARCH, manuscriptInlinePreview, manuscriptSearchKey, navigateManuscriptSearch, setManuscriptSearch, type ManuscriptSearchOptions, type ManuscriptSearchRegions, type ManuscriptSearchState } from './manuscriptSearch'
+import './manuscriptFind.css'
 import type { PublicationByline } from './publicationMetadata'
 import { embeddedExecutionImageFromHtml, executionTableFromHtml, safeEmbeddedImageDataUrl } from './outputRenderer'
 import { isPipeTableSeparator, parseTableCaptionLine } from './tableSyntax'
@@ -117,7 +119,7 @@ function structuredBlockLabel(range: StructuredBlockRange) {
       : outputKind === 'table'
         ? 'reproducible table source'
         : outputKind === 'values'
-          ? 'published-value source'
+          ? 'computed value calculation'
           : outputKind === 'setup'
             ? 'project setup source'
             : 'computation source'
@@ -214,6 +216,8 @@ export function shouldRequestStructuredCommands(state: EditorState, event: Pick<
 
 export interface StructuredManuscriptEditorHandle {
   focus: () => void
+  setSearch: (query: string) => ManuscriptSearchState
+  findNext: (direction?: 1 | -1) => ManuscriptSearchState
   toggleBold: () => boolean
   toggleItalic: () => boolean
   setLink: (href: string, title?: string) => boolean
@@ -255,6 +259,8 @@ export interface ImportedFigure {
 export interface StructuredManuscriptEditorProps {
   source: string
   onChange: (source: string) => void
+  onSearchChange?: (result: ManuscriptSearchState) => void
+  searchRegions?: () => ManuscriptSearchRegions
   publicationByline?: PublicationByline
   onDiagnostics?: (diagnostics: DocumentDiagnostic[]) => void
   onOutlineChange?: (outline: StructuredOutlineItem[]) => void
@@ -994,7 +1000,7 @@ function codeCellNodeView(
     const cellLanguage = String(node.attrs.language)
     const lines = code ? code.split(/\r\n|\r|\n/).length : 0
     const output = node.attrs.outputKind ? String(node.attrs.outputKind) : 'result'
-    const objectName = output === 'values' ? 'published values' : output
+    const objectName = output === 'values' ? 'computed values' : output
     const presentedStatus = presentationStatus(cellId) ?? String(node.attrs.status)
     const completedOutputRun = ['figure', 'table'].includes(output)
       && ['queued', 'running'].includes(previousPresentedStatus ?? '')
@@ -1728,7 +1734,7 @@ function equationNodeView(initialNode: ProseMirrorNode, view: EditorView, getPos
       number.textContent = numbered?.number ? `(${numbered.number})` : ''
       number.hidden = !numbered?.number
       captionPreview.textContent = equationCaption
-        ? `${numbered?.number ? `Equation ${numbered.number}. ` : ''}${inlineMarkdownPreviewText(equationCaption)}`
+        ? `${numbered?.number ? `Equation ${numbered.number}. ` : ''}${manuscriptInlinePreview(equationCaption)}`
         : ''
       captionPreview.hidden = editing || !equationCaption
       updateObjectReferenceButton(references, view, equationLabel, numbered?.number ? `Equation ${numbered.number}` : 'display equation')
@@ -1890,17 +1896,6 @@ function retargetFootnoteReferences(transaction: Transaction, previousLabel: str
   return updated
 }
 
-function inlineMarkdownPreviewText(value: string) {
-  return value
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-    .replace(/\[([^\]\r\n]*?)@([a-zA-Z0-9_:.+-]+)([^\]\r\n]*)\]/g, '$1$2$3')
-    .replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, '$1$2')
-    .replace(/(?<!\*)\*([^*]+)\*(?!\*)|(?<!_)_([^_]+)_(?!_)/g, '$1$2')
-    .replace(/`([^`]+)`/g, '$1')
-    .replace(/\$([^$\r\n]+)\$/g, '$1')
-    .replace(/\[\^([a-zA-Z0-9_.:-]+)\]/g, 'footnote $1')
-    .trim()
-}
 
 function footnoteDomId(label: string) {
   return `dm-footnote-${label.replace(/[^a-zA-Z0-9_.:-]+/g, '-') || 'note'}`
@@ -2041,7 +2036,7 @@ function footnoteDefinitionNodeView(initialNode: ProseMirrorNode, view: EditorVi
     dom.id = footnoteDomId(String(node.attrs.label))
     numberLabel.textContent = number ? `Footnote ${number}` : `Unreferenced footnote ${String(node.attrs.label)}`
     dom.setAttribute('aria-label', number ? `Footnote ${number}` : `Unreferenced footnote ${String(node.attrs.label)}`)
-    preview.textContent = inlineMarkdownPreviewText(String(node.attrs.contentMarkdown)) || 'Empty footnote'
+    preview.textContent = manuscriptInlinePreview(String(node.attrs.contentMarkdown)) || 'Empty footnote'
     edit.disabled = !isEditable()
     edit.setAttribute('aria-label', number ? `Edit footnote ${number}` : `Edit unreferenced footnote ${String(node.attrs.label)}`)
     textarea.setAttribute('aria-label', number ? `Footnote ${number} content` : `Footnote ${String(node.attrs.label)} content`)
@@ -2414,7 +2409,7 @@ function outputNodeView(
         const headRow = document.createElement('tr')
         tableData.headers.forEach((value, index) => {
           const cell = document.createElement('th')
-          cell.textContent = inlineMarkdownPreviewText(value)
+          cell.textContent = manuscriptInlinePreview(value)
           cell.style.textAlign = tableData.alignments[index]
           headRow.append(cell)
         })
@@ -2424,7 +2419,7 @@ function outputNodeView(
           const row = document.createElement('tr')
           tableData.headers.forEach((_header, index) => {
             const cell = document.createElement('td')
-            cell.textContent = inlineMarkdownPreviewText(values[index] ?? '')
+            cell.textContent = manuscriptInlinePreview(values[index] ?? '')
             cell.style.textAlign = tableData.alignments[index]
             row.append(cell)
           })
@@ -2438,7 +2433,7 @@ function outputNodeView(
       preview.textContent = markdown
       content.append(preview)
     }
-    const caption = presentation.caption ? inlineMarkdownPreviewText(presentation.caption) : ''
+    const caption = presentation.caption ? manuscriptInlinePreview(presentation.caption) : ''
     captionPreview.textContent = `${numbered?.number ? `${kindLabel} ${numbered.number}.` : ''}${caption ? `${numbered?.number ? ' ' : ''}${caption}` : ''}`
     captionPreview.hidden = editing || (!numbered?.number && !caption)
     if (presentation.kind === 'table') dom.insertBefore(captionPreview, content)
@@ -3377,7 +3372,7 @@ function tableNodeView(
     edit.disabled = !isEditable()
     edit.setAttribute('aria-label', tableLabel ? `Edit table ${tableLabel} details` : 'Edit table details')
     preview.id = captionId
-    preview.textContent = `${numbered?.number ? `Table ${numbered.number}.` : ''}${captionMarkdown ? `${numbered?.number ? ' ' : ''}${inlineMarkdownPreviewText(captionMarkdown)}` : ''}`
+    preview.textContent = `${numbered?.number ? `Table ${numbered.number}.` : ''}${captionMarkdown ? `${numbered?.number ? ' ' : ''}${manuscriptInlinePreview(captionMarkdown)}` : ''}`
     preview.hidden = editing || (!numbered?.number && !captionMarkdown)
     if (numbered?.number || captionMarkdown) table.setAttribute('aria-describedby', captionId)
     else table.removeAttribute('aria-describedby')
@@ -3486,7 +3481,7 @@ function tableNodeView(
   }
 }
 
-function editorState(document: ProseMirrorNode, collaboration?: CollaborativeEditorBinding | null) {
+function editorState(document: ProseMirrorNode, collaboration?: CollaborativeEditorBinding | null, search?: ManuscriptSearchOptions) {
   const editingPlugins = collaboration
     ? createCollaborativeProseMirrorState({
         document: collaboration.document,
@@ -3507,6 +3502,7 @@ function editorState(document: ProseMirrorNode, collaboration?: CollaborativeEdi
     ...(collaboration ? {} : { doc: document }),
     plugins: [
       ...editingPlugins,
+      createManuscriptSearchPlugin(search),
       keymap({
         'Mod-b': toggleMark(manuscriptSchema.marks.strong),
         'Mod-i': toggleMark(manuscriptSchema.marks.emphasis),
@@ -3520,6 +3516,8 @@ function editorState(document: ProseMirrorNode, collaboration?: CollaborativeEdi
 export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorHandle, StructuredManuscriptEditorProps>(function StructuredManuscriptEditor({
   source,
   onChange,
+  onSearchChange,
+  searchRegions,
   publicationByline,
   onDiagnostics,
   onOutlineChange,
@@ -3564,6 +3562,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const sourceRef = useRef(source)
   const loadedSourceRef = useRef(source)
   const onChangeRef = useRef(onChange)
+  const onSearchChangeRef = useRef(onSearchChange)
+  const searchRegionsRef = useRef(searchRegions)
+  const searchQueryRef = useRef('')
   const publicationBylineRef = useRef(publicationByline)
   const onDiagnosticsRef = useRef(onDiagnostics)
   const onOutlineRef = useRef(onOutlineChange)
@@ -3601,8 +3602,12 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const activeReviewIdRef = useRef(activeReviewId)
   const activeReviewAnchorIdRef = useRef(activeReviewAnchorId)
   const collaborationRef = useRef(collaboration)
-  const reviewDecorationRef = useRef(reviewDecorationIndex(source))
+  const reviewDecorationRef = useRef<ReviewDecorationIndex | null>(null)
+  // Building the index parses the manuscript; do it only once during mounting.
+  if (reviewDecorationRef.current === null) reviewDecorationRef.current = reviewDecorationIndex(source)
   onChangeRef.current = onChange
+  onSearchChangeRef.current = onSearchChange
+  searchRegionsRef.current = searchRegions
   publicationBylineRef.current = publicationByline
   onDiagnosticsRef.current = onDiagnostics
   onOutlineRef.current = onOutlineChange
@@ -3637,6 +3642,24 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   activeReviewAnchorIdRef.current = activeReviewAnchorId
   collaborationRef.current = collaboration
 
+  const searchOptions = (): ManuscriptSearchOptions => ({
+    initialQuery: searchQueryRef.current,
+    regions: () => searchRegionsRef.current?.() ?? {},
+    inlineRegions: (document) => {
+      const view = viewRef.current
+      if (!view || view.state.doc !== document) return undefined
+      const regions: Array<{ position: number; elements: HTMLElement[] }> = []
+      document.descendants((node, position) => {
+        if (node.type !== manuscriptSchema.nodes.output_block) return true
+        const element = view.nodeDOM(position)
+        if (element instanceof HTMLElement) regions.push({ position, elements: [...element.querySelectorAll<HTMLElement>('.structured-output-content, .structured-output-caption')] })
+        return false
+      })
+      return regions
+    },
+    onChange: (result) => { searchQueryRef.current = result.query; onSearchChangeRef.current?.(result) },
+  })
+
   const metadataForEditor = (parsed: ReturnType<typeof parseStructuredManuscript>) => collaborationRef.current
     ? { ...parsed.metadata, originalDocumentJson: withoutCollaborativeReviewAnchors(parsed.document).toJSON() }
     : parsed.metadata
@@ -3670,7 +3693,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     if (collaborationRef.current) {
       reconcileCollaborativeProseMirrorDocument(collaborationRef.current, parsed.document)
     } else {
-      view.updateState(editorState(parsed.document))
+      view.updateState(editorState(parsed.document, undefined, searchOptions()))
     }
     refreshFootnotePresentation(view)
     emitReviewSelection(view)
@@ -3777,6 +3800,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
 
   useImperativeHandle(forwardedRef, () => ({
     focus: () => viewRef.current?.focus(),
+    setSearch: (query) => {
+      searchQueryRef.current = query
+      return viewRef.current ? setManuscriptSearch(viewRef.current, query) : { ...EMPTY_MANUSCRIPT_SEARCH, query }
+    },
+    findNext: (direction = 1) => viewRef.current ? navigateManuscriptSearch(viewRef.current, direction) : EMPTY_MANUSCRIPT_SEARCH,
     toggleBold: () => run(toggleMark(manuscriptSchema.marks.strong)),
     toggleItalic: () => run(toggleMark(manuscriptSchema.marks.emphasis)),
     setLink: (href, title) => {
@@ -4248,7 +4276,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       }
     }
     const view = new EditorView(host, {
-      state: editorState(parsed.document, collaboration),
+      state: editorState(parsed.document, collaboration, searchOptions()),
       editable: () => !readOnlyRef.current,
       attributes: {
         role: 'textbox',
@@ -4261,7 +4289,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         ...publicationBylineDecorations(state.doc, publicationBylineRef.current),
         ...reviewDecorations(
           state.doc,
-          reviewDecorationRef.current,
+          reviewDecorationRef.current!,
           markupViewRef.current,
           reviewAuthorIdRef.current,
           activeReviewIdRef.current,
@@ -4440,6 +4468,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         }
         const next = view.state.apply(transaction)
         view.updateState(next)
+        if (transaction.getMeta(manuscriptSearchKey) && !transaction.docChanged) return
         refreshSemanticPresentation(view)
         refreshFootnotePresentation(view)
         emitReviewSelection(view)
@@ -4507,7 +4536,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         reconcileCollaborativeProseMirrorDocument(collaborationRef.current, parsed.document)
       } else {
         for (const pending of pendingFigureImportsRef.current) pending.cancelled = true
-        view.updateState(editorState(parsed.document))
+        view.updateState(editorState(parsed.document, undefined, searchOptions()))
         refreshSemanticPresentation(view)
       }
       refreshFootnotePresentation(view)

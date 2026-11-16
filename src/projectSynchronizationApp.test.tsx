@@ -153,8 +153,9 @@ describe('selective synchronization in the actual app', () => {
     await until(() => container.querySelector('.project-switcher-name small')?.textContent === 'paper.qmd')
     await act(async () => button('Open online collaboration').click())
     await act(async () => button('Connect test collaboration').click())
-    await act(async () => button('Browse project files').click())
+    await act(async () => button('Files', container.querySelector('[aria-label="Workspace navigation"]')!).click())
     await until(() => Boolean(container.querySelector('[aria-label="Selective synchronization"]')))
+    await act(async () => container.querySelector<HTMLElement>('.project-file-explorer-transfers > summary')!.click())
   }
 
   it('automatically pulls the shared manuscript into its unchanged local default without creating a second text authority', async () => {

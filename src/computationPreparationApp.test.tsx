@@ -165,7 +165,7 @@ describe('prepare a computation from its first Run action', () => {
     expect(desktopHost.executeKernel).not.toHaveBeenCalled()
 
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open Code and computation"]')!.click())
-    const prepare = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Prepare environments')!
+    const prepare = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Prepare project languages')!
     await act(async () => prepare.click())
     expect(container.querySelector('[aria-labelledby="execution-trust-title"]')?.textContent).toContain('Preparation does not run manuscript computations')
     await confirmPreparation()

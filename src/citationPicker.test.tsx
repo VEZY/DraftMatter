@@ -48,8 +48,10 @@ describe('keyboard citation cluster workflow', () => {
     await press(window, 'c', { ctrlKey: true, shiftKey: true })
     const search = container.querySelector<HTMLInputElement>('input[aria-label="Search citation sources"]')!
     expect(search).not.toBeNull()
-    expect(container.querySelectorAll('.source-result[aria-pressed="true"]')).toHaveLength(1)
+    expect(container.querySelectorAll('.source-result[aria-pressed="true"]')).toHaveLength(0)
 
+    await press(search, 'Enter')
+    expect(container.querySelectorAll('.source-result[aria-pressed="true"]')).toHaveLength(1)
     await press(search, 'ArrowDown')
     await press(search, 'Enter')
     expect(container.querySelectorAll('.source-result[aria-pressed="true"]')).toHaveLength(2)

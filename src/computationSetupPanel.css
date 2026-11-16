@@ -1,0 +1,27 @@
+.computation-setup-panel { color: #4b5c51; font-size: 12px; line-height: 1.55; }
+.code-workspace-drawer:has(.computation-setup-panel) .code-workspace-drawer-head p { color: #5d6f63; }
+.computation-setup-section { border-bottom: 1px solid #e3e8e1; padding: 19px 20px; }
+.computation-setup-heading { align-items: center; display: flex; gap: 8px; }
+.computation-setup-heading > svg { color: #6b806f; flex: 0 0 auto; }
+.computation-setup-heading h3 { color: #354c3d; font-size: 14px; font-weight: 650; margin: 0; }
+.computation-setup-heading h3 > span { color: #606f65; font-size: 10px; font-weight: 400; margin-left: 5px; }
+.computation-setup-section > p { margin: 8px 0 12px; }
+.computation-setup-section .computation-setup-hint { color: #657368; font-size: 11px; }
+.computation-runtime-list { border: 1px solid #e2e8e0; border-radius: 7px; list-style: none; margin: 13px 0 11px; overflow: hidden; padding: 0; }
+.computation-runtime-list > li { align-items: center; display: flex; gap: 10px; justify-content: space-between; padding: 10px 11px; }
+.computation-runtime-list > li + li { border-top: 1px solid #e8ece6; }
+.computation-runtime-list > li > div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.computation-runtime-list strong { color: #45594a; font-size: 12px; }
+.computation-runtime-list small { color: #657368; font-size: 10px; overflow-wrap: anywhere; }
+.computation-runtime-status { background: #f1f3ef; border-radius: 4px; color: #5e6b61; flex: 0 0 auto; font-size: 10px; padding: 3px 6px; text-align: center; }
+.computation-runtime-status.ready { background: #e8f2e9; color: #3e6448; }
+.computation-runtime-status.unhealthy, .computation-runtime-status.missing { background: #faf0e5; color: #896134; }
+.computation-setup-panel .computation-setup-actions.code-workspace-toolbar { background: none; border: 0; gap: 7px; padding: 0; }
+.computation-setup-actions button, .computation-add-setup, .computation-project-actions > button { align-items: center; background: #f8faf6; border: 1px solid #d6dfd2; border-radius: 5px; color: #48604b; display: inline-flex; font-size: 11px; gap: 6px; min-height: 32px; padding: 6px 9px; }
+.computation-setup-actions button:hover:not(:disabled), .computation-add-setup:hover, .computation-project-actions > button:hover:not(:disabled) { background: #edf3e9; border-color: #aebfab; }
+.computation-setup-actions button:disabled { opacity: .55; }
+.computation-setup-section .execution-cell-row { border: 1px solid #dce4d7; border-radius: 7px; margin-top: 12px; padding: 12px; }
+.computation-project-actions { border-top: 1px solid #e3e8e1; display: flex; flex-wrap: wrap; gap: 7px; padding: 16px 20px; }
+.computed-value-create-calculation { border-top: 1px solid #e2e7de; color: #5c6d5d; margin-top: 12px; padding-top: 12px; }
+.computed-value-create-calculation p { font-size: 11px; line-height: 1.5; margin: 0 0 8px; }
+.computed-value-create-calculation button { background: #f2f6ee; border: 1px solid #cfdbc7; border-radius: 5px; color: #42603e; font-size: 11px; padding: 7px 10px; }

@@ -111,7 +111,7 @@ export function ProgrammingLanguages({ onBack }: { onBack: () => void }) {
             <article><Icon name="code" size={18} /><h3>Add code</h3><p>Insert a setup, values, figure, table, or ordinary code cell and choose its language.</p></article>
             <article><Icon name="play" size={18} /><h3>Run independently</h3><p>Run one cell while developing, or run the project’s language cells together for a clean result.</p></article>
             <article><Icon name="command" size={18} /><h3>Inspect the session</h3><p>The terminal shares the live document kernel, so variables, imports, progress, and errors are visible in one place.</p></article>
-            <article><Icon name="check" size={18} /><h3>Keep the result</h3><p>Published values, tables, and retained figures remain readable in the manuscript even when local execution is unavailable.</p></article>
+            <article><Icon name="check" size={18} /><h3>Keep the result</h3><p>Computed values, tables, and retained figures remain readable in the manuscript even when local execution is unavailable.</p></article>
           </div>
         </section>
 

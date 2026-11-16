@@ -155,7 +155,7 @@ describe('shared Jupyter execution workspace', () => {
 
   async function prepareEnvironments() {
     await openCodeWorkspace()
-    const prepare = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Prepare environments')!
+    const prepare = [...container.querySelectorAll('button')].find((button) => button.textContent === 'Prepare project languages')!
     await act(async () => prepare.click())
   }
 
@@ -265,12 +265,12 @@ describe('shared Jupyter execution workspace', () => {
     expect(container.querySelector('.structured-code-cell[data-dm-id="py-setup"]')).toBeNull()
   })
 
-  it('adds a reproducible table from the code panel', async () => {
+  it('adds a reproducible table through Insert instead of duplicating insertion controls in setup', async () => {
     await openCodeWorkspace()
-    const findAddTable = () => [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
-      .find((button) => button.textContent?.includes('Add reproducible table'))
-    await settleUntil(() => Boolean(findAddTable()))
-    const addTable = findAddTable()!
+    expect([...container.querySelectorAll<HTMLButtonElement>('.code-workspace-drawer button')].some((button) => button.textContent?.includes('Add reproducible table'))).toBe(false)
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close Code and computation"]')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('.format-toolbar [aria-label="Insert"]')!.click())
+    const addTable = [...container.querySelectorAll<HTMLButtonElement>('.toolbar-insert-menu button')].find((button) => button.textContent?.includes('Reproducible table'))!
     expect(addTable).toBeTruthy()
     await act(async () => addTable.click())
 
@@ -287,6 +287,32 @@ describe('shared Jupyter execution workspace', () => {
 
     const savedSources = vi.mocked(desktopHost.saveDocument).mock.calls.map(([request]) => request.content)
     expect(savedSources.join('\n')).toMatch(/```julia \{#cell-julia-[^}]+ \.execute output="table" reference="tbl-result"\}/)
+  })
+
+  it('creates a computed value calculation from its insertion dialog without requiring shared setup or running code', async () => {
+    await act(async () => appRoot.unmount())
+    const emptySource = '# Findings\n\nInsert a computed result here.\n'
+    vi.mocked(desktopHost.readDocument).mockResolvedValue({ path: 'paper.qmd', content: emptySource, hash: 'document-old', modifiedMs: 1 })
+    vi.mocked(desktopHost.executeKernel).mockClear()
+    appRoot = createRoot(container)
+    await act(async () => appRoot.render(<App />))
+    await settleUntil(() => Boolean(container.querySelector('.structured-editor-content')?.textContent?.includes('Insert a computed result here.')))
+    await act(async () => container.querySelector<HTMLButtonElement>('.format-toolbar [aria-label="Insert"]')!.click())
+    const computed = [...container.querySelectorAll<HTMLButtonElement>('.toolbar-insert-menu button')].find((button) => button.textContent?.includes('Computed value'))!
+    await act(async () => computed.click())
+    let dialog = container.querySelector<HTMLElement>('[aria-labelledby="insert-block-title"]')!
+    expect(dialog.querySelector('h2')?.textContent).toBe('Insert computed value')
+    const create = [...dialog.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Create a calculation…')!
+    await act(async () => create.click())
+    dialog = container.querySelector<HTMLElement>('[aria-labelledby="insert-block-title"]')!
+    expect(dialog.querySelector('h2')?.textContent).toBe('Create a value calculation')
+    await act(async () => dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!.click())
+    await settle(950)
+    expect(container.querySelector('.code-workspace-drawer')?.textContent).toContain('Computed values')
+    const saved = vi.mocked(desktopHost.saveDocument).mock.calls.at(-1)![0].content
+    expect(saved).toContain('output="values"')
+    expect(saved).not.toContain('role="setup"')
+    expect(desktopHost.executeKernel).not.toHaveBeenCalled()
   })
 
   it('waits for explicit setup even when the project has remembered trust', async () => {
@@ -314,8 +340,8 @@ describe('shared Jupyter execution workspace', () => {
     expect(container.querySelector('.rail-terminal-button')?.getAttribute('data-label')).toBe('Terminal · Ready')
   })
 
-  it('keeps the quick citation launcher available in a desktop project', async () => {
-    const launcher = container.querySelector<HTMLButtonElement>('.quick-cite')
+  it('keeps the citation launcher in the writing toolbar in a desktop project', async () => {
+    const launcher = container.querySelector<HTMLButtonElement>('.toolbar-cite-button')
     expect(launcher).not.toBeNull()
     expect(launcher?.disabled).toBe(false)
 
@@ -460,7 +486,7 @@ describe('shared Jupyter execution workspace', () => {
 
   it('clean-runs setup first, restarts every language kernel, and never materializes setup output', async () => {
     await openCodeWorkspace()
-    const findCleanRun = () => [...container.querySelectorAll<HTMLButtonElement>('.code-workspace-toolbar button')]
+    const findCleanRun = () => [...container.querySelectorAll<HTMLButtonElement>('.computation-project-actions button')]
       .find((button) => button.textContent?.includes('Clean run'))
     await settleUntil(() => Boolean(findCleanRun()))
     const cleanRun = findCleanRun()!

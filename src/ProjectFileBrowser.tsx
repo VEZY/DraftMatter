@@ -1,6 +1,7 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { Icon } from './Icon'
 import { buildProjectFileInventory, projectFileByteSize, projectFileKindLabel, type ProjectFileInventoryInput } from './projectFileInventory'
+import { ProjectFileExplorer } from './ProjectFileExplorer'
 import type { ProjectFile } from './collaboration/projectFiles'
 
 export interface ProjectFileOpenOptions {
@@ -11,6 +12,7 @@ export interface ProjectFileOpenOptions {
 }
 
 export interface ProjectFileBrowserProps {
+  layout?: 'dialog' | 'sidebar'
   localFiles?: readonly ProjectFileInventoryInput[]
   onlineFiles?: readonly ProjectFileInventoryInput[]
   currentManuscriptPath: string
@@ -40,6 +42,7 @@ const usageLabels = { current: 'Current manuscript', referenced: 'Referenced in 
 
 /** Shows known file copies without treating file presence as synchronization or a Git commit. */
 export function ProjectFileBrowser({
+  layout = 'dialog',
   localFiles, onlineFiles, currentManuscriptPath, referencedPaths, figureLabels, location, projectName, rootPath,
   localInventoryComplete = false, onlineInventoryComplete = false, liveCollaboration = false,
   loading = false, problem, onRefresh, onRevealFolder, onOpenFile, onInsertFigure, insertablePaths, onDownloadFile, downloadablePaths, children,
@@ -51,6 +54,11 @@ export function ProjectFileBrowser({
   const visible = files.filter((file) => (!search || file.path.toLocaleLowerCase().includes(search)) && (filter === 'all' || file[filter]))
   const localLabel = locationLabels[location]
   const hasOnlineFiles = files.some((file) => file.online)
+
+  if (layout === 'sidebar') return <ProjectFileExplorer files={files} {...{
+    currentManuscriptPath, projectName, location, rootPath, loading, problem, onRefresh, onRevealFolder,
+    onOpenFile, onInsertFigure, insertablePaths, onDownloadFile, downloadablePaths, localInventoryComplete, onlineInventoryComplete, liveCollaboration, children,
+  }} />
 
   return <section className="project-file-browser" aria-label="Project files">
     <header className="project-file-browser-heading">
@@ -89,7 +97,7 @@ export function ProjectFileBrowser({
         {onOpenFile && <button type="button" className="project-file-browser-download" aria-label={`Keep ${file.path} open`} onClick={() => openFile(true)}>Keep open</button>}
         {onOpenFile && file.local && file.online && <button type="button" className="project-file-browser-download" aria-label={`Open online copy of ${file.path}`} onClick={() => openFile(false, 'online')}>Open online</button>}
         {file.kind === 'figure' && /\.(?:png|jpe?g|gif|webp|svg)$/i.test(file.path) && onInsertFigure && (!insertablePaths || insertablePaths.includes(file.path)) && <button type="button" className="project-file-browser-insert" aria-label={`Insert ${file.path} as a figure`} onClick={() => onInsertFigure(file.path)}><Icon name="plus" size={12} /> Insert figure</button>}
-        {onDownloadFile && (!downloadablePaths || downloadablePaths.includes(file.path)) && <button type="button" className="project-file-browser-download" aria-label={`Download ${file.path}`} onClick={() => onDownloadFile(file.path)}><Icon name="download" size={12} /> Download</button>}
+        {onDownloadFile && !(location === 'local' && file.local) && (!downloadablePaths || downloadablePaths.includes(file.path)) && <button type="button" className="project-file-browser-download" aria-label={`Download ${file.path}`} onClick={() => onDownloadFile(file.path)}><Icon name="download" size={12} /> Download</button>}
       </li>
     })}</ul> : <p className="project-file-browser-empty">{search || filter !== 'all' ? 'No files match this search.' : loading ? 'Loading files…' : 'No project files are available here yet.'}</p>}
     {location === 'local' && !localInventoryComplete && <p className="project-file-browser-help">Showing known project files. Other files in this folder may not be listed.</p>}

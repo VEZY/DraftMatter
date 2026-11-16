@@ -142,7 +142,39 @@ export function isPanelManagedCell(cell: Pick<ExecutableCell, 'role'>) {
   return cell.role === 'setup' || cell.role === 'values'
 }
 
+const recentExtractions = new Map<string, ExecutableCellResult>()
+const MAX_RECENT_EXTRACTIONS = 4
+
+function copyExtraction(result: ExecutableCellResult): ExecutableCellResult {
+  return {
+    cells: result.cells.map((cell) => ({
+      ...cell,
+      attributes: { ...cell.attributes },
+      classes: [...cell.classes],
+      position: { ...cell.position },
+    })),
+    diagnostics: result.diagnostics.map((diagnostic) => ({ ...diagnostic })),
+  }
+}
+
+/** Reuse parsing across analyses of the exact same source, retaining independent mutable results. */
 export function extractExecutableCells(source: string): ExecutableCellResult {
+  const cached = recentExtractions.get(source)
+  if (cached) {
+    recentExtractions.delete(source)
+    recentExtractions.set(source, cached)
+    return copyExtraction(cached)
+  }
+  const result = parseExecutableCells(source)
+  recentExtractions.set(source, result)
+  if (recentExtractions.size > MAX_RECENT_EXTRACTIONS) {
+    const oldest = recentExtractions.keys().next().value
+    if (oldest !== undefined) recentExtractions.delete(oldest)
+  }
+  return copyExtraction(result)
+}
+
+function parseExecutableCells(source: string): ExecutableCellResult {
   const tree = unified().use(remarkParse).parse(source) as Root
   const excluded = excludedDivRanges(source)
   const diagnostics: DocumentDiagnostic[] = []
