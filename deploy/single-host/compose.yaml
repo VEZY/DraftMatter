@@ -13,7 +13,7 @@ x-restricted: &restricted
 
 services:
   initialize:
-    image: postgres:18.7-alpine
+    image: postgres:18.7-alpine@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015
     user: '0:0'
     network_mode: none
     entrypoint: [sh, /initialize.sh]
@@ -30,7 +30,7 @@ services:
     <<: *restricted
     # PostgreSQL runs as PID 1; root tini cannot signal UID 70 with all capabilities dropped.
     init: false
-    image: postgres:18.7-alpine
+    image: postgres:18.7-alpine@sha256:b6972e1115a4ff8eba5d7f7d19184926d1e16d7d1136ae1e1a7ebf286da0f015
     environment:
       POSTGRES_DB: draftmatter
       POSTGRES_USER: postgres
@@ -60,7 +60,7 @@ services:
 
   object-storage:
     <<: *restricted
-    image: chrislusf/seaweedfs:4.29
+    image: chrislusf/seaweedfs:4.29@sha256:d47c7ee99fcb951351d7194915f4e3a5ea604a8e8871183d713907dec4fb9bf5
     user: '1000:1000'
     command: [mini, '-dir=/data', '-bucket=draftmatter', '-admin.ui=false', '-webdav=false', '-s3.port.iceberg=0', '-s3.iam=false', '-s3.config=/etc/seaweedfs/s3.json', '-s3.cert.file=/run/draftmatter-tls/objects.crt', '-s3.key.file=/run/draftmatter-tls/objects.key', '-s3.port.https=8334', '-s3.concurrentUploadLimitMB=64', '-filer.concurrentUploadLimitMB=64', '-volume.concurrentUploadLimitMB=64', '-volume.index=leveldb', '-master.telemetry=false']
     volumes:
@@ -77,7 +77,7 @@ services:
 
   keycloak:
     <<: *restricted
-    image: quay.io/keycloak/keycloak:26.7.0
+    image: quay.io/keycloak/keycloak:26.7.0@sha256:0f198be292568439d700cdbfb893e69a6009bb43a94a06a945b1d3d506c76b13
     command: [start, --import-realm, --http-enabled=true, --proxy-headers=xforwarded, --health-enabled=true, --metrics-enabled=false]
     environment:
       KC_HOSTNAME: ${AUTH_ORIGIN:?Set AUTH_ORIGIN}
@@ -149,13 +149,13 @@ services:
     build:
       context: ../..
       dockerfile: deploy/production/Dockerfile.web
-      args:
-        VITE_DRAFTMATTER_COLLABORATION_URL: ${COLLABORATION_ORIGIN:?Set COLLABORATION_ORIGIN}
-        VITE_DM_LEGAL_PUBLISHER_NAME: ${DM_LEGAL_PUBLISHER_NAME:?Set DM_LEGAL_PUBLISHER_NAME}
-        VITE_DM_LEGAL_CONTACT_EMAIL: ${DM_LEGAL_CONTACT_EMAIL:?Set DM_LEGAL_CONTACT_EMAIL}
-        VITE_DM_LEGAL_HOSTING_DETAILS: ${DM_LEGAL_HOSTING_DETAILS:?Set DM_LEGAL_HOSTING_DETAILS}
-        VITE_DM_LEGAL_DATA_LOCATION: ${DM_LEGAL_DATA_LOCATION:?Set DM_LEGAL_DATA_LOCATION}
-        VITE_DM_LEGAL_ADDITIONAL_PROCESSORS: ${DM_LEGAL_ADDITIONAL_PROCESSORS:?Set DM_LEGAL_ADDITIONAL_PROCESSORS}
+    environment:
+      DM_PUBLIC_COLLABORATION_URL: ${COLLABORATION_ORIGIN:?Set COLLABORATION_ORIGIN}
+      DM_LEGAL_PUBLISHER_NAME: ${DM_LEGAL_PUBLISHER_NAME:?Set DM_LEGAL_PUBLISHER_NAME}
+      DM_LEGAL_CONTACT_EMAIL: ${DM_LEGAL_CONTACT_EMAIL:?Set DM_LEGAL_CONTACT_EMAIL}
+      DM_LEGAL_HOSTING_DETAILS: ${DM_LEGAL_HOSTING_DETAILS:?Set DM_LEGAL_HOSTING_DETAILS}
+      DM_LEGAL_DATA_LOCATION: ${DM_LEGAL_DATA_LOCATION:?Set DM_LEGAL_DATA_LOCATION}
+      DM_LEGAL_ADDITIONAL_PROCESSORS: ${DM_LEGAL_ADDITIONAL_PROCESSORS:?Set DM_LEGAL_ADDITIONAL_PROCESSORS}
     command: [caddy, run, --config, /etc/caddy/single-host.Caddyfile, --adapter, caddyfile]
     ports:
       - ${BIND_ADDRESS:-0.0.0.0}:${HTTP_PORT:-80}:${HTTP_PORT:-80}

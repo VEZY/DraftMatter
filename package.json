@@ -52,7 +52,7 @@
     "desktop:build": "tauri build",
     "deploy:single-host:init": "node scripts/init-single-host.mjs",
     "deploy:single-host:check": "node scripts/check-single-host.mjs",
-    "test:deployment": "vitest run services/collaboration/singleHost*.test.mjs services/collaboration/rehearsalOrchestration.test.mjs services/collaboration/migrationPackaging.test.mjs services/collaboration/productionDeployment.test.mjs --maxWorkers=1 && node --test deploy/single-host/backup/backup.test.mjs",
+    "test:deployment": "vitest run services/collaboration/singleHost*.test.mjs services/collaboration/serverRelease*.test.mjs services/collaboration/rehearsalOrchestration.test.mjs services/collaboration/migrationPackaging.test.mjs services/collaboration/productionDeployment.test.mjs src/publicRuntimeConfiguration.test.ts --maxWorkers=1 && node --test deploy/single-host/backup/backup.test.mjs",
     "test:deployment:smoke": "node scripts/smoke-single-host.mjs",
     "deploy:single-host:rehearse": "node scripts/rehearse-single-host.mjs",
     "deploy:single-host:tls": "node scripts/renew-single-host-tls.mjs"

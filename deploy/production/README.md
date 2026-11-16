@@ -90,7 +90,7 @@ changing them. Local builds show preparation wording until hosting is known.
 See [alpha publication and OVH preparation](../../docs/alpha-launch.md) for the
 website configuration, legal scope and the next provisioning steps.
 
-Use Node 24.10.0 (the repository's `.node-version`) and Docker Engine with Compose
+Use Node 24.22.3 (the repository's `.node-version`) and Docker Engine with Compose
 v2. Keep real secrets outside the checkout and Docker build context. Container
 environment variables remain readable to Docker administrators: limit access to
 the host, Docker socket, and environment file. A secrets manager can supply the

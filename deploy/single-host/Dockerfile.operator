@@ -1,0 +1,18 @@
+FROM node:24.22.3-bookworm-slim
+
+# Initialization and TLS renewal need OpenSSL, not npm or a host Node install.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y openssl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /opt/draftmatter-operator
+COPY scripts/init-single-host.mjs scripts/check-single-host.mjs scripts/single-host-config.mjs scripts/check-production-config.mjs scripts/renew-single-host-tls.mjs scripts/check-server-release.mjs scripts/install-server-release.mjs ./scripts/
+COPY deploy/single-host/keycloak/realm.mjs ./deploy/single-host/keycloak/realm.mjs
+COPY services/collaboration/config.ts ./services/collaboration/config.ts
+COPY src/legalConfig.ts ./src/legalConfig.ts
+COPY deploy/single-host/backup/backup.mjs deploy/single-host/backup/crypto.mjs ./deploy/single-host/backup/
+COPY LICENSE compliance/THIRD_PARTY_NOTICES.md /usr/share/doc/draftmatter/
+
+USER node
+ENTRYPOINT ["node"]
+CMD ["scripts/check-server-release.mjs", "--help"]

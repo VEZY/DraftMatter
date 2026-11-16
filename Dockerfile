@@ -1,13 +1,17 @@
-FROM node:24.10.0-bookworm-slim AS build
+FROM node:24.22.3-bookworm-slim AS build
 
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY . .
+COPY vite.service.config.ts ./
+COPY services ./services
+COPY src ./src
+COPY scripts/copy-collaboration-assets.mjs ./scripts/copy-collaboration-assets.mjs
+COPY integrations ./integrations
 RUN npm run build:collaboration
 RUN npm prune --omit=dev
 
-FROM node:24.10.0-bookworm-slim AS runtime
+FROM node:24.22.3-bookworm-slim AS runtime
 
 ENV NODE_ENV=production
 WORKDIR /app

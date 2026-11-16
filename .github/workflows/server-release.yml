@@ -1,0 +1,98 @@
+name: Server release
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Immutable server version, for example 0.1.0-alpha.1
+        type: string
+        required: true
+
+concurrency:
+  # Serialize all versions, including the collision check and final publication.
+  group: server-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  preflight:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: '.node-version'
+      - name: Refuse other branches or existing release tags before verification
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_COMMIT: ${{ github.sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/prepare-server-release.mjs preflight
+
+  verify:
+    needs: preflight
+    uses: ./.github/workflows/collaboration-service.yml
+    with:
+      export-server-images: true
+      server-release-version: ${{ inputs.version }}
+    permissions:
+      contents: read
+
+  publish:
+    needs: [preflight, verify]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+      packages: write
+    env:
+      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_COMMIT: ${{ github.sha }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: '.node-version'
+      - name: Download only this run's exact tested image artifact
+        uses: actions/download-artifact@v7
+        with:
+          name: draftmatter-server-tested-images-${{ github.sha }}
+          path: ${{ runner.temp }}/server-images
+      - name: Load and verify tested Linux amd64 images
+        run: |
+          gzip -dc "$RUNNER_TEMP/server-images/images.tar.gz" | docker load
+          node scripts/prepare-server-release.mjs verify-tested-images "$RUNNER_TEMP/server-images/tested-images.json"
+      - name: Authenticate publication with the scoped workflow token
+        run: |
+          registry_config="$RUNNER_TEMP/draftmatter-registry-auth"
+          install -d -m 700 "$registry_config"
+          printf 'DOCKER_CONFIG=%s\n' "$registry_config" >> "$GITHUB_ENV"
+          printf '%s' "$GH_TOKEN" | DOCKER_CONFIG="$registry_config" docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+      - name: Recheck collisions, promote tested images and prepare public assets
+        run: node scripts/prepare-server-release.mjs publish-images "$RUNNER_TEMP/server-images/tested-images.json" "$RUNNER_TEMP/server-release"
+      - name: Publish the complete server release after all assets exist
+        env:
+          VERSION: ${{ inputs.version }}
+        run: |
+          tag="server-v$VERSION"
+          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
+            --title "DraftMatter server $VERSION" --notes-file "$RUNNER_TEMP/server-release/server-release-notes.md" \
+            --draft --prerelease
+          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" \
+            "$RUNNER_TEMP/server-release/server-release.json" \
+            "$RUNNER_TEMP/server-release/draftmatter-server-$VERSION.tar.gz" \
+            "$RUNNER_TEMP/server-release/SHA256SUMS"
+          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
+      - name: Remove temporary registry authentication
+        if: always()
+        run: rm -f "$RUNNER_TEMP/draftmatter-registry-auth/config.json"

@@ -269,6 +269,13 @@ async function publicChecks(browser, settings) {
   await http(settings, '/health/ready')
   await http(settings, '/api/session', { expected: 401 })
   await http(settings, '/metrics', { expected: 404 })
+  const publicWeb = await http(settings, `${settings.appOrigin}/draftmatter-public-config.json`)
+  assert.match(publicWeb.headers['cache-control'] ?? '', /no-store/, 'Public runtime configuration must not be cached')
+  assert.deepEqual(publicWeb.data, { schemaVersion: 1, environment: {
+    VITE_DRAFTMATTER_COLLABORATION_URL: settings.environment.COLLABORATION_ORIGIN,
+    ...Object.fromEntries(['PUBLISHER_NAME', 'CONTACT_EMAIL', 'HOSTING_DETAILS', 'DATA_LOCATION', 'ADDITIONAL_PROCESSORS']
+      .map((name) => [`VITE_DM_LEGAL_${name}`, settings.environment[`DM_LEGAL_${name}`]])),
+  } }, 'The web image must expose exactly its public startup configuration')
   for (const path of ['/assets/not-a-real-bundle.js', '/assets/not-a-real-style.css']) await http(settings, `${settings.appOrigin}${path}`, { expected: 404 })
   const context = await browser.newContext()
   try {
@@ -279,6 +286,7 @@ async function publicChecks(browser, settings) {
         await page.getByRole('heading', { name: heading, exact: true }).waitFor()
       })
       assert(!await page.getByLabel('Alpha preparation').count(), 'Hosted legal information is still marked unconfigured')
+      assert((await page.locator('body').innerText()).includes(settings.environment.DM_LEGAL_CONTACT_EMAIL), 'Legal pages must use the runtime contact address')
     }
   } finally { await context.close() }
   const tokenEndpoint = `${settings.issuer}/protocol/openid-connect/token`

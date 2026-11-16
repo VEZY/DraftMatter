@@ -1,0 +1,11 @@
+# Apply after compose.yaml. This file cannot build DraftMatter on the server.
+# release.env is generated from the checked server-release.json manifest.
+services:
+  collaboration:
+    build: !reset null
+    image: ${DM_COLLABORATION_IMAGE:?Set the immutable collaboration image from release.env}
+    platform: linux/amd64
+  edge:
+    build: !reset null
+    image: ${DM_WEB_IMAGE:?Set the immutable web image from release.env}
+    platform: linux/amd64

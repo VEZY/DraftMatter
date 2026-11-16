@@ -2,17 +2,27 @@ name: Collaboration service
 
 on:
   workflow_dispatch:
+  workflow_call:
+    inputs:
+      export-server-images:
+        description: Export the exact images after the full rehearsal succeeds
+        type: boolean
+        default: false
+      server-release-version:
+        type: string
+        default: '0.0.0-alpha.0'
   pull_request:
   push:
     branches: [main]
 
 concurrency:
-  group: collaboration-${{ github.ref }}
+  group: collaboration-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
   verify-service:
     runs-on: ubuntu-24.04
+    timeout-minutes: 60
     services:
       postgres:
         image: postgres:18.7-alpine
@@ -27,6 +37,8 @@ jobs:
           --health-interval 5s --health-timeout 5s --health-retries 12
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
 
       - name: Set up Node.js
         uses: actions/setup-node@v6
@@ -66,18 +78,47 @@ jobs:
         run: docker compose --env-file deploy/production/.env.example -f deploy/production/compose.yaml config --quiet
 
       - name: Build non-root service image
-        run: docker build --tag draftmatter-collaboration:${{ github.sha }} .
+        run: docker build --platform linux/amd64 --label org.opencontainers.image.revision=${{ github.sha }} --label org.opencontainers.image.source=https://github.com/VEZY/DraftMatter --tag draftmatter-collaboration:${{ github.sha }} .
 
       - name: Build production browser and proxy image
         run: |
           docker build --file deploy/production/Dockerfile.web \
-            --build-arg VITE_DRAFTMATTER_COLLABORATION_URL=https://sync.example.invalid \
-            --build-arg VITE_DM_LEGAL_PUBLISHER_NAME='CI build fixture' \
-            --build-arg VITE_DM_LEGAL_CONTACT_EMAIL=operations@draftmatter-pilot.fr \
-            --build-arg VITE_DM_LEGAL_HOSTING_DETAILS='Non-deployed CI fixture, no actual hosted alpha' \
-            --build-arg VITE_DM_LEGAL_DATA_LOCATION='Non-deployed CI fixture' \
-            --build-arg VITE_DM_LEGAL_ADDITIONAL_PROCESSORS='Non-deployed CI fixture' \
+            --platform linux/amd64 \
+            --label org.opencontainers.image.revision=${{ github.sha }} \
+            --label org.opencontainers.image.source=https://github.com/VEZY/DraftMatter \
             --tag draftmatter-web:${{ github.sha }} .
+
+      - name: Build and verify offline operator image
+        run: |
+          docker build --platform linux/amd64 --file deploy/single-host/Dockerfile.operator \
+            --label org.opencontainers.image.revision=${{ github.sha }} \
+            --label org.opencontainers.image.source=https://github.com/VEZY/DraftMatter \
+            --tag draftmatter-operator:${{ github.sha }} .
+          install -d -m 700 "$RUNNER_TEMP/draftmatter-operator-fixture" "$RUNNER_TEMP/draftmatter-operator-public"
+          node --input-type=module <<'JS'
+          import { writeFileSync } from 'node:fs'
+          const images = Object.fromEntries(['collaboration', 'web', 'operator'].map(kind => [kind, `ghcr.io/vezy/draftmatter-${kind}@sha256:${'a'.repeat(64)}`]))
+          writeFileSync(`${process.env.RUNNER_TEMP}/draftmatter-operator-public/server-release.json`, JSON.stringify({ schemaVersion: 1, version: '0.0.0-alpha.0', commit: process.env.GITHUB_SHA, platform: 'linux/amd64', images }))
+          JS
+          for operation in init check; do
+            args=()
+            if [ "$operation" = check ]; then args+=(--check); fi
+            docker run --rm --network none --read-only --cap-drop ALL --security-opt no-new-privileges \
+              --user "$(id -u):$(id -g)" --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+              --mount "type=bind,src=$RUNNER_TEMP/draftmatter-operator-public,dst=/bundle,readonly" \
+              --mount "type=bind,src=$RUNNER_TEMP/draftmatter-operator-fixture,dst=$RUNNER_TEMP/draftmatter-operator-fixture" \
+              draftmatter-operator:${{ github.sha }} scripts/install-server-release.mjs /bundle/server-release.json \
+              --directory "$RUNNER_TEMP/draftmatter-operator-fixture" --rehearsal --project draftmatter-rehearsal-operator "${args[@]}"
+          done
+          node --input-type=module <<'JS'
+          import { execFileSync } from 'node:child_process'
+          import { readFileSync } from 'node:fs'
+          const fixture = `${process.env.RUNNER_TEMP}/draftmatter-operator-fixture`
+          const manifest = JSON.parse(readFileSync(`${process.env.RUNNER_TEMP}/draftmatter-operator-public/server-release.json`, 'utf8'))
+          const configuration = JSON.parse(execFileSync('docker', ['compose', '--env-file', `${fixture}/runtime.env`, '--env-file', `${fixture}/release.env`, '-f', 'deploy/single-host/compose.yaml', '-f', 'deploy/single-host/prebuilt.yaml', 'config', '--format', 'json'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }))
+          if (Object.values(configuration.services).some(service => service.build) || configuration.services.collaboration.image !== manifest.images.collaboration || configuration.services.edge.image !== manifest.images.web) throw new Error('Prebuilt Compose must remove all builds and retain immutable release images.')
+          console.log('Prebuilt Compose uses the checked image digests and has no build definitions.')
+          JS
 
       - name: Validate production proxy configuration without starting it
         run: docker run --rm --network none --env APP_HOST=app.example.invalid --env COLLABORATION_HOST=sync.example.invalid --env ACME_EMAIL=operations@example.invalid --entrypoint caddy draftmatter-web:${{ github.sha }} validate --config /etc/caddy/Caddyfile --adapter caddyfile
@@ -91,12 +132,31 @@ jobs:
       - name: Prepare isolated single-host rehearsal
         run: |
           node scripts/init-single-host.mjs --directory "$RUNNER_TEMP/draftmatter-rehearsal" \
-            --rehearsal --project draftmatter-rehearsal-ci --release "${{ github.sha }}-rehearsal"
+            --rehearsal --project draftmatter-rehearsal-ci --release "${{ github.sha }}"
           node scripts/check-single-host.mjs "$RUNNER_TEMP/draftmatter-rehearsal/runtime.env"
 
       - name: Rehearse login, data sharing, restart and encrypted infrastructure recovery
         timeout-minutes: 15
-        run: node scripts/rehearse-single-host.mjs --env-file "$RUNNER_TEMP/draftmatter-rehearsal/runtime.env"
+        run: node scripts/rehearse-single-host.mjs --env-file "$RUNNER_TEMP/draftmatter-rehearsal/runtime.env" --skip-build
+
+      - name: Export exact tested server images
+        if: inputs.export-server-images
+        env:
+          RELEASE_VERSION: ${{ inputs.server-release-version }}
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          node scripts/prepare-server-release.mjs export-tested-images "$RUNNER_TEMP/server-images"
+          docker save draftmatter-collaboration:${{ github.sha }} draftmatter-web:${{ github.sha }} draftmatter-operator:${{ github.sha }} | gzip -1 > "$RUNNER_TEMP/server-images/images.tar.gz"
+
+      - name: Retain tested images only for this release run
+        if: inputs.export-server-images
+        uses: actions/upload-artifact@v6
+        with:
+          name: draftmatter-server-tested-images-${{ github.sha }}
+          path: ${{ runner.temp }}/server-images/
+          compression-level: 0
+          retention-days: 1
+          if-no-files-found: error
 
       - name: Stop isolated rehearsal containers
         if: always()

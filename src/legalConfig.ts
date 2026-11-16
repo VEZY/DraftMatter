@@ -50,4 +50,10 @@ export function readLegalConfiguration(environment: Record<string, string | unde
   return { publisherName, contactEmail, hostingDetails, dataLocation, additionalProcessors, deletionDays: 30, backupDays: 30, noticeDays: 30, ready }
 }
 
-export const legalConfiguration = readLegalConfiguration(import.meta.env)
+// The web container installs this validated public allowlist before importing
+// application modules. Desktop and marketing builds retain their build settings.
+// Keep this module import-free so operator tools can run it directly under Node.
+const runtimeEnvironment = (globalThis as typeof globalThis & {
+  __DRAFTMATTER_PUBLIC_ENVIRONMENT__?: Record<string, string>
+}).__DRAFTMATTER_PUBLIC_ENVIRONMENT__
+export const legalConfiguration = readLegalConfiguration(runtimeEnvironment ?? import.meta.env)

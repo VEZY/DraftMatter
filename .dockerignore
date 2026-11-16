@@ -19,3 +19,8 @@ dist-cli
 dist-website
 test-results
 playwright-report
+**/runtime.env
+**/backup.key
+**/*.key
+**/rehearsal-report.json
+**/server-images.tar*

@@ -24,6 +24,7 @@ import type {
 } from './workspaceService'
 
 import { signInDesktop, usesDesktopIdentity } from './oidcDesktop'
+import { publicRuntimeEnvironment } from '../publicRuntimeConfiguration'
 
 const DEVELOPMENT_SERVICE_KEY = 'draftmatter.collaboration.development-service.v1'
 
@@ -85,8 +86,9 @@ function readableError(error: unknown) {
 }
 
 function configuredServiceUrl(storage: Pick<Storage, 'getItem'>) {
-  const environment = typeof import.meta.env.VITE_DRAFTMATTER_COLLABORATION_URL === 'string'
-    ? import.meta.env.VITE_DRAFTMATTER_COLLABORATION_URL.trim()
+  const configured = publicRuntimeEnvironment()?.VITE_DRAFTMATTER_COLLABORATION_URL ?? import.meta.env.VITE_DRAFTMATTER_COLLABORATION_URL
+  const environment = typeof configured === 'string'
+    ? configured.trim()
     : ''
   const metadata = typeof document === 'undefined'
     ? ''

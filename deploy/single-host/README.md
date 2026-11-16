@@ -9,6 +9,11 @@ available for a later managed database/identity/storage deployment.
 The [13 November local rehearsal report](../../docs/deployment-rehearsal.md)
 records the observed checks, exact tested images and remaining public-host gates.
 
+For an actual VPS, use the [prebuilt server release installation](PREBUILT.md).
+GitHub builds the application images; the VPS pulls their immutable digests and
+runs them with `--no-build`. The local rehearsal below remains a source-build
+test of the same stack.
+
 ```text
 app.draftmatter.eu   -- HTTPS --> Caddy: browser application
 sync.draftmatter.eu  -- HTTPS --> Caddy --> collaboration
@@ -137,6 +142,10 @@ real testers rely on the alpha.
 
 ## Preparing the future VPS
 
+Use the [prebuilt installation procedure](PREBUILT.md) on the VPS; it runs these
+same helpers inside the published operator image. The direct Node commands in
+this section are also available for local operator preparations.
+
 Create the private runtime directory for the operator before initialization:
 
 ```sh
@@ -156,7 +165,8 @@ rehearsal's legal wording and fake accounts must never be imported into a public
 instance. Production has no accounts in its initial realm.
 
 Before `up`, validate with `deploy:single-host:check`, `docker compose config
---quiet`, build the exact tested commit and validate the Caddy configuration.
+--quiet`, pull the release's digest-pinned images using the prebuilt override,
+and validate the Caddy configuration. The VPS does not build application images.
 Keep image digests and the matching private environment for rollback. Do not
 reuse a release tag for changed images. New database migrations are discovered
 and packaged automatically; rehearse upgrades on a restored copy before changing

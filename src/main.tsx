@@ -1,12 +1,16 @@
-import { StrictMode } from 'react'
-import { createRoot } from 'react-dom/client'
-import 'katex/dist/katex.min.css'
-import { DraftMatterApplication } from './DraftMatterApplication'
-import './styles.css'
-import './writingWorkspace.css'
+import { initializePublicRuntimeConfiguration } from './publicRuntimeConfiguration'
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <DraftMatterApplication />
-  </StrictMode>,
-)
+async function startApplication() {
+  await initializePublicRuntimeConfiguration(import.meta.env.VITE_DM_RUNTIME_PUBLIC_CONFIG === 'true')
+  await import('./renderApplication')
+}
+
+void startApplication().catch(() => {
+  const root = document.getElementById('root')
+  if (!root) return
+  root.replaceChildren()
+  const message = document.createElement('p')
+  message.setAttribute('role', 'alert')
+  message.textContent = 'DraftMatter cannot start because its public site configuration is unavailable. Please contact the site operator.'
+  root.append(message)
+})

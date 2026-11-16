@@ -1,50 +1,39 @@
-FROM node:24.10.0-bookworm-slim AS build
+FROM node:24.22.3-bookworm-slim AS build
 
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 
-# Copy only browser build inputs. In particular, never COPY an operator's env file.
+# Only browser inputs: no operator runtime.env or deployment credentials.
 COPY index.html vite.config.ts tsconfig.app.json ./
 COPY LICENSE ./
 COPY src ./src
 COPY public ./public
 COPY integrations ./integrations
 
-# This is public configuration, compiled into the browser bundle, not a secret.
-ARG VITE_DRAFTMATTER_COLLABORATION_URL
-ENV VITE_DRAFTMATTER_COLLABORATION_URL=${VITE_DRAFTMATTER_COLLABORATION_URL}
-ARG VITE_DM_LEGAL_PUBLISHER_NAME
-ARG VITE_DM_LEGAL_CONTACT_EMAIL
-ARG VITE_DM_LEGAL_HOSTING_DETAILS
-ARG VITE_DM_LEGAL_DATA_LOCATION
-ARG VITE_DM_LEGAL_ADDITIONAL_PROCESSORS
-ENV VITE_DM_LEGAL_PUBLISHER_NAME=${VITE_DM_LEGAL_PUBLISHER_NAME} \
-    VITE_DM_LEGAL_CONTACT_EMAIL=${VITE_DM_LEGAL_CONTACT_EMAIL} \
-    VITE_DM_LEGAL_HOSTING_DETAILS=${VITE_DM_LEGAL_HOSTING_DETAILS} \
-    VITE_DM_LEGAL_DATA_LOCATION=${VITE_DM_LEGAL_DATA_LOCATION} \
-    VITE_DM_LEGAL_ADDITIONAL_PROCESSORS=${VITE_DM_LEGAL_ADDITIONAL_PROCESSORS}
-RUN node --input-type=module -e 'const value = new URL(process.env.VITE_DRAFTMATTER_COLLABORATION_URL); if (value.protocol !== "https:" || value.username || value.password || value.search || value.hash) throw new Error("A public HTTPS collaboration URL is required.")' \
-    && node --input-type=module -e 'import { readLegalConfiguration } from "./src/legalConfig.ts"; if (!readLegalConfiguration(process.env).ready) throw new Error("Complete the public legal hosting and contact information before building the alpha image.")' \
-    && npm run check \
-    && npx vite build
+# Generic release: public deployment settings arrive at container startup.
+ENV VITE_DM_RUNTIME_PUBLIC_CONFIG=true
+RUN npm run check && npx vite build
 
-FROM caddy:2.11.9-alpine AS runtime
+FROM caddy:2.11.9-alpine AS caddy
+RUN if getcap /usr/bin/caddy | grep -q .; then setcap -r /usr/bin/caddy; fi
 
-# Privileged ports are not used. Remove the base image's binding capability as
-# well, so the binary needs no file capabilities under the Compose restrictions.
-RUN if getcap /usr/bin/caddy | grep -q .; then setcap -r /usr/bin/caddy; fi \
-    && addgroup -g 1000 draftmatter \
-    && adduser -D -H -u 1000 -G draftmatter draftmatter \
-    && mkdir -p /data /config \
+FROM node:24.22.3-alpine AS runtime
+
+ENV NODE_ENV=production XDG_CONFIG_HOME=/config XDG_DATA_HOME=/data
+RUN mkdir -p /data /config /opt/draftmatter/deploy/production /opt/draftmatter/src \
     && chown -R 1000:1000 /data /config
-
+COPY --from=caddy /usr/bin/caddy /usr/bin/caddy
+COPY --from=caddy /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=build /app/dist /srv/draftmatter
 COPY deploy/production/Caddyfile /etc/caddy/Caddyfile
 COPY deploy/production/routes.caddy /etc/caddy/routes.caddy
+COPY deploy/production/public-config.mjs /opt/draftmatter/deploy/production/public-config.mjs
+COPY src/publicConfigurationModel.mjs /opt/draftmatter/src/publicConfigurationModel.mjs
+COPY deploy/production/web-entrypoint.sh /usr/local/bin/draftmatter-web
 COPY LICENSE compliance/THIRD_PARTY_NOTICES.md /usr/share/doc/draftmatter/
 
-# Internal high ports let the production Compose service drop every capability.
 EXPOSE 8080 8443
 USER 1000:1000
+ENTRYPOINT ["/bin/sh", "/usr/local/bin/draftmatter-web"]
 CMD ["caddy", "run", "--config", "/etc/caddy/Caddyfile", "--adapter", "caddyfile"]
