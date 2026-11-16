@@ -85,6 +85,8 @@ import { InsertBlockDialog, type InsertBlockKind, type InsertBlockRequest } from
 import { LinkDialog } from './LinkDialog'
 import { CollaborationDialog, type CollaborationFileService } from './CollaborationDialog'
 import { ProjectFilesWorkspace } from './ProjectFilesWorkspace'
+import { GitHistoryPanel } from './GitHistoryPanel'
+import type { GitRemoteRequest, GitRemoteResult, GitRepositoryStatus } from './desktopHost'
 import { ProjectDocumentWorkspace, type ProjectDocumentWorkspaceHandle } from './ProjectDocumentWorkspace'
 import { useProjectSynchronization } from './useProjectSynchronization'
 import { useProjectImageUrls } from './useProjectImageUrls'
@@ -714,6 +716,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const [toast, setToast] = useState('')
   const [projectMenuOpen, setProjectMenuOpen] = useState(false)
   const [projectFilesOpen, setProjectFilesOpen] = useState(false)
+  const [gitPanelOpen, setGitPanelOpen] = useState(false)
+  const [gitRepository, setGitRepository] = useState<{ root: string; status?: GitRepositoryStatus; problem?: string }>()
+  const gitDetectionRequestRef = useRef(0)
+  const gitOperationRunningRef = useRef(false)
   const fileWorkspaceRef = useRef<ProjectDocumentWorkspaceHandle>(null)
   const [manuscriptFileActive, setManuscriptFileActive] = useState(true)
   const [collaborationFileService, setCollaborationFileService] = useState<CollaborationFileService | null>(null)
@@ -802,6 +808,27 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   const [citationQuery, setCitationQuery] = useState('')
   const [citationAcquisitionState, setCitationAcquisitionState] = useState<'idle' | 'saving'>('idle')
   const [desktopSession, setDesktopSession] = useState<DesktopSession | null>(null)
+  const currentGit = gitRepository?.root === desktopSession?.root ? gitRepository?.status : undefined
+  useEffect(() => { if (!currentGit?.repository) setGitPanelOpen(false) }, [currentGit?.repository])
+  useEffect(() => {
+    let disposed = false
+    setGitRepository(undefined)
+    setGitPanelOpen(false)
+    const root = desktopSession?.root
+    if (!root || !desktopHost.available) return
+    const detect = async () => {
+      const id = ++gitDetectionRequestRef.current
+      try {
+        const status = await desktopHost.gitStatus(root)
+        if (!disposed && gitDetectionRequestRef.current === id) setGitRepository({ root, status })
+      } catch (error) {
+        if (!disposed && gitDetectionRequestRef.current === id) setGitRepository({ root, problem: normaliseHostFailure(error).message })
+      }
+    }
+    void detect()
+    window.addEventListener('focus', detect)
+    return () => { disposed = true; window.removeEventListener('focus', detect) }
+  }, [desktopSession?.root])
   const [localImageRefreshRevision, setLocalImageRefreshRevision] = useState(0)
   useEffect(() => {
     let cancelled = false
@@ -1669,13 +1696,13 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
     let disposed = false
 
     const checkExternalStatus = async () => {
-      if (disposed || collaborationSessionActiveRef.current || externalCheckRunningRef.current || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current) return
+      if (disposed || gitOperationRunningRef.current || collaborationSessionActiveRef.current || externalCheckRunningRef.current || desktopSaveBlockedRef.current || citationAcquisitionRunningRef.current) return
       externalCheckRunningRef.current = true
       try {
         const expected = desktopSessionRef.current
         if (!expected) return
         const status = await desktopHost.documentStatus(expected.root, expected.path, expected.hash)
-        if (disposed) return
+        if (disposed || gitOperationRunningRef.current) return
         const current = desktopSessionRef.current
         if (!current || current.root !== expected.root || current.path !== expected.path || current.hash !== expected.hash) return
 
@@ -1707,7 +1734,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
         }
 
         const document = await desktopHost.readDocument(current.root, current.path)
-        if (disposed || draftRevisionRef.current !== current.savedRevision) {
+        if (disposed || gitOperationRunningRef.current) return
+        const activeSession = desktopSessionRef.current
+        if (!activeSession || activeSession.root !== current.root || activeSession.path !== current.path || activeSession.hash !== current.hash) return
+        if (draftRevisionRef.current !== current.savedRevision) {
           preserveDesktopConflict(`${current.path} changed outside DraftMatter while you were editing.`)
           return
         }
@@ -4105,13 +4135,15 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
   }
 
   const openProjectFiles = () => {
+    setGitPanelOpen(false)
     setProjectFilesOpen(true)
     setLeftPanelOpen(true)
   }
 
   const toggleNavigationPanel = (files: boolean) => {
     if (!files) fileWorkspaceRef.current?.showManuscript()
-    setLeftPanelOpen(!leftPanelOpen || projectFilesOpen !== files)
+    setLeftPanelOpen(!leftPanelOpen || gitPanelOpen || projectFilesOpen !== files)
+    setGitPanelOpen(false)
     setProjectFilesOpen(files)
   }
 
@@ -4540,6 +4572,68 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       if (knownRoot) localStorage.removeItem(LAST_PROJECT_ROOT_KEY)
       setToast(failure.message)
     } finally {
+      setProjectBusy(false)
+    }
+  }
+
+  const initializeProjectGit = async () => {
+    const session = desktopSessionRef.current
+    if (!session || projectBusy || gitOperationRunningRef.current) return
+    gitOperationRunningRef.current = true
+    setProjectBusy(true)
+    setProjectMenuOpen(false)
+    try {
+      const result = await desktopHost.gitInitialize(session.root)
+      if (desktopSessionRef.current?.root !== session.root) return
+      gitDetectionRequestRef.current++
+      setGitRepository({ root: session.root, status: result.status })
+      setGitPanelOpen(true)
+      setLeftPanelOpen(true)
+      setToast(result.createdIgnore ? 'Git initialized locally with a .gitignore. Select files to create the first commit.' : 'Git initialized locally. Your existing .gitignore is preserved.')
+    } catch (error) {
+      if (desktopSessionRef.current?.root === session.root) setToast(`Git could not be initialized: ${readableError(error)}`)
+    } finally {
+      gitOperationRunningRef.current = false
+      setProjectBusy(false)
+    }
+  }
+
+  const prepareGitCommit = async (paths: string[]) => {
+    const session = desktopSessionRef.current
+    if (!session || projectBusy || gitOperationRunningRef.current) return false
+    if (paths.includes(session.path)) {
+      if (collaborationSessionActiveRef.current) throw new Error('Leave live collaboration and save the local manuscript before committing it.')
+      if (!await flushDraftBeforeLeave()) throw new Error('Save the current manuscript and edited file tabs before creating a Git commit.')
+    } else if (fileWorkspaceRef.current && !fileWorkspaceRef.current.canLeave()) {
+      throw new Error('Save or discard edited file tabs before creating a Git commit.')
+    }
+    return desktopSessionRef.current?.root === session.root && desktopSessionRef.current?.path === session.path
+  }
+
+  const pullProjectGit = async (request: GitRemoteRequest): Promise<GitRemoteResult> => {
+    const session = desktopSessionRef.current
+    if (!session || session.root !== request.root || projectBusy || gitOperationRunningRef.current) throw new Error('Finish the current project operation before pulling Git changes.')
+    if (collaborationSessionActiveRef.current) throw new Error('Leave live collaboration before pulling Git changes into this local project.')
+    if (executionPlanBusyRef.current || kernelSetupBusy || formatterSetupBusy || juliaPackageBusy) throw new Error('Finish the running language operation before pulling Git changes.')
+    gitOperationRunningRef.current = true
+    setProjectBusy(true)
+    let pulled = false
+    try {
+      if (!await flushDraftBeforeLeave()) throw new Error('Save the manuscript and edited file tabs before pulling Git changes.')
+      if (desktopSessionRef.current?.root !== session.root || desktopSessionRef.current.path !== session.path) throw new Error('The active project changed. Open Git again before pulling.')
+      const result = await desktopHost.gitPull(request)
+      pulled = true
+      const project = await desktopHost.openProject(session.root)
+      if (!project.documents.some((document) => document.path === session.path)) throw new Error('The open manuscript is no longer present in the pulled project.')
+      if (!await applyDesktopProject(project, false, session.path, false, true)) throw new Error('The project could not be reloaded.')
+      setLocalImageRefreshRevision((revision) => revision + 1)
+      fileWorkspaceRef.current?.reloadFiles()
+      return result
+    } catch (error) {
+      if (pulled) throw new Error(`Pull completed, but the project could not be fully refreshed: ${readableError(error)} Reload the project before making further Git changes.`)
+      throw error
+    } finally {
+      gitOperationRunningRef.current = false
       setProjectBusy(false)
     }
   }
@@ -5903,6 +5997,9 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
                     <button onClick={() => fileInputRef.current?.click()}><Icon name="document" size={16} /><span><strong>Open manuscript…</strong><small>DraftMatter manuscript, up to 5 MB</small></span></button>
                   )}
                   <button onClick={() => { setProjectMenuOpen(false); openProjectFiles() }}><Icon name="folder" size={16} /><span><strong>Browse project files</strong><small>Figures, data, local and online copies</small></span></button>
+                  {desktopSession && !currentGit?.repository && <button aria-label="Initialize Git…" onClick={() => void initializeProjectGit()} disabled={projectBusy || !currentGit?.gitAvailable}>
+                    <Icon name="branch" size={16} /><span><strong>Initialize Git…</strong><small>{gitRepository?.problem ?? (currentGit?.gitAvailable === false ? 'Install Git on this computer to use local commits' : currentGit ? 'Optional local commits; preserve the existing .gitignore' : 'Checking for a local Git repository…')}</small></span>
+                  </button>}
                   <button aria-label="Enter focus mode" onClick={() => { setProjectMenuOpen(false); setFocusMode(true) }}><Icon name="focus" size={16} /><span><strong>Enter focus mode</strong><small>Keep only the paper and writing tools</small></span></button>
                   {onOpenLearn && <button aria-label="Learn DraftMatter" onClick={() => { setProjectMenuOpen(false); void leaveEditor(onOpenLearn) }}><Icon name="info" size={16} /><span><strong>Learn DraftMatter</strong><small>Writing, figures, references, and collaboration</small></span></button>}
                   <button className="project-menu-example" onClick={() => void openCompleteExample()} disabled={projectBusy}><Icon name="spark" size={16} /><span><strong>Open complete example</strong><small>Citations, review, figures, tables, Python, R, and Julia</small></span></button>
@@ -6029,9 +6126,10 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
       <div className="workspace">
         <nav className="app-rail" aria-label="Workspace navigation">
           <div className="rail-items">
-            <button className={leftPanelOpen && projectFilesOpen ? 'active' : ''} onClick={() => toggleNavigationPanel(true)} data-label="Files" aria-label="Files" aria-pressed={leftPanelOpen && projectFilesOpen} aria-controls={leftPanelOpen ? "project-navigation-panel" : undefined}><Icon name="folder" />{(synchronizationProblems > 0 || selectiveSync.snapshot?.error) && <span className="rail-notice" aria-label="File synchronization needs attention">{synchronizationProblems || '!'}</span>}</button>
-            <button className={leftPanelOpen && !projectFilesOpen ? 'active' : ''} onClick={() => toggleNavigationPanel(false)} data-label="Outline" aria-label="Outline" aria-pressed={leftPanelOpen && !projectFilesOpen} aria-controls={leftPanelOpen ? "project-navigation-panel" : undefined}><Icon name="document" /></button>
+            <button className={leftPanelOpen && !gitPanelOpen && projectFilesOpen ? 'active' : ''} onClick={() => toggleNavigationPanel(true)} data-label="Files" aria-label="Files" aria-pressed={leftPanelOpen && !gitPanelOpen && projectFilesOpen} aria-controls={leftPanelOpen ? "project-navigation-panel" : undefined}><Icon name="folder" />{(synchronizationProblems > 0 || selectiveSync.snapshot?.error) && <span className="rail-notice" aria-label="File synchronization needs attention">{synchronizationProblems || '!'}</span>}</button>
+            <button className={leftPanelOpen && !gitPanelOpen && !projectFilesOpen ? 'active' : ''} onClick={() => toggleNavigationPanel(false)} data-label="Outline" aria-label="Outline" aria-pressed={leftPanelOpen && !gitPanelOpen && !projectFilesOpen} aria-controls={leftPanelOpen ? "project-navigation-panel" : undefined}><Icon name="document" /></button>
             <button className={recoveryOpen ? 'active' : ''} onClick={() => setRecoveryOpen(true)} data-label="History" aria-label="History" aria-haspopup="dialog" aria-expanded={recoveryOpen}><Icon name="history" /></button>
+            {currentGit?.repository && <button className={leftPanelOpen && gitPanelOpen ? 'active' : ''} onClick={() => { setLeftPanelOpen(!leftPanelOpen || !gitPanelOpen); setGitPanelOpen(true) }} data-label="Git" aria-label="Git" aria-pressed={leftPanelOpen && gitPanelOpen} aria-controls={leftPanelOpen && gitPanelOpen ? 'project-navigation-panel' : undefined}><Icon name="branch" /></button>}
             <button className={findOpen ? 'active' : ''} onClick={openDocumentFind} data-label="Find in document" aria-label="Find in document" aria-pressed={findOpen} title={`Find in document (${commandUsesMetaKey ? '⌘F' : 'Ctrl+F'})`}><Icon name="search" /></button>
           </div>
           <div className="rail-footer-actions">
@@ -6053,7 +6151,13 @@ function App({ saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, se
           </div>
         </nav>
 
-        {leftPanelOpen && (
+        {leftPanelOpen && gitPanelOpen && currentGit?.repository ? <GitHistoryPanel
+          key={desktopSession!.root}
+          root={desktopSession!.root} manuscriptPath={desktopSession!.path}
+          onNotice={setToast} onClose={() => setLeftPanelOpen(false)}
+          onBeforeCommit={prepareGitCommit} onPull={pullProjectGit}
+          onRepositoryChange={(status) => { if (desktopSessionRef.current?.root === desktopSession!.root) { gitDetectionRequestRef.current++; setGitRepository({ root: desktopSession!.root, status }) } }}
+        /> : leftPanelOpen && (
           <aside id="project-navigation-panel" className={`left-panel ${projectFilesOpen ? 'files-sidebar' : 'outline-sidebar'}`} aria-label={projectFilesOpen ? 'Project files' : 'Manuscript outline'}>
             {projectFilesOpen ? (
           <ProjectFilesWorkspace

@@ -65,6 +65,29 @@ async function clickWithin(element: Element, label: string) {
 }
 
 describe('project document workspace integration', () => {
+  it('reloads clean file tabs after external Git changes without replacing the manuscript', async () => {
+    await render()
+    await open('notes/methods.md', { keepOpen: true })
+    const manuscript = container.querySelector('[data-testid="manuscript"]')
+    const next = new TextEncoder().encode('Updated by a fast-forward pull')
+    vi.mocked(desktopHost.readProjectFilePreview).mockResolvedValueOnce({ path: 'notes/methods.md', bytes: [...next], size: next.length, hash: nextHash, modifiedMs: 2, truncated: false })
+    await act(async () => workspace.current!.reloadFiles())
+    expect(viewer().querySelector('output')?.textContent).toBe('Updated by a fast-forward pull')
+    expect(container.querySelector('[data-testid="manuscript"]')).toBe(manuscript)
+    expect(tabs()).toHaveLength(2)
+  })
+
+  it('keeps dirty file drafts when refreshing clean tabs', async () => {
+    await render()
+    await open('notes/draft.md', { keepOpen: true })
+    await clickWithin(viewer(), 'Change draft')
+    const draft = viewer()
+    await act(async () => workspace.current!.reloadFiles())
+    expect(viewer()).toBe(draft)
+    expect(viewer().querySelector('output')?.textContent).toBe('edited notes/draft.md')
+    expect(desktopHost.readProjectFilePreview).toHaveBeenCalledTimes(1)
+  })
+
   it('reads complete PDF previews up to 32 MiB locally and online without writing either copy', async () => {
     const pdf = { ...file, id: 'pdf-version', path: 'exports/article.PDF', size: 9 * 1024 * 1024, mediaType: 'application/pdf' }
     await render({ context: context() })

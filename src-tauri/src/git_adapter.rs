@@ -4,7 +4,10 @@ use std::collections::HashSet;
 use std::fs::{self, File};
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Output};
+use std::process::{Child, Command, Output, Stdio};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 const MAX_GIT_OUTPUT_BYTES: usize = 4 * 1024 * 1024;
 const MAX_DIFF_BYTES: usize = 2 * 1024 * 1024;
@@ -12,6 +15,7 @@ const MAX_STATUS_ENTRIES: usize = 10_000;
 const MAX_SELECTED_PATHS: usize = 512;
 const MAX_COMMIT_MESSAGE_BYTES: usize = 4_096;
 const MAX_HISTORY_ENTRIES: usize = 50;
+const GIT_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[derive(Debug, Clone)]
 struct RepositoryContext {
@@ -220,6 +224,7 @@ fn git_command(current_dir: &Path) -> Command {
         .current_dir(current_dir)
         .env("GIT_TERMINAL_PROMPT", "0")
         .env("GCM_INTERACTIVE", "Never")
+        .env("SSH_ASKPASS_REQUIRE", "never")
         .env("GIT_LITERAL_PATHSPECS", "1")
         .env("GIT_OPTIONAL_LOCKS", "0")
         .env("GIT_CONFIG_COUNT", "4")
@@ -254,7 +259,11 @@ fn sanitise_message(bytes: &[u8]) -> String {
         search_from = credentials_start + "[redacted]@".len();
     }
     if message.len() > 4_096 {
-        message.truncate(4_096);
+        let mut limit = 4_096;
+        while !message.is_char_boundary(limit) {
+            limit -= 1;
+        }
+        message.truncate(limit);
         message.push_str("…");
     }
     if message.is_empty() {
@@ -265,18 +274,114 @@ fn sanitise_message(bytes: &[u8]) -> String {
 }
 
 fn run_git(current_dir: &Path, arguments: &[&str]) -> Result<Output, HostError> {
-    let output = git_command(current_dir)
+    run_git_with_timeout(current_dir, arguments, GIT_TIMEOUT)
+}
+
+fn stop_git_process(child: &mut Child) {
+    #[cfg(unix)]
+    {
+        // Git owns a separate process group so timeout also stops its SSH helper.
+        // Its unreaped child PID cannot have been reused by an unrelated process.
+        unsafe {
+            libc::kill(-(child.id() as i32), libc::SIGKILL);
+        }
+    }
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/PID", &child.id().to_string(), "/T", "/F"])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+fn run_git_with_timeout(
+    current_dir: &Path,
+    arguments: &[&str],
+    timeout: Duration,
+) -> Result<Output, HostError> {
+    let mut command = git_command(current_dir);
+    command
         .args(arguments)
-        .output()
-        .map_err(|error| {
-            if error.kind() == std::io::ErrorKind::NotFound {
-                HostError::Integration(
-                    "System Git is not installed or is not available on PATH.".to_string(),
-                )
-            } else {
-                HostError::Io(format!("Could not start Git: {error}"))
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0);
+    }
+    let mut child = command.spawn().map_err(|error| {
+        if error.kind() == std::io::ErrorKind::NotFound {
+            HostError::Integration(
+                "System Git is not installed or is not available on PATH.".to_string(),
+            )
+        } else {
+            HostError::Io(format!("Could not start Git: {error}"))
+        }
+    })?;
+    fn drain(mut reader: impl Read) -> Result<Vec<u8>, std::io::Error> {
+        let mut retained = Vec::new();
+        let mut buffer = [0; 8192];
+        loop {
+            let size = reader.read(&mut buffer)?;
+            if size == 0 {
+                return Ok(retained);
             }
-        })?;
+            let remaining = (MAX_GIT_OUTPUT_BYTES + 1).saturating_sub(retained.len());
+            retained.extend_from_slice(&buffer[..size.min(remaining)]);
+        }
+    }
+    let stdout = child.stdout.take().unwrap();
+    let stderr = child.stderr.take().unwrap();
+    let (stdout_sender, stdout_reader) = mpsc::sync_channel(1);
+    let (stderr_sender, stderr_reader) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let _ = stdout_sender.send(drain(stdout));
+    });
+    thread::spawn(move || {
+        let _ = stderr_sender.send(drain(stderr));
+    });
+    let started = Instant::now();
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if started.elapsed() < timeout => thread::sleep(Duration::from_millis(5)),
+            Ok(None) => {
+                stop_git_process(&mut child);
+                return Err(HostError::Integration(format!(
+                    "Git did not finish within {} seconds. Check the repository and remote connection before retrying; authentication must be configured in your local Git client.",
+                    timeout.as_secs(),
+                )));
+            }
+            Err(error) => {
+                stop_git_process(&mut child);
+                return Err(HostError::Io(format!(
+                    "Could not read the Git process status: {error}"
+                )));
+            }
+        }
+    };
+    let read_output =
+        |reader: mpsc::Receiver<Result<Vec<u8>, std::io::Error>>| -> Result<Vec<u8>, HostError> {
+            reader
+                .recv_timeout(timeout.saturating_sub(started.elapsed()))
+                .map_err(|_| {
+                    HostError::Integration(
+                        "Git output did not finish in time. Check the repository before retrying."
+                            .into(),
+                    )
+                })?
+                .map_err(|error| HostError::Io(format!("Could not read Git output: {error}")))
+        };
+    let output = Output {
+        status,
+        stdout: read_output(stdout_reader)?,
+        stderr: read_output(stderr_reader)?,
+    };
     if output.stdout.len().saturating_add(output.stderr.len()) > MAX_GIT_OUTPUT_BYTES {
         return Err(HostError::Integration(
             "Git returned more than the 4 MB safety limit.".to_string(),
@@ -671,6 +776,28 @@ pub fn git_diff_impl(request: GitDiffRequest) -> Result<GitDiffResult, HostError
     let context = require_repository(&request.root)?;
     let _project_guard = crate::project_guard(&context.project_root)?;
     let repository_path = repository_path(&context, &request.path)?;
+    let untracked = if request.staged {
+        false
+    } else {
+        let files = require_success(
+            run_git(
+                &context.repository_root,
+                &[
+                    "ls-files",
+                    "--others",
+                    "--exclude-standard",
+                    "-z",
+                    "--",
+                    &repository_path,
+                ],
+            )?,
+            "inspect the selected new file",
+        )?;
+        files
+            .stdout
+            .split(|byte| *byte == 0)
+            .any(|path| path == repository_path.as_bytes())
+    };
     let mut arguments = vec![
         "diff",
         "--no-ext-diff",
@@ -683,11 +810,18 @@ pub fn git_diff_impl(request: GitDiffRequest) -> Result<GitDiffResult, HostError
     if request.staged {
         arguments.push("--cached");
     }
-    arguments.extend(["--", &repository_path]);
-    let output = require_success(
-        run_git(&context.repository_root, &arguments)?,
-        "read the selected diff",
-    )?;
+    if untracked {
+        arguments.extend(["--no-index", "--", "/dev/null", &repository_path]);
+    } else {
+        arguments.extend(["--", &repository_path]);
+    }
+    let output = run_git(&context.repository_root, &arguments)?;
+    // --no-index uses exit code 1 for an ordinary difference.
+    let output = if untracked && output.status.code() == Some(1) {
+        output
+    } else {
+        require_success(output, "read the selected diff")?
+    };
     let binary = String::from_utf8_lossy(&output.stdout).contains("Binary files ");
     let truncated = output.stdout.len() > MAX_DIFF_BYTES;
     let bytes = &output.stdout[..output.stdout.len().min(MAX_DIFF_BYTES)];
@@ -709,7 +843,7 @@ fn validate_commit_hash(hash: &str) -> Result<&str, HostError> {
         Ok(hash)
     } else {
         Err(HostError::InvalidProject(
-            "The checkpoint identifier is not a valid abbreviated commit hash.".to_string(),
+            "The commit identifier is not a valid abbreviated commit hash.".to_string(),
         ))
     }
 }
@@ -744,7 +878,7 @@ pub fn git_history_impl(raw_root: &str) -> Result<Vec<GitHistoryEntry>, HostErro
                 &pathspec,
             ],
         )?,
-        "read checkpoint history",
+        "read commit history",
     )?;
     let mut fields = output.stdout.split(|byte| *byte == 0).peekable();
     let mut history = Vec::new();
@@ -755,22 +889,22 @@ pub fn git_history_impl(raw_root: &str) -> Result<Vec<GitHistoryEntry>, HostErro
         let Some(hash) = fields.next() else { break };
         let Some(short_hash) = fields.next() else {
             return Err(HostError::Integration(
-                "Git returned malformed checkpoint history.".to_string(),
+                "Git returned malformed commit history.".to_string(),
             ));
         };
         let Some(authored_at) = fields.next() else {
             return Err(HostError::Integration(
-                "Git returned malformed checkpoint history.".to_string(),
+                "Git returned malformed commit history.".to_string(),
             ));
         };
         let Some(author) = fields.next() else {
             return Err(HostError::Integration(
-                "Git returned malformed checkpoint history.".to_string(),
+                "Git returned malformed commit history.".to_string(),
             ));
         };
         let Some(message) = fields.next() else {
             return Err(HostError::Integration(
-                "Git returned malformed checkpoint history.".to_string(),
+                "Git returned malformed commit history.".to_string(),
             ));
         };
         history.push(GitHistoryEntry {
@@ -818,7 +952,7 @@ pub fn git_checkpoint_diff_impl(
                 &pathspec,
             ],
         )?,
-        "read the selected checkpoint diff",
+        "read the selected commit diff",
     )?;
     let truncated = output.stdout.len() > MAX_DIFF_BYTES;
     let bytes = &output.stdout[..output.stdout.len().min(MAX_DIFF_BYTES)];
@@ -854,7 +988,7 @@ fn checkpoint_files(context: &RepositoryContext, hash: &str) -> Result<Vec<Strin
                 &pathspec,
             ],
         )?,
-        "read the selected checkpoint files",
+        "read the selected commit files",
     )?;
     let mut files = output
         .stdout
@@ -983,7 +1117,7 @@ fn validate_commit_message(message: &str) -> Result<String, HostError> {
     let message = message.trim();
     if message.is_empty() || message.len() > MAX_COMMIT_MESSAGE_BYTES || message.contains('\0') {
         return Err(HostError::InvalidProject(
-            "Checkpoint names must contain between 1 and 4,096 bytes of text.".to_string(),
+            "Commit messages must contain between 1 and 4,096 bytes of text.".to_string(),
         ));
     }
     Ok(message.to_string())
@@ -996,7 +1130,7 @@ pub fn git_create_commit_impl(request: GitCommitRequest) -> Result<GitCommitResu
     let staged = run_git(&context.repository_root, &["diff", "--cached", "--quiet"])?;
     if staged.status.success() {
         return Err(HostError::Conflict(
-            "No staged changes are available for this checkpoint.".to_string(),
+            "No staged changes are available for this commit.".to_string(),
         ));
     }
     require_success(
@@ -1004,11 +1138,11 @@ pub fn git_create_commit_impl(request: GitCommitRequest) -> Result<GitCommitResu
             &context.repository_root,
             &["commit", "--no-verify", "-m", &message],
         )?,
-        "create the checkpoint",
+        "create the commit",
     )?;
     let hash = require_success(
         run_git(&context.repository_root, &["rev-parse", "HEAD"])?,
-        "read the new checkpoint",
+        "read the new commit",
     )?;
     let hash = String::from_utf8_lossy(&hash.stdout).trim().to_string();
     let files_output = require_success(
@@ -1024,7 +1158,7 @@ pub fn git_create_commit_impl(request: GitCommitRequest) -> Result<GitCommitResu
                 "HEAD",
             ],
         )?,
-        "read the checkpoint files",
+        "read the commit files",
     )?;
     let mut files = files_output
         .stdout
@@ -1048,24 +1182,38 @@ pub fn git_create_checkpoint_impl(
     let _project_guard = crate::project_guard(&context.project_root)?;
     let message = validate_commit_message(&request.message)?;
     let paths = selected_repository_paths(&context, &request.paths)?;
+    let mut commit_paths = paths.clone();
+    // A staged rename is one selectable row. Commit its old name as well when
+    // it belongs to this project. Its deletion is already staged, so attempting
+    // to git-add that now-absent name would fail; only add the selected new name.
+    for entry in status_entries(&context)? {
+        if entry.kind == GitChangeKind::Renamed && request.paths.contains(&entry.path) {
+            if let Some(original) = entry.original_path {
+                let original = repository_path(&context, &original)?;
+                if !commit_paths.contains(&original) {
+                    commit_paths.push(original);
+                }
+            }
+        }
+    }
 
     let mut stage_arguments = vec!["add", "--all", "--"];
     stage_arguments.extend(paths.iter().map(String::as_str));
     require_success(
         run_git(&context.repository_root, &stage_arguments)?,
-        "stage the selected checkpoint files",
+        "stage the selected files",
     )?;
 
     let mut commit_arguments = vec!["commit", "--only", "--no-verify", "-m", &message, "--"];
-    commit_arguments.extend(paths.iter().map(String::as_str));
+    commit_arguments.extend(commit_paths.iter().map(String::as_str));
     require_success(
         run_git(&context.repository_root, &commit_arguments)?,
-        "create the selected checkpoint",
+        "create the selected commit",
     )?;
 
     let hash = require_success(
         run_git(&context.repository_root, &["rev-parse", "HEAD"])?,
-        "read the new checkpoint",
+        "read the new commit",
     )?;
     let hash = String::from_utf8_lossy(&hash.stdout).trim().to_string();
     Ok(GitCommitResult {
@@ -1181,7 +1329,7 @@ fn validate_remote(
     let Some(remote) = remote else {
         return Ok(None);
     };
-    if remote.is_empty() || remote.len() > 128 || remote.contains('\0') {
+    if remote.is_empty() || remote.starts_with('-') || remote.len() > 128 || remote.contains('\0') {
         return Err(HostError::InvalidProject(
             "The remote name is invalid.".to_string(),
         ));
@@ -1273,10 +1421,51 @@ pub fn git_push_impl(request: GitRemoteRequest) -> Result<GitRemoteResult, HostE
                 .to_string(),
         ));
     }
-    let mut arguments = vec!["push"];
-    if let (Some(remote), Some(branch)) = (remote.as_deref(), request.branch.as_deref()) {
-        arguments.extend([remote, branch]);
+    let current = branch_name(&context)?.ok_or_else(|| HostError::Conflict(
+        "Switch to a local branch before pushing. Detached HEAD cannot be pushed from DraftMatter.".into(),
+    ))?;
+    if request
+        .branch
+        .as_deref()
+        .is_some_and(|branch| branch != current)
+    {
+        return Err(HostError::InvalidProject(
+            "Only the current branch can be pushed from DraftMatter.".into(),
+        ));
     }
+    let (remote, destination) = if let Some(remote) = remote {
+        (remote, format!("refs/heads/{current}"))
+    } else {
+        let read_config = |key: &str| -> Result<String, HostError> {
+            let output = require_success(
+                run_git(&context.repository_root, &["config", "--get", key])?,
+                "read the current branch upstream",
+            )?;
+            Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+        };
+        let name = read_config(&format!("branch.{current}.remote"))?;
+        let remote = validate_remote(&context, Some(&name))?.unwrap();
+        let destination = read_config(&format!("branch.{current}.merge"))?;
+        let target = destination.strip_prefix("refs/heads/").ok_or_else(|| {
+            HostError::InvalidProject("The upstream must refer to a remote branch.".into())
+        })?;
+        validate_branch_name(&context, target)?;
+        (remote, destination)
+    };
+    // An explicit refspec avoids configured '+' push refspecs; disabling mirror
+    // also prevents repository configuration from turning this into a forced push.
+    let refspec = format!("refs/heads/{current}:{destination}");
+    let mirror = format!("remote.{remote}.mirror=false");
+    let arguments = [
+        "-c",
+        &mirror,
+        "push",
+        "--no-force",
+        "--no-follow-tags",
+        "--recurse-submodules=no",
+        &remote,
+        &refspec,
+    ];
     let output = require_success(
         run_git(&context.repository_root, &arguments)?,
         "push the current branch",
@@ -1533,6 +1722,228 @@ mod tests {
     }
 
     #[test]
+    fn selected_commit_in_a_parent_repository_preserves_other_index_and_worktree_versions() {
+        let repository = tempdir().unwrap();
+        initialise(repository.path());
+        let project = repository.path().join("article");
+        fs::create_dir(&project).unwrap();
+        fs::write(project.join("paper.qmd"), "Original paper\n").unwrap();
+        fs::write(repository.path().join("notes.md"), "Original notes\n").unwrap();
+        commit_all(repository.path(), "Base project");
+        fs::write(repository.path().join("notes.md"), "Staged notes\n").unwrap();
+        git(repository.path(), ["add", "notes.md"]);
+        fs::write(repository.path().join("notes.md"), "Newer unstaged notes\n").unwrap();
+        fs::write(project.join("paper.qmd"), "Revised paper\n").unwrap();
+        let root = project.to_string_lossy().into_owned();
+
+        let status = git_status_impl(&root).unwrap();
+        assert_eq!(status.project_prefix, "article");
+        assert_eq!(status.entries.len(), 1);
+        assert_eq!(status.entries[0].path, "paper.qmd");
+        assert_eq!(
+            status.repository_root,
+            Some(
+                fs::canonicalize(repository.path())
+                    .unwrap()
+                    .to_string_lossy()
+                    .into_owned()
+            )
+        );
+        assert!(matches!(
+            git_initialize_impl(&root),
+            Err(HostError::Conflict(_))
+        ));
+        assert!(!project.join(".git").exists());
+
+        git_create_checkpoint_impl(GitCheckpointRequest {
+            root: root.clone(),
+            paths: vec!["paper.qmd".into()],
+            message: "Revise paper only".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            git(repository.path(), ["show", "HEAD:article/paper.qmd"]).stdout,
+            b"Revised paper\n"
+        );
+        assert_eq!(
+            git(repository.path(), ["show", "HEAD:notes.md"]).stdout,
+            b"Original notes\n"
+        );
+        assert_eq!(
+            git(repository.path(), ["show", ":notes.md"]).stdout,
+            b"Staged notes\n"
+        );
+        assert_eq!(
+            fs::read(repository.path().join("notes.md")).unwrap(),
+            b"Newer unstaged notes\n"
+        );
+        assert!(git_status_impl(&root).unwrap().entries.is_empty());
+        assert_eq!(
+            git_history_impl(&root).unwrap()[0].message,
+            "Revise paper only"
+        );
+    }
+
+    #[test]
+    fn selecting_a_staged_rename_commits_both_names_without_other_staged_edits() {
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("paper.qmd"), "# Manuscript\n").unwrap();
+        fs::write(project.path().join("notes.md"), "Original notes\n").unwrap();
+        commit_all(project.path(), "Base manuscript");
+        git(project.path(), ["mv", "paper.qmd", "article.qmd"]);
+        fs::write(project.path().join("notes.md"), "Staged notes\n").unwrap();
+        git(project.path(), ["add", "notes.md"]);
+        fs::write(project.path().join("notes.md"), "Newer working notes\n").unwrap();
+        let root = project.path().to_string_lossy().into_owned();
+
+        git_create_checkpoint_impl(GitCheckpointRequest {
+            root: root.clone(),
+            paths: vec!["article.qmd".into()],
+            message: "Rename manuscript".into(),
+        })
+        .unwrap();
+        let tree = git(project.path(), ["ls-tree", "--name-only", "HEAD"]);
+        assert_eq!(
+            String::from_utf8_lossy(&tree.stdout),
+            "article.qmd\nnotes.md\n"
+        );
+        assert_eq!(
+            git(project.path(), ["show", "HEAD:article.qmd"]).stdout,
+            b"# Manuscript\n"
+        );
+        assert_eq!(
+            git(project.path(), ["show", "HEAD:notes.md"]).stdout,
+            b"Original notes\n"
+        );
+        assert_eq!(
+            git(project.path(), ["show", ":notes.md"]).stdout,
+            b"Staged notes\n"
+        );
+        assert_eq!(
+            fs::read(project.path().join("notes.md")).unwrap(),
+            b"Newer working notes\n"
+        );
+        let status = git_status_impl(&root).unwrap();
+        assert_eq!(status.entries.len(), 1);
+        assert_eq!(status.entries[0].path, "notes.md");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stalled_git_commands_time_out_and_stop_their_helpers() {
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        let started = Instant::now();
+        let result = run_git_with_timeout(
+            project.path(),
+            &[
+                "-c",
+                "alias.stall=!sh -c 'sleep 0.3; echo late > helper-ran'",
+                "stall",
+            ],
+            Duration::from_millis(50),
+        );
+        assert!(
+            matches!(result, Err(HostError::Integration(message)) if message.contains("did not finish"))
+        );
+        assert!(started.elapsed() < Duration::from_secs(2));
+        thread::sleep(Duration::from_millis(400));
+        assert!(!project.path().join("helper-ran").exists());
+        assert!(run_git(project.path(), &["status", "--short"])
+            .unwrap()
+            .status
+            .success());
+    }
+
+    #[test]
+    fn ignored_datasets_are_not_listed_or_added_by_selected_commits() {
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join(".gitignore"), "data/\n").unwrap();
+        fs::create_dir(project.path().join("data")).unwrap();
+        fs::write(
+            project.path().join("data/observations.csv"),
+            "private,measurements\n",
+        )
+        .unwrap();
+        fs::write(project.path().join("paper.qmd"), "# Paper\n").unwrap();
+        let root = project.path().to_string_lossy().into_owned();
+        let status = git_status_impl(&root).unwrap();
+        assert!(!status
+            .entries
+            .iter()
+            .any(|entry| entry.path.starts_with("data/")));
+
+        git_create_checkpoint_impl(GitCheckpointRequest {
+            root: root.clone(),
+            paths: vec!["paper.qmd".into()],
+            message: "Paper without data".into(),
+        })
+        .unwrap();
+        assert_eq!(
+            git(project.path(), ["ls-tree", "--name-only", "-r", "HEAD"]).stdout,
+            b"paper.qmd\n"
+        );
+        assert!(git_create_checkpoint_impl(GitCheckpointRequest {
+            root,
+            paths: vec!["data/observations.csv".into()],
+            message: "Attempt ignored file".into()
+        })
+        .is_err());
+        assert_eq!(git(project.path(), ["ls-files"]).stdout, b"paper.qmd\n");
+        assert_eq!(
+            fs::read(project.path().join(".gitignore")).unwrap(),
+            b"data/\n"
+        );
+        assert!(project.path().join("data/observations.csv").exists());
+    }
+
+    #[test]
+    fn new_files_have_read_only_diffs_without_staging_or_running_text_converters() {
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(
+            project.path().join(".gitattributes"),
+            "*.qmd diff=fixture\n",
+        )
+        .unwrap();
+        git(
+            project.path(),
+            [
+                "config",
+                "diff.fixture.textconv",
+                "sh -c 'touch converter-ran'",
+            ],
+        );
+        fs::write(
+            project.path().join("paper.qmd"),
+            "# New paper\n\nNew result.\n",
+        )
+        .unwrap();
+        let root = project.path().to_string_lossy().into_owned();
+
+        let preview = git_diff_impl(GitDiffRequest {
+            root: root.clone(),
+            path: "paper.qmd".into(),
+            staged: false,
+        })
+        .unwrap();
+        assert!(preview.text.contains("+# New paper"));
+        assert!(preview.text.contains("+New result."));
+        assert!(!preview.binary);
+        assert!(!project.path().join("converter-ran").exists());
+        assert!(git(project.path(), ["diff", "--cached", "--name-only"])
+            .stdout
+            .is_empty());
+        assert!(git_status_impl(&root)
+            .unwrap()
+            .entries
+            .iter()
+            .all(|entry| !entry.staged));
+    }
+
+    #[test]
     fn guarded_branches_refuse_dirty_switches_and_accept_clean_names() {
         let project = tempdir().unwrap();
         initialise(project.path());
@@ -1693,7 +2104,45 @@ mod tests {
     }
 
     #[test]
-    fn divergent_pull_stops_and_preserves_local_work() {
+    fn push_uses_the_configured_upstream_when_its_branch_name_differs() {
+        let remote = tempdir().unwrap();
+        git(remote.path(), ["init", "--bare", "-b", "published"]);
+        let project = tempdir().unwrap();
+        initialise(project.path());
+        fs::write(project.path().join("paper.qmd"), "Base manuscript\n").unwrap();
+        commit_all(project.path(), "Base");
+        git(
+            project.path(),
+            ["remote", "add", "origin", &remote.path().to_string_lossy()],
+        );
+        git(project.path(), ["push", "-u", "origin", "main:published"]);
+        fs::write(project.path().join("paper.qmd"), "Revised manuscript\n").unwrap();
+        commit_all(project.path(), "Revise manuscript");
+
+        let result = git_push_impl(GitRemoteRequest {
+            root: project.path().to_string_lossy().into_owned(),
+            remote: None,
+            branch: None,
+        })
+        .unwrap();
+        assert_eq!(result.status.upstream.as_deref(), Some("origin/published"));
+        assert_eq!(result.status.ahead, 0);
+        assert_eq!(
+            git(remote.path(), ["show", "published:paper.qmd"]).stdout,
+            b"Revised manuscript\n"
+        );
+        assert_eq!(
+            git(
+                remote.path(),
+                ["for-each-ref", "--format=%(refname:short)", "refs/heads"]
+            )
+            .stdout,
+            b"published\n"
+        );
+    }
+
+    #[test]
+    fn divergent_pull_and_push_stop_and_preserve_both_branches() {
         let remote = tempdir().unwrap();
         git(remote.path(), ["init", "--bare", "-b", "main"]);
         let project = tempdir().unwrap();
@@ -1744,6 +2193,32 @@ mod tests {
             .trim()
             .to_string();
         assert_eq!(after, local_head);
+        let remote_head = git(remote.path(), ["rev-parse", "refs/heads/main"]).stdout;
+        // Even a force refspec or mirror configured by another tool cannot
+        // change the non-forced behavior of this application's Push action.
+        git(
+            project.path(),
+            [
+                "config",
+                "remote.origin.push",
+                "+refs/heads/main:refs/heads/main",
+            ],
+        );
+        git(project.path(), ["config", "remote.origin.mirror", "true"]);
+        let pushed = git_push_impl(GitRemoteRequest {
+            root: project.path().to_string_lossy().into_owned(),
+            remote: None,
+            branch: None,
+        });
+        assert!(matches!(pushed, Err(HostError::Integration(message)) if message.contains("non-fast-forward")));
+        assert_eq!(
+            git(remote.path(), ["rev-parse", "refs/heads/main"]).stdout,
+            remote_head
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&git(project.path(), ["rev-parse", "HEAD"]).stdout).trim(),
+            local_head
+        );
     }
 
     #[test]
@@ -1776,6 +2251,7 @@ mod tests {
             sanitise_message(b"fatal: https://user:secret@example.invalid/private.git failed"),
             "fatal: https://[redacted]@example.invalid/private.git failed"
         );
+        assert!(sanitise_message(format!("{}é", "a".repeat(4095)).as_bytes()).ends_with('…'));
     }
 
     #[test]

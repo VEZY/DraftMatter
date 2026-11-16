@@ -3776,83 +3776,91 @@ async fn format_code(
         .map_err(|error| HostError::Integration(format!("The formatter task failed: {error}")))?
 }
 
-#[tauri::command]
-fn git_status(root: String) -> Result<GitRepositoryStatus, HostError> {
-    git_status_impl(&root)
+async fn git_task<T: Send + 'static>(
+    task: impl FnOnce() -> Result<T, HostError> + Send + 'static,
+) -> Result<T, HostError> {
+    tauri::async_runtime::spawn_blocking(task)
+        .await
+        .map_err(|error| HostError::Integration(format!("The Git task failed: {error}")))?
 }
 
 #[tauri::command]
-fn git_initialize(root: String) -> Result<GitInitializeResult, HostError> {
-    git_initialize_impl(&root)
+async fn git_status(root: String) -> Result<GitRepositoryStatus, HostError> {
+    git_task(move || git_status_impl(&root)).await
 }
 
 #[tauri::command]
-fn git_diff(request: GitDiffRequest) -> Result<GitDiffResult, HostError> {
-    git_diff_impl(request)
+async fn git_initialize(root: String) -> Result<GitInitializeResult, HostError> {
+    git_task(move || git_initialize_impl(&root)).await
 }
 
 #[tauri::command]
-fn git_history(root: String) -> Result<Vec<GitHistoryEntry>, HostError> {
-    git_history_impl(&root)
+async fn git_diff(request: GitDiffRequest) -> Result<GitDiffResult, HostError> {
+    git_task(move || git_diff_impl(request)).await
 }
 
 #[tauri::command]
-fn git_checkpoint_diff(
+async fn git_history(root: String) -> Result<Vec<GitHistoryEntry>, HostError> {
+    git_task(move || git_history_impl(&root)).await
+}
+
+#[tauri::command]
+async fn git_checkpoint_diff(
     request: GitCheckpointDiffRequest,
 ) -> Result<GitCheckpointDiffResult, HostError> {
-    git_checkpoint_diff_impl(request)
+    git_task(move || git_checkpoint_diff_impl(request)).await
 }
 
 #[tauri::command]
-fn git_restore_checkpoint(
+async fn git_restore_checkpoint(
     request: GitRestoreCheckpointRequest,
 ) -> Result<GitRepositoryStatus, HostError> {
-    git_restore_checkpoint_impl(request)
+    git_task(move || git_restore_checkpoint_impl(request)).await
 }
 
 #[tauri::command]
-fn git_stage(request: GitStageRequest) -> Result<GitRepositoryStatus, HostError> {
-    git_stage_impl(request)
+async fn git_stage(request: GitStageRequest) -> Result<GitRepositoryStatus, HostError> {
+    git_task(move || git_stage_impl(request)).await
 }
 
 #[tauri::command]
-fn git_create_commit(request: GitCommitRequest) -> Result<GitCommitResult, HostError> {
-    git_create_commit_impl(request)
+async fn git_create_commit(request: GitCommitRequest) -> Result<GitCommitResult, HostError> {
+    git_task(move || git_create_commit_impl(request)).await
 }
 
 #[tauri::command]
-fn git_create_checkpoint(request: GitCheckpointRequest) -> Result<GitCommitResult, HostError> {
-    git_create_checkpoint_impl(request)
+async fn git_create_checkpoint(request: GitCheckpointRequest) -> Result<GitCommitResult, HostError> {
+    git_task(move || git_create_checkpoint_impl(request)).await
 }
 
 #[tauri::command]
-fn git_branches(root: String) -> Result<GitBranchStatus, HostError> {
-    git_branches_impl(&root)
+async fn git_branches(root: String) -> Result<GitBranchStatus, HostError> {
+    git_task(move || git_branches_impl(&root)).await
 }
 
 #[tauri::command]
-fn git_create_branch(request: GitBranchRequest) -> Result<GitBranchStatus, HostError> {
-    git_create_branch_impl(request)
+async fn git_create_branch(request: GitBranchRequest) -> Result<GitBranchStatus, HostError> {
+    git_task(move || git_create_branch_impl(request)).await
 }
 
 #[tauri::command]
-fn git_switch_branch(request: GitBranchRequest) -> Result<GitBranchStatus, HostError> {
-    git_switch_branch_impl(request)
+async fn git_switch_branch(request: GitBranchRequest) -> Result<GitBranchStatus, HostError> {
+    git_task(move || git_switch_branch_impl(request)).await
 }
 
 #[tauri::command]
-fn git_fetch(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
-    git_fetch_impl(request)
+async fn git_fetch(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
+    git_task(move || git_fetch_impl(request)).await
 }
 
 #[tauri::command]
-fn git_pull(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
-    git_pull_impl(request)
+async fn git_pull(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
+    git_task(move || git_pull_impl(request)).await
 }
 
 #[tauri::command]
-fn git_push(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
-    git_push_impl(request)
+async fn git_push(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
+    git_task(move || git_push_impl(request)).await
 }
 
 #[tauri::command]

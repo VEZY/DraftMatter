@@ -15,11 +15,12 @@ export interface ProjectDocumentWorkspaceHandle {
   openFile: (path: string, options?: ProjectFileOpenOptions) => void
   showManuscript: () => void
   canLeave: () => boolean
+  reloadFiles: () => void
 }
 interface Tab {
   id: string; path: string; location: 'local' | 'online'; file?: ProjectFile; versionId?: string; remoteScope?: string
   keepOpen: boolean; dirty: boolean; loading: boolean; problem?: string
-  bytes?: Uint8Array; size?: number; truncated?: boolean; hash?: string; provenance?: string
+  bytes?: Uint8Array; size?: number; truncated?: boolean; hash?: string; provenance?: string; viewerKey?: string
 }
 interface StoredTab { path: string; location: 'local' | 'online'; fileId?: string; remoteScope?: string }
 interface Props {
@@ -97,6 +98,7 @@ function ProjectDocumentWorkspaceSession({ workspaceRef, scope, root, manuscript
   const load = async (tab: Tab, fileId?: string) => {
     const controller = new AbortController(); controllers.current.add(controller)
     const values = current.current
+    const viewerKey = crypto.randomUUID()
     if (tab.location === 'online' && tab.remoteScope !== remoteIdentity(values.context)) {
       controllers.current.delete(controller)
       update(tab.id, { loading: false, problem: 'Reconnect to the original project and account to read this online file.' })
@@ -111,16 +113,16 @@ function ProjectDocumentWorkspaceSession({ workspaceRef, scope, root, manuscript
         const file = tab.file ?? (await api.catalogue(controller.signal)).files.find((candidate) => candidate.id === fileId && candidate.path === tab.path)
         if (!file) throw new Error('This saved online version is no longer available. Open a current version from Files.')
         const preview = await api.readPreview(file, limit, controller.signal)
-        if (!controller.signal.aborted && tab.remoteScope === remoteIdentity(current.current.context)) update(tab.id, { bytes: preview.bytes, size: file.size, truncated: preview.truncated, file, provenance: `Online · Version ${file.id} · ${file.createdAt}`, loading: false })
+        if (!controller.signal.aborted && tab.remoteScope === remoteIdentity(current.current.context)) update(tab.id, { bytes: preview.bytes, size: file.size, truncated: preview.truncated, file, viewerKey, provenance: `Online · Version ${file.id} · ${file.createdAt}`, loading: false })
       } else if (tab.location === 'local' && values.root && desktopHost.available) {
         const preview = await desktopHost.readProjectFilePreview(values.root, tab.path, limit)
-        if (!controller.signal.aborted) update(tab.id, { bytes: Uint8Array.from(preview.bytes), size: preview.size, truncated: preview.truncated, hash: preview.hash ?? undefined, provenance: `Local · ${preview.hash ? `SHA-256 ${preview.hash}` : 'Partial preview'} · ${new Date(preview.modifiedMs).toLocaleString()}`, loading: false })
+        if (!controller.signal.aborted) update(tab.id, { bytes: Uint8Array.from(preview.bytes), size: preview.size, truncated: preview.truncated, hash: preview.hash ?? undefined, viewerKey, provenance: `Local · ${preview.hash ? `SHA-256 ${preview.hash}` : 'Partial preview'} · ${new Date(preview.modifiedMs).toLocaleString()}`, loading: false })
       } else {
         const image = (tab.location === 'online' ? values.sharedImages : values.images).find((candidate) => candidate.path === tab.path)
         const bundle = tab.location === 'local' ? values.bundledFiles.find((candidate) => candidate.path === tab.path) : undefined
         const bytes = image ? base64ToBytes(image.base64) : bundle ? new TextEncoder().encode(bundle.content) : undefined
         if (!bytes) throw new Error('This file is unavailable in this copy. Open an available local or online version from Files.')
-        update(tab.id, { bytes: bytes.slice(0, limit), size: bytes.length, truncated: bytes.length > limit, provenance: tab.location === 'online' ? 'Online · Image shared with the live manuscript' : bundle ? 'Bundled example · Read only' : 'This browser · Saved image', loading: false })
+        update(tab.id, { bytes: bytes.slice(0, limit), size: bytes.length, truncated: bytes.length > limit, viewerKey, provenance: tab.location === 'online' ? 'Online · Image shared with the live manuscript' : bundle ? 'Bundled example · Read only' : 'This browser · Saved image', loading: false })
       }
     } catch (error) { if (!controller.signal.aborted) update(tab.id, { problem: message(error), loading: false }) }
     finally {
@@ -146,7 +148,14 @@ function ProjectDocumentWorkspaceSession({ workspaceRef, scope, root, manuscript
     tabsRef.current = [...retained, tab]; setTabs(tabsRef.current); setActive(id)
     void load(tab, fileId)
   }
-  useImperativeHandle(workspaceRef, () => ({ openFile: open, showManuscript: () => setActive('manuscript'), canLeave: () => {
+  useImperativeHandle(workspaceRef, () => ({ openFile: open, showManuscript: () => setActive('manuscript'), reloadFiles: () => {
+    for (const controller of controllers.current) controller.abort()
+    controllers.current.clear()
+    for (const tab of tabsRef.current) if (!tab.dirty) {
+      update(tab.id, { loading: true, problem: undefined })
+      void load(tab, tab.file?.id ?? tab.versionId)
+    }
+  }, canLeave: () => {
     if (!tabsRef.current.some((tab) => tab.dirty)) return true
     current.current.onNotice('Save or close your edited file tabs before leaving this project.'); return false
   } }))
@@ -216,7 +225,7 @@ function ProjectDocumentWorkspaceSession({ workspaceRef, scope, root, manuscript
     {tabs.map((tab, index) => <section key={tab.id} id={`file-panel-${index}`} role="tabpanel" aria-labelledby={`file-tab-${index}`} hidden={active !== tab.id} className="project-file-tab-panel">
       <div className="project-file-tab-actions"><span>{tab.path}</span>{!tab.keepOpen && <button onClick={() => update(tab.id, { keepOpen: true })}>Keep open</button>}{tab.bytes && !tab.truncated && !tab.dirty && (tab.location !== 'online' || tab.remoteScope === remoteIdentity(context)) && <button onClick={() => void download(tab)}>Download file</button>}<button disabled={tab.dirty || tab.loading} onClick={() => { update(tab.id, { loading: true, problem: undefined }); void load(tab, tab.file?.id ?? tab.versionId) }}>Reload file</button></div>
       {tab.location === 'online' && tab.remoteScope !== remoteIdentity(context) && <p role="alert">Reconnect to the original project and account to access this online tab. Its unsaved edits are kept here.</p>}
-      <div className="project-file-tab-content" hidden={tab.location === 'online' && tab.remoteScope !== remoteIdentity(context)}>{tab.loading ? <p role="status">Loading file preview…</p> : tab.problem ? <p role="alert">{tab.problem}</p> : tab.bytes && <ProjectFileViewer active={active === tab.id} path={tab.path} bytes={tab.bytes} totalBytes={tab.size ?? tab.bytes.length} truncated={Boolean(tab.truncated)} provenance={tab.provenance ?? tab.location} editable={!tab.truncated && (tab.location === 'local' ? Boolean(root && tab.hash) : Boolean(tab.file && context && ['owner', 'editor'].includes(context.workspace.role))) && (tab.size ?? 0) <= TEXT_LIMIT} onSave={(content) => save(tab, content)} onDirtyChange={(dirty) => update(tab.id, { dirty, ...(dirty ? { keepOpen: true } : {}) })} onInsertFigure={onInsertFigure && !tab.truncated ? () => { void onInsertFigure(tab.path, tab.bytes!, tab.location === 'online').then(() => setActive('manuscript')).catch((error) => onNotice(message(error))) } : undefined} />}</div>
+      <div className="project-file-tab-content" hidden={tab.location === 'online' && tab.remoteScope !== remoteIdentity(context)}>{tab.loading ? <p role="status">Loading file preview…</p> : tab.problem ? <p role="alert">{tab.problem}</p> : tab.bytes && <ProjectFileViewer key={tab.viewerKey} active={active === tab.id} path={tab.path} bytes={tab.bytes} totalBytes={tab.size ?? tab.bytes.length} truncated={Boolean(tab.truncated)} provenance={tab.provenance ?? tab.location} editable={!tab.truncated && (tab.location === 'local' ? Boolean(root && tab.hash) : Boolean(tab.file && context && ['owner', 'editor'].includes(context.workspace.role))) && (tab.size ?? 0) <= TEXT_LIMIT} onSave={(content) => save(tab, content)} onDirtyChange={(dirty) => update(tab.id, { dirty, ...(dirty ? { keepOpen: true } : {}) })} onInsertFigure={onInsertFigure && !tab.truncated ? () => { void onInsertFigure(tab.path, tab.bytes!, tab.location === 'online').then(() => setActive('manuscript')).catch((error) => onNotice(message(error))) } : undefined} />}</div>
     </section>)}
   </>
 }

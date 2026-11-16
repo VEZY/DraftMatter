@@ -5123,6 +5123,7 @@ kbd {
 
 .structured-editor-content:focus-visible {
   outline: none !important;
+  box-shadow: none;
 }
 
 .structured-block-drag-handle {

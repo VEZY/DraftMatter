@@ -65,6 +65,6 @@ export function SelectiveSyncPanel({ model }: { model: ProjectSynchronization })
       </section>}
     </li>)}</ul>
     {!rows.length && <p className="selective-sync-explanation">{snapshot?.busy ? 'Reading the project files…' : query ? 'No matching files.' : 'The project file list will appear here.'}</p>}
-    <footer>Transfers up to 32 MiB per file. Pause or unselect stops after the current file. Deletions are never propagated automatically. Git is optional and managed outside DraftMatter.</footer>
+    <footer>Transfers up to 32 MiB per file. Pause or unselect stops after the current file. Deletions are never propagated automatically. Optional Git commits are managed in the separate Git panel.</footer>
   </section>
 }

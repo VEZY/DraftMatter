@@ -91,10 +91,32 @@ links or forms. Switching back to the paper releases the PDF renderer.
 | Shared online paper | With the shared manuscript, so collaborators can see it. A connected desktop project also keeps its local copy. |
 
 The Files view distinguishes local and online copies. The existence of both
-copies does not establish that their contents match. Git is optional and separate from online sharing. Set it up with your preferred
-Git client, IDE, or command line. DraftMatter does not inspect or manage your
-repository, create commits, or contact Git remotes. Local recovery history remains
-available without Git.
+copies does not establish that their contents match. Git is optional and separate
+from online sharing and recovery history.
+
+## Use local Git when you want commits
+
+For a desktop project in an existing Git repository, **Git** appears in the left
+navigation beside **History** and **Search**. If the project has no repository,
+open the project menu and choose **Initialize Git…**. Initialization is explicit;
+an existing `.gitignore` is preserved. Git must already be installed on this
+computer. Browser drafts do not expose local Git controls.
+
+The Git panel lists changed files with unchecked selection boxes. Select only
+the files you want to commit, enter a **Commit message**, then choose **Create
+commit**. Unselected staged and working changes stay outside that commit, and
+datasets are never selected automatically. Inspect working changes or select a
+commit in **Commit history** to read its changes. Browsing changes neither files
+nor branches. **History** continues to show the separate automatic recovery
+versions.
+
+Configured Git remotes have explicit **Fetch**, **Pull fast-forward**, and
+**Push** actions. Creating a commit does not push it. Pull refuses an unclean
+working tree or a change that needs a merge or rebase; push never forces. After a
+successful pull, DraftMatter reloads the manuscript from disk. Configure remotes,
+switch branches, and perform advanced Git operations using your usual Git tools.
+If the project is inside a larger repository, its repository location is shown;
+remote operations apply to that repository's branch, not only the paper's folder.
 
 ## Synchronize a selected part of a local project
 
@@ -142,9 +164,9 @@ selected files use immutable server versions and guarded current-version heads.
 An older server without these heads reports an upgrade requirement and does not
 silently start synchronization.
 
-Git remains an external, optional tool. DraftMatter does not initialize or probe
-a repository, and its history icon opens local recovery snapshots. Existing
-repositories stay intact; configure and use Git from your preferred tools.
+Git remains optional and independent of file synchronization. The **Git** panel
+provides selected local commits and explicit remote actions; **History** opens
+recovery versions. Git remotes and advanced operations use your usual Git tools.
 
 ## Share the paper, then choose any additional data
 

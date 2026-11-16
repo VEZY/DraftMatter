@@ -138,8 +138,9 @@ describe('DM-P1-GATE local project workflow', () => {
       persistedHash = 'document-2'
       return { path: request.path, hash: persistedHash, bytes: request.content.length, recoveryPath: '.draftmatter/recovery/paper-document-1.qmd' }
     })
-    for (const method of ['gitStatus', 'gitInitialize', 'gitBranches', 'gitHistory', 'gitCheckpointDiff', 'gitRestoreCheckpoint'] as const) {
-      vi.spyOn(desktopHost, method).mockRejectedValue(new Error('Git is managed outside DraftMatter'))
+    vi.spyOn(desktopHost, 'gitStatus').mockResolvedValue({ gitAvailable: true, gitVersion: 'git version 2.50.0', repository: false, projectPrefix: '', detached: false, ahead: 0, behind: 0, entries: [] })
+    for (const method of ['gitInitialize', 'gitBranches', 'gitHistory', 'gitCheckpointDiff', 'gitRestoreCheckpoint', 'gitCreateCheckpoint', 'gitFetch', 'gitPull', 'gitPush'] as const) {
+      vi.spyOn(desktopHost, method).mockRejectedValue(new Error('Git operations require an explicit action'))
     }
 
     container = document.createElement('div')
@@ -450,7 +451,7 @@ describe('DM-P1-GATE local project workflow', () => {
     expect(readRecoverySnapshots(localStorage, recoveryIdentity).some((snapshot) => snapshot.source === editedSource)).toBe(true)
   })
 
-  it('opens local recovery from the History launcher and restores a saved version without managing Git', async () => {
+  it('opens local recovery from the History launcher and restores a saved version separately from Git commits', async () => {
     localStorage.setItem('draftmatter.last-project-root.v1', projectRoot)
     await act(async () => appRoot.render(<App />))
     await flush(50)
@@ -464,7 +465,7 @@ describe('DM-P1-GATE local project workflow', () => {
     const history = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Recovery history"]')!
     expect(history).not.toBeNull()
     expect(history.textContent).toContain('Browsing leaves your manuscript unchanged.')
-    expect(container.querySelector('.git-history-browser')).toBeNull()
+    expect(container.querySelector('.git-history-panel')).toBeNull()
     expect(container.textContent).not.toContain('Restore clean files')
     expect(desktopHost.saveDocument).toHaveBeenCalledTimes(writesBeforeHistory)
     expect(persistedSource).toBe(editedSource)
@@ -481,7 +482,8 @@ describe('DM-P1-GATE local project workflow', () => {
     expect(container.querySelector('.structured-manuscript-editor')?.textContent).toContain('First observation.')
     expect(archivedVersions.some((snapshot) => snapshot.source === editedSource && snapshot.kind === 'before-restore')).toBe(true)
     expect(archivedVersions.some((snapshot) => snapshot.source === originalSource && snapshot.kind === 'restored')).toBe(true)
-    for (const method of ['gitStatus', 'gitInitialize', 'gitBranches', 'gitHistory', 'gitCheckpointDiff', 'gitRestoreCheckpoint'] as const) {
+    expect(desktopHost.gitStatus).toHaveBeenCalledWith(projectRoot)
+    for (const method of ['gitInitialize', 'gitBranches', 'gitHistory', 'gitCheckpointDiff', 'gitRestoreCheckpoint', 'gitCreateCheckpoint', 'gitFetch', 'gitPull', 'gitPush'] as const) {
       expect(desktopHost[method]).not.toHaveBeenCalled()
     }
   })
