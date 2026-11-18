@@ -41,7 +41,7 @@ test('highlights only edited words in a long historical paragraph without changi
   expect(['rgba(0, 0, 0, 0)', 'rgb(255, 255, 255)']).toContain(fill)
   expect(await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toBe(source)
   expect(await page.evaluate((key) => localStorage.getItem(key), journalKey)).toBe(journalBefore)
-  await page.screenshot({ path: '/private/tmp/draftmatter-word-level-history.png' })
+  await page.screenshot({ path: test.info().outputPath('draftmatter-word-level-history.png') })
   await dialog.getByRole('tab', { name: 'Source', exact: true }).click()
   await expect(dialog.getByLabel('Version source', { exact: true })).toHaveText(older)
 })

@@ -69,7 +69,7 @@ test('names an older version without restoring it and keeps the name after reope
   await dialog.getByRole('tab', { name: 'Source', exact: true }).click()
   await expect(dialog.getByLabel('Version source', { exact: true })).toHaveText(older)
   expect(await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toBe(source)
-  await page.screenshot({ path: '/private/tmp/draftmatter-named-version-integrated.png' })
+  await page.screenshot({ path: test.info().outputPath('draftmatter-named-version-integrated.png') })
 })
 
 test('shows and restores only the active manuscript, preserving other files and unassigned old backups', async ({ page }) => {

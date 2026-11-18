@@ -236,18 +236,18 @@ function AppHome({
             <article>
               <span><Icon name="book" size={19} /></span>
               <div><h3>Learn the workflow</h3><p>Use the short guide, tour the complete example, or review supported programming languages.</p></div>
-              <div><button onClick={onOpenLearn}>How to use DraftMatter</button><button onClick={onOpenTutorial}>Start guided tour</button><button onClick={onOpenLanguages}>Languages</button></div>
+              <div className="home-app-setup-actions"><button onClick={onOpenLearn}>How to use DraftMatter</button><button onClick={onOpenTutorial}>Start guided tour</button><button onClick={onOpenLanguages}>Languages</button></div>
             </article>
             <article>
               <span><Icon name="spark" size={19} /></span>
               <div><h3>AI connections</h3><p>DraftMatter works without AI. On desktop, connect assistants once, then enable them separately for each project.</p></div>
-              <div>{desktopHost.available && <button onClick={onConnectAssistants}>Manage AI connections</button>}<button onClick={onOpenAiLearn}>How AI access works</button></div>
+              <div className="home-app-setup-actions">{desktopHost.available && <button onClick={onConnectAssistants}>Manage AI connections</button>}<button onClick={onOpenAiLearn}>How AI access works</button></div>
             </article>
             <article>
               <span><Icon name="users" size={19} /></span>
               <div><h3>Account &amp; collaboration</h3><p>{session.serviceUrl ? 'A collaboration service is configured. Sign in to access shared papers.' : 'You are working locally. Add an account only when you need shared papers or browser collaboration.'}</p></div>
               <AlphaAccountNotice onOpenLegal={onOpenLegal} />
-              <div>{session.serviceUrl && desktopHost.available && <button onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}>Sign in</button>}{(!session.serviceUrl || import.meta.env.DEV) && <button onClick={() => document.getElementById('home-account-setup')?.querySelector<HTMLButtonElement>('.home-disclosure')?.click()}>Configure collaboration</button>}</div>
+              <div className="home-app-setup-actions">{session.serviceUrl && desktopHost.available && <button onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}>Sign in</button>}{(!session.serviceUrl || import.meta.env.DEV) && <button onClick={() => document.getElementById('home-account-setup')?.querySelector<HTMLButtonElement>('.home-disclosure')?.click()}>Configure collaboration</button>}</div>
             </article>
           </div>
         </section>
