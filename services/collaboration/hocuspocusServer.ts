@@ -1,5 +1,6 @@
 import { Server, type ServerConfiguration, type Connection, type Document } from '@hocuspocus/server'
 import type { IncomingMessage, ServerResponse } from 'node:http'
+import { decodeJwt } from 'jose'
 import * as Y from 'yjs'
 import type { ProjectAuthorizationService, WorkspaceRole } from '../../src/collaboration/workspaceService'
 import { parseReviewMarkup } from '../../src/reviewMarkup'
@@ -28,6 +29,8 @@ export interface CollaborationConnectionContext extends CollaborationProjectScop
   userId: string
   sessionId: string
   role: WorkspaceRole
+  /** A server-controlled deadline, derived only after token authorization. */
+  credentialExpiresAt?: number
 }
 
 export interface DraftMatterHocuspocusOptions {
@@ -39,6 +42,8 @@ export interface DraftMatterHocuspocusOptions {
   debounceMs?: number
   maxDebounceMs?: number
   maxPayloadBytes?: number
+  /** Includes unauthenticated physical sockets; defaults to 128 for the alpha. */
+  maxSocketConnections?: number
   tokenRefreshMs?: number
   allowedOrigins?: string[]
   httpHandler?: (request: IncomingMessage, response: ServerResponse) => Promise<void>
@@ -878,7 +883,57 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
   const validator = options.validationMode === 'reference' ? undefined : new CollaborationUpdateValidator()
   const releases = new WeakMap<Connection<CollaborationConnectionContext>, () => void>()
   const messageBudgets = new WeakMap<Connection<CollaborationConnectionContext>, { tokens: number; at: number }>()
+  const accountBudgets = new Map<string, { tokens: number; at: number }>()
+  const accountConnections = new Map<string, number>()
+  const budgetCleanup = new Map<string, ReturnType<typeof setTimeout>>()
   const clock = options.clock ?? Date.now
+  const maxSocketConnections = options.maxSocketConnections ?? 128
+  if (!Number.isSafeInteger(maxSocketConnections) || maxSocketConnections < 1) throw new Error('The collaboration socket limit must be a positive safe integer.')
+  let socketConnections = 0
+  const tokenRefreshMs = options.tokenRefreshMs ?? 5 * 60_000
+  const credentialTimers = new WeakMap<Connection<CollaborationConnectionContext>, {
+    expiresAt: number
+    expiry: ReturnType<typeof setTimeout>
+    refresh: ReturnType<typeof setTimeout>
+    repeatedRefresh?: ReturnType<typeof setInterval>
+  }>()
+  const expiredCredentials = () => new CollaborationTransportError(4401, 'Collaboration credentials expired. Sign in again or reconnect with a refreshed session.')
+  const clearCredentialTimers = (connection: Connection<CollaborationConnectionContext>) => {
+    const timers = credentialTimers.get(connection)
+    if (!timers) return
+    clearTimeout(timers.expiry)
+    clearTimeout(timers.refresh)
+    if (timers.repeatedRefresh) clearInterval(timers.repeatedRefresh)
+    credentialTimers.delete(connection)
+  }
+  const armCredentialDeadline = (connection: Connection<CollaborationConnectionContext>, context: CollaborationConnectionContext) => {
+    if (!connection.document.hasConnection(connection)) return
+    const expiresAt = context.credentialExpiresAt!
+    // Returning the same still-valid token must never extend its deadline or
+    // create an increasingly fast refresh loop near expiration.
+    if (credentialTimers.get(connection)?.expiresAt === expiresAt) return
+    clearCredentialTimers(connection)
+    const remaining = Math.max(0, expiresAt - clock())
+    const expiry = setTimeout(() => {
+      clearCredentialTimers(connection)
+      connection.close(expiredCredentials())
+    }, remaining)
+    // Ask inside the browser's 30-second refresh window, before the hard expiry.
+    const refreshDelay = Math.min(tokenRefreshMs, Math.max(1, remaining - Math.min(25_000, remaining / 2)))
+    const timers = {
+      expiresAt, expiry,
+      refresh: setTimeout(() => {
+        connection.requestToken()
+        const repeated = setInterval(() => connection.requestToken(), tokenRefreshMs)
+        repeated.unref()
+        timers.repeatedRefresh = repeated
+      }, refreshDelay),
+      repeatedRefresh: undefined as ReturnType<typeof setInterval> | undefined,
+    }
+    expiry.unref()
+    timers.refresh.unref()
+    credentialTimers.set(connection, timers)
+  }
   const localPending = new Map<string, Uint8Array[]>()
   const localFlushes = new Map<string, Promise<boolean>>()
   const storageUnavailable = () => new CollaborationTransportError(4503, 'Collaboration storage is unavailable; unsent changes remain on your device. Reconnect to retry.')
@@ -918,7 +973,15 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
       }
     }
     connectionConfig.readOnly = readOnly
-    return { ...scope, userId: access.userId, sessionId: access.sessionId, role: access.role }
+    // Authorization above has already verified this exact token. Decoding here
+    // only reads its verified expiry; it does not establish identity or access.
+    // Opaque local/test tokens still require a response to periodic revalidation.
+    let credentialExpiresAt = clock() + tokenRefreshMs + 30_000
+    try {
+      const expiration = decodeJwt(token).exp
+      if (typeof expiration === 'number' && Number.isSafeInteger(Math.floor(expiration * 1000))) credentialExpiresAt = Math.min(credentialExpiresAt, Math.floor(expiration * 1000))
+    } catch { /* The authorization service may use an opaque token. */ }
+    return { ...scope, userId: access.userId, sessionId: access.sessionId, role: access.role, credentialExpiresAt }
   }
   const configuration: Partial<ServerConfiguration<CollaborationConnectionContext>> = {
     port: options.port ?? 0,
@@ -927,10 +990,23 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
     quiet: true,
     debounce: options.debounceMs ?? 1_000,
     maxDebounce: options.maxDebounceMs ?? 10_000,
-    maxUnauthenticatedQueueSize: options.maxPayloadBytes ?? 16 * 1024 * 1024,
-    maxUnauthenticatedQueueMessages: 256,
+    maxUnauthenticatedQueueSize: Math.min(options.maxPayloadBytes ?? 16 * 1024 * 1024, 256 * 1024),
+    maxUnauthenticatedQueueMessages: 32,
     maxPendingDocuments: 8,
     websocketOptions: { maxPayload: options.maxPayloadBytes ?? 16 * 1024 * 1024 },
+    async onUpgrade({ request, socket }) {
+      const origin = typeof request.headers.origin === 'string' ? request.headers.origin.replace(/\/$/, '') : undefined
+      if (origin && options.allowedOrigins?.length && !options.allowedOrigins.includes(origin)) {
+        socket.end('HTTP/1.1 403 Forbidden\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+        throw null
+      }
+      if (socketConnections >= maxSocketConnections) {
+        socket.end('HTTP/1.1 503 Service Unavailable\r\nRetry-After: 2\r\nConnection: close\r\nContent-Length: 0\r\n\r\n')
+        throw null
+      }
+      socketConnections += 1
+      socket.once('close', () => { socketConnections -= 1 })
+    },
     async onConnect({ requestHeaders }) {
       const origin = requestHeaders.get('origin')?.replace(/\/$/, '')
       if (origin && options.allowedOrigins?.length && !options.allowedOrigins.includes(origin)) {
@@ -946,17 +1022,47 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
       const scope = parseCollaborationDocumentName(documentName)
       return authorizeConnection(token, scope, connectionConfig)
     },
-    async connected({ connection }) {
-      const interval = setInterval(() => connection.requestToken(), options.tokenRefreshMs ?? 5 * 60_000)
-      interval.unref()
-      connection.onClose(() => clearInterval(interval))
+    async connected({ connection, context }) {
+      const count = accountConnections.get(context.userId) ?? 0
+      if (count >= 8) {
+        connection.close({ code: 4429, reason: 'This account already has eight open collaboration documents. Close another tab or window before reconnecting.' })
+        return
+      }
+      clearTimeout(budgetCleanup.get(context.userId))
+      budgetCleanup.delete(context.userId)
+      accountConnections.set(context.userId, count + 1)
+      connection.onClose(() => {
+        clearCredentialTimers(connection)
+        const remaining = (accountConnections.get(context.userId) ?? 1) - 1
+        if (remaining) accountConnections.set(context.userId, remaining)
+        else {
+          accountConnections.delete(context.userId)
+          // Preserve the depleted account budget briefly across reconnects, then
+          // remove idle records once the entire burst would have refilled.
+          const cleanup = setTimeout(() => {
+            if (!accountConnections.has(context.userId)) accountBudgets.delete(context.userId)
+            budgetCleanup.delete(context.userId)
+          }, 4_000)
+          cleanup.unref()
+          budgetCleanup.set(context.userId, cleanup)
+        }
+      })
+      armCredentialDeadline(connection, context)
     },
-    async onTokenSync({ token, documentName, connectionConfig, connection }) {
+    async onTokenSync({ token, documentName, connectionConfig, connection, context: previous }) {
       const context = await authorizeConnection(token, parseCollaborationDocumentName(documentName), connectionConfig)
+      if (!connection.document.hasConnection(connection)) throw expiredCredentials()
+      if (previous.userId !== context.userId) throw new CollaborationTransportError(4401, 'Reconnect to change the collaboration account.')
       connection.readOnly = connectionConfig.readOnly
+      connection.context = context
+      armCredentialDeadline(connection, context)
       return context
     },
     async beforeHandleMessage({ context, connection, documentName }) {
+      if (context.credentialExpiresAt !== undefined && context.credentialExpiresAt <= clock()) {
+        connection.close(expiredCredentials())
+        throw expiredCredentials()
+      }
       // Realtime traffic has a burst-tolerant budget, independent of REST actions.
       // 30 frames/s permits typing plus cursor presence; the 120-frame burst is bounded.
       const now = clock()
@@ -964,14 +1070,20 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
       budget.tokens = Math.min(120, budget.tokens + Math.max(0, now - budget.at) * 30 / 1000)
       budget.at = now
       messageBudgets.set(connection, budget)
-      if (budget.tokens < 1) {
+      const accountBudget = accountBudgets.get(context.userId) ?? { tokens: 240, at: now }
+      accountBudget.tokens = Math.min(240, accountBudget.tokens + Math.max(0, now - accountBudget.at) * 60 / 1000)
+      accountBudget.at = now
+      accountBudgets.set(context.userId, accountBudget)
+      if (budget.tokens < 1 || accountBudget.tokens < 1) {
         connection.close({ code: 4429, reason: 'Collaboration message rate exceeded. Reconnect after a short pause.' })
         throw new CollaborationTransportError(4429, 'Collaboration message rate exceeded.')
       }
       budget.tokens -= 1
+      accountBudget.tokens -= 1
       const release = await messages.acquire(documentName)
       releases.set(connection, release)
       try {
+        if (context.credentialExpiresAt !== undefined && context.credentialExpiresAt <= clock()) throw expiredCredentials()
         if (options.authorization.reauthorizeProject) {
           await options.authorization.reauthorizeProject(
             context,

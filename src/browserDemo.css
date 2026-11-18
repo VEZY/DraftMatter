@@ -1,0 +1,50 @@
+.app-shell.browser-demo-shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.app-shell.browser-demo-shell > .topbar { flex: 0 0 auto; }
+.app-shell.browser-demo-shell > .workspace { flex: 1 1 0; height: auto; min-height: 0; }
+
+.browser-demo-notice {
+  position: relative;
+  z-index: 55;
+  flex: 0 0 auto;
+  min-width: 0;
+  padding: 10px 20px;
+  border-bottom: 1px solid #cadbd1;
+  background: #eef6f0;
+  color: #284e38;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  font: 12px/1.5 Inter, ui-sans-serif, system-ui, sans-serif;
+}
+
+.browser-demo-notice > div,
+.browser-demo-notice nav {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 14px;
+}
+
+.browser-demo-notice a {
+  color: inherit;
+  font-weight: 650;
+  text-underline-offset: 3px;
+}
+
+.browser-demo-notice a:focus-visible {
+  outline: 2px solid currentColor;
+  outline-offset: 4px;
+}
+
+@media (max-width: 700px) {
+  .browser-demo-notice { align-items: flex-start; padding-inline: 12px; }
+  .browser-demo-notice > div { display: grid; gap: 2px; }
+  .browser-demo-notice nav { flex: 0 0 auto; display: grid; gap: 5px; }
+}

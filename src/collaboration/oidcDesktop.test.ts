@@ -1,6 +1,9 @@
 import { webcrypto } from 'node:crypto'
 import { describe, expect, it, vi } from 'vitest'
-import { DESKTOP_IDENTITY_CALLBACK, signInDesktop } from './oidcDesktop'
+import { DESKTOP_IDENTITY_CALLBACK, signInDesktop, signOutDesktop } from './oidcDesktop'
+import { invoke } from '@tauri-apps/api/core'
+
+vi.mock('@tauri-apps/api/core', () => ({ isTauri: () => false, invoke: vi.fn().mockResolvedValue(undefined) }))
 
 function identity(issuer = 'https://identity.example.test') {
   let listener: (urls: string[]) => void = () => {}
@@ -25,6 +28,10 @@ function identity(issuer = 'https://identity.example.test') {
 }
 
 describe('desktop system-browser identity', () => {
+  it('opens provider logout confirmation without putting identity tokens in the system-browser URL', async () => {
+    await signOutDesktop({ endpoint: 'https://identity.example.test/logout', clientId: 'draftmatter-public', idToken: 'private-identity-hint' })
+    expect(invoke).toHaveBeenCalledWith('open_identity_logout', { url: 'https://identity.example.test/logout?client_id=draftmatter-public' })
+  })
   it('waits for the exact PKCE return, ignores forged state and rotates tokens in memory', async () => {
     const fixture = identity()
     const result = signInDesktop('https://collab.example.test', fixture.host, fixture.request, webcrypto as Crypto)

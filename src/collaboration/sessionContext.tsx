@@ -13,8 +13,11 @@ import {
 } from './invitationLink'
 import {
   completeOidcAuthorization,
+  cleanOidcCallbackUrl,
   hasOidcCallback,
   prepareOidcAuthorization,
+  submitOidcLogout,
+  type OidcLoginResult,
 } from './oidcBrowser'
 import type {
   CollaborationSessionProfile,
@@ -23,7 +26,7 @@ import type {
   WorkspaceRole,
 } from './workspaceService'
 
-import { signInDesktop, usesDesktopIdentity } from './oidcDesktop'
+import { signInDesktop, signOutDesktop, usesDesktopIdentity } from './oidcDesktop'
 import { publicRuntimeEnvironment } from '../publicRuntimeConfiguration'
 
 const DEVELOPMENT_SERVICE_KEY = 'draftmatter.collaboration.development-service.v1'
@@ -73,6 +76,7 @@ interface CollaborationSessionContextValue {
   signOut: () => void
   refresh: () => Promise<void>
   acceptInvitation: () => Promise<WorkspaceMembership>
+  dismissInvitation: () => void
   createWorkspace: (request: { id: string; name: string }) => Promise<WorkspaceSummary>
   createProject: (workspaceId: string, request: { id: string; name: string }) => Promise<WorkspaceProject>
   projectsForWorkspace: (workspaceId: string) => WorkspaceProject[]
@@ -85,7 +89,7 @@ function readableError(error: unknown) {
   return error instanceof Error ? error.message : String(error)
 }
 
-function configuredServiceUrl(storage: Pick<Storage, 'getItem'>) {
+function configuredServiceUrl(storage: Pick<Storage, 'getItem'>, includeDevelopmentOverride = true) {
   const configured = publicRuntimeEnvironment()?.VITE_DRAFTMATTER_COLLABORATION_URL ?? import.meta.env.VITE_DRAFTMATTER_COLLABORATION_URL
   const environment = typeof configured === 'string'
     ? configured.trim()
@@ -93,7 +97,7 @@ function configuredServiceUrl(storage: Pick<Storage, 'getItem'>) {
   const metadata = typeof document === 'undefined'
     ? ''
     : document.querySelector<HTMLMetaElement>('meta[name="draftmatter-collaboration-service"]')?.content.trim() ?? ''
-  const candidate = environment || metadata || storage.getItem(DEVELOPMENT_SERVICE_KEY)?.trim() || ''
+  const candidate = environment || metadata || (includeDevelopmentOverride ? storage.getItem(DEVELOPMENT_SERVICE_KEY)?.trim() : '') || ''
   if (!candidate) return ''
   try {
     return normalizeCollaborationServiceUrl(candidate).apiUrl
@@ -106,23 +110,31 @@ export interface CollaborationSessionProviderProps {
   children: ReactNode
   initialServiceUrl?: string
   navigateToIdentity?: (url: string) => void
+  /** Anonymous examples must never consume account callbacks, invitations or tokens. */
+  disabledNetwork?: boolean
 }
 
 export function CollaborationSessionProvider({
   children,
   initialServiceUrl,
   navigateToIdentity,
+  disabledNetwork = false,
 }: CollaborationSessionProviderProps) {
-  const initialInvitation = useMemo(() => readCollaborationInvitationLink(window.location.href), [])
-  const [serviceUrl, setServiceUrl] = useState(() => {
-    if (initialInvitation) return initialInvitation.serviceUrl
+  const initialInvitation = useMemo(() => disabledNetwork ? null : readCollaborationInvitationLink(window.location.href), [disabledNetwork])
+  // Only operator/application configuration establishes the hosted trust boundary.
+  // A fragment supplied by an inviter must not redirect a real account's tokens.
+  const [trustedServiceUrl] = useState(() => {
+    if (disabledNetwork) return ''
     if (initialServiceUrl) {
-      try {
-        return normalizeCollaborationServiceUrl(initialServiceUrl).apiUrl
-      } catch {
-        return ''
-      }
+      try { return normalizeCollaborationServiceUrl(initialServiceUrl).apiUrl } catch { return '' }
     }
+    return configuredServiceUrl(localStorage, false)
+  })
+  const invitationRejected = Boolean(initialInvitation && trustedServiceUrl && initialInvitation.serviceUrl !== trustedServiceUrl)
+  const [serviceUrl, setServiceUrl] = useState(() => {
+    if (disabledNetwork) return ''
+    if (trustedServiceUrl) return trustedServiceUrl
+    if (initialInvitation) return initialInvitation.serviceUrl
     return configuredServiceUrl(localStorage)
   })
   const [state, setState] = useState<CollaborationAccountState>('signed-out')
@@ -130,20 +142,31 @@ export function CollaborationSessionProvider({
   const [workspaces, setWorkspaces] = useState<WorkspaceSummary[]>([])
   const [drafts, setDrafts] = useState<CatalogueDraft[]>([])
   const [workspaceFailures, setWorkspaceFailures] = useState<WorkspaceCatalogueFailure[]>([])
-  const [pendingInvitation, setPendingInvitation] = useState<CollaborationInvitationLink | null>(initialInvitation)
-  const [error, setError] = useState('')
+  const [pendingInvitation, setPendingInvitation] = useState<CollaborationInvitationLink | null>(invitationRejected ? null : initialInvitation)
+  const [error, setError] = useState(invitationRejected ? 'This invitation belongs to a different collaboration server. Ask the sender for a link to this DraftMatter service.' : '')
   const [client, setClient] = useState<CollaborationServiceClient | null>(null)
   const tokenRef = useRef<CollaborationAccessToken | null>(null)
   const clientRef = useRef<CollaborationServiceClient | null>(null)
   const callbackStartedRef = useRef(false)
+  const sessionGenerationRef = useRef(0)
+  const endIdentitySessionRef = useRef<OidcLoginResult['endSession']>(undefined)
 
-  const loadCatalogue = useCallback(async (nextClient: CollaborationServiceClient) => {
+  const checkedService = useCallback((candidate: string) => {
+    if (disabledNetwork) throw new Error('The interactive example does not connect to collaboration accounts.')
+    const normalized = normalizeCollaborationServiceUrl(candidate).apiUrl
+    if (trustedServiceUrl && normalized !== trustedServiceUrl) throw new Error('This DraftMatter deployment only connects to its configured collaboration server.')
+    return normalized
+  }, [disabledNetwork, trustedServiceUrl])
+
+  const loadCatalogue = useCallback(async (nextClient: CollaborationServiceClient, generation = sessionGenerationRef.current) => {
+    if (generation !== sessionGenerationRef.current || nextClient !== clientRef.current) return
     setState('loading')
     setError('')
     const [nextProfile, nextWorkspaces] = await Promise.all([
       nextClient.getSession(),
       nextClient.listWorkspaces(),
     ])
+    if (generation !== sessionGenerationRef.current) return
     const results = await Promise.allSettled(nextWorkspaces.map((workspace) => nextClient.listProjects(workspace.id)))
     const nextDrafts: CatalogueDraft[] = []
     const failures: WorkspaceCatalogueFailure[] = []
@@ -162,6 +185,7 @@ export function CollaborationSessionProvider({
         })
       }
     })
+    if (generation !== sessionGenerationRef.current) return
     setProfile(nextProfile)
     setWorkspaces(nextWorkspaces)
     setDrafts(nextDrafts)
@@ -169,16 +193,20 @@ export function CollaborationSessionProvider({
     setState('ready')
   }, [])
 
-  const activate = useCallback(async (nextServiceUrl: string, token: CollaborationAccessToken) => {
-    const normalized = normalizeCollaborationServiceUrl(nextServiceUrl).apiUrl
+  const activate = useCallback(async (nextServiceUrl: string, token: CollaborationAccessToken, endSession?: OidcLoginResult['endSession']) => {
+    const normalized = checkedService(nextServiceUrl)
+    endIdentitySessionRef.current?.()
+    endIdentitySessionRef.current = endSession
+    const generation = ++sessionGenerationRef.current
     const nextClient = new CollaborationServiceClient(normalized, token)
     tokenRef.current = token
     clientRef.current = nextClient
     setServiceUrl(normalized)
     setClient(nextClient)
     try {
-      await loadCatalogue(nextClient)
+      await loadCatalogue(nextClient, generation)
     } catch (nextError) {
+      if (generation !== sessionGenerationRef.current) return
       tokenRef.current = null
       clientRef.current = null
       setClient(null)
@@ -190,7 +218,7 @@ export function CollaborationSessionProvider({
       setError(readableError(nextError))
       throw nextError
     }
-  }, [loadCatalogue])
+  }, [checkedService, loadCatalogue])
 
   useEffect(() => {
     if (!initialInvitation) return
@@ -198,12 +226,14 @@ export function CollaborationSessionProvider({
   }, [initialInvitation])
 
   useEffect(() => {
-    if (!hasOidcCallback(window.location.href) || callbackStartedRef.current) return
+    if (disabledNetwork || !hasOidcCallback(window.location.href) || callbackStartedRef.current) return
     callbackStartedRef.current = true
     const retainedInvitation = takePendingCollaborationInvitation(sessionStorage)
     setState('signing-in')
     setError('')
-    void completeOidcAuthorization(window.location.href, sessionStorage).then(async (result) => {
+    const callbackUrl = window.location.href
+    window.history.replaceState({}, '', cleanOidcCallbackUrl(callbackUrl))
+    void completeOidcAuthorization(callbackUrl, sessionStorage, undefined, undefined, trustedServiceUrl || undefined).then(async (result) => {
       if (!result) return
       window.history.replaceState({}, '', result.cleanUrl)
       if (retainedInvitation?.serviceUrl === result.serviceUrl) {
@@ -212,22 +242,24 @@ export function CollaborationSessionProvider({
           cleanUrl: result.cleanUrl,
         })
       }
-      await activate(result.serviceUrl, result.token)
+      await activate(result.serviceUrl, result.token, result.endSession)
     }).catch((nextError) => {
       setState('error')
       setError(readableError(nextError))
     })
-  }, [activate])
+  }, [activate, disabledNetwork, trustedServiceUrl])
 
   const configureDevelopmentService = (nextServiceUrl: string) => {
-    const normalized = normalizeCollaborationServiceUrl(nextServiceUrl).apiUrl
-    localStorage.setItem(DEVELOPMENT_SERVICE_KEY, normalized)
-    setServiceUrl(normalized)
-    setError('')
+    try {
+      const normalized = checkedService(nextServiceUrl)
+      if (!trustedServiceUrl) localStorage.setItem(DEVELOPMENT_SERVICE_KEY, normalized)
+      setServiceUrl(normalized)
+      setError('')
+    } catch (nextError) { setError(readableError(nextError)) }
   }
 
   const signIn = async () => {
-    if (!serviceUrl || state === 'signing-in') {
+    if (disabledNetwork || !serviceUrl || state === 'signing-in') {
       if (!serviceUrl) {
         setState('error')
         setError('This DraftMatter deployment has not configured a collaboration service.')
@@ -239,7 +271,7 @@ export function CollaborationSessionProvider({
     try {
       if (usesDesktopIdentity()) {
         const result = await signInDesktop(serviceUrl)
-        await activate(result.serviceUrl, result.token)
+        await activate(result.serviceUrl, result.token, result.endSession)
         return
       }
       const request = await prepareOidcAuthorization(serviceUrl, window.location.href, sessionStorage)
@@ -258,12 +290,16 @@ export function CollaborationSessionProvider({
     setError('')
     try {
       await activate(nextServiceUrl, accessToken)
-    } catch {
-      // activate publishes the actionable account error.
+    } catch (nextError) {
+      setState('error')
+      setError(readableError(nextError))
     }
   }
 
   const signOut = () => {
+    const logout = endIdentitySessionRef.current?.()
+    endIdentitySessionRef.current = undefined
+    sessionGenerationRef.current++
     tokenRef.current = null
     clientRef.current = null
     setClient(null)
@@ -273,14 +309,21 @@ export function CollaborationSessionProvider({
     setWorkspaceFailures([])
     setState('signed-out')
     setError('')
+    if (logout) {
+      if (usesDesktopIdentity()) {
+        void signOutDesktop(logout).catch(() => setError('DraftMatter is disconnected, but the identity browser could not open. Close its sign-in session on shared computers.'))
+      } else submitOidcLogout(logout)
+    }
   }
 
   const refresh = async () => {
     const current = clientRef.current
     if (!current) return
+    const generation = sessionGenerationRef.current
     try {
-      await loadCatalogue(current)
+      await loadCatalogue(current, generation)
     } catch (nextError) {
+      if (generation !== sessionGenerationRef.current) return
       setState('error')
       setError(readableError(nextError))
     }
@@ -298,6 +341,13 @@ export function CollaborationSessionProvider({
       setError(readableError(nextError))
       throw nextError
     }
+  }
+
+  const dismissInvitation = () => {
+    setPendingInvitation(null)
+    takePendingCollaborationInvitation(sessionStorage)
+    setError('')
+    if (state === 'error') setState(profile ? 'ready' : 'signed-out')
   }
 
   const createWorkspace = async (request: { id: string; name: string }) => {
@@ -360,6 +410,7 @@ export function CollaborationSessionProvider({
     signOut,
     refresh,
     acceptInvitation,
+    dismissInvitation,
     createWorkspace,
     createProject,
     projectsForWorkspace,

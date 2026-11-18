@@ -107,6 +107,9 @@ export class PostgresEntitlementService {
   }
 
   async assertSeatAvailable(workspaceId: string, database: Queryable = this.pool) {
+    // Invitation tokens are distinct rows. Lock the shared entitlement before
+    // counting seats so concurrent acceptances cannot both consume the last one.
+    await database.query('SELECT workspace_id FROM draftmatter_entitlements WHERE workspace_id = $1 FOR UPDATE', [workspaceId])
     const entitlement = await this.assertWorkspaceWritable(workspaceId, database)
     const result = await database.query<{ count: number | string }>(
       `SELECT COUNT(*) AS count FROM draftmatter_memberships
@@ -123,6 +126,9 @@ export class PostgresEntitlementService {
     if (!Number.isSafeInteger(incomingBytes) || incomingBytes < 0 || !Number.isSafeInteger(reclaimedBytes) || reclaimedBytes < 0) {
       throw new Error('Storage byte adjustments must be non-negative safe integers.')
     }
+    // Project-row locks alone do not serialize writes to different papers in
+    // the same workspace. Keep their shared byte budget atomic as well.
+    await database.query('SELECT workspace_id FROM draftmatter_entitlements WHERE workspace_id = $1 FOR UPDATE', [workspaceId])
     const entitlement = await this.assertWorkspaceWritable(workspaceId, database)
     const result = await database.query<{ bytes: number | string }>(
       `SELECT

@@ -104,6 +104,11 @@ function binaryRoute(method: string, parts: string[]) {
   if (method === 'GET' && parts.length === 9 && parts[6] !== 'uploads' && parts[7] === 'parts' && /^[1-9]\d{0,3}$/.test(parts[8])) {
     return { direction: 'download' as const, workspaceId: parts[2], projectId: parts[4], fileId: parts[6], partNumber: Number(parts[8]) }
   }
+  // PDF previews may return 32 MiB, larger than an ordinary file part. They
+  // must share admission and slow-reader deadlines with all other downloads.
+  if (method === 'GET' && parts.length === 8 && parts[6] !== 'uploads' && parts[7] === 'preview') {
+    return { direction: 'download' as const, workspaceId: parts[2], projectId: parts[4], fileId: parts[6] }
+  }
   return undefined
 }
 

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { Pool, PoolClient } from 'pg'
 import * as Y from 'yjs'
+import { WorkspaceAccessError } from '../../src/collaboration/workspaceService'
 import { CollaborationStoreError, type CollaborationProjectScope, type CollaborationSnapshotMetadata } from './fileStore'
 import type { ObjectStorage } from './objectStorage'
 import { CollaborationOperationsDashboard } from './operations'
@@ -18,6 +19,8 @@ interface PostgresCollaborationStoreOptions {
   maxUpdateBytes?: number
   dashboard?: CollaborationOperationsDashboard
   objectPrefix?: string
+  /** Technical copies have a separate, bounded budget; user versions are never pruned here. */
+  backupLimits?: { projectCount?: number; projectBytes?: number; totalBytes?: number }
   storageQuota?: {
     assertStorageAvailable(workspaceId: string, incomingBytes: number, database?: Pick<PoolClient, 'query'>, reclaimedBytes?: number): Promise<unknown>
   }
@@ -90,10 +93,10 @@ function stableJson(value: unknown) {
   return `${JSON.stringify(value, null, 2)}\n`
 }
 
-async function transaction<T>(pool: Pick<Pool, 'connect'>, run: (client: PoolClient) => Promise<T>) {
+async function transaction<T>(pool: Pick<Pool, 'connect'>, run: (client: PoolClient) => Promise<T>, readCommitted = false) {
   const client = await pool.connect()
   try {
-    await client.query('BEGIN')
+    await client.query(readCommitted ? 'BEGIN ISOLATION LEVEL READ COMMITTED' : 'BEGIN')
     const result = await run(client)
     await client.query('COMMIT')
     return result
@@ -115,6 +118,7 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
   private readonly maxUpdateBytes: number
   private readonly objectPrefix: string
   private readonly storageQuota?: PostgresCollaborationStoreOptions['storageQuota']
+  private readonly backupLimits: { projectCount: number; projectBytes: number; totalBytes: number }
   readonly dashboard: CollaborationOperationsDashboard
 
   constructor(options: PostgresCollaborationStoreOptions) {
@@ -128,6 +132,12 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
     this.dashboard = options.dashboard ?? new CollaborationOperationsDashboard()
     this.objectPrefix = (options.objectPrefix ?? 'draftmatter').replace(/^\/+|\/+$/g, '')
     this.storageQuota = options.storageQuota
+    this.backupLimits = {
+      projectCount: options.backupLimits?.projectCount ?? 100,
+      projectBytes: options.backupLimits?.projectBytes ?? 1_000_000_000,
+      totalBytes: options.backupLimits?.totalBytes ?? 5_000_000_000,
+    }
+    if (Object.values(this.backupLimits).some((value) => !Number.isSafeInteger(value) || value < 1)) throw new Error('Technical backup limits must be positive safe integers.')
   }
 
   private key(scope: CollaborationProjectScope) {
@@ -217,7 +227,7 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
         compacted = true
       }
       return { pendingUpdates: count, pendingBytes: bytes, compacted }
-    })
+    }, true)
     this.dashboard.recordUpdate(this.key(scope), update.byteLength, at)
     if (result.compacted) this.dashboard.recordCompaction(this.key(scope), at)
     return { pendingUpdates: result.pendingUpdates, pendingBytes: result.pendingBytes }
@@ -279,7 +289,7 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
           [scope.workspaceId, scope.projectId, at, nextSequence + 1],
         )
         return { id: snapshotId, createdAt: at, bytes: stateUpdate.byteLength, sha256 }
-      })
+      }, true)
       this.dashboard.recordSnapshot(this.key(scope), metadata.bytes, at)
       return metadata
     } catch (error) {
@@ -358,44 +368,58 @@ export class PostgresCollaborationStore implements CollaborationPersistence {
 
   async createBackup(scope: CollaborationProjectScope, backupId: string) {
     safeId(backupId, 'Backup ID')
-    const loaded = await this.load(scope)
-    const parts = [...(loaded.snapshot ? [loaded.snapshot] : []), ...loaded.updates]
-    let state: Uint8Array
-    if (parts.length) state = Y.mergeUpdates(parts)
-    else {
-      const empty = new Y.Doc()
-      state = Y.encodeStateAsUpdate(empty)
-      empty.destroy()
-    }
-    const createdAt = iso(this.clock())
-    const stateSha256 = hash(state)
-    const envelope: BackupEnvelope = {
-      schemaVersion: 1,
-      workspaceId: scope.workspaceId,
-      projectId: scope.projectId,
-      createdAt,
-      stateSha256,
-      stateBase64: Buffer.from(state).toString('base64'),
-    }
-    const bytes = Buffer.from(stableJson(envelope))
-    const sha256 = hash(bytes)
     const objectKey = this.backupObjectKey(scope, backupId)
     let objectWritten = false
     try {
-      await this.objects.put(objectKey, bytes, {
-        immutable: true,
-        contentType: 'application/vnd.draftmatter.collaboration-backup+json',
-        metadata: { sha256, stateSha256, workspace: scope.workspaceId, project: scope.projectId, backup: backupId },
-      })
-      objectWritten = true
-      await this.pool.query(
-        `INSERT INTO draftmatter_collaboration_backups
-         (workspace_id, project_id, id, created_at, object_key, bytes, sha256, state_sha256)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-        [scope.workspaceId, scope.projectId, backupId, createdAt, objectKey, bytes.byteLength, sha256, stateSha256],
-      )
-      this.dashboard.recordBackup(this.key(scope), bytes.byteLength, createdAt)
-      return { id: backupId, createdAt, bytes: bytes.byteLength, sha256, stateSha256 }
+      const result = await transaction(this.pool, async (client) => {
+        // Serialize the budget across projects/processes before acquiring a
+        // project lock. READ COMMITTED sees commits made while this lock waited.
+        await client.query('SELECT pg_advisory_xact_lock($1::integer, $2::integer)', [0x444d4251, 1])
+        await this.lockProject(client, scope)
+        const loaded = await this.readState(client, scope)
+        const parts = [...(loaded.snapshot ? [loaded.snapshot] : []), ...loaded.updates]
+        const state = Y.mergeUpdates(parts)
+        const createdAt = iso(this.clock())
+        const stateSha256 = hash(state)
+        // Repeated clicks/retries reuse a recent immutable copy. A fresh daily
+        // copy still replaces age-expired recovery coverage on idle projects.
+        const existing = await client.query<BackupRow>(
+          `SELECT id, created_at, object_key, bytes, sha256, state_sha256 FROM draftmatter_collaboration_backups
+           WHERE workspace_id = $1 AND project_id = $2 AND state = 'ready' AND state_sha256 = $3 AND created_at > $4
+           ORDER BY created_at DESC, id DESC LIMIT 1`,
+          [scope.workspaceId, scope.projectId, stateSha256, iso(this.clock() - 24 * 60 * 60_000)],
+        )
+        const prior = existing.rows[0]
+        if (prior) return { id: prior.id, createdAt: iso(prior.created_at), bytes: Number(prior.bytes), sha256: prior.sha256, stateSha256: prior.state_sha256 }
+        const envelope: BackupEnvelope = { schemaVersion: 1, workspaceId: scope.workspaceId, projectId: scope.projectId, createdAt, stateSha256, stateBase64: Buffer.from(state).toString('base64') }
+        const bytes = Buffer.from(stableJson(envelope))
+        const projectBudget = await client.query<{ count: string | number; bytes: string | number }>(
+          'SELECT COUNT(*) AS count, COALESCE(SUM(bytes), 0) AS bytes FROM draftmatter_collaboration_backups WHERE workspace_id = $1 AND project_id = $2',
+          [scope.workspaceId, scope.projectId],
+        )
+        const totalBudget = await client.query<{ bytes: string | number }>('SELECT COALESCE(SUM(bytes), 0) AS bytes FROM draftmatter_collaboration_backups')
+        if (Number(projectBudget.rows[0].count) >= this.backupLimits.projectCount
+          || BigInt(projectBudget.rows[0].bytes) + BigInt(bytes.byteLength) > BigInt(this.backupLimits.projectBytes)
+          || BigInt(totalBudget.rows[0].bytes) + BigInt(bytes.byteLength) > BigInt(this.backupLimits.totalBytes)) {
+          throw new WorkspaceAccessError('forbidden', 'Technical backup storage has reached its limit. Existing versions remain available; no recovery copy was deleted.')
+        }
+        const sha256 = hash(bytes)
+        await this.objects.put(objectKey, bytes, {
+          immutable: true,
+          contentType: 'application/vnd.draftmatter.collaboration-backup+json',
+          metadata: { sha256, stateSha256, workspace: scope.workspaceId, project: scope.projectId, backup: backupId },
+        })
+        objectWritten = true
+        await client.query(
+          `INSERT INTO draftmatter_collaboration_backups
+           (workspace_id, project_id, id, created_at, object_key, bytes, sha256, state_sha256)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+          [scope.workspaceId, scope.projectId, backupId, createdAt, objectKey, bytes.byteLength, sha256, stateSha256],
+        )
+        return { id: backupId, createdAt, bytes: bytes.byteLength, sha256, stateSha256 }
+      }, true)
+      if (objectWritten) this.dashboard.recordBackup(this.key(scope), result.bytes, result.createdAt)
+      return result
     } catch (error) {
       if (objectWritten) await this.objects.delete(objectKey).catch(() => undefined)
       throw error

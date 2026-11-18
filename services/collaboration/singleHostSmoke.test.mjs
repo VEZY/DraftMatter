@@ -1,6 +1,6 @@
 import { join, resolve } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { assertMissingPkceRejected, smokeSettings } from '../../scripts/smoke-single-host.mjs'
+import { assertMissingPkceRejected, assertPrivateIdentityRouting, privateIdentityPaths, smokeSettings } from '../../scripts/smoke-single-host.mjs'
 
 const environment = () => ({
   DM_SINGLE_HOST_MODE: 'rehearsal',
@@ -52,6 +52,20 @@ describe('real OAuth missing-PKCE rejection', () => {
 })
 
 describe('isolated single-host smoke safety', () => {
+  it('checks private identity routes with raw encoded request paths instead of normalizing them in the client', async () => {
+    const settings = smokeSettings(environment(), '/tmp/draftmatter-rehearsal/runtime.env')
+    const paths = []
+    await assertPrivateIdentityRouting(settings, async (actualSettings, origin, options) => {
+      expect(actualSettings).toBe(settings)
+      expect(origin).toBe(settings.authOrigin)
+      expect(options.expected).toBe(404)
+      paths.push(options.rawPath)
+    })
+    expect(paths).toEqual(privateIdentityPaths)
+    expect(paths).toContain('/realms/draftmatter/%2e%2e/master/.well-known/openid-configuration')
+    expect(paths).toContain('/resources/%2e%2e/admin/')
+  })
+
   it('uses one local TLS port consistently for app, identity and WebSocket requests', () => {
     const directory = resolve('/tmp/draftmatter-rehearsal')
     const settings = smokeSettings(environment(), join(directory, 'runtime.env'))

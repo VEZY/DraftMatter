@@ -1,12 +1,14 @@
 import { useEffect, useState } from 'react'
 import { Icon } from '../src/Icon'
 import { LegalLinks, LegalPage } from '../src/LegalDocuments'
-import { isLegalDocumentId, type LegalDocumentId } from '../src/legalConfig'
+import { isLegalDocumentId, legalConfiguration, type LegalDocumentId } from '../src/legalConfig'
+import { alphaAccessLink } from '../src/alphaAccess'
 import { HomeTrustGuide } from '../src/HomeLearningGuide'
 import { HomeHeroPreview, HomeShowcase } from '../src/HomeShowcase'
 
 const repositoryUrl = 'https://github.com/VEZY/DraftMatter'
-const releasesUrl = `${repositoryUrl}/releases`
+const applicationUrl = 'https://app.draftmatter.eu/'
+const exampleUrl = `${applicationUrl}demo`
 
 function legalDocumentFromHash(): LegalDocumentId | null {
   const id = window.location.hash.slice('#legal/'.length)
@@ -21,24 +23,17 @@ function scrollTo(id: string) {
 }
 
 function AlphaAction({ compact = false }: { compact?: boolean }) {
-  const signupUrl = import.meta.env.VITE_ALPHA_SIGNUP_URL?.trim()
-  if (signupUrl) {
-    return (
-      <a className={compact ? 'website-nav-cta' : 'home-primary website-alpha-primary'} href={signupUrl} target="_blank" rel="noreferrer">
-        Request alpha access
-        {!compact && <Icon name="arrowRight" size={16} />}
-      </a>
-    )
-  }
+  const link = alphaAccessLink(legalConfiguration.contactEmail, import.meta.env.VITE_ALPHA_SIGNUP_URL)
   return (
-    <a className={compact ? 'website-nav-cta' : 'home-primary website-alpha-primary'} href={releasesUrl}>
-      Follow alpha progress
+    <a className={compact ? 'website-nav-cta' : 'home-primary website-alpha-primary'} href={link.href} aria-label="Request alpha access" target={link.external ? '_blank' : undefined} rel={link.external ? 'noreferrer' : undefined}>
+      {compact ? 'Request access' : 'Request alpha access'}
       {!compact && <Icon name="arrowRight" size={16} />}
     </a>
   )
 }
 
 export function Website() {
+  const exampleReady = import.meta.env.VITE_DM_WEBSITE_DEMO_READY === 'true'
   const [legalDocument, setLegalDocument] = useState(legalDocumentFromHash)
   useEffect(() => {
     const onHashChange = () => setLegalDocument(legalDocumentFromHash())
@@ -57,6 +52,7 @@ export function Website() {
           <a href="#home-showcase">Product tour</a>
           <a href="#website-principles">Why DraftMatter</a>
           <a href={repositoryUrl}>GitHub</a>
+          <a className="website-app-link" href={applicationUrl}>Sign in</a>
           <AlphaAction compact />
         </nav>
       </header>
@@ -70,7 +66,10 @@ export function Website() {
             <p className="home-hero-support">Research writing, with the missing pieces built in.</p>
             <p className="home-hero-summary">DraftMatter brings writing, citations, reproducible results, review, and collaboration into one focused workspace. Everything is available when needed and quiet when it is not.</p>
             <div className="home-hero-actions">
-              <AlphaAction />
+              {exampleReady
+                ? <a className="home-primary website-alpha-primary" href={exampleUrl}>Try the example<Icon name="arrowRight" size={16} /></a>
+                : <AlphaAction />}
+              <a href={applicationUrl}>Open DraftMatter</a>
               <button className="home-preview-action" onClick={() => scrollTo('home-showcase')}>
                 See how it works
                 <Icon name="arrowRight" size={17} />
@@ -79,6 +78,9 @@ export function Website() {
                 View the source
               </a>
             </div>
+            <p className="website-example-note">{exampleReady
+              ? 'Try writing and citations without an account. Your example is private to this tab and resets when you reload. Shared papers require an alpha invitation.'
+              : 'The hosted alpha is available by invitation. Already invited? Open DraftMatter to sign in.'}</p>
             <ul className="home-hero-proof" aria-label="DraftMatter principles">
               <li><Icon name="check" size={13} />Portable manuscript</li>
               <li><Icon name="check" size={13} />Local computation</li>
@@ -130,11 +132,10 @@ export function Website() {
           </ul>
         </div>
         <aside>
-          <strong>{import.meta.env.VITE_ALPHA_SIGNUP_URL ? 'Interested in testing DraftMatter?' : 'The alpha is being prepared.'}</strong>
-          <p>{import.meta.env.VITE_ALPHA_SIGNUP_URL
-            ? 'Read the alpha terms and privacy policy below before requesting access. The registration page identifies any separate provider it uses. Your email is used to organise the test and send essential alpha updates.'
-            : 'Follow the repository for now. A private email registration link can be enabled here as soon as the alpha intake is ready.'}</p>
+          <strong>Interested in testing DraftMatter?</strong>
+          <p>Read the alpha terms and privacy policy below before requesting access. Send a short request with your name and how you would like to use DraftMatter. We will get back to you about an invitation; requesting access does not create an account.</p>
           <AlphaAction />
+          <a className="website-existing-account" href={applicationUrl}>Already invited? Sign in</a>
           <small>No public download is advertised until a supported pre-release exists.</small>
         </aside>
       </section>

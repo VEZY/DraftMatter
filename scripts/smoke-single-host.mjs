@@ -57,9 +57,12 @@ function loopbackLookup(_hostname, options, callback) {
   callback(null, ...(options?.all ? [[{ address: '127.0.0.1', family: 4 }]] : ['127.0.0.1', 4]))
 }
 
-function http(settings, url, { method = 'GET', token, json, bytes, form, expected = 200, headers = {} } = {}) {
+function http(settings, url, { method = 'GET', token, json, bytes, form, expected = 200, headers = {}, rawPath } = {}) {
   const target = new URL(url.startsWith('/') ? `${settings.serviceOrigin}${url}` : url)
   assert(settings.hosts.includes(target.hostname) && target.protocol === 'https:', 'Smoke requests are restricted to rehearsal HTTPS hosts')
+  if (rawPath !== undefined) {
+    assert(method === 'GET' && rawPath.startsWith('/') && rawPath.length <= 4096 && !/[\x00-\x20?#]/.test(rawPath), 'Raw boundary probes require a bounded path-only GET request')
+  }
   const payload = json !== undefined ? Buffer.from(JSON.stringify(json)) : form ? Buffer.from(form.toString()) : bytes
   const allHeaders = {
     ...(token ? { authorization: `Bearer ${token}` } : {}),
@@ -69,7 +72,7 @@ function http(settings, url, { method = 'GET', token, json, bytes, form, expecte
     ...headers,
   }
   return new Promise((fulfil, reject) => {
-    const request = httpsRequest(target, { method, headers: allHeaders, lookup: loopbackLookup, agent: false, rejectUnauthorized: true }, (response) => {
+    const request = httpsRequest(target, { method, ...(rawPath === undefined ? {} : { path: rawPath }), headers: allHeaders, lookup: loopbackLookup, agent: false, rejectUnauthorized: true }, (response) => {
       const chunks = []
       let length = 0
       response.on('data', (chunk) => {
@@ -91,6 +94,25 @@ function http(settings, url, { method = 'GET', token, json, bytes, form, expecte
     request.on('error', reject)
     request.end(payload)
   })
+}
+
+export const privateIdentityPaths = Object.freeze([
+  '/admin/',
+  '/realms/master/.well-known/openid-configuration',
+  '/realms/draftmatter/../master/.well-known/openid-configuration',
+  '/realms/draftmatter/%2e%2e/master/.well-known/openid-configuration',
+  '/realms/draftmatter/%2E%2E%2Fmaster/.well-known/openid-configuration',
+  '/realms/draftmatter//../master/.well-known/openid-configuration',
+  '/resources/../admin/',
+  '/resources/%2e%2e/admin/',
+])
+
+export async function assertPrivateIdentityRouting(settings, request = http) {
+  for (const rawPath of privateIdentityPaths) {
+    // Passing a full URL through WHATWG URL/fetch would normalize the very
+    // traversal we need the proxy to reject. Preserve the raw HTTP request path.
+    await request(settings, settings.authOrigin, { expected: 404, rawPath })
+  }
 }
 
 /** OAuth can report a rejected request through its already-validated callback. */
@@ -252,7 +274,16 @@ async function applicationSignIn(browser, settings) {
     const screenshot = join(dirname(settings.envFile), 'smoke-app-signed-in.png')
     await page.screenshot({ path: screenshot, fullPage: true })
     chmodSync(screenshot, 0o600)
-    return { status: 'passed', displayName }
+    await runSmokeCheck('application-sign-out', async () => {
+      await page.getByRole('button', { name: 'Sign out', exact: true }).click()
+      await page.waitForURL((url) => url.origin === new URL(settings.environment.AUTH_ORIGIN).origin, { timeout: 30_000 })
+    })
+    await runSmokeCheck('application-logout-cookie-cleared', async () => {
+      await page.goto(settings.appOrigin)
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click()
+      await page.locator('input[name="username"]').waitFor({ state: 'visible', timeout: 30_000 })
+    })
+    return { status: 'passed', displayName, logoutStatus: 'passed' }
   } catch (error) {
     const prefix = join(dirname(settings.envFile), 'smoke-app-sign-in')
     writeFileSync(`${prefix}.html`, await page.content().catch(() => ''), { mode: 0o600 })
@@ -269,6 +300,7 @@ async function publicChecks(browser, settings) {
   await http(settings, '/health/ready')
   await http(settings, '/api/session', { expected: 401 })
   await http(settings, '/metrics', { expected: 404 })
+  await assertPrivateIdentityRouting(settings)
   const publicWeb = await http(settings, `${settings.appOrigin}/draftmatter-public-config.json`)
   assert.match(publicWeb.headers['cache-control'] ?? '', /no-store/, 'Public runtime configuration must not be cached')
   assert.deepEqual(publicWeb.data, { schemaVersion: 1, environment: {
@@ -337,8 +369,16 @@ async function documentPeer(browser, settings, bundle, token, workspaceId, proje
     // Load the actual local HTTPS response. A route.fulfill() harness has no
     // source IP and can be classified as public, which correctly triggers
     // Chromium's Local Network Access checks for the loopback WSS endpoint.
+    // Serve only the generated test client through an exact same-origin script
+    // route. The real page keeps its strict CSP; no inline-script exception or
+    // browser CSP bypass is needed for this protocol harness.
+    const clientScript = `${settings.appOrigin}/__draftmatter_smoke_client__.js`
+    await page.route(clientScript, (route) => route.fulfill({
+      status: 200, contentType: 'application/javascript; charset=utf-8',
+      headers: { 'cache-control': 'no-store' }, body: bundle,
+    }))
     await page.goto(`${settings.appOrigin}/smoke-collaboration-harness`)
-    await page.addScriptTag({ content: bundle })
+    await page.addScriptTag({ url: clientScript })
     await page.evaluate(async ({ websocketUrl, name, token }) => {
       const document = new window.DmSmoke.Y.Doc()
       await new Promise((resolve, reject) => {

@@ -174,6 +174,12 @@ not perform the promotion.
 
 ## Retention and off-host copies
 
+For the selected second-Mac destination, use the
+[verified Mac pull procedure](offhost-mac-backups.md). It adds a dedicated
+read-only SSH exporter, authenticated encrypted copies, local retention and a
+prepared macOS schedule. Neither its preparation nor this runbook establishes
+that the production timers and off-host copies are actually running.
+
 The 29-day threshold is **not a plan to accumulate 29 full archives on a 75 GB
 VPS**. Use the local directory as staging and retain at most one recent verified
 local archive once off-host copies are confirmed. A fresh full backup needs free

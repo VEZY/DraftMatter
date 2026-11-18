@@ -220,4 +220,23 @@ describe('durable collaboration transport', () => {
     await server.hocuspocus.unloadDocument(document)
     await server.destroy()
   })
+
+  it('shares a realtime account budget across otherwise individually compliant connections', async () => {
+    vi.spyOn(console, 'error').mockImplementation(() => {})
+    const { server, document } = await fixture({}, () => 0)
+    const clients = [0, 1, 2, 3].map((index) => client(server, document, `account-socket-${index}`))
+    const query = new OutgoingMessage(document.name).writeQueryAwareness().toUint8Array()
+    // Each connection stays below its 120-frame burst, but the account reaches
+    // its combined 240-frame budget. Another socket cannot multiply that limit.
+    for (const sender of clients.slice(0, 3)) {
+      for (let index = 0; index < 80; index++) sender.connection.handleMessage(query)
+      await sender.connection.waitForPendingMessages()
+      expect(document.hasConnection(sender.connection)).toBe(true)
+    }
+    clients[3].connection.handleMessage(query)
+    await clients[3].connection.waitForPendingMessages()
+    expect(document.hasConnection(clients[3].connection)).toBe(false)
+    await server.hocuspocus.unloadDocument(document)
+    await server.destroy()
+  })
 })

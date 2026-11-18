@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily DraftMatter encrypted backup
+
+[Timer]
+OnCalendar=*-*-* 03:10:00 Europe/Paris
+Persistent=true
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

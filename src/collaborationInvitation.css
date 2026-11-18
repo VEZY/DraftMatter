@@ -1,0 +1,36 @@
+.collaboration-invitation-scope {
+  padding: 12px;
+  border: 1px solid #d9e4dd;
+  border-radius: 8px;
+  background: #f5f9f6;
+  color: #364d3e;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.collaboration-invitation-scope p,
+.collaboration-invitation-options p { margin: 5px 0 0; }
+
+.collaboration-invitation-options {
+  display: grid;
+  gap: 8px;
+  color: #5c6c61;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.collaboration-invitation-options label {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.collaboration-invitation-options input[type="checkbox"] {
+  width: 15px;
+  min-height: 15px;
+  height: 15px;
+  margin: 1px 0 0;
+  flex: 0 0 auto;
+}
+
+.collaboration-invitation-options small { font-size: inherit; }

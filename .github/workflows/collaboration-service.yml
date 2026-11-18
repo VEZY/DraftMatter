@@ -49,6 +49,9 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Audit dependencies shipped in the server runtime
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Start private S3 integration fixture
         run: |
           docker run --detach --rm --name draftmatter-test-s3 --env AWS_ACCESS_KEY_ID=draftmatter-local --env AWS_SECRET_ACCESS_KEY=local-integration-test-only --env S3_BUCKET=draftmatter --publish 127.0.0.1:8333:8333 chrislusf/seaweedfs:4.29 mini -dir=/data
@@ -125,6 +128,9 @@ jobs:
 
       - name: Test encrypted backup and retention tooling
         run: node --test deploy/single-host/backup/backup.test.mjs
+
+      - name: Test verified off-host backup copies and read-only export
+        run: npm run test:backup-offhost
 
       - name: Install rehearsal browser
         run: npx playwright install --with-deps chromium

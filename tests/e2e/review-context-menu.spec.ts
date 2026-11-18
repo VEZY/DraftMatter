@@ -174,6 +174,12 @@ Check the later observation.
   await expect.poll(async () => Math.abs((await composer.boundingBox())!.y - selectionTop)).toBeLessThanOrEqual(2)
   expect((await composer.boundingBox())!.y).toBeLessThan((await page.locator('#review-item-dm-later-thread').boundingBox())!.y)
   await expect(composer.locator('input, select, blockquote, .comment-quote')).toHaveCount(0)
+  const scrollDelta = await page.locator('.editor-area').evaluate((element) => {
+    const before = element.scrollTop
+    element.scrollTop += 50
+    return element.scrollTop - before
+  })
+  await expect.poll(async () => Math.abs((await composer.boundingBox())!.y - (selectionTop - scrollDelta))).toBeLessThanOrEqual(2)
 })
 
 test('comments across bold and italic prose without rewriting its text or Markdown formatting', async ({ page }) => {

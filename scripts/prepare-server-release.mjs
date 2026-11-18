@@ -49,8 +49,10 @@ export function serverDeploymentPaths(treeEntries) {
     'scripts/init-single-host.mjs', 'scripts/check-single-host.mjs', 'scripts/single-host-config.mjs',
     'scripts/check-production-config.mjs', 'scripts/renew-single-host-tls.mjs',
     'scripts/check-server-release.mjs', 'scripts/install-server-release.mjs', 'scripts/server-operator.sh',
+    'scripts/server-backup.sh', 'deploy/offhost-mac/pull.mjs', 'deploy/offhost-mac/install.mjs',
     'services/collaboration/config.ts', 'src/legalConfig.ts',
     'docs/alpha-operations.md', 'docs/single-host-backups.md', 'docs/server-releases.md',
+    'docs/offhost-mac-backups.md',
   ])
   return treeEntries.filter(({ path, mode }) => {
     if (!files.has(path) && !path.startsWith('deploy/single-host/')) return false

@@ -27,6 +27,7 @@ export function AlignedReviewRail({
     if (!editor || !rail || !spacer) return
 
     const railRect = rail.getBoundingClientRect()
+    const editorToRailOffset = editor.getBoundingClientRect().top - railRect.top
     const anchors = new Map<string, HTMLElement>()
     const anchorOrder = new Map<string, number>()
     editor.querySelectorAll<HTMLElement>(ANCHOR_SELECTOR).forEach((anchor) => {
@@ -57,7 +58,12 @@ export function AlignedReviewRail({
           // This is stable in document coordinates: scrolling subtracts from
           // the DOM rect and adds the same amount through editor.scrollTop.
           targetTop: numbered(anchor.getBoundingClientRect().top + editor.scrollTop - railRect.top),
-        } : explicitTop !== undefined && Number.isFinite(Number(explicitTop)) ? { targetTop: numbered(Number(explicitTop)) } : {}),
+        } : explicitTop !== undefined && Number.isFinite(Number(explicitTop)) ? {
+          // Composer targets are measured from the editor's scroll origin.
+          // The rail can start above it (for example beside the file tabs), so
+          // convert to the same rail coordinates used for existing anchors.
+          targetTop: numbered(Number(explicitTop) + editorToRailOffset),
+        } : {}),
       }
     })
     const placed = measurements.filter((item) => orderByBalloon.get(item.id) !== undefined)

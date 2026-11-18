@@ -10,6 +10,14 @@ for (const width of [1280, 390]) {
     })
     await page.goto('/')
     await expect(page.getByRole('heading', { level: 1 })).toContainText('Your paper should be')
+    const example = page.getByRole('link', { name: 'Try the example', exact: true })
+    if (process.env.VITE_DM_WEBSITE_DEMO_READY === 'true') {
+      await expect(example).toHaveAttribute('href', 'https://app.draftmatter.eu/demo')
+      await expect(page.locator('.website-example-note')).toContainText('private to this tab')
+    } else {
+      await expect(example).toHaveCount(0)
+      await expect(page.locator('.website-example-note')).toContainText('available by invitation')
+    }
     await expect(page.locator('link[rel="canonical"]')).toHaveAttribute('href', 'https://www.draftmatter.eu/')
     for (const [title, id] of [
       ['Legal notice', 'mentions-legales'],

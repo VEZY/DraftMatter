@@ -1,6 +1,6 @@
 import { createHmac } from 'node:crypto'
 import { DataType, newDb } from 'pg-mem'
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import type { CollaborationIdentityVerifier } from '../../src/collaboration/workspaceService'
 import { PostgresEntitlementService, SignedEntitlementWebhookProcessor } from './entitlements'
 import { runCollaborationMigrations } from './migrations'
@@ -50,12 +50,28 @@ async function database(onMembershipRevoked?: (workspaceId: string, userId: stri
 }
 
 describe('PostgreSQL workspace authorization', () => {
+  it('retries a first-login secondary-index race only for the exact same provider-bound account', async () => {
+    const { pool, service } = await database()
+    await service.getCurrentIdentity('owner')
+    vi.spyOn(pool, 'query').mockRejectedValueOnce(Object.assign(new Error('Concurrent identity insert'), { code: '23505', constraint: 'draftmatter_identity_subject' }))
+    await expect(service.getCurrentIdentity('owner')).resolves.toMatchObject({ userId: 'owner', email: 'owner@example.org' })
+    const conflicting = new PostgresWorkspaceService({ pool, identity: { async verify() {
+      return { userId: 'different-id', sessionId: 'different-session', issuer: 'https://identity.example.test', subject: 'subject-owner', email: 'another@example.org' }
+    } } })
+    // Inject the same real PostgreSQL conflict to exercise the non-merging path.
+    vi.spyOn(pool, 'query').mockRejectedValueOnce(Object.assign(new Error('Conflicting provider identity'), { code: '23505', constraint: 'draftmatter_identity_subject' }))
+    await expect(conflicting.getCurrentIdentity('fixture')).rejects.toMatchObject({ code: 'unauthenticated' })
+    expect((await pool.query('SELECT id, email FROM draftmatter_users')).rows).toEqual([expect.objectContaining({ id: 'owner', email: 'owner@example.org' })])
+    await pool.end()
+  })
+
   it('gives file parts a separate bounded budget and still rechecks project roles and revocation', async () => {
     const { pool, service } = await database()
     await service.createWorkspace('owner', { id: 'forest', name: 'Forest study' })
     await service.createProject('owner', 'forest', { id: 'paper', name: 'Canopy response' })
     const invitation = await service.createInvitation('owner', 'forest', { role: 'editor' })
     await service.acceptInvitation('editor', invitation.token)
+    await pool.query('DELETE FROM draftmatter_rate_limit_events WHERE principal_key = $1', ['editor'])
     const limited = new PostgresWorkspaceService({ pool, identity: new FixtureIdentity('files'), rateLimits: {
       write: { limit: 1, windowMs: 60_000 }, files: { limit: 2, windowMs: 60_000 },
     } })
@@ -140,8 +156,21 @@ describe('PostgreSQL workspace authorization', () => {
       identity: new FixtureIdentity('limited'),
       rateLimits: { read: { limit: 1, windowMs: 60_000 } },
     })
+    await pool.query('DELETE FROM draftmatter_rate_limit_events WHERE principal_key = $1', ['owner'])
     await expect(limited.getProject('owner', 'forest', 'paper')).resolves.toMatchObject({ id: 'paper' })
     await expect(limited.getProject('owner', 'forest', 'paper')).rejects.toMatchObject({ code: 'rate-limited', retryAfterMs: expect.any(Number) })
+    await pool.end()
+  })
+
+  it('shares durable request budgets between sessions of the same account', async () => {
+    const { pool, service } = await database()
+    await service.createWorkspace('owner', { id: 'forest', name: 'Forest study' })
+    await pool.query('DELETE FROM draftmatter_rate_limit_events WHERE principal_key = $1', ['owner'])
+    const first = new PostgresWorkspaceService({ pool, identity: new FixtureIdentity('first-login'), rateLimits: { read: { limit: 1, windowMs: 60_000 } } })
+    const second = new PostgresWorkspaceService({ pool, identity: new FixtureIdentity('second-login'), rateLimits: { read: { limit: 1, windowMs: 60_000 } } })
+    await expect(first.listWorkspaces('owner')).resolves.toHaveLength(1)
+    await expect(second.listWorkspaces('owner')).rejects.toMatchObject({ code: 'rate-limited' })
+    await expect(second.listWorkspaces('other')).resolves.toEqual([])
     await pool.end()
   })
 

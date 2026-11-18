@@ -62,7 +62,9 @@ export class OidcIdentityVerifier implements CollaborationIdentityVerifier {
       if (!subject) throw new Error('OIDC subject is missing.')
       const issuer = String(payload.iss)
       const suppliedSession = optionalClaim(payload.sid, 128) ?? optionalClaim(payload.jti, 128)
-      const email = payload.email_verified === false ? undefined : optionalClaim(payload.email, 320)?.toLowerCase()
+      // Email is an authorization boundary for addressed invitations. An absent
+      // or truthy-but-nonboolean claim is not evidence of verified ownership.
+      const email = payload.email_verified === true ? optionalClaim(payload.email, 320)?.toLowerCase() : undefined
       const displayName = optionalClaim(payload.name, 200) ?? optionalClaim(payload.preferred_username, 200)
       const userId = opaqueId('oidc', `${issuer}\0${subject}`)
       const sessionId = suppliedSession && SAFE_ID.test(suppliedSession) ? suppliedSession : opaqueId('session', token)

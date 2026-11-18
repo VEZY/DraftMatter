@@ -7,7 +7,16 @@
 		X-Frame-Options DENY
 		Referrer-Policy no-referrer
 		Strict-Transport-Security "max-age=31536000"
+		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=(), usb=()"
 	}
+	# Documents, PDF previews and isolated computation output never need active
+	# plugins or executable inline scripts. WASM is used by document/PDF tooling.
+	@application not path /demo /demo/*
+	header @application Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self' https: wss: http://localhost:* http://127.0.0.1:* ws://localhost:* ws://127.0.0.1:*; frame-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'self' {$DM_PUBLIC_AUTH_ORIGIN}; frame-ancestors 'none'"
+	# The public example is isolated from identity/collaboration providers and
+	# external citation services. It loads only its own static assets and WASM.
+	@demo path /demo /demo/*
+	header @demo Content-Security-Policy "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data: blob:; connect-src 'self'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'"
 
 	# A missing build asset must be a 404, never the SPA entrypoint.
 	handle /draftmatter-public-config.json {

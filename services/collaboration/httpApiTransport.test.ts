@@ -12,6 +12,7 @@ import { CollaborationOperationsDashboard } from './operations'
 const base = '/api/workspaces/forest/projects/paper/files'
 const uploadPath = `${base}/uploads/upload/parts/1`
 const downloadPath = `${base}/version/parts/1`
+const previewPath = `${base}/version/preview?maxBytes=33554432`
 const origin = 'https://app.example.test'
 const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex')
 const cleanups: Array<() => Promise<unknown> | void> = []
@@ -49,10 +50,15 @@ async function fixture(options: { timeoutMs?: number; downloadBytes?: Uint8Array
     await options.pendingRead?.()
     return { bytes: downloadBytes, sha256: sha256(downloadBytes) }
   })
+  const readPreview = vi.fn(async (token: string, _scope: ProjectFileScope, versionId: string, _maximum: number) => {
+    identity(token)
+    await options.pendingRead?.()
+    return { bytes: downloadBytes, sha256: sha256(downloadBytes), size: downloadBytes.length, versionId }
+  })
   const api = createCollaborationHttpApi({
     workspaces: { authorizeProject } as unknown as CollaborationHttpApiOptions['workspaces'],
     fileAuthorization: { authorizeProject },
-    files: { getUpload, putPart, readPart } as unknown as NonNullable<CollaborationHttpApiOptions['files']>,
+    files: { getUpload, putPart, readPart, readPreview } as unknown as NonNullable<CollaborationHttpApiOptions['files']>,
     entitlements: { get: vi.fn() }, webhooks: { process: vi.fn() }, readiness: async () => undefined,
     dashboard: new CollaborationOperationsDashboard(), connections: () => 0, allowedOrigins: [origin],
     publicConfig: { oidcIssuer: 'https://identity.example.test', oidcClientId: 'fixture' },
@@ -94,17 +100,17 @@ async function fixture(options: { timeoutMs?: number; downloadBytes?: Uint8Array
     cleanups.push(() => { request.destroy() })
     return { request: request!, result }
   }
-  const slowDownload = async (token: string) => {
+  const slowDownload = async (token: string, path = downloadPath) => {
     const socket = createConnection({ host: '127.0.0.1', port })
     socket.on('error', () => undefined)
     cleanups.push(() => { socket.destroy() })
     await once(socket, 'connect')
     // Keep the receive window full: no application reads or implicit HTTP draining.
     socket.pause()
-    socket.write(`GET ${downloadPath} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer ${token}\r\nConnection: close\r\n\r\n`)
+    socket.write(`GET ${path} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer ${token}\r\nConnection: close\r\n\r\n`)
     return socket
   }
-  return { start, slowDownload, api, getUpload, putPart, readPart, authorizeProject, responses }
+  return { start, slowDownload, api, getUpload, putPart, readPart, readPreview, authorizeProject, responses }
 }
 
 describe('Node project file transport admission', () => {
@@ -158,6 +164,40 @@ describe('Node project file transport admission', () => {
     expect(accepted.status).toBe(200)
     expect(accepted.body.length).toBe(PROJECT_FILE_CHUNK_BYTES)
     second.destroy()
+  })
+
+  it('shares preview admission with parts and holds it for slow PDF readers', async () => {
+    const { start, slowDownload, readPreview, readPart, responses } = await fixture({ downloadBytes: new Uint8Array(PROJECT_FILE_CHUNK_BYTES * 4).fill(19) })
+    const first = await slowDownload('alice.old', previewPath)
+    const second = await slowDownload('alice.new', previewPath.replace('/files/', '/f%69les/'))
+    await eventually(() => readPreview.mock.calls.length === 2 && responses.length === 2 && responses.every((response) => response.writableLength > 0 && !response.writableFinished))
+    expect((await start({ token: 'alice.third', method: 'GET', path: previewPath }).result).status).toBe(429)
+    expect((await start({ token: 'alice.fourth', method: 'GET', path: downloadPath }).result).status).toBe(429)
+    expect(readPreview).toHaveBeenCalledTimes(2)
+    expect(readPart).not.toHaveBeenCalled()
+    first.destroy()
+    await eventually(() => responses[0].destroyed)
+    await delay(20)
+    expect((await start({ token: 'alice.next', method: 'GET', path: previewPath }).result).status).toBe(200)
+    second.destroy()
+  })
+
+  it('authenticates previews before storage and enforces their absolute transfer deadline', async () => {
+    let finishRead!: () => void
+    const pending = new Promise<void>((resolve) => { finishRead = resolve })
+    const { start, readPreview } = await fixture({ timeoutMs: 60, pendingRead: () => pending })
+    expect((await start({ method: 'GET', path: previewPath }).result).status).toBe(401)
+    expect((await start({ token: 'invalid', method: 'GET', path: previewPath }).result).status).toBe(401)
+    expect(readPreview).not.toHaveBeenCalled()
+    const stalled = [start({ token: 'alice', method: 'GET', path: previewPath }), start({ token: 'alice', method: 'GET', path: previewPath })]
+    await eventually(() => readPreview.mock.calls.length === 2)
+    const timedOut = await Promise.all(stalled.map((client) => client.result))
+    expect(timedOut.map((response) => response.status)).toEqual([408, 408])
+    // Closing a response must not free capacity while its S3 work is pending.
+    expect((await start({ token: 'alice', method: 'GET', path: previewPath }).result).status).toBe(429)
+    finishRead()
+    await delay(20)
+    expect((await start({ token: 'alice', method: 'GET', path: previewPath }).result).status).toBe(200)
   })
 
   it('retains the slot for a closed client until its already-started storage operation settles', async () => {

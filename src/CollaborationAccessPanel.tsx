@@ -5,6 +5,7 @@ import { CollaborationServiceClient, type CollaborationBackup, type Collaboratio
 import { createCollaborationInvitationLink } from './collaboration/invitationLink'
 import { copyPlainText } from './clipboard'
 import { Icon } from './Icon'
+import './collaborationInvitation.css'
 
 export interface CollaborationAccessPanelProps {
   client: CollaborationServiceClient
@@ -36,10 +37,13 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
   const [backupNotice, setBackupNotice] = useState('')
   const [deletionConfirmation, setDeletionConfirmation] = useState('')
   const [email, setEmail] = useState('')
+  const [allowUnboundInvitation, setAllowUnboundInvitation] = useState(false)
   const [role, setRole] = useState<Exclude<WorkspaceRole, 'owner'>>('editor')
   const [createdToken, setCreatedToken] = useState('')
   const [createdLink, setCreatedLink] = useState('')
+  const [createdEmail, setCreatedEmail] = useState('')
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'failed'>('idle')
+  const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
 
   const refresh = async () => {
     setBusy('refresh')
@@ -80,17 +84,21 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
   }
 
   const invite = async () => {
+    if (busy || (!allowUnboundInvitation && !validEmail)) return
     setBusy('invite')
     setProblem('')
     setCreatedToken('')
     setCreatedLink('')
+    setCreatedEmail('')
     setCopyState('idle')
     try {
-      const created = await client.createInvitation(workspace.id, { role, ...(email.trim() ? { email: email.trim() } : {}), expiresInMs: 7 * 24 * 60 * 60_000 })
+      const created = await client.createInvitation(workspace.id, { role, ...(!allowUnboundInvitation ? { email: email.trim() } : {}), expiresInMs: 7 * 24 * 60 * 60_000 })
       setInvitations((current) => [...current.filter((item) => item.id !== created.invitation.id), created.invitation])
       setCreatedToken(created.token)
+      setCreatedEmail(created.invitation.email ?? '')
       setCreatedLink(isTauri() ? '' : createCollaborationInvitationLink(window.location.href, client.urls.apiUrl, created.token) ?? '')
       setEmail('')
+      setAllowUnboundInvitation(false)
     } catch (error) {
       setProblem(error instanceof Error ? error.message : String(error))
     } finally {
@@ -241,12 +249,21 @@ export function CollaborationAccessPanel({ client, workspace, projectId, current
       <button className="collaboration-access-toggle" onClick={toggle} aria-expanded={open}><Icon name="users" size={15} /><span><strong>Workspace access & recovery</strong><small>Invitations, manuscript roles, activity, and immutable cloud recovery</small></span><Icon name="chevronDown" size={14} /></button>
       {open && (
         <div className="collaboration-access-body">
+          <section className="collaboration-invitation-scope" aria-label="Invitation scope">
+            <strong>Invite to workspace: {workspace.name}</strong>
+            <p>This grants access to all current and future papers and shared files in this workspace. To share only this paper, place it in a separate workspace first.</p>
+          </section>
           <div className="collaboration-invite-row">
-            <label><span>Invite by email <small>optional binding</small></span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="coauthor@example.org" /></label>
+            <label><span>Invitee email</span><input type="email" value={email} onChange={(event) => setEmail(event.target.value)} placeholder="coauthor@example.org" required={!allowUnboundInvitation} disabled={allowUnboundInvitation || Boolean(busy)} maxLength={320} /></label>
             <label><span>Role</span><select value={role} onChange={(event) => setRole(event.target.value as Exclude<WorkspaceRole, 'owner'>)}><option value="editor">Editor</option><option value="commenter">Commenter</option><option value="viewer">Viewer</option></select></label>
-            <button onClick={() => void invite()} disabled={Boolean(busy)}>{busy === 'invite' ? 'Creating…' : 'Create invitation'}</button>
+            <button onClick={() => void invite()} disabled={Boolean(busy) || (!allowUnboundInvitation && !validEmail)}>{busy === 'invite' ? 'Creating…' : 'Create invitation'}</button>
           </div>
-          {createdToken && <div className="collaboration-invite-token"><span><strong>{createdLink ? 'Browser invitation created' : 'Invitation secret created'}</strong><small>{createdLink ? 'Share this once. Its secret stays after # so it is not sent in web requests.' : 'Share this token once. DraftMatter does not store the secret after this session.'}</small></span><input value={createdLink || createdToken} readOnly aria-label={createdLink ? 'Invitation link' : 'Invitation token'} /><button onClick={() => void copyInvitation()}>{copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy'}</button></div>}
+          <div className="collaboration-invitation-options">
+            <p>{role === 'editor' ? 'Editors can read, edit and comment.' : role === 'commenter' ? 'Commenters can read and comment.' : 'Viewers can read.'} The workspace role applies unless you set a different role for a paper.</p>
+            <label><input type="checkbox" checked={allowUnboundInvitation} onChange={(event) => setAllowUnboundInvitation(event.target.checked)} disabled={Boolean(busy)} /><span>Allow any signed-in account with this link to join</span></label>
+            <small>{allowUnboundInvitation ? 'Anyone who receives this one-use link can join the entire workspace. Share it only with the intended person.' : 'Only an account with this verified email address can accept the invitation.'}</small>
+          </div>
+          {createdToken && <div className="collaboration-invite-token"><span><strong>{createdLink ? 'Browser invitation created' : 'Invitation secret created'}</strong><small>{createdEmail ? `For ${createdEmail}. ` : 'Any signed-in account with this link can join the workspace. '}No email has been sent. Copy this {createdLink ? 'link' : 'token'} and send it to your colleague. It can be used once and expires after 7 days. Your colleague needs an activated alpha account.</small></span><input value={createdLink || createdToken} readOnly aria-label={createdLink ? 'Invitation link' : 'Invitation token'} /><button onClick={() => void copyInvitation()}>{copyState === 'copied' ? 'Copied' : copyState === 'failed' ? 'Copy failed' : 'Copy'}</button></div>}
 
           <div className="collaboration-admin-grid">
             <section><span className="collaboration-section-label">Members · {members.length}</span>{members.map((member) => {

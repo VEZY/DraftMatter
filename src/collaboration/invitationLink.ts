@@ -39,6 +39,7 @@ function validServiceUrl(value: string | null) {
 }
 
 function browserOriginAllowed(url: URL) {
+  if (url.username || url.password) return false
   if (url.protocol === 'https:') return true
   return url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
 }
@@ -58,6 +59,9 @@ export function createCollaborationInvitationLink(appUrl: string, serviceUrl: st
     return null
   }
   if (!browserOriginAllowed(url)) return null
+  // Invitations grant workspace membership, not access to the sender's current
+  // editor route (which may be private or point to a local filesystem path).
+  url.pathname = '/invite'
   url.search = ''
   const fragment = new URLSearchParams()
   fragment.set(INVITATION_KEY, token)

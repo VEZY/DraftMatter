@@ -1,0 +1,14 @@
+# Install as /etc/ssh/sshd_config.d/30-draftmatter-backup.conf on the VPS.
+# Add only this public key to root-owned /etc/ssh/authorized_keys/draftmatter-backup.
+# Existing global AllowUsers/AllowGroups rules must permit this account too.
+Match User draftmatter-backup
+    AuthenticationMethods publickey
+    AuthorizedKeysFile /etc/ssh/authorized_keys/%u
+    ForceCommand /usr/bin/sudo -n /usr/local/lib/draftmatter/backup-export
+    DisableForwarding yes
+    PermitTTY no
+    PermitUserRC no
+    X11Forwarding no
+    PasswordAuthentication no
+    KbdInteractiveAuthentication no
+Match all

@@ -54,6 +54,7 @@
     "deploy:single-host:check": "node scripts/check-single-host.mjs",
     "test:deployment": "vitest run services/collaboration/singleHost*.test.mjs services/collaboration/serverRelease*.test.mjs services/collaboration/rehearsalOrchestration.test.mjs services/collaboration/migrationPackaging.test.mjs services/collaboration/productionDeployment.test.mjs src/publicRuntimeConfiguration.test.ts --maxWorkers=1 && node --test deploy/single-host/backup/backup.test.mjs",
     "test:deployment:smoke": "node scripts/smoke-single-host.mjs",
+    "test:backup-offhost": "node --test deploy/offhost-mac/*.test.mjs && python3 -B -m unittest discover -s deploy/single-host/backup -p 'test_*.py'",
     "deploy:single-host:rehearse": "node scripts/rehearse-single-host.mjs",
     "deploy:single-host:tls": "node scripts/renew-single-host-tls.mjs"
   },
@@ -71,8 +72,6 @@
     "@tauri-apps/api": "^2.11.1",
     "@tauri-apps/plugin-deep-link": "^2.4.9",
     "@tauri-apps/plugin-dialog": "^2.7.1",
-    "@types/mdast": "4.0.4",
-    "@vitejs/plugin-react": "latest",
     "jose": "6.2.3",
     "katex": "^0.19.1",
     "pdfjs-dist": "6.5.438",
@@ -90,9 +89,7 @@
     "react-dom": "latest",
     "remark-parse": "11.0.0",
     "toml-eslint-parser": "^0.10.1",
-    "typescript": "latest",
     "unified": "11.0.5",
-    "vite": "latest",
     "y-prosemirror": "1.3.7",
     "y-protocols": "1.0.7",
     "yjs": "13.6.31",
@@ -102,12 +99,16 @@
     "@playwright/test": "^1.61.1",
     "@tauri-apps/cli": "^2.11.4",
     "@types/node": "26.1.1",
+    "@types/mdast": "4.0.4",
     "@types/pg": "8.20.0",
     "@types/react": "latest",
     "@types/react-dom": "latest",
+    "@vitejs/plugin-react": "6.0.3",
     "axe-core": "^4.12.1",
     "jsdom": "^29.1.1",
     "pg-mem": "3.0.14",
+    "typescript": "7.0.2",
+    "vite": "8.3.6",
     "vitest": "^4.1.10"
   }
 }

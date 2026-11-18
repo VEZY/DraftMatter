@@ -10,6 +10,26 @@ const features = [
 ] as const
 
 test.describe('signed-out Home landing experience', () => {
+  test('keeps invitation requests and sign-in visible while the anonymous example awaits publication', async ({ page }) => {
+    await page.goto('/')
+    await expect(page.getByRole('link', { name: 'Try the example', exact: true })).toHaveCount(0)
+    await expect(page.locator('.website-example-note')).toContainText('available by invitation')
+    await expect(page.getByRole('link', { name: 'Open DraftMatter', exact: true })).toHaveAttribute('href', 'https://app.draftmatter.eu/')
+    const navigation = page.getByRole('navigation', { name: 'DraftMatter website', exact: true })
+    await expect(navigation.getByRole('link', { name: 'Sign in', exact: true })).toHaveAttribute('href', 'https://app.draftmatter.eu/')
+    await expect(navigation.getByRole('link', { name: 'Request alpha access', exact: true })).toHaveAttribute('href', /^mailto:/)
+    const desktopScreenshot = test.info().outputPath('website-desktop-entry.png')
+    await page.screenshot({ path: desktopScreenshot })
+    await test.info().attach('website-desktop-entry', { path: desktopScreenshot, contentType: 'image/png' })
+    await page.setViewportSize({ width: 360, height: 800 })
+    await expect(navigation.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible()
+    await expect(navigation.getByRole('link', { name: 'Request alpha access', exact: true })).toBeVisible()
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360)
+    const mobileScreenshot = test.info().outputPath('website-mobile-entry.png')
+    await page.screenshot({ path: mobileScreenshot })
+    await test.info().attach('website-mobile-entry', { path: mobileScreenshot, contentType: 'image/png' })
+  })
+
   test('navigates the feature carousel manually with direct selection and circular controls', async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await page.goto('/')

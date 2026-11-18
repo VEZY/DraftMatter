@@ -130,9 +130,9 @@ export class CollaborationMaintenanceCoordinator {
       const scope = { workspaceId: row.workspace_id, projectId: row.project_id }
       const id = backupId(now, this.idFactory())
       try {
-        await this.persistence.createBackup(scope, id)
+        const backup = await this.persistence.createBackup(scope, id)
         try {
-          await this.persistence.verifyBackup(scope, id)
+          await this.persistence.verifyBackup(scope, backup.id)
           this.metrics.lastSuccessfulBackupAt = iso(now)
         } catch {
           this.metrics.verificationFailures += 1

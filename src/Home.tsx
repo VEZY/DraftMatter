@@ -11,7 +11,8 @@ import type { WorkspaceRole } from './collaboration/workspaceService'
 import type { LocalProjectRecent } from './localProjectCatalogue'
 import { HomeLearningGuide } from './HomeLearningGuide'
 import { LegalLinks } from './LegalDocuments'
-import type { LegalDocumentId } from './legalConfig'
+import { legalConfiguration, type LegalDocumentId } from './legalConfig'
+import { alphaAccessLink } from './alphaAccess'
 
 interface HomeProps {
   preferredWorkspaceId?: string
@@ -125,7 +126,6 @@ function AppHome({
   onClonePaper,
   localProjects,
   localProblem,
-  onOpenExample,
   onOpenBrowserDraft,
   onOpenLearn,
   onOpenLanguages,
@@ -137,6 +137,8 @@ function AppHome({
   const session = useCollaborationSession()
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLocaleLowerCase()
+  const accessLink = alphaAccessLink(legalConfiguration.contactEmail)
+  const hostedBrowser = !desktopHost.available && Boolean(session.serviceUrl)
   const visibleProjects = useMemo(() => localProjects.filter((project) => (
     !normalizedQuery || `${project.name} ${project.root}`.toLocaleLowerCase().includes(normalizedQuery)
   )), [localProjects, normalizedQuery])
@@ -175,12 +177,15 @@ function AppHome({
             <h1>Your papers</h1>
             <p>{desktopHost.available
               ? 'Open a Markdown or Quarto manuscript, or start a new paper on this computer.'
-              : 'Start a portable browser draft, open the complete example, or connect to a collaboration account.'}</p>
+              : hostedBrowser
+                ? 'Sign in to find your shared papers, or explore the example without an account.'
+                : 'Start a portable browser draft, open the complete example, or connect to a collaboration account.'}</p>
           </div>
           <div className="home-app-heading-actions">
+            {hostedBrowser && <button className="home-primary" onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}><Icon name="users" size={16} />{session.state === 'signing-in' ? 'Signing in…' : 'Sign in'}</button>}
             {desktopHost.available
               ? <button className="home-primary" onClick={onOpenLocalPaper}><Icon name="document" size={16} />Open existing paper</button>
-              : <button className="home-primary" onClick={onOpenBrowserDraft}><Icon name="plus" size={16} />New browser draft</button>}
+              : <button className={hostedBrowser ? undefined : 'home-primary'} onClick={onOpenBrowserDraft}><Icon name="plus" size={16} />New browser draft</button>}
             {desktopHost.available && <button onClick={onOpenLocalProject}><Icon name="folder" size={16} />Open project folder</button>}
             {desktopHost.available && <div className="home-paper-create-actions">
               <button onClick={onNewLocalDraft}><Icon name="plus" size={16} />New paper</button>
@@ -188,6 +193,12 @@ function AppHome({
             </div>}
           </div>
         </section>
+
+        {hostedBrowser && <section className="home-alpha-access" aria-label="Alpha access">
+          <p><strong>New to DraftMatter?</strong> The free alpha is by invitation. <a href={accessLink.href}>Request alpha access</a>.</p>
+          <p>Have a project invitation? Open the link your colleague sent, then sign in with the invited email address.</p>
+          <p>If you reloaded this page, sign in again to reconnect to your shared papers.</p>
+        </section>}
 
         {desktopHost.available ? (
           <>
@@ -212,10 +223,12 @@ function AppHome({
           </>
         ) : (
           <section className="home-browser-actions" aria-label="Browser paper actions">
-            <button onClick={onOpenExample}><span><Icon name="spark" size={19} /></span><strong>Open the complete example</strong><small>Explore a finished research project without changing the original.</small><Icon name="arrowRight" size={16} /></button>
+            <a href="/demo"><span><Icon name="spark" size={19} /></span><strong>Open the complete example</strong><small>No account needed. Edit a private example that resets when you reload.</small><Icon name="arrowRight" size={16} /></a>
             <button onClick={onOpenTutorial}><span><Icon name="book" size={19} /></span><strong>Take the guided tour</strong><small>Learn writing, citations, results, and review inside one paper.</small><Icon name="arrowRight" size={16} /></button>
           </section>
         )}
+
+        {!desktopHost.available && <p className="home-browser-storage-note">Browser drafts stay in this browser until you share them. Export a copy to keep an independent backup. Opening folders and cloning Git repositories require the desktop app.</p>}
 
         <section id="home-setup" className="home-app-setup" aria-labelledby="home-setup-title">
           <div className="home-section-title"><h2 id="home-setup-title">Set up DraftMatter</h2></div>
@@ -234,13 +247,13 @@ function AppHome({
               <span><Icon name="users" size={19} /></span>
               <div><h3>Account &amp; collaboration</h3><p>{session.serviceUrl ? 'A collaboration service is configured. Sign in to access shared papers.' : 'You are working locally. Add an account only when you need shared papers or browser collaboration.'}</p></div>
               <AlphaAccountNotice onOpenLegal={onOpenLegal} />
-              <div>{session.serviceUrl && <button onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}>Sign in</button>}<button onClick={() => document.getElementById('home-account-setup')?.querySelector<HTMLButtonElement>('.home-disclosure')?.click()}>Configure collaboration</button></div>
+              <div>{session.serviceUrl && desktopHost.available && <button onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}>Sign in</button>}{(!session.serviceUrl || import.meta.env.DEV) && <button onClick={() => document.getElementById('home-account-setup')?.querySelector<HTMLButtonElement>('.home-disclosure')?.click()}>Configure collaboration</button>}</div>
             </article>
           </div>
         </section>
 
         {session.error && <p className="home-account-error" role="alert">{session.error}</p>}
-        <AdvancedConnectionSetup />
+        {(!session.serviceUrl || import.meta.env.DEV) && <AdvancedConnectionSetup />}
       </div>
       <AlphaLegalFooter onOpenLegal={onOpenLegal} />
     </main>
@@ -276,6 +289,7 @@ function Catalogue({
   const [roleFilter, setRoleFilter] = useState<WorkspaceRole | 'all'>('all')
   const [sort, setSort] = useState<'activity' | 'title' | 'created'>('activity')
   const normalizedQuery = query.trim().toLocaleLowerCase()
+  const filtersActive = Boolean(normalizedQuery || workspaceId !== 'all' || roleFilter !== 'all')
   const visibleDrafts = useMemo(() => session.drafts.filter((draft) => (
     (workspaceId === 'all' || draft.workspaceId === workspaceId)
     && (roleFilter === 'all' || draft.role === roleFilter)
@@ -319,7 +333,7 @@ function Catalogue({
 
       <div className="home-catalogue-content">
         <section className="home-catalogue-heading">
-          <div><span className="home-kicker">Your research workspace</span><h1>Drafts</h1><p>Every manuscript you can access, across all of your workspaces.</p></div>
+          <div><span className="home-kicker">Your research workspace</span><h1>Drafts</h1><p>Every manuscript you can access, across all of your workspaces.</p><p className="home-signed-in-note" aria-label="Signed-in account">Signed in as <strong>{session.profile?.email ?? accountName}</strong>.</p></div>
           <button className="home-primary" onClick={onNewDraft}><Icon name="plus" size={16} />New draft</button>
         </section>
 
@@ -343,9 +357,11 @@ function Catalogue({
         ) : visibleDrafts.length === 0 ? (
           <section className="home-empty">
             <span><Icon name="document" size={24} /></span>
-            <h2>{query ? 'No matching drafts' : 'No drafts here yet'}</h2>
-            <p>{query ? 'Try a different title or workspace.' : 'Create a manuscript with a portable source, then invite collaborators when you are ready.'}</p>
-            {!query && <button className="home-primary" onClick={onNewDraft}>Create your first draft</button>}
+            <h2>{filtersActive ? 'No matching drafts' : 'No drafts here yet'}</h2>
+            <p>{filtersActive ? 'Try a different title, workspace, or role filter.' : 'Create a manuscript, then use Collaborate in the editor to invite a colleague by email. Already invited to a project? Open its invitation link while signed in with the invited address.'}</p>
+            {filtersActive
+              ? <button onClick={() => { setQuery(''); setWorkspaceId('all'); setRoleFilter('all') }}>Clear filters</button>
+              : <button className="home-primary" onClick={onNewDraft}>Create your first draft</button>}
           </section>
         ) : (
           <div className="home-draft-sections">

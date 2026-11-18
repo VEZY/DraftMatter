@@ -8,6 +8,7 @@ import { PostgresCollaborationStore } from './postgresStore'
 
 async function database() {
   const memory = newDb({ autoCreateForeignKeyIndices: true, noAstCoverageCheck: true })
+  memory.public.registerFunction({ name: 'pg_advisory_xact_lock', args: [DataType.integer, DataType.integer], returns: DataType.integer, implementation: () => 1 })
   memory.public.registerOperator({
     operator: '~',
     left: DataType.text,
@@ -307,6 +308,51 @@ describe('managed PostgreSQL and object-storage persistence', () => {
     expect(persistence.dashboard.project('forest:paper')).toMatchObject({ backupCount: 1, backupVerificationFailureCount: 1 })
     expect(persistence.dashboard.project('forest:restored')).toMatchObject({ restoreSuccessCount: 1 })
     fixture.document.destroy()
+    document.destroy()
+    await pool.end()
+  })
+
+  it('reuses recent unchanged technical backups and caps copies without deleting named versions', async () => {
+    const { pool } = await database()
+    const objects = new MemoryObjectStorage()
+    const day = 24 * 60 * 60_000
+    let now = Date.parse('2026-11-17T00:00:00Z')
+    const persistence = new PostgresCollaborationStore({ pool, objects, clock: () => now, backupLimits: { projectCount: 2 } })
+    const { document, first } = documentFixture()
+    const scope = { workspaceId: 'forest', projectId: 'paper' }
+    await persistence.appendUpdate(scope, first)
+    await persistence.createSnapshot(scope, 'named-version')
+    await persistence.createNamedRecoveryCheckpoint(scope, 'named-version', { name: 'Keep this version', createdBy: 'owner' })
+    const original = await persistence.createBackup(scope, 'first-backup')
+    expect(await persistence.createBackup(scope, 'retry-backup')).toEqual(original)
+    expect(await objects.list('draftmatter/workspaces/forest/projects/paper/backups/')).toHaveLength(1)
+    now += day
+    expect((await persistence.createBackup(scope, 'daily-backup')).id).toBe('daily-backup')
+    now += day
+    await expect(persistence.createBackup(scope, 'over-budget')).rejects.toMatchObject({ code: 'forbidden' })
+    expect(await persistence.listBackups(scope)).toHaveLength(2)
+    expect(await persistence.listRecoveryCheckpoints(scope)).toEqual([expect.objectContaining({ name: 'Keep this version' })])
+    await expect(objects.get('draftmatter/workspaces/forest/projects/paper/snapshots/named-version.bin')).resolves.toBeDefined()
+    expect(persistence.dashboard.project('forest:paper').backupCount).toBe(2)
+    document.destroy()
+    await pool.end()
+  })
+
+  it('enforces project and total technical backup byte budgets before creating objects, including pending deletions', async () => {
+    const { pool } = await database()
+    const objects = new MemoryObjectStorage()
+    const scope = { workspaceId: 'forest', projectId: 'paper' }
+    const { document, first } = documentFixture()
+    const tooSmall = new PostgresCollaborationStore({ pool, objects, backupLimits: { projectBytes: 1 } })
+    await tooSmall.appendUpdate(scope, first)
+    await expect(tooSmall.createBackup(scope, 'cannot-fit')).rejects.toMatchObject({ code: 'forbidden' })
+    expect(await objects.list('draftmatter/workspaces/forest/projects/paper/backups/')).toEqual([])
+    const normal = new PostgresCollaborationStore({ pool, objects })
+    const prior = await normal.createBackup(scope, 'fits')
+    await pool.query("UPDATE draftmatter_collaboration_backups SET state = 'deleting' WHERE workspace_id = 'forest'")
+    const fullServer = new PostgresCollaborationStore({ pool, objects, backupLimits: { totalBytes: prior.bytes } })
+    await expect(fullServer.createBackup(scope, 'server-full')).rejects.toMatchObject({ code: 'forbidden' })
+    expect(await objects.list('draftmatter/workspaces/forest/projects/paper/backups/')).toHaveLength(1)
     document.destroy()
     await pool.end()
   })

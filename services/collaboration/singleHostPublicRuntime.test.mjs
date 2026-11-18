@@ -7,6 +7,7 @@ import { writePublicConfiguration } from '../../deploy/production/public-config.
 
 const environment = () => ({
   DM_PUBLIC_COLLABORATION_URL: 'https://sync.draftmatter.eu',
+  DM_PUBLIC_AUTH_ORIGIN: 'https://auth.draftmatter.eu',
   DM_LEGAL_PUBLISHER_NAME: 'Rémi Vezy',
   DM_LEGAL_CONTACT_EMAIL: 'contact@draftmatter.eu',
   DM_LEGAL_HOSTING_DETAILS: 'SAS PulseHeberg, Toulon, France.',
@@ -27,7 +28,13 @@ describe('generic web image startup public configuration', () => {
       expect(JSON.parse(readFileSync(target, 'utf8')).environment.VITE_DM_LEGAL_CONTACT_EMAIL).toBe('another-contact@draftmatter.eu')
       await expect(writePublicConfiguration({ ...environment(), DM_LEGAL_CONTACT_EMAIL: '' }, target)).rejects.toThrow('Complete')
       expect(JSON.parse(readFileSync(target, 'utf8')).environment.VITE_DM_LEGAL_CONTACT_EMAIL).toBe('another-contact@draftmatter.eu')
+      await expect(writePublicConfiguration({ ...environment(), DM_PUBLIC_AUTH_ORIGIN: 'https://wrong.invalid/path' }, target)).rejects.toThrow('public identity origin')
+      expect(JSON.parse(readFileSync(target, 'utf8')).environment.VITE_DM_LEGAL_CONTACT_EMAIL).toBe('another-contact@draftmatter.eu')
     } finally { rmSync(directory, { recursive: true, force: true }) }
+  })
+
+  it.each(['', 'http://auth.draftmatter.eu', 'https://auth.draftmatter.eu/path', 'https://auth.draftmatter.eu?private', 'https://user:private@auth.draftmatter.eu', 'https://auth.draftmatter.eu#private'])('refuses an unsafe identity origin without printing its value', async (origin) => {
+    await expect(writePublicConfiguration({ ...environment(), DM_PUBLIC_AUTH_ORIGIN: origin })).rejects.toThrow('public identity origin')
   })
 
   it('fails startup without exposing environment values when public settings are invalid', () => {

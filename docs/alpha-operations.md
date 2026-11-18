@@ -11,6 +11,33 @@ infrastructure cleanup is automated.
 
 ## Before inviting testers
 
+Complete the identity and recovery gates as well as application health checks:
+
+- Create a named permanent administrator in Keycloak's `master` realm, verify a
+  fresh authenticated administration operation with it, then remove the exact
+  temporary bootstrap account. Keep normal participant accounts in the
+  `draftmatter` realm without administration roles. Store the administrator's
+  recovery material privately; never expose the administration console or
+  `master` realm through the public proxy to simplify account provisioning.
+- Confirm an independent encrypted infrastructure backup, its off-host copy,
+  and a separately protected copy of `backup.key`. A local archive on the VPS
+  alone does not recover from loss of that host. Rehearse restoration into a
+  fresh disposable target before trusting the service with testers' only copy.
+  The selected no-subscription destination is the operator's second Mac; follow
+  the [verified Mac pull setup](offhost-mac-backups.md), including availability,
+  FileVault, independently preserved keys and controlled Time Machine retention.
+- Assign an operator and working alert destination for failed backups,
+  off-host copy failures, low disk space, unhealthy containers and overdue
+  cleanup. Verify those alerts actually reach the operator. Document the
+  internal TLS leaf renewal procedure and renew before their 90-day expiry;
+  public Caddy certificates and internal PostgreSQL/object certificates have
+  separate lifecycles. The scripts and a green health endpoint do not install
+  these schedules or establish that someone receives an alert.
+- Run the read-only production probe against the exact reviewed release. It
+  checks browser security headers for both the application and the public
+  example. Qualify an actual browser and installed desktop login separately,
+  then test invitation acceptance and removal with disposable accounts.
+
 1. Record the actual VPS, database, identity, object-storage and backup locations
    and providers. Publish those facts in the legal configuration. OVH branding by
    itself does not establish a French data location. Keep the alpha closed until

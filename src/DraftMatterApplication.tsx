@@ -26,13 +26,14 @@ import {
   type LocalProjectRecent,
 } from './localProjectCatalogue'
 import './home.css'
+import { isBrowserDemoLocation } from './browserDemo'
 
 // The home/account routes do not need the editor, export engines or language modes.
 const App = lazy(() => import('./App'))
 
 const isEditorRoute = (route: ApplicationRoute) => ['collaborative-editor', 'local-editor', 'example', 'tutorial', 'browser-editor'].includes(route.destination)
 
-function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorSaveGuard }) {
+function ApplicationRouter({ saveBeforeLeaveRef, demoMode = false }: { saveBeforeLeaveRef: EditorSaveGuard; demoMode?: boolean }) {
   const session = useCollaborationSession()
   const [route, setRoute] = useState<ApplicationRoute>(() => parseApplicationRoute(window.location))
   const [launch, setLaunch] = useState<CollaborationProjectLaunch | null>(null)
@@ -207,8 +208,14 @@ function ApplicationRouter({ saveBeforeLeaveRef }: { saveBeforeLeaveRef: EditorS
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [localLaunch, route])
 
+  // This document's isolation lasts until a full navigation, even after a
+  // browser history change. Account routes must never mount inside the demo.
+  if (demoMode) return <App demoMode initialExperience="complete-example" onNavigateHome={() => window.location.assign('/')} />
+
   // Legal information remains public, including while an invitation is pending.
   if (route.destination === 'legal') return <LegalPage documentId={route.documentId} onNavigate={openLegal} onBack={() => navigate(session.pendingInvitation ? { destination: 'invitation' } : legalReturnRouteRef.current)} />
+
+  if (route.destination === 'demo') return <main className="home-route-status"><a href="/demo">Open the interactive example</a></main>
 
   if (session.pendingInvitation || route.destination === 'invitation') {
     return <InvitationEntry onOpenDraft={openDraft} onBack={() => navigate({ destination: 'home' })} onOpenLegal={openLegal} />
@@ -251,6 +258,7 @@ export interface DraftMatterApplicationProps {
 }
 
 export function DraftMatterApplication({ collaboration }: DraftMatterApplicationProps) {
+  const [demoMode] = useState(() => isBrowserDemoLocation(window.location))
   const desktop = isTauri()
   const [desktopLaunchReady, setDesktopLaunchReady] = useState(!desktop)
   const [sessionGeneration, setSessionGeneration] = useState(0)
@@ -301,5 +309,5 @@ export function DraftMatterApplication({ collaboration }: DraftMatterApplication
   }, [desktop])
 
   if (!desktopLaunchReady) return <div className="home-route-status" role="status">Opening DraftMatter…</div>
-  return <CollaborationSessionProvider key={sessionGeneration} {...collaboration}><Suspense fallback={<div className="home-route-status" role="status">Opening manuscript…</div>}><ApplicationRouter saveBeforeLeaveRef={saveBeforeLeaveRef} /></Suspense></CollaborationSessionProvider>
+  return <CollaborationSessionProvider key={sessionGeneration} {...collaboration} disabledNetwork={demoMode || collaboration?.disabledNetwork}><Suspense fallback={<div className="home-route-status" role="status">Opening manuscript…</div>}><ApplicationRouter saveBeforeLeaveRef={saveBeforeLeaveRef} demoMode={demoMode} /></Suspense></CollaborationSessionProvider>
 }

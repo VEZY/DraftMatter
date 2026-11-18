@@ -37,7 +37,7 @@ describe('collaboration workspace administration', () => {
         .mockResolvedValue([{ id: 'backup-2', createdAt: '2026-07-15T01:00:00.000Z', bytes: 3072, sha256: 'c'.repeat(64), stateSha256: 'd'.repeat(64), verifiedAt: '2026-07-15T01:01:00.000Z', lastRestoredAt: '2026-07-15T01:02:00.000Z' }]),
       getWorkspaceDeletion: vi.fn().mockResolvedValue({ deletion: null }),
       createInvitation: vi.fn().mockResolvedValue({
-        invitation: { id: 'invite-1', workspaceId: 'forest', role: 'commenter', createdAt: '2026-07-15T00:00:00.000Z', expiresAt: '2026-07-22T00:00:00.000Z', createdBy: 'owner-1' },
+        invitation: { id: 'invite-1', workspaceId: 'forest', role: 'commenter', email: 'coauthor@example.test', createdAt: '2026-07-15T00:00:00.000Z', expiresAt: '2026-07-22T00:00:00.000Z', createdBy: 'owner-1' },
         token: 'one-time-invitation-token',
       }),
       createRecoveryCheckpoint: vi.fn().mockResolvedValue({ id: 'recovery-2', snapshotId: 'snapshot-2', name: 'Before reviewer revisions', createdBy: 'owner-1', createdAt: '2026-07-15T01:00:00.000Z' }),
@@ -68,6 +68,10 @@ describe('collaboration workspace administration', () => {
     expect(client.getWorkspaceDeletion).toHaveBeenCalledWith('forest')
     expect(container.textContent).toContain('Named cloud recovery · 1')
     expect(container.textContent).toContain('project created')
+    expect(container.querySelector('[aria-label="Invitation scope"]')?.textContent).toContain('all current and future papers and shared files')
+    expect(container.textContent).toContain('place it in a separate workspace first')
+    const createInvitation = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Create invitation')!
+    expect(createInvitation.disabled).toBe(true)
 
     const projectRole = container.querySelector<HTMLSelectElement>('[aria-label="Project role for Editing Researcher"]')!
     await act(async () => {
@@ -82,12 +86,17 @@ describe('collaboration workspace administration', () => {
     await act(async () => {
       role.value = 'commenter'
       role.dispatchEvent(new Event('change', { bubbles: true }))
+      const email = container.querySelector<HTMLInputElement>('.collaboration-invite-row input[type="email"]')!
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(email, 'coauthor@example.test')
+      email.dispatchEvent(new Event('input', { bubbles: true }))
     })
     await act(async () => {
       [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Create invitation')!.click()
       await new Promise((resolve) => window.setTimeout(resolve, 0))
     })
-    expect(client.createInvitation).toHaveBeenCalledWith('forest', { role: 'commenter', expiresInMs: 7 * 24 * 60 * 60_000 })
+    expect(client.createInvitation).toHaveBeenCalledWith('forest', { role: 'commenter', email: 'coauthor@example.test', expiresInMs: 7 * 24 * 60 * 60_000 })
+    expect(container.textContent).toContain('No email has been sent.')
+    expect(container.textContent).toContain('For coauthor@example.test.')
     const invitationLink = container.querySelector<HTMLInputElement>('[aria-label="Invitation link"]')?.value
     expect(invitationLink).toContain('#dm-invite=one-time-invitation-token')
     expect(invitationLink?.split('#')[0]).not.toContain('one-time-invitation-token')
@@ -96,6 +105,21 @@ describe('collaboration workspace administration', () => {
     await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Copy')!.click())
     expect(writeText).toHaveBeenCalledWith(invitationLink)
     expect(container.textContent).toContain('Copied')
+
+    const unbound = container.querySelector<HTMLInputElement>('.collaboration-invitation-options input[type="checkbox"]')!
+    expect(unbound.checked).toBe(false)
+    await act(async () => unbound.click())
+    expect(container.querySelector<HTMLInputElement>('.collaboration-invite-row input[type="email"]')?.disabled).toBe(true)
+    expect(createInvitation.disabled).toBe(false)
+    vi.mocked(client.createInvitation).mockResolvedValueOnce({
+      invitation: { id: 'invite-2', workspaceId: 'forest', role: 'commenter', createdAt: '2026-07-15T00:00:00.000Z', expiresAt: '2026-07-22T00:00:00.000Z', createdBy: 'owner-1' },
+      token: 'unbound-one-time-invitation',
+    })
+    await act(async () => createInvitation.click())
+    expect(client.createInvitation).toHaveBeenLastCalledWith('forest', { role: 'commenter', expiresInMs: 7 * 24 * 60 * 60_000 })
+    expect(container.textContent).toContain('Any signed-in account with this link can join the workspace.')
+    expect(unbound.checked).toBe(false)
+    expect(createInvitation.disabled).toBe(true)
 
     const recoveryName = container.querySelector<HTMLInputElement>('[aria-label="Recovery checkpoint name"]')!
     await act(async () => {

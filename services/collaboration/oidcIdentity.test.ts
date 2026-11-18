@@ -52,6 +52,12 @@ describe('OIDC collaboration identity verification', () => {
     expect(identity.email).toBeUndefined()
   })
 
+  it.each([undefined, null, false, 'true', 'false', 1, 0])('requires explicit boolean verification before trusting email (%s)', async (emailVerified) => {
+    const identity = await verifier.verify(await token({ email_verified: emailVerified }))
+    expect(identity.email).toBeUndefined()
+    expect(identity.userId).toMatch(/^oidc-[a-f0-9]{64}$/)
+  })
+
   it('requires HTTPS for a remote key set outside loopback development', () => {
     expect(() => new OidcIdentityVerifier({ issuer, audience, jwksUri: 'http://identity.example.test/jwks' })).toThrow(/HTTPS/)
   })

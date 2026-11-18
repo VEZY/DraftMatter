@@ -1,5 +1,5 @@
 import { isTauri, invoke } from '@tauri-apps/api/core'
-import { completeOidcAuthorization, prepareOidcAuthorization, type OidcLoginResult } from './oidcBrowser'
+import { completeOidcAuthorization, prepareOidcAuthorization, type OidcLoginResult, type OidcLogoutRequest } from './oidcBrowser'
 
 export const DESKTOP_IDENTITY_CALLBACK = 'draftmatter://auth/callback'
 
@@ -63,3 +63,10 @@ export async function signInDesktop(
 }
 
 export function usesDesktopIdentity() { return isTauri() }
+
+/** The system browser confirms logout using its own cookie; no token in its URL. */
+export async function signOutDesktop(logout: OidcLogoutRequest) {
+  const url = new URL(logout.endpoint)
+  url.search = new URLSearchParams({ client_id: logout.clientId }).toString()
+  await invoke('open_identity_logout', { url: url.toString() })
+}

@@ -656,11 +656,15 @@ fn now_millis() -> u64 {
 
 fn source_hash(bytes: &[u8]) -> String {
     let mut hash = 0xcbf29ce484222325_u64;
-    for byte in bytes {
-        hash ^= u64::from(*byte);
-        hash = hash.wrapping_mul(0x100000001b3);
-    }
+    update_source_hash(&mut hash, bytes);
     format!("fnv1a:{hash:016x}")
+}
+
+fn update_source_hash(hash: &mut u64, bytes: &[u8]) {
+    for byte in bytes {
+        *hash ^= u64::from(*byte);
+        *hash = hash.wrapping_mul(0x100000001b3);
+    }
 }
 
 fn safe_relative(raw: &str) -> Result<PathBuf, HostError> {
@@ -767,10 +771,19 @@ fn modified_ms(metadata: &fs::Metadata) -> u64 {
 }
 
 fn read_entry(root: &Path, path: &Path, kind: ProjectEntryKind) -> Result<ProjectEntry, HostError> {
-    let metadata = fs::metadata(path)?;
     let mut file = File::open(path)?;
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)?;
+    let metadata = file.metadata()?;
+    // Discovery needs a revision hash, not an in-memory copy of every file.
+    // Keep the same FNV-1a identity used by document reads, with bounded memory.
+    let mut hash = 0xcbf29ce484222325_u64;
+    let mut buffer = [0; 64 * 1024];
+    loop {
+        let size = file.read(&mut buffer)?;
+        if size == 0 {
+            break;
+        }
+        update_source_hash(&mut hash, &buffer[..size]);
+    }
     let relative = path.strip_prefix(root).map_err(|error| {
         HostError::InvalidPath(format!("Could not make a project-relative path: {error}"))
     })?;
@@ -779,7 +792,7 @@ fn read_entry(root: &Path, path: &Path, kind: ProjectEntryKind) -> Result<Projec
         kind,
         bytes: metadata.len(),
         modified_ms: modified_ms(&metadata),
-        hash: source_hash(&bytes),
+        hash: format!("fnv1a:{hash:016x}"),
     })
 }
 
@@ -840,7 +853,12 @@ fn discover_entries(
         match extension.as_str() {
             "md" | "qmd" => documents.push(read_entry(root, &path, ProjectEntryKind::Manuscript)?),
             "bib" | "bibtex" | "json" | "ris" | "enw" => {
-                bibliographies.push(read_entry(root, &path, ProjectEntryKind::Bibliography)?)
+                // Large JSON datasets are project files, not supported citation
+                // libraries. Avoid hashing gigabytes before opening a paper;
+                // the bibliography reader already enforces this same limit.
+                if fs::metadata(&path)?.len() <= MAX_BIBLIOGRAPHY_BYTES {
+                    bibliographies.push(read_entry(root, &path, ProjectEntryKind::Bibliography)?)
+                }
             }
             _ => {}
         }
@@ -3950,6 +3968,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             oidc_desktop::open_identity_authorization,
+            oidc_desktop::open_identity_logout,
             collaboration_checkpoint::save_collaboration_checkpoint,
             open_project,
             create_project,
@@ -5001,6 +5020,35 @@ mod tests {
         for (path, source) in documents {
             assert_eq!(fs::read_to_string(root.join(path)).unwrap(), source);
         }
+    }
+
+    #[test]
+    fn discovery_hashes_match_document_hashes_across_streaming_boundaries() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path();
+        for bytes in [Vec::new(), "Unicode text é 🌱\n".repeat(20_000).into_bytes()] {
+            let path = root.join("paper.md");
+            fs::write(&path, &bytes).unwrap();
+            let entry = read_entry(root, &path, ProjectEntryKind::Manuscript).unwrap();
+            assert_eq!(entry.hash, source_hash(&bytes));
+            assert_eq!(entry.bytes, bytes.len() as u64);
+            assert_eq!(entry.path, "paper.md");
+        }
+    }
+
+    #[test]
+    fn discovery_skips_json_datasets_above_the_supported_bibliography_limit() {
+        let temporary = tempdir().unwrap();
+        let root = temporary.path().join("project");
+        create_project_at_root(&root, "Test").unwrap();
+        fs::write(root.join("references.json"), "[]\n").unwrap();
+        let data = root.join("large-dataset.json");
+        File::create(&data).unwrap().set_len(MAX_BIBLIOGRAPHY_BYTES + 1).unwrap();
+        let before = fs::metadata(&data).unwrap();
+        let discovered = open_project_impl(root.to_str().unwrap()).unwrap();
+        assert_eq!(discovered.bibliographies.iter().map(|entry| entry.path.as_str()).collect::<Vec<_>>(), vec!["references.json"]);
+        assert_eq!(fs::metadata(&data).unwrap().len(), before.len());
+        assert!(matches!(read_bibliography_impl(root.to_str().unwrap(), "large-dataset.json"), Err(HostError::UnsupportedFile(_))));
     }
 
     #[test]

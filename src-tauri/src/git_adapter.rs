@@ -470,32 +470,59 @@ fn check_repository_filters(repository_root: &Path) -> Result<(), HostError> {
     // --no-ext-diff and --no-textconv. Keep user/system filters (e.g. LFS),
     // but refuse repository-supplied commands rather than bypassing a filter
     // and staging or restoring an incorrect file representation.
-    let output = run_git(
+    check_repository_command_config(
         repository_root,
-        &[
-            "config",
-            "--includes",
-            "--show-scope",
-            "--name-only",
-            "--null",
-            "--get-regexp",
-            r"^filter\..*\.(clean|smudge|process)$",
-        ],
-    )?;
-    if output.status.code() == Some(1) && output.stdout.is_empty() && output.stderr.is_empty() {
-        return Ok(()); // No matching keys.
-    }
-    let output = require_success(output, "inspect Git filter settings")?;
-    let mut fields = output.stdout.split(|byte| *byte == 0);
-    while let Some(scope) = fields.next().filter(|scope| !scope.is_empty()) {
-        if fields.next().filter(|key| !key.is_empty()).is_none() {
-            return Err(HostError::Integration(
-                "Git returned incomplete filter settings.".into(),
-            ));
+        r"^filter\..*\.(clean|smudge|process)$",
+        "filter",
+    )
+}
+
+fn check_repository_network_commands(repository_root: &Path) -> Result<(), HostError> {
+    // SSH overrides and credential helpers are executable commands, including
+    // commands inherited through a repository's include/includeIf files. Git
+    // configuration in a downloaded project is not permission to run them.
+    // User/system configuration remains available for SSH identities and the
+    // user's credential manager.
+    check_repository_command_config(
+        repository_root,
+        r"^(core\.(sshcommand|gitproxy|askpass)|credential(\..*)?\.helper|remote\..*\.(uploadpack|receivepack))$",
+        "network",
+    )
+}
+
+fn check_repository_signing_commands(repository_root: &Path) -> Result<(), HostError> {
+    // Keep trusted user-configured commit signing, but a local repository must
+    // not turn a Save Version operation into execution of an arbitrary signer.
+    check_repository_command_config(
+        repository_root,
+        r"^gpg((\..*)?\.program|\.ssh\.defaultkeycommand)$",
+        "signing",
+    )
+}
+
+fn check_repository_command_config(
+    repository_root: &Path,
+    pattern: &str,
+    purpose: &str,
+) -> Result<(), HostError> {
+    // Read repository scopes explicitly. In particular Apple Git reports its
+    // built-in system credential helper with an "unknown" scope: treating all
+    // unknown settings as repository commands would break ordinary Git on macOS.
+    // --worktree falls back to --local when worktreeConfig is not enabled.
+    for scope in ["--local", "--worktree"] {
+        let output = run_git(
+            repository_root,
+            &[
+                "config", scope, "--includes", "--name-only", "--null", "--get-regexp", pattern,
+            ],
+        )?;
+        if output.status.code() == Some(1) && output.stdout.is_empty() && output.stderr.is_empty() {
+            continue; // No matching keys in this repository scope.
         }
-        if !matches!(scope, b"global" | b"system" | b"command") {
+        let output = require_success(output, "inspect Git command settings")?;
+        if output.stdout.split(|byte| *byte == 0).any(|key| !key.is_empty()) {
             return Err(HostError::Integration(
-                "This repository defines a Git filter command. DraftMatter cannot run repository-defined filters. Use your Git client, or configure a trusted filter in your user Git settings.".into(),
+                format!("This repository defines a Git {purpose} command. DraftMatter cannot run repository-defined {purpose} commands. Use your Git client, or configure the trusted command in your user Git settings."),
             ));
         }
     }
@@ -1180,8 +1207,12 @@ fn validate_commit_message(message: &str) -> Result<String, HostError> {
 pub fn git_create_commit_impl(request: GitCommitRequest) -> Result<GitCommitResult, HostError> {
     let context = require_repository(&request.root)?;
     let _project_guard = crate::project_guard(&context.project_root)?;
+    check_repository_signing_commands(&context.repository_root)?;
     let message = validate_commit_message(&request.message)?;
-    let staged = run_git(&context.repository_root, &["diff", "--cached", "--quiet"])?;
+    let staged = run_git(
+        &context.repository_root,
+        &["diff", "--cached", "--quiet", "--no-ext-diff", "--no-textconv"],
+    )?;
     if staged.status.success() {
         return Err(HostError::Conflict(
             "No staged changes are available for this commit.".to_string(),
@@ -1234,6 +1265,7 @@ pub fn git_create_checkpoint_impl(
 ) -> Result<GitCommitResult, HostError> {
     let context = require_repository(&request.root)?;
     let _project_guard = crate::project_guard(&context.project_root)?;
+    check_repository_signing_commands(&context.repository_root)?;
     let message = validate_commit_message(&request.message)?;
     let paths = selected_repository_paths(&context, &request.paths)?;
     let mut commit_paths = paths.clone();
@@ -1660,6 +1692,7 @@ fn remote_result(root: &str, action: &str, output: &Output) -> Result<GitRemoteR
 pub fn git_fetch_impl(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
     let context = require_repository(&request.root)?;
     let _project_guard = crate::project_guard(&context.project_root)?;
+    check_repository_network_commands(&context.repository_root)?;
     let remote = validate_remote(&context, request.remote.as_deref())?;
     if request.branch.is_some() {
         return Err(HostError::InvalidProject(
@@ -1682,6 +1715,7 @@ pub fn git_fetch_impl(request: GitRemoteRequest) -> Result<GitRemoteResult, Host
 pub fn git_pull_impl(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
     let context = require_repository(&request.root)?;
     let _project_guard = crate::project_guard(&context.project_root)?;
+    check_repository_network_commands(&context.repository_root)?;
     let remote = validate_remote(&context, request.remote.as_deref())?;
     if let Some(branch) = request.branch.as_deref() {
         validate_branch_name(&context, branch)?;
@@ -1707,6 +1741,7 @@ pub fn git_pull_impl(request: GitRemoteRequest) -> Result<GitRemoteResult, HostE
 pub fn git_push_impl(request: GitRemoteRequest) -> Result<GitRemoteResult, HostError> {
     let context = require_repository(&request.root)?;
     let _project_guard = crate::project_guard(&context.project_root)?;
+    check_repository_network_commands(&context.repository_root)?;
     let remote = validate_remote(&context, request.remote.as_deref())?;
     if let Some(branch) = request.branch.as_deref() {
         validate_branch_name(&context, branch)?;
@@ -2928,6 +2963,148 @@ mod tests {
         let diff = git_checkpoint_diff_impl(GitCheckpointDiffRequest { root, hash }).unwrap();
         assert!(diff.text.contains("+base"));
         assert!(!marker.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_network_commands_are_refused_before_fetch_pull_or_push() {
+        let project = tempdir().unwrap();
+        let path = project.path();
+        initialise(path);
+        fs::write(path.join("paper.md"), "base\n").unwrap();
+        commit_all(path, "base");
+        git(path, ["remote", "add", "origin", "ssh://example.invalid/paper.git"]);
+        let executable = path.join("untrusted-ssh");
+        fs::write(&executable, "#!/bin/sh\ntouch network-command-ran\nexit 1\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        git(path, ["config", "core.sshCommand", &executable.to_string_lossy()]);
+        let control = Command::new("git")
+            .current_dir(path)
+            .args(["fetch", "origin"])
+            .output()
+            .unwrap();
+        assert!(!control.status.success());
+        let marker = path.join("network-command-ran");
+        assert!(marker.exists(), "unrestricted Git must execute the repository's SSH command");
+        fs::remove_file(&marker).unwrap();
+        git(path, ["config", "--unset", "core.sshCommand"]);
+        git(path, ["config", "include.path", "network.conf"]);
+        let root = path.to_string_lossy().into_owned();
+        let index_before = fs::read(path.join(".git/index")).unwrap();
+        for section in [
+            "[core]\nsshCommand",
+            "[core]\naskPass",
+            "[credential]\nhelper",
+            "[credential \"https://example.invalid\"]\nhelper",
+            "[remote \"origin\"]\nuploadpack",
+            "[remote \"origin\"]\nreceivepack",
+        ] {
+            fs::write(path.join(".git/network.conf"), format!("{section} = {}\n", executable.display())).unwrap();
+            for operation in [git_fetch_impl, git_pull_impl, git_push_impl] {
+                let error = operation(GitRemoteRequest {
+                    root: root.clone(), remote: Some("origin".into()), branch: None,
+                }).unwrap_err();
+                assert!(matches!(error, HostError::Integration(message) if message.contains("repository defines a Git network command")));
+                assert!(!marker.exists());
+                assert_eq!(fs::read(path.join(".git/index")).unwrap(), index_before);
+                assert_eq!(fs::read_to_string(path.join("paper.md")).unwrap(), "base\n");
+            }
+            assert!(git_status_impl(&root).is_ok(), "read-only inspection remains available");
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_signing_commands_are_refused_before_committing_or_staging() {
+        let project = tempdir().unwrap();
+        let path = project.path();
+        initialise(path);
+        fs::write(path.join("paper.md"), "base\n").unwrap();
+        commit_all(path, "base");
+        fs::write(path.join("paper.md"), "new version\n").unwrap();
+        git(path, ["add", "paper.md"]);
+        let executable = path.join("untrusted-signer");
+        fs::write(&executable, "#!/bin/sh\ntouch signing-command-ran\nexit 1\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        git(path, ["config", "gpg.program", &executable.to_string_lossy()]);
+        git(path, ["config", "commit.gpgSign", "true"]);
+        let control = Command::new("git").current_dir(path).args(["commit", "-m", "unsafe control"]).output().unwrap();
+        assert!(!control.status.success());
+        let marker = path.join("signing-command-ran");
+        assert!(marker.exists(), "unrestricted Git must execute the repository's signing command");
+        fs::remove_file(&marker).unwrap();
+        let root = path.to_string_lossy().into_owned();
+        let index_before = fs::read(path.join(".git/index")).unwrap();
+        let head_before = git(path, ["rev-parse", "HEAD"]).stdout;
+        let commit = git_create_commit_impl(GitCommitRequest { root: root.clone(), message: "save".into() }).unwrap_err();
+        let checkpoint = git_create_checkpoint_impl(GitCheckpointRequest {
+            root: root.clone(), paths: vec!["paper.md".into()], message: "save selected".into(),
+        }).unwrap_err();
+        for error in [commit, checkpoint] {
+            assert!(matches!(error, HostError::Integration(message) if message.contains("repository defines a Git signing command")));
+        }
+        assert!(!marker.exists());
+        assert_eq!(fs::read(path.join(".git/index")).unwrap(), index_before);
+        assert_eq!(git(path, ["rev-parse", "HEAD"]).stdout, head_before);
+        assert!(git_history_impl(&root).is_ok(), "read-only history remains available");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn committing_staged_changes_never_runs_a_trusted_exit_code_external_diff() {
+        let project = tempdir().unwrap();
+        let path = project.path();
+        initialise(path);
+        fs::write(path.join("paper.md"), "base\n").unwrap();
+        commit_all(path, "base");
+        fs::write(path.join("paper.md"), "new version\n").unwrap();
+        git(path, ["add", "paper.md"]);
+        let executable = path.join("untrusted-diff");
+        fs::write(&executable, "#!/bin/sh\ntouch external-diff-ran\nexit 0\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        git(path, ["config", "diff.external", &executable.to_string_lossy()]);
+        git(path, ["config", "diff.trustExitCode", "true"]);
+        git(path, ["diff", "--cached", "--quiet"]);
+        let marker = path.join("external-diff-ran");
+        assert!(marker.exists(), "unrestricted Git must execute the trusted-exit-code external diff");
+        fs::remove_file(&marker).unwrap();
+        git_create_commit_impl(GitCommitRequest {
+            root: path.to_string_lossy().into_owned(), message: "save staged draft".into(),
+        }).unwrap();
+        assert!(!marker.exists());
+        assert_eq!(git(path, ["show", "HEAD:paper.md"]).stdout, b"new version\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn repository_ssh_default_key_command_cannot_execute_when_saving_a_version() {
+        let project = tempdir().unwrap();
+        let path = project.path();
+        initialise(path);
+        fs::write(path.join("paper.md"), "base\n").unwrap();
+        commit_all(path, "base");
+        fs::write(path.join("paper.md"), "new version\n").unwrap();
+        git(path, ["add", "paper.md"]);
+        let executable = path.join("untrusted-default-key");
+        fs::write(&executable, "#!/bin/sh\ntouch default-key-ran\nexit 1\n").unwrap();
+        fs::set_permissions(&executable, fs::Permissions::from_mode(0o755)).unwrap();
+        git(path, ["config", "gpg.format", "ssh"]);
+        git(path, ["config", "gpg.ssh.defaultKeyCommand", &executable.to_string_lossy()]);
+        git(path, ["config", "commit.gpgSign", "true"]);
+        let control = Command::new("git").current_dir(path)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null").env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .args(["commit", "-m", "unsafe control"]).output().unwrap();
+        assert!(!control.status.success());
+        let marker = path.join("default-key-ran");
+        assert!(marker.exists(), "unrestricted Git must execute the SSH default-key command");
+        fs::remove_file(&marker).unwrap();
+        let index_before = fs::read(path.join(".git/index")).unwrap();
+        let error = git_create_checkpoint_impl(GitCheckpointRequest {
+            root: path.to_string_lossy().into_owned(), paths: vec!["paper.md".into()], message: "save version".into(),
+        }).unwrap_err();
+        assert!(matches!(error, HostError::Integration(message) if message.contains("repository defines a Git signing command")));
+        assert!(!marker.exists());
+        assert_eq!(fs::read(path.join(".git/index")).unwrap(), index_before);
     }
 
     #[cfg(unix)]

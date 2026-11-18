@@ -1,4 +1,5 @@
 import { prepareCollaborationCheckpointSource, referencedBibliographyPaths } from './collaborationProjectSnapshot'
+import { BrowserDemoNotice } from './BrowserDemoNotice'
 import { createStoredZip } from './zipArchive'
 import * as Y from 'yjs'
 import { createPortableProjectBundle } from './portableProjectBundle'
@@ -603,6 +604,7 @@ type HistoryVersion = RecoveryHistoryVersion & { archiveId?: string }
 type LoadedHistoryVersion = RecoverySnapshot & { archiveId?: string }
 
 export interface AppProps {
+  demoMode?: boolean
   active?: boolean
   saveBeforeLeaveRef?: EditorSaveGuard
   collaborationLaunch?: CollaborationProjectLaunch
@@ -634,7 +636,7 @@ format:
 Start writing here.
 `
 
-function App({ active = true, saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, selectedManuscriptPath, onNavigateHome, initialExperience, startExampleTour = false, startCollaborationOnMount = false, browserDocumentLaunch, onOpenLearn, onOpenAiLearn, onOpenLanguages }: AppProps = {}) {
+function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaborationLaunch, desktopProjectLaunch, selectedManuscriptPath, onNavigateHome, initialExperience, startExampleTour = false, startCollaborationOnMount = false, browserDocumentLaunch, onOpenLearn, onOpenAiLearn, onOpenLanguages }: AppProps = {}) {
   const collaborationSession = useOptionalCollaborationSession()
   const collaborativeProject = collaborationLaunch?.projects.find((project) => project.id === collaborationLaunch.projectId)
   const collaborativeInitialSource = collaborationLaunch
@@ -6122,7 +6124,8 @@ function App({ active = true, saveBeforeLeaveRef, collaborationLaunch, desktopPr
   return (
     <>
     {manuscriptPicker}
-    <div inert={projectBusy || Boolean(pendingProject)} className={`app-shell ${focusMode ? 'focus-mode' : ''}`}>
+    <div inert={projectBusy || Boolean(pendingProject)} className={`app-shell ${focusMode ? 'focus-mode' : ''} ${demoMode ? 'browser-demo-shell' : ''}`}>
+      {demoMode && <BrowserDemoNotice />}
       <svg className="app-sketch-defs" aria-hidden="true">
         <defs>
           <filter id="app-pencil-wobble" x="-8%" y="-8%" width="116%" height="116%" colorInterpolationFilters="sRGB">
@@ -6219,7 +6222,7 @@ function App({ active = true, saveBeforeLeaveRef, collaborationLaunch, desktopPr
               <span className="visually-hidden">Code &amp; computation · {codeWorkspaceState}</span>
             </button>}
 
-            <button data-tooltip={collaborationStatus === 'connected' ? 'Online collaboration · connected' : 'Share and collaborate'} className={`collaboration-toggle compact-tool ${collaborationStatus}`} onClick={() => desktopProject && collaborationSession && !desktopProject.config.collaboration ? setStartCollaborationOpen(true) : setCollaborationOpen(true)} aria-label={desktopProject && collaborationSession && !desktopProject.config.collaboration ? 'Start collaboration' : 'Open online collaboration'}>
+            <button disabled={demoMode} data-tooltip={demoMode ? 'Sign in from your papers to collaborate' : collaborationStatus === 'connected' ? 'Online collaboration · connected' : 'Share and collaborate'} className={`collaboration-toggle compact-tool ${collaborationStatus}`} onClick={() => desktopProject && collaborationSession && !desktopProject.config.collaboration ? setStartCollaborationOpen(true) : setCollaborationOpen(true)} aria-label={desktopProject && collaborationSession && !desktopProject.config.collaboration ? 'Start collaboration' : 'Open online collaboration'}>
               <Icon name="users" size={16} />
               <i />
             </button>
@@ -6568,7 +6571,7 @@ function App({ active = true, saveBeforeLeaveRef, collaborationLaunch, desktopPr
               <section className={`browser-execution-banner ${executionBoundaryKind}`} role="note" aria-label={executionBoundaryKind === 'template' ? 'Example execution requires a project copy' : 'Code execution unavailable in the current document'}>
                 <span className="browser-execution-banner-icon"><Icon name={executionBoundaryKind === 'template' ? 'spark' : 'eye'} size={17} /></span>
                 {executionBoundaryKind === 'template' ? <span>
-                  <strong>Template example</strong><small>Make a project copy to edit or run code.</small>
+                  <strong>{demoMode ? 'Precomputed example' : 'Template example'}</strong><small>{demoMode ? 'Edit the text and try citations. Figures and results are precomputed; code execution is disabled.' : 'Make a project copy to edit or run code.'}</small>
                 </span> : executionBoundaryKind === 'shared-desktop' ? <span>
                   <strong>Local copy required</strong><small>Create a project copy before running code.</small>
                 </span> : executionBoundaryKind === 'shared-browser' ? <span>
@@ -7312,7 +7315,7 @@ function App({ active = true, saveBeforeLeaveRef, collaborationLaunch, desktopPr
         onClose={() => setGitInitializationReview(undefined)}
       />}
 
-      <CollaborationDialog
+      {!demoMode && <CollaborationDialog
         open={collaborationOpen}
         source={manuscriptSource}
         loadResources={loadSharedProjectResources}
@@ -7338,7 +7341,7 @@ function App({ active = true, saveBeforeLeaveRef, collaborationLaunch, desktopPr
         checkpointTarget={desktopSession?.path ?? filename}
         canUseBrowserSignIn
         localAuthor={userSettings.author}
-      />
+      />}
 
       {collaborationSession && desktopProject && (
         <StartCollaborationDialog

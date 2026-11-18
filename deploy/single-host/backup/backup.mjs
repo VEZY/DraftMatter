@@ -63,6 +63,18 @@ async function capture(args, options) {
   return Buffer.concat(chunks).toString('utf8').trim()
 }
 
+export function backupComposeArguments(options) {
+  if (Boolean(options.releaseEnvFile) !== Boolean(options.prebuiltComposeFile)) {
+    throw new BackupError('--release-env-file and --prebuilt-compose-file must be supplied together.')
+  }
+  if (!options.envFile) throw new BackupError('--env-file is required.')
+  const base = ['compose', '--env-file', resolve(options.envFile)]
+  if (options.releaseEnvFile) base.push('--env-file', resolve(options.releaseEnvFile))
+  base.push('--project-name', options.project ?? 'draftmatter-alpha', '--file', resolve(options.composeFile ?? join(root, 'deploy/single-host/compose.yaml')))
+  if (options.prebuiltComposeFile) base.push('--file', resolve(options.prebuiltComposeFile))
+  return base
+}
+
 function context(options) {
   const project = options.project ?? 'draftmatter-alpha'
   if (!projects.test(project)) throw new BackupError('Compose project name is invalid.')
@@ -71,7 +83,7 @@ function context(options) {
   }
   if (!options.envFile || !options.keyFile) throw new BackupError('--env-file and --key-file are required.')
   const composeFile = resolve(options.composeFile ?? join(root, 'deploy/single-host/compose.yaml'))
-  const base = ['compose', '--env-file', resolve(options.envFile), '--project-name', project, '--file', composeFile]
+  const base = backupComposeArguments({ ...options, project, composeFile })
   return {
     ...options, project, composeFile, base,
     database: options.database ?? 'draftmatter', identityDatabase: options.identityDatabase ?? 'keycloak',
@@ -105,6 +117,29 @@ export async function readBackupEnvironment(ctx) {
   if (!insideCheckout || (!insideCheckout.startsWith('../') && insideCheckout !== '..')) throw new BackupError('Keep backup/restore deployment secrets outside the checkout.')
   const info = await lstat(runtimeDirectory)
   if (!info.isDirectory() || (process.platform !== 'win32' && (info.mode & 0o077) !== 0)) throw new BackupError('Backup/restore runtime directory must be private (chmod 700).')
+  if (Boolean(ctx.releaseEnvFile) !== Boolean(ctx.prebuiltComposeFile)) throw new BackupError('--release-env-file and --prebuilt-compose-file must be supplied together.')
+  if (ctx.releaseEnvFile) {
+    const releaseFile = resolve(ctx.releaseEnvFile)
+    if (await realpath(dirname(releaseFile)) !== runtimeDirectory) throw new BackupError('The release environment must be inside the same private runtime directory.')
+    await privateFile(releaseFile, 'Release environment')
+    const details = await lstat(releaseFile)
+    if (details.nlink !== 1 || details.size > 4096) throw new BackupError('Release environment must be bounded and without links.')
+    const release = parseEnv(await readFile(releaseFile, 'utf8'))
+    const fields = ['RELEASE_ID', 'DM_COLLABORATION_IMAGE', 'DM_WEB_IMAGE', 'DM_OPERATOR_IMAGE']
+    if (JSON.stringify(Object.keys(release).sort()) !== JSON.stringify(fields.sort())
+      || !/^[a-f0-9]{40}$/.test(release.RELEASE_ID ?? '') || release.RELEASE_ID !== environment.RELEASE_ID) {
+      throw new BackupError('The release environment must match the selected runtime release and contain only pinned image references.')
+    }
+    for (const kind of ['COLLABORATION', 'WEB', 'OPERATOR']) {
+      const name = `DM_${kind}_IMAGE`
+      if (!new RegExp(`^ghcr\\.io/vezy/draftmatter-${kind.toLowerCase()}@sha256:[a-f0-9]{64}$`).test(release[name] ?? '')) throw new BackupError('The release environment must use official images by immutable digest.')
+      if (process.env[name] !== undefined && process.env[name] !== release[name]) throw new BackupError(`${name} is exported with a conflicting value; unset it before backup/restore.`)
+    }
+    const overlay = await lstat(resolve(ctx.prebuiltComposeFile))
+    if (!overlay.isFile() || overlay.isSymbolicLink() || overlay.nlink !== 1 || overlay.size > 64 * 1024 || (process.platform !== 'win32' && (overlay.mode & 0o022))) {
+      throw new BackupError('Prebuilt Compose configuration must be a bounded ordinary reviewed file, without links or group/world writes.')
+    }
+  }
   return { mode: environment.DM_SINGLE_HOST_MODE, runtimeDirectory }
 }
 
@@ -271,9 +306,58 @@ async function projectLock(project, action) {
   finally { await lock.close(); await unlink(path) }
 }
 
+function archiveCopyLimit(value) {
+  if (value === undefined) return undefined
+  if ((typeof value !== 'number' && (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)))
+      || !Number.isSafeInteger(Number(value)) || Number(value) < 1) {
+    throw new BackupError('--max-copies must be a positive safe integer.')
+  }
+  return Number(value)
+}
+
+// Called while holding the directory lock. A failed new archive must never
+// make room by deleting an older recovery copy first.
+export async function publishBackupArchive({ source, directory, name, key, maxCopies }) {
+  const limit = archiveCopyLimit(maxCopies)
+  if (!/^draftmatter-\d{8}T\d{9}Z-[a-f0-9-]{36}\.dmbackup$/.test(name)) throw new BackupError('Backup archive name is invalid.')
+  const destination = join(directory, name), partial = `${destination}.partial`
+  let published = false
+  try {
+    await encryptStream(source, partial, key)
+    // Check the complete persisted ciphertext and authentication tag before
+    // publishing it or allowing count-based removal of older copies.
+    await withVerifiedPlaintext(partial, key, async () => undefined)
+    await rename(partial, destination)
+    // File fsync alone does not make the renamed directory entry durable.
+    // Keep every older copy if this step fails, including after power loss.
+    const parent = await open(directory, 'r')
+    try { await parent.sync() } finally { await parent.close() }
+    published = true
+    const removed = []
+    if (limit !== undefined) {
+      const previous = (await readdir(directory))
+        .filter((candidate) => candidate !== name && /^draftmatter-\d{8}T\d{9}Z-[a-f0-9-]{36}\.dmbackup$/.test(candidate))
+        .sort().reverse()
+      for (const candidate of previous) {
+        const info = await lstat(join(directory, candidate))
+        if (!info.isFile() || info.isSymbolicLink() || info.nlink !== 1) throw new BackupError('Refusing to rotate a linked or non-file archive.')
+      }
+      const expired = previous.slice(limit - 1)
+      for (const candidate of expired) {
+        await unlink(join(directory, candidate))
+        removed.push(candidate)
+      }
+    }
+    return { archive: destination, removed, ...(limit === undefined ? {} : { maxCopies: limit }) }
+  } finally {
+    if (!published) await unlink(partial).catch(() => undefined)
+  }
+}
+
 export async function createBackup(options) {
   const ctx = context(options)
   if (!options.directory) throw new BackupError('--directory is required.')
+  const maxCopies = archiveCopyLimit(options.maxCopies)
   Object.assign(ctx, await readBackupEnvironment(ctx))
   const key = await readBackupKey(resolve(ctx.keyFile))
   try {
@@ -290,9 +374,7 @@ export async function createBackup(options) {
       }
       const createdAt = new Date().toISOString()
       const name = `draftmatter-${createdAt.replace(/[-:.]/g, '')}-${randomUUID()}.dmbackup`
-      const destination = join(directory, name)
-      const partial = `${destination}.partial`
-      let success = false, primaryError
+      let primaryError
       try {
         if (initiallyRunning.length) await compose(ctx, ['stop', '--timeout', '60', ...initiallyRunning], 'Quiesce alpha writers')
         for (const service of writerServices) {
@@ -308,15 +390,12 @@ export async function createBackup(options) {
           postgresImage: postgres.value.Image, objectStorageImage: objects.value.Image,
           parts: ['database', 'identity', 'objects'],
         }
-        await encryptStream(Readable.from(sourceArchive(ctx, manifest, postgres, volume)), partial, key)
-        await rename(partial, destination)
-        success = true
-        return { status: 'created', archive: destination, createdAt, encrypted: 'AES-256-GCM', databases: 2, objectVolumeIncluded: true }
+        const published = await publishBackupArchive({ source: Readable.from(sourceArchive(ctx, manifest, postgres, volume)), directory, name, key, maxCopies })
+        return { status: 'created', ...published, createdAt, encrypted: 'AES-256-GCM', databases: 2, objectVolumeIncluded: true }
       } catch (error) {
         primaryError = error
         throw error
       } finally {
-        if (!success) await unlink(partial).catch(() => undefined)
         // Restore only services that were running before this operation, even
         // after an interrupted/failed backup. A SIGKILL/host crash needs operator recovery.
         if (initiallyRunning.length) {
@@ -466,7 +545,7 @@ export async function pruneBackups(options) {
 
 function argumentsFor(args) {
   const [action, ...rest] = args
-  const known = new Set(['env-file', 'key-file', 'directory', 'project', 'compose-file', 'archive', 'confirm-empty-target', 'retention-days', 'database', 'identity-database', 'database-user', 'identity-user'])
+  const known = new Set(['env-file', 'key-file', 'directory', 'project', 'compose-file', 'release-env-file', 'prebuilt-compose-file', 'archive', 'confirm-empty-target', 'retention-days', 'max-copies', 'database', 'identity-database', 'database-user', 'identity-user'])
   const options = {}
   for (let index = 0; index < rest.length; index += 2) {
     const name = rest[index]?.replace(/^--/, '')

@@ -78,7 +78,26 @@ test.describe('DM-P1-07 accessibility baseline', () => {
     const title = page.getByRole('textbox', { name: 'Manuscript title' })
     await title.focus()
     await page.keyboard.press('Tab')
-    const focused = page.locator(':focus-visible')
+    const editingFocus = page.locator(':focus-visible')
+    await expect(editingFocus).toBeVisible()
+    // Manuscript fields intentionally use their text caret instead of a frame
+    // around the whole paper. Check that keyboard focus really entered an
+    // editable field, then verify a visible ring on the next toolbar control.
+    await expect.poll(() => editingFocus.evaluate((element) => element.contains(window.getSelection()?.focusNode ?? null))).toBe(true)
+    const caret = await editingFocus.evaluate((element) => ({
+      editable: (element as HTMLElement).isContentEditable,
+      caretColor: getComputedStyle(element).caretColor,
+      hasSelection: element.contains(window.getSelection()?.focusNode ?? null),
+    }))
+    expect(caret).toMatchObject({ editable: true, hasSelection: true })
+    expect(caret.caretColor).not.toMatch(/transparent|rgba\([^)]*,\s*0\)$/)
+    await page.keyboard.type('Keyboard caret probe ')
+    await expect(editingFocus).toContainText('Keyboard caret probe')
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect(editingFocus).not.toContainText('Keyboard caret probe')
+    await page.getByRole('button', { name: 'Open command menu', exact: true }).focus()
+    await page.keyboard.press('Tab')
+    const focused = page.locator('button:focus-visible')
     await expect(focused).toBeVisible()
     const focusRing = await focused.evaluate((element) => {
       const style = getComputedStyle(element)

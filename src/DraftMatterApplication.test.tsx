@@ -230,15 +230,30 @@ describe('DraftMatter application entry', () => {
     await act(async () => root.unmount())
   })
 
-  it('opens the complete example independently from the new-paper action', async () => {
+  it('opens the anonymous example with a full document navigation instead of overwriting the browser draft', async () => {
     const container = document.createElement('div')
     const root = createRoot(container)
     await act(async () => root.render(<DraftMatterApplication />))
-    const example = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Open the complete example'))!
-    await act(async () => example.click())
+    const example = [...container.querySelectorAll<HTMLAnchorElement>('a')].find((link) => link.textContent?.includes('Open the complete example'))!
+    expect(example.getAttribute('href')).toBe('/demo')
+    expect(container.querySelector('[data-testid="editor"]')).toBeNull()
+    await act(async () => root.unmount())
+  })
 
-    expect(window.location.search).toBe('?example=complete')
+  it('keeps the demo disconnected after a same-document history change to an account route', async () => {
+    window.history.replaceState({}, '', '/demo')
+    const request = vi.fn()
+    vi.stubGlobal('fetch', request)
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<DraftMatterApplication />))
     expect(container.querySelector('[data-testid="editor"]')?.textContent).toBe('complete-example')
+    await act(async () => {
+      window.history.pushState({}, '', '/workspace/private/project/private')
+      window.dispatchEvent(new PopStateEvent('popstate'))
+    })
+    expect(container.querySelector('[data-testid="editor"]')?.textContent).toBe('complete-example')
+    expect(request).not.toHaveBeenCalled()
     await act(async () => root.unmount())
   })
 

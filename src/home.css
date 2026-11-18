@@ -10,6 +10,21 @@
   --home-white: #fff;
 }
 
+/* Keep control labels available to assistive technology without duplicating
+   their visible placeholders or pushing the application header out of line. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
 /* Editor routes fill the window independently of their sidebar contents. */
 .draftmatter-editor-route {
   height: 100%;
@@ -7206,7 +7221,8 @@
   gap: 12px;
 }
 
-.home-browser-actions > button {
+.home-browser-actions > button,
+.home-browser-actions > a {
   min-height: 116px;
   padding: 18px;
   border-color: var(--home-line);
@@ -7217,14 +7233,20 @@
   align-items: center;
   gap: 4px 12px;
   text-align: left;
+  border: 1px solid var(--home-line);
+  border-radius: 8px;
+  color: var(--home-ink);
+  text-decoration: none;
 }
 
-.home-browser-actions > button:hover {
+.home-browser-actions > button:hover,
+.home-browser-actions > a:hover {
   border-color: #b7cbbf;
   background: #fbfdfc;
 }
 
-.home-browser-actions > button > span {
+.home-browser-actions > button > span,
+.home-browser-actions > a > span {
   width: 38px;
   height: 38px;
   grid-row: 1 / span 2;
@@ -7246,10 +7268,46 @@
   line-height: 1.45;
 }
 
-.home-browser-actions > button > svg {
+.home-browser-actions > button > svg,
+.home-browser-actions > a > svg {
   grid-column: 3;
   grid-row: 1 / span 2;
   color: var(--home-sage);
+}
+
+.home-alpha-access {
+  margin-top: 22px;
+  padding: 14px 18px;
+  border: 1px solid var(--home-line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--home-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.home-alpha-access p { margin: 0; }
+.home-alpha-access p + p { margin-top: 4px; }
+.home-alpha-access strong { color: var(--home-ink); }
+.home-alpha-access a { color: var(--home-sage-dark); text-underline-offset: 3px; }
+
+.home-browser-storage-note {
+  margin-top: 14px;
+  color: var(--home-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.home-catalogue-heading .home-signed-in-note {
+  margin-top: 10px;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.home-browser-actions > a:focus-visible,
+.home-alpha-access a:focus-visible {
+  outline: 3px solid rgba(63, 113, 94, .3);
+  outline-offset: 3px;
 }
 
 .home-app-setup {

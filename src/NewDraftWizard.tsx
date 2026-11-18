@@ -62,6 +62,7 @@ export function NewDraftWizard({
   const createdRemoteRef = useRef<{ workspaceId: string; project: WorkspaceProject } | null>(null)
 
   const selectedTemplate = useMemo(() => NEW_DRAFT_TEMPLATES.find((template) => template.id === templateId)!, [templateId])
+  const writableWorkspaces = session.workspaces.filter((workspace) => workspace.role === 'owner' || workspace.role === 'editor')
 
   useEffect(() => {
     if (!open) return
@@ -69,9 +70,16 @@ export function NewDraftWizard({
     setStep(1)
     setLocation(initialLocation)
     setProblem('')
+    // The wizard is mounted on signed-out Home as well. Read the current
+    // account when opening rather than retaining that earlier empty session.
+    setLeadAuthor(session.profile?.displayName?.trim() || readUserSettings(localStorage).author.name)
+    setWorkspaceId((current) => writableWorkspaces.some((workspace) => workspace.id === current) ? current : writableWorkspaces[0]?.id ?? '')
+    setCreateWorkspace(writableWorkspaces.length === 0)
     createdRemoteRef.current = null
     requestAnimationFrame(() => dialogRef.current?.focus())
-  }, [initialLocation, open])
+  // Catalogue refreshes must not reset a wizard the user is already filling.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialLocation, open, session.profile?.userId])
 
   useEffect(() => {
     if (!open) return
@@ -293,8 +301,9 @@ export function NewDraftWizard({
 
             {location === 'collaborative' ? (
               <section className="new-draft-location-details">
-                <label className="new-draft-check"><input type="checkbox" checked={createWorkspace} onChange={(event) => setCreateWorkspace(event.target.checked)} /><span>Create a new workspace</span></label>
-                {createWorkspace ? <div className="new-draft-field-row"><label><span>Workspace name</span><input value={workspaceName} onChange={(event) => { setWorkspaceName(event.target.value); setWorkspacePortableId(portableDraftId(event.target.value)) }} /></label><label><span>Workspace ID</span><input value={workspacePortableId} onChange={(event) => setWorkspacePortableId(event.target.value)} /></label></div> : <label><span>Workspace</span><select value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)}>{session.workspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name} · {workspace.role}</option>)}</select></label>}
+                <label className="new-draft-check"><input type="checkbox" checked={createWorkspace} onChange={(event) => setCreateWorkspace(event.target.checked)} disabled={writableWorkspaces.length === 0} /><span>Create a new workspace</span></label>
+                {createWorkspace ? <div className="new-draft-field-row"><label><span>Workspace name</span><input value={workspaceName} onChange={(event) => { setWorkspaceName(event.target.value); setWorkspacePortableId(portableDraftId(event.target.value)) }} /></label><label><span>Workspace ID</span><input value={workspacePortableId} onChange={(event) => setWorkspacePortableId(event.target.value)} /></label></div> : <label><span>Workspace</span><select value={workspaceId} onChange={(event) => setWorkspaceId(event.target.value)}>{writableWorkspaces.map((workspace) => <option key={workspace.id} value={workspace.id}>{workspace.name} · {workspace.role}</option>)}</select></label>}
+                {session.workspaces.length > 0 && writableWorkspaces.length === 0 && <small>Your existing workspace roles allow reading or commenting. Create your own workspace for this new paper.</small>}
               </section>
             ) : (
               <section className="new-draft-local-options">

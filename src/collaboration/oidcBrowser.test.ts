@@ -12,6 +12,35 @@ function memoryStorage() {
 }
 
 describe('browser OIDC Authorization Code + PKCE', () => {
+  it('invalidates retained tokens on logout and keeps the identity hint out of browser storage', async () => {
+    const storage = memoryStorage()
+    const request = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-public' } }))
+      .mockResolvedValueOnce(Response.json({ issuer: 'https://identity.example.test', authorization_endpoint: 'https://identity.example.test/authorize', token_endpoint: 'https://identity.example.test/token', end_session_endpoint: 'https://identity.example.test/logout' }))
+      .mockResolvedValueOnce(Response.json({ access_token: 'private-access', refresh_token: 'private-refresh', id_token: 'private-id-hint', expires_in: 300 }))
+    const prepared = await prepareOidcAuthorization('https://sync.example.test', 'https://app.example.test/', storage, request)
+    const state = new URL(prepared.authorizationUrl).searchParams.get('state')!
+    const result = await completeOidcAuthorization(`https://app.example.test/?code=code&state=${state}`, storage, request)
+    expect(storage.values.size).toBe(0)
+    expect(result!.endSession!()).toEqual({ endpoint: 'https://identity.example.test/logout', clientId: 'draftmatter-public', idToken: 'private-id-hint' })
+    await expect(result!.token()).rejects.toThrow(/signed out/)
+    expect(result!.endSession!()).toBeUndefined()
+    expect(request).toHaveBeenCalledTimes(3)
+  })
+
+  it('rejects a stored login for a different hosted service before exchanging its authorization code', async () => {
+    const storage = memoryStorage()
+    const discovery = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-public' } }))
+      .mockResolvedValueOnce(Response.json({ issuer: 'https://identity.example.test', authorization_endpoint: 'https://identity.example.test/authorize', token_endpoint: 'https://identity.example.test/token' }))
+    const prepared = await prepareOidcAuthorization('https://evil.example.test', 'https://app.example.test/', storage, discovery)
+    const state = new URL(prepared.authorizationUrl).searchParams.get('state')!
+    const exchange = vi.fn()
+    await expect(completeOidcAuthorization(`https://app.example.test/?code=real-code&state=${state}`, storage, exchange, Date.now, 'https://sync.example.test')).rejects.toThrow(/different collaboration server/)
+    expect(exchange).not.toHaveBeenCalled()
+    expect(storage.values.size).toBe(0)
+  })
+
   it('creates an S256 authorization request and exchanges only a matching callback', async () => {
     const storage = memoryStorage()
     let now = 2_000

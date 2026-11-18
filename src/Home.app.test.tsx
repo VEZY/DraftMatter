@@ -6,7 +6,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const session = vi.hoisted(() => ({
   state: 'ready',
-  profile: null,
+  profile: null as null | { displayName: string; email: string; userId: string },
   serviceUrl: '',
   error: '',
   workspaces: [],
@@ -73,6 +73,9 @@ describe('DraftMatter desktop home', () => {
     await act(async () => root.unmount())
     container.remove()
     vi.clearAllMocks()
+    session.serviceUrl = ''
+    session.profile = null
+    desktopHost.available = true
   })
 
   it('puts existing local papers and real setup actions ahead of onboarding copy', async () => {
@@ -120,5 +123,40 @@ describe('DraftMatter desktop home', () => {
     await act(async () => configure.click())
     expect(container.querySelector('input[inputmode="url"]')).not.toBeNull()
     expect(container.querySelector('input[type="password"]')).not.toBeNull()
+  })
+
+  it('puts hosted sign-in above the browser draft action and routes the public example to an isolated entry', async () => {
+    desktopHost.available = false
+    session.serviceUrl = 'https://sync.draftmatter.test'
+    await act(async () => root.render(<Home {...props} />))
+    const actions = container.querySelector('.home-app-heading-actions')!
+    expect(actions.querySelector('button')?.textContent).toBe('Sign in')
+    expect([...container.querySelectorAll('button')].filter((button) => button.textContent === 'Sign in')).toHaveLength(1)
+    await act(async () => actions.querySelector<HTMLButtonElement>('button')!.click())
+    expect(session.signIn).toHaveBeenCalledTimes(1)
+    expect(container.querySelector<HTMLAnchorElement>('.home-browser-actions a')?.getAttribute('href')).toBe('/demo')
+    expect(container.textContent).toContain('The free alpha is by invitation.')
+    expect(container.textContent).toContain('Open the link your colleague sent')
+    expect(container.textContent).toContain('Export a copy to keep an independent backup')
+    expect(container.textContent).toContain('cloning Git repositories require the desktop app')
+    expect(container.textContent).toContain('sign in again to reconnect to your shared papers')
+  })
+
+  it('distinguishes an empty filtered catalogue from having no papers and lets the user clear filters', async () => {
+    session.profile = { displayName: 'Ada Researcher', email: 'ada@example.test', userId: 'ada' }
+    await act(async () => root.render(<Home {...props} />))
+    expect(container.querySelector('[aria-label="Signed-in account"]')?.textContent).toBe('Signed in as ada@example.test.')
+    const roles = [...container.querySelectorAll<HTMLSelectElement>('select')].find((element) => element.closest('label')?.textContent?.startsWith('Role'))!
+    await act(async () => {
+      roles.value = 'viewer'
+      roles.dispatchEvent(new Event('change', { bubbles: true }))
+    })
+    expect(container.querySelector('.home-empty h2')?.textContent).toBe('No matching drafts')
+    expect(container.querySelector('.home-empty')?.textContent).not.toContain('Create your first draft')
+    const clear = container.querySelector<HTMLButtonElement>('.home-empty button')!
+    expect(clear.textContent).toBe('Clear filters')
+    await act(async () => clear.click())
+    expect(container.querySelector('.home-empty h2')?.textContent).toBe('No drafts here yet')
+    expect(container.querySelector('.home-empty')?.textContent).toContain('use Collaborate in the editor')
   })
 })

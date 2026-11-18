@@ -207,10 +207,10 @@ function notification(row: NotificationRow): WorkspaceNotification {
   }
 }
 
-async function transaction<T>(pool: Pick<Pool, 'connect'>, run: (client: PoolClient) => Promise<T>) {
+async function transaction<T>(pool: Pick<Pool, 'connect'>, run: (client: PoolClient) => Promise<T>, readCommitted = false) {
   const client = await pool.connect()
   try {
-    await client.query('BEGIN')
+    await client.query(readCommitted ? 'BEGIN ISOLATION LEVEL READ COMMITTED' : 'BEGIN')
     const result = await run(client)
     await client.query('COMMIT')
     return result
@@ -253,22 +253,46 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
   private async upsertIdentity(identity: VerifiedCollaborationIdentity) {
     safeId(identity.userId, 'User ID')
     safeId(identity.sessionId, 'Session ID')
-    await this.pool.query(
-      `INSERT INTO draftmatter_users(id, email, display_name, identity_issuer, identity_subject)
+    const statement = `INSERT INTO draftmatter_users(id, email, display_name, identity_issuer, identity_subject)
        VALUES ($1, $2, $3, $4, $5)
        ON CONFLICT (id) DO UPDATE SET
          email = COALESCE(EXCLUDED.email, draftmatter_users.email),
          display_name = COALESCE(EXCLUDED.display_name, draftmatter_users.display_name),
          identity_issuer = COALESCE(EXCLUDED.identity_issuer, draftmatter_users.identity_issuer),
-         identity_subject = COALESCE(EXCLUDED.identity_subject, draftmatter_users.identity_subject)`,
-      [identity.userId, identity.email ?? null, identity.displayName ?? null, identity.issuer ?? null, identity.subject ?? null],
-    )
+         identity_subject = COALESCE(EXCLUDED.identity_subject, draftmatter_users.identity_subject)`
+    const values = [identity.userId, identity.email ?? null, identity.displayName ?? null, identity.issuer ?? null, identity.subject ?? null]
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        await this.pool.query(statement, values)
+        return
+      } catch (error) {
+        // Concurrent first-login requests can race on the secondary provider
+        // identity index before ON CONFLICT(id) resolves the primary-key race.
+        // Retry only after the committed identity is bound to this exact user ID;
+        // never merge two different local accounts on an email or provider claim.
+        const failure = error as { code?: string; constraint?: string }
+        // A provider may default each implicit statement to REPEATABLE READ.
+        // Retrying this aborted, idempotent statement starts a fresh snapshot.
+        if (failure.code === '40001' && attempt < 2) continue
+        if (failure.code !== '23505' || failure.constraint !== 'draftmatter_identity_subject' || !identity.issuer || !identity.subject) throw error
+        const existing = await this.pool.query<{ id: string }>(
+          'SELECT id FROM draftmatter_users WHERE identity_issuer = $1 AND identity_subject = $2',
+          [identity.issuer, identity.subject],
+        )
+        if (existing.rows.length !== 1 || existing.rows[0].id !== identity.userId) {
+          throw new WorkspaceAccessError('unauthenticated', 'The collaboration identity could not be established.')
+        }
+        if (attempt >= 2) throw error
+      }
+    }
   }
 
   private async consumeRateLimit(identity: VerifiedCollaborationIdentity, category: 'read' | 'write' | 'invite' | 'files') {
     const rule = this.rateLimits[category]
     const now = this.clock()
-    const principal = `${identity.userId}:${identity.sessionId}`
+    // Login/refresh/session rotation cannot mint a new request budget. All
+    // devices and concurrent sessions share the authenticated account's limit.
+    const principal = identity.userId
     await transaction(this.pool, async (client) => {
       await client.query('SELECT id FROM draftmatter_users WHERE id = $1 FOR UPDATE', [identity.userId])
       await client.query(
@@ -288,7 +312,7 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
         'INSERT INTO draftmatter_rate_limit_events(principal_key, category, occurred_at) VALUES ($1, $2, $3)',
         [principal, category, iso(now)],
       )
-    })
+    }, true)
   }
 
   private async authenticate(token: string, category: 'read' | 'write' | 'invite' | 'files') {
@@ -925,7 +949,7 @@ export class PostgresWorkspaceService implements ProjectAuthorizationService {
       )
       await this.audit(client, current.workspace_id, identity.userId, 'invitation.accepted', current.id, { role: current.role })
       return { workspaceId: current.workspace_id, userId: identity.userId, role: current.role, joinedAt }
-    })
+    }, true)
   }
 
   async revokeInvitation(token: string, workspaceId: string, invitationId: string) {

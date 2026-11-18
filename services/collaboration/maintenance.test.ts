@@ -10,6 +10,7 @@ import { PostgresWorkspaceService } from './postgresWorkspaceService'
 
 function memoryPool() {
   const memory = newDb({ autoCreateForeignKeyIndices: true, noAstCoverageCheck: true })
+  memory.public.registerFunction({ name: 'pg_advisory_xact_lock', args: [DataType.integer, DataType.integer], returns: DataType.integer, implementation: () => 1 })
   memory.public.registerOperator({
     operator: '~',
     left: DataType.text,
@@ -74,6 +75,9 @@ describe('managed collaboration maintenance', () => {
     await maintenance.runOnce()
     expect(await persistence.listBackups({ workspaceId: 'forest', projectId: 'paper' })).toHaveLength(1)
     expect(maintenance.snapshot()).toMatchObject({ backupSuccesses: 1, backupFailures: 0, verificationFailures: 0 })
+    await maintenance.runBackupCycle()
+    expect(await persistence.listBackups({ workspaceId: 'forest', projectId: 'paper' })).toHaveLength(1)
+    expect(maintenance.snapshot()).toMatchObject({ backupSuccesses: 2, backupFailures: 0, verificationFailures: 0 })
     expect(delivered).toEqual([expect.objectContaining({
       to: 'reviewer@example.org',
       kind: 'review-requested',

@@ -129,6 +129,27 @@ button {
   color: var(--home-muted) !important;
 }
 
+.website-example-note {
+  max-width: 560px;
+  margin: 14px 0 0;
+  color: var(--home-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.website a:focus-visible {
+  outline: 3px solid rgba(63, 113, 94, .3);
+  outline-offset: 4px;
+}
+
+.website-existing-account {
+  display: block;
+  margin-top: 16px;
+  color: var(--home-sage-dark);
+  font-size: 13px;
+  text-underline-offset: 3px;
+}
+
 .website-ai-notes {
   min-width: 230px;
   display: grid;
@@ -291,7 +312,7 @@ button {
 }
 
 @media (max-width: 900px) {
-  .website-nav > a:not(.website-nav-cta) {
+  .website-nav > a:not(.website-nav-cta):not(.website-app-link) {
     display: none;
   }
 
@@ -317,4 +338,13 @@ button {
   .website-footer nav {
     margin-left: 0;
   }
+}
+
+@media (max-width: 520px) {
+  .website .home-welcome-header { padding-inline: 12px; }
+  .website .home-welcome-header .home-brand { gap: 6px; font-size: 18px; }
+  .website .home-welcome-header .home-brand img { width: 25px; height: 25px; }
+  .website-nav { gap: 8px; }
+  .website-nav > a { font-size: 11px; }
+  .website-nav .website-nav-cta { padding: 8px; }
 }

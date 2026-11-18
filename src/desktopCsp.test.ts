@@ -12,6 +12,9 @@ describe('desktop content security policy', () => {
     expect(connect).not.toContain('http:')
     expect(connect).not.toContain('ws:')
     expect(connect).not.toContain('*')
+    expect(connect.join(' ')).not.toContain('[::1]') // Browsers reject IPv6 literal CSP host sources.
+    // CSP host-source syntax does not accept bracketed IPv6 address sources.
+    expect(connect.some((source) => source.includes('[::1]'))).toBe(false)
     expect(csp.split(';').find((part) => part.trim().startsWith('script-src'))).not.toContain('https:')
   })
   it('allows the CSL WebAssembly formatter without enabling general eval', () => {
@@ -22,5 +25,15 @@ describe('desktop content security policy', () => {
     expect(scriptDirective).toContain("'self'")
     expect(scriptDirective).toContain("'wasm-unsafe-eval'")
     expect(scriptDirective).not.toMatch(/(?:^|\s)'unsafe-eval'(?:\s|$)/)
+  })
+
+  it('blocks active plugins, injected base URLs and native form navigation', () => {
+    const config = JSON.parse(readFileSync(new URL('../src-tauri/tauri.conf.json', import.meta.url), 'utf8'))
+    const directives = new Map(String(config.app.security.csp).split(';').map((entry) => {
+      const [name, ...sources] = entry.trim().split(/\s+/)
+      return [name, sources]
+    }))
+    for (const name of ['object-src', 'base-uri', 'form-action']) expect(directives.get(name)).toEqual(["'none'"])
+    expect(directives.get('script-src')).not.toContain("'unsafe-inline'")
   })
 })

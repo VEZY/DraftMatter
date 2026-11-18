@@ -1,0 +1,3 @@
+# Install root:root 0440 as /etc/sudoers.d/draftmatter-backup-export.
+# The empty argument string forbids additional command arguments.
+draftmatter-backup ALL=(root) NOPASSWD: /usr/local/lib/draftmatter/backup-export ""

@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { NewDraftWizard } from './NewDraftWizard'
 import { CollaborationSessionProvider, useCollaborationSession, type CollaborationProjectLaunch } from './collaboration/sessionContext'
 
+;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
+
 function change(field: HTMLInputElement, value: string) {
   const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!
   setter.call(field, value)
@@ -64,8 +66,7 @@ describe('New draft wizard', () => {
         started.current = true
         void session.useAccessToken('https://collab.example.test', 'short-lived-token')
       }, [session])
-      if (!session.profile) return <span>Signing in</span>
-      return <NewDraftWizard open onClose={vi.fn()} onCollaborativeCreated={onCreated} onLocalCreated={vi.fn()} />
+      return <NewDraftWizard open={Boolean(session.profile)} onClose={vi.fn()} onCollaborativeCreated={onCreated} onLocalCreated={vi.fn()} />
     }
 
     const container = document.createElement('div')
@@ -78,6 +79,9 @@ describe('New draft wizard', () => {
     await act(async () => button(container, 'Continue').click())
     expect(container.textContent).toContain('Standard research article')
     await act(async () => button(container, 'Continue').click())
+    expect(input(container, 'Lead author').value).toBe('Ada Researcher')
+    expect(input(container, 'Create a new workspace').checked).toBe(false)
+    expect([...container.querySelectorAll<HTMLSelectElement>('select')].find((select) => select.closest('label')?.querySelector(':scope > span')?.textContent === 'Workspace')?.value).toBe('forest')
     await act(async () => change(input(container, 'Working title'), 'Canopy recovery'))
     await act(async () => button(container, 'Create draft').click())
 

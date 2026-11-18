@@ -37,6 +37,9 @@ describe('immutable server release publication boundary', () => {
   })
 
   it('refuses private runtime assets and symlinks even when accidentally committed under a deployment directory', () => {
+    const publicHelpers = ['scripts/server-backup.sh', 'deploy/offhost-mac/pull.mjs', 'deploy/offhost-mac/install.mjs', 'docs/offhost-mac-backups.md']
+    expect(serverDeploymentPaths(publicHelpers.map((path) => ({ mode: '100644', path })))).toHaveLength(publicHelpers.length)
+    expect(serverDeploymentPaths([{ mode: '100644', path: 'deploy/offhost-mac/config.json' }])).toEqual([])
     expect(serverDeploymentPaths([{ mode: '100644', path: 'papers/private-manuscript.md' }, { mode: '100644', path: 'deploy/single-host/compose.yaml' }])).toEqual([{ mode: '100644', path: 'deploy/single-host/compose.yaml' }])
     for (const path of ['deploy/single-host/runtime.env', 'deploy/single-host/tls/ca.key', 'deploy/single-host/secrets/password', 'deploy/single-host/backup.key']) {
       expect(() => serverDeploymentPaths([{ mode: '100644', path }])).toThrow('Private')

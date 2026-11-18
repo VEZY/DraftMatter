@@ -36,6 +36,9 @@ describe('application routes', () => {
   })
 
   it('recognizes workspace-filtered Home, invitations, learning, and the complete example', () => {
+    expect(parseApplicationRoute(new URL('/demo', 'https://draftmatter.example'))).toEqual({ destination: 'demo' })
+    expect(parseApplicationRoute(new URL('/demo/', 'https://draftmatter.example'))).toEqual({ destination: 'demo' })
+    expect(applicationRoutePath({ destination: 'demo' })).toBe('/demo')
     expect(parseApplicationRoute(new URL('/workspace/forest', 'https://draftmatter.example'))).toEqual({ destination: 'home', workspaceId: 'forest' })
     expect(parseApplicationRoute(new URL('/invite', 'https://draftmatter.example'))).toEqual({ destination: 'invitation' })
     expect(parseApplicationRoute(new URL('/?example=complete', 'https://draftmatter.example'))).toEqual({ destination: 'example' })

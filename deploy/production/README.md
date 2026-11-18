@@ -75,6 +75,13 @@ the relevant web origins to both the IdP's CORS policy and `DM_ALLOWED_ORIGINS`:
 Qualify a complete login on an installed desktop build; a browser login alone
 does not prove OS callback registration.
 
+Set `AUTH_ORIGIN` to the HTTPS origin of `DM_OIDC_ISSUER`, without its realm
+path or a trailing slash. The edge receives it as `DM_PUBLIC_AUTH_ORIGIN` and
+allows sign-out form submissions only to this exact identity origin. Startup
+rejects malformed values; the deployment preflight checks that it matches the
+configured issuer. The single-host initializer already records `AUTH_ORIGIN`.
+The isolated public example continues to disallow all form submissions.
+
 ## Configuration and build
 
 The free closed-alpha legal pages are public application routes under `/legal/`.
@@ -83,10 +90,14 @@ hosting provider’s legal identity/address/contact, a short English statement o
 the hosting country, and any additional data-processing providers. Keep server
 architecture, addresses, ports and component names in operator documentation,
 outside these public fields. Only claim hosting in France by a French company
-after confirming both facts; a website on another host must identify that host. The preflight and browser image build
-refuse missing or placeholder hosting information. These fields are compiled
-into the browser bundle, so they must never contain credentials. Rebuild after
-changing them. Local builds show preparation wording until hosting is known.
+after confirming both facts; a website on another host must identify that host.
+The preflight and browser image startup refuse missing or placeholder hosting
+information. The image writes only allowlisted public values into
+`/draftmatter-public-config.json`, served with `Cache-Control: no-store`.
+These fields must never contain credentials. Recreate `edge` after changing its
+runtime environment; an application rebuild is unnecessary. Local and desktop
+builds retain their build-time configuration and preparation wording until
+hosting is known.
 See [alpha publication and OVH preparation](../../docs/alpha-launch.md) for the
 website configuration, legal scope and the next provisioning steps.
 
@@ -131,10 +142,13 @@ that would override the checked file in Compose. Do not publish the output of
 secrets.
 
 The browser service URL is injected through
-`VITE_DRAFTMATTER_COLLABORATION_URL=https://<COLLABORATION_HOST>` **during the image
-build**. Changing that hostname requires rebuilding `edge`; changing only its
-runtime environment does not update a compiled browser bundle. The edge image
-serves the app at `/`.
+`DM_PUBLIC_COLLABORATION_URL=https://<COLLABORATION_HOST>` at container startup,
+alongside the five public legal fields. The browser validates that public
+configuration before importing the application. Missing or malformed
+configuration stops startup instead of falling back to an unintended server.
+The same reviewed image can therefore serve the selected deployment without
+baking credentials or deployment-specific URLs into its JavaScript. The edge
+image serves the app at `/`.
 
 The service image is the root `Dockerfile`. Both images run without root and
 with read-only root filesystems, a writable temporary directory, dropped Linux
@@ -153,12 +167,18 @@ docker compose --env-file "$DM_PRODUCTION_ENV" -f deploy/production/compose.yaml
 npm run deploy:check -- "$DM_PRODUCTION_ENV" --probe
 ```
 
-The optional probe performs only unauthenticated GET requests: app HTML, service
+The optional probe performs only unauthenticated GET requests: app/example HTML
+and their required browser security headers, service
 liveness/readiness, exact-origin CORS and published identity configuration,
 rejection of an unauthenticated API request, private metrics, and OIDC discovery
 and JWKS. It does not perform a login or certify access-token audience, S3 writes,
 WebSocket connectivity, backup restoration, or capacity. A redirect is treated
 as a configuration failure. Failed probes do not print remote response bodies.
+The public example at `/demo` has a separate content security policy: network
+requests stay on the application origin, external frames and form submissions
+are disabled, and no user account is used. Its stricter policy is checked
+independently from the full application's policy. This route is an isolated
+browser example, not a shared anonymous workspace or a server computation slot.
 
 Before opening the private pilot, record these results on disposable projects:
 

@@ -34,7 +34,7 @@ function hostname(environment, name, localRehearsal = false) {
 /** Validate the same service configuration used at startup, without opening any connections. */
 export function validateProductionEnvironment(environment, { localRehearsal = false } = {}) {
   for (const [name, value] of Object.entries(environment)) {
-    if (!/^(?:APP_HOST|COLLABORATION_HOST|ACME_EMAIL|RELEASE_ID|DM_|NODE_ENV)/.test(name) || !value) continue
+    if (!/^(?:APP_HOST|COLLABORATION_HOST|AUTH_ORIGIN|ACME_EMAIL|RELEASE_ID|DM_|NODE_ENV)/.test(name) || !value) continue
     if (/REPLACE_|change[-_]?(?:me|this)|example\.(?:com|org|net|test|invalid)/i.test(value)) {
       throw new ProductionCheckError(`${name} still contains an example or placeholder.`)
     }
@@ -53,6 +53,8 @@ export function validateProductionEnvironment(environment, { localRehearsal = fa
   if (environment.NODE_ENV && environment.NODE_ENV !== 'production') throw new ProductionCheckError('NODE_ENV must be production.')
   for (const name of ['DM_OBJECT_REGION', 'DM_OIDC_CLIENT_ID']) requireValue(environment, name)
   const config = loadCollaborationServiceConfig({ ...environment, NODE_ENV: 'production' })
+  const authOrigin = new URL(config.oidc.issuer).origin
+  if (requireValue(environment, 'AUTH_ORIGIN') !== authOrigin) throw new ProductionCheckError('AUTH_ORIGIN must exactly match the HTTPS OIDC issuer origin, without a path.')
   const port = localRehearsal ? ':8443' : ''
   const appOrigin = `https://${appHost}${port}`
   if (!config.allowedOrigins.includes(appOrigin)) throw new ProductionCheckError('DM_ALLOWED_ORIGINS must include the HTTPS APP_HOST origin.')
@@ -73,6 +75,7 @@ export function validateProductionEnvironment(environment, { localRehearsal = fa
   // Return only public settings. Never print the service config or environment.
   return {
     appOrigin,
+    authOrigin,
     serviceOrigin: `https://${serviceHost}${port}`,
     issuer: config.oidc.issuer,
     jwksUri: config.oidc.jwksUri,
@@ -80,6 +83,46 @@ export function validateProductionEnvironment(environment, { localRehearsal = fa
     allowedOrigins: config.allowedOrigins,
     releaseId,
     emailDelivery: Boolean(config.notificationDelivery),
+  }
+}
+
+export function validateBrowserSecurityHeaders(response, { demo = false, authOrigin } = {}) {
+  for (const [name, expected] of [
+    ['x-content-type-options', 'nosniff'], ['x-frame-options', 'DENY'], ['referrer-policy', 'no-referrer'],
+  ]) {
+    if (response.headers.get(name)?.toLowerCase() !== expected.toLowerCase()) {
+      throw new ProductionCheckError(`Missing or unsafe application security header: ${name}.`)
+    }
+  }
+  const maxAge = response.headers.get('strict-transport-security')?.match(/(?:^|;)\s*max-age=(\d+)\s*(?:;|$)/i)
+  if (!maxAge || Number(maxAge[1]) < 31536000) throw new ProductionCheckError('Application HTTPS transport policy is missing or too short.')
+  const policy = new Map()
+  for (const entry of (response.headers.get('content-security-policy') ?? '').split(';')) {
+    const [name, ...sources] = entry.trim().split(/\s+/)
+    if (!name) continue
+    if (policy.has(name)) throw new ProductionCheckError('Application content security policy contains duplicate directives.')
+    policy.set(name, sources)
+  }
+  const exactly = (name, expected) => {
+    const actual = policy.get(name)
+    if (!actual || actual.length !== expected.length || expected.some((source) => !actual.includes(source))) {
+      throw new ProductionCheckError(`Missing or unsafe application content security policy: ${name}.`)
+    }
+  }
+  exactly('default-src', ["'self'"])
+  exactly('script-src', ["'self'", "'wasm-unsafe-eval'"])
+  for (const name of ['object-src', 'base-uri', 'frame-ancestors']) exactly(name, ["'none'"])
+  if (!demo && !authOrigin) throw new ProductionCheckError('The public identity origin is required to verify the application form policy.')
+  exactly('form-action', demo ? ["'none'"] : ["'self'", authOrigin])
+  if (demo) {
+    exactly('connect-src', ["'self'"])
+    exactly('frame-src', ["'none'"])
+  }
+  const permissions = response.headers.get('permissions-policy') ?? ''
+  for (const feature of ['camera', 'microphone', 'geolocation', 'payment', 'usb']) {
+    if (!new RegExp(`(?:^|,)\\s*${feature}=\\(\\)\\s*(?:,|$)`).test(permissions)) {
+      throw new ProductionCheckError(`Application browser permission is not disabled: ${feature}.`)
+    }
   }
 }
 
@@ -105,6 +148,12 @@ export async function probeProductionDeployment(settings, request = fetch) {
   if (!application.headers.get('content-type')?.includes('text/html') || !(await application.text()).includes('id="root"')) {
     throw new ProductionCheckError('APP_HOST does not serve the DraftMatter application HTML.')
   }
+  validateBrowserSecurityHeaders(application, { authOrigin: settings.authOrigin })
+  const demo = await get(`${settings.appOrigin}/demo`, 200)
+  if (!demo.headers.get('content-type')?.includes('text/html') || !(await demo.text()).includes('id="root"')) {
+    throw new ProductionCheckError('The public example does not serve the DraftMatter application HTML.')
+  }
+  validateBrowserSecurityHeaders(demo, { demo: true })
   for (const [path, status] of [['/health/live', 'live'], ['/health/ready', 'ready']]) {
     const response = await get(`${settings.serviceOrigin}${path}`, 200)
     if ((await response.json()).status !== status) throw new ProductionCheckError(`Unexpected service health response at ${path}.`)

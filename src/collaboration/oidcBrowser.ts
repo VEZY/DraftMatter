@@ -11,6 +11,7 @@ interface OidcDiscovery {
   issuer: string
   authorization_endpoint: string
   token_endpoint: string
+  end_session_endpoint?: string
   code_challenge_methods_supported?: string[]
 }
 
@@ -24,6 +25,7 @@ interface OidcTransaction {
   redirectUri: string
   createdAt: number
   issuer?: string
+  logoutEndpoint?: string
 }
 
 export interface OidcAuthorizationRequest {
@@ -37,11 +39,15 @@ export interface OidcLoginResult {
   expiresAt?: number
   serviceUrl: string
   cleanUrl: string
+  endSession?: () => OidcLogoutRequest | undefined
 }
+
+export interface OidcLogoutRequest { endpoint: string; clientId: string; idToken?: string }
 
 interface OidcTokenPayload {
   access_token?: string
   refresh_token?: string
+  id_token?: string
   expires_in?: number
   error?: string
   error_description?: string
@@ -49,6 +55,7 @@ interface OidcTokenPayload {
 
 class OidcTokenSession {
   private refreshInFlight?: Promise<string>
+  private closed = false
 
   constructor(
     private accessToken: string,
@@ -58,9 +65,12 @@ class OidcTokenSession {
     private readonly clientId: string,
     private readonly request: typeof fetch,
     private readonly clock: () => number,
+    private readonly logoutEndpoint?: string,
+    private idToken?: string,
   ) {}
 
   async getAccessToken() {
+    if (this.closed) throw new Error('The collaboration session has been signed out.')
     if (!this.expiresAt || this.expiresAt > this.clock() + 30_000) return this.accessToken
     if (!this.refreshToken) throw new Error('The collaboration session expired. Sign in again to continue.')
     if (!this.refreshInFlight) this.refreshInFlight = this.refresh().finally(() => { this.refreshInFlight = undefined })
@@ -77,6 +87,7 @@ class OidcTokenSession {
       body: form.toString(),
     })
     const payload = await response.json() as OidcTokenPayload
+    if (this.closed) throw new Error('The collaboration session has been signed out.')
     if (!response.ok || !payload.access_token || payload.access_token.length > 16_384) {
       throw new Error(payload.error_description || payload.error || 'The collaboration session could not be refreshed. Sign in again.')
     }
@@ -85,6 +96,31 @@ class OidcTokenSession {
     this.expiresAt = typeof payload.expires_in === 'number' && payload.expires_in > 0 ? this.clock() + payload.expires_in * 1_000 : undefined
     return this.accessToken
   }
+
+  endSession(): OidcLogoutRequest | undefined {
+    if (this.closed) return undefined
+    this.closed = true
+    const logout = this.logoutEndpoint ? { endpoint: this.logoutEndpoint, clientId: this.clientId, ...(this.idToken ? { idToken: this.idToken } : {}) } : undefined
+    this.accessToken = ''
+    this.refreshToken = undefined
+    this.idToken = undefined
+    return logout
+  }
+}
+
+/** POST the identity hint: never put account tokens in history, URLs or storage. */
+export function submitOidcLogout(logout: OidcLogoutRequest, target: Document = document) {
+  const form = target.createElement('form')
+  form.method = 'POST'
+  form.action = secureEndpoint(logout.endpoint, 'OIDC logout endpoint')
+  form.hidden = true
+  for (const [name, value] of Object.entries({ client_id: logout.clientId, ...(logout.idToken ? { id_token_hint: logout.idToken } : {}) })) {
+    const input = target.createElement('input')
+    input.type = 'hidden'; input.name = name; input.value = value
+    form.append(input)
+  }
+  target.body.append(form)
+  try { form.submit() } finally { form.remove() }
 }
 
 function base64Url(bytes: Uint8Array) {
@@ -126,7 +162,7 @@ function callbackUri(locationUrl: string) {
   return url.toString()
 }
 
-function cleanCallbackUrl(locationUrl: string) {
+export function cleanOidcCallbackUrl(locationUrl: string) {
   const url = new URL(locationUrl)
   for (const key of ['code', 'state', 'session_state', 'iss', 'error', 'error_description']) url.searchParams.delete(key)
   return url.toString()
@@ -167,6 +203,7 @@ export async function prepareOidcAuthorization(
   }
   const authorizationEndpoint = secureEndpoint(discovery.authorization_endpoint, 'OIDC authorization endpoint')
   const tokenEndpoint = secureEndpoint(discovery.token_endpoint, 'OIDC token endpoint')
+  const logoutEndpoint = discovery.end_session_endpoint ? secureEndpoint(discovery.end_session_endpoint, 'OIDC logout endpoint') : undefined
   const verifierBytes = webCrypto.getRandomValues(new Uint8Array(48))
   const stateBytes = webCrypto.getRandomValues(new Uint8Array(32))
   const verifier = base64Url(verifierBytes)
@@ -183,6 +220,7 @@ export async function prepareOidcAuthorization(
     redirectUri,
     createdAt: clock(),
     issuer,
+    ...(logoutEndpoint ? { logoutEndpoint } : {}),
   }
   storage.setItem(TRANSACTION_KEY, JSON.stringify(transaction))
 
@@ -202,10 +240,15 @@ export async function completeOidcAuthorization(
   storage: Pick<Storage, 'getItem' | 'removeItem'>,
   request: typeof fetch = fetch,
   clock: () => number = Date.now,
+  expectedServiceUrl?: string,
 ): Promise<OidcLoginResult | null> {
   if (!hasOidcCallback(locationUrl)) return null
   const callback = new URL(locationUrl)
   const transaction = readTransaction(storage)
+  if (transaction && expectedServiceUrl && normalizeCollaborationServiceUrl(transaction.serviceUrl).apiUrl !== normalizeCollaborationServiceUrl(expectedServiceUrl).apiUrl) {
+    storage.removeItem(TRANSACTION_KEY)
+    throw new Error('The identity sign-in belongs to a different collaboration server.')
+  }
   const error = callback.searchParams.get('error')
   const errorDescription = callback.searchParams.get('error_description')
   if (error) {
@@ -252,12 +295,13 @@ export async function completeOidcAuthorization(
   }
   storage.removeItem(TRANSACTION_KEY)
   const expiresAt = typeof payload.expires_in === 'number' && payload.expires_in > 0 ? clock() + payload.expires_in * 1_000 : undefined
-  const tokenSession = new OidcTokenSession(payload.access_token, payload.refresh_token, expiresAt, transaction.tokenEndpoint, transaction.clientId, request, clock)
+  const tokenSession = new OidcTokenSession(payload.access_token, payload.refresh_token, expiresAt, transaction.tokenEndpoint, transaction.clientId, request, clock, transaction.logoutEndpoint, typeof payload.id_token === 'string' && payload.id_token.length <= 32_768 ? payload.id_token : undefined)
   return {
     accessToken: payload.access_token,
     token: () => tokenSession.getAccessToken(),
     ...(expiresAt ? { expiresAt } : {}),
     serviceUrl: transaction.serviceUrl,
-    cleanUrl: cleanCallbackUrl(locationUrl),
+    cleanUrl: cleanOidcCallbackUrl(locationUrl),
+    endSession: () => tokenSession.endSession(),
   }
 }

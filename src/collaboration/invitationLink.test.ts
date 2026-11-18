@@ -24,14 +24,14 @@ describe('browser collaboration invitation links', () => {
       'one-use-secret',
     )!
     const url = new URL(link)
-    expect(url.origin + url.pathname).toBe('https://app.example.test/writer')
+    expect(url.origin + url.pathname).toBe('https://app.example.test/invite')
     expect(url.search).toBe('')
     expect(url.hash).toContain('dm-invite=one-use-secret')
     expect(url.toString().split('#')[0]).not.toContain('one-use-secret')
     expect(readCollaborationInvitationLink(link)).toEqual({
       token: 'one-use-secret',
       serviceUrl: 'https://collab.example.test',
-      cleanUrl: 'https://app.example.test/writer',
+      cleanUrl: 'https://app.example.test/invite',
     })
   })
 
@@ -41,7 +41,8 @@ describe('browser collaboration invitation links', () => {
     expect(createCollaborationInvitationLink('https://app.example.test/', 'http://collab.example.test', 'secret')).toBeNull()
     expect(readCollaborationInvitationLink('https://app.example.test/#dm-invite=&dm-service=https%3A%2F%2Fcollab.example.test')).toBeNull()
     expect(readCollaborationInvitationLink('http://app.example.test/#dm-invite=secret&dm-service=https%3A%2F%2Fcollab.example.test')).toBeNull()
-    expect(createCollaborationInvitationLink('http://127.0.0.1:4173/', 'http://localhost:1234', 'local-secret')).toContain('#dm-invite=local-secret')
+    expect(createCollaborationInvitationLink('http://127.0.0.1:4173/', 'http://localhost:1234', 'local-secret')).toContain('/invite#dm-invite=local-secret')
+    expect(createCollaborationInvitationLink('https://user:password@app.example.test/', 'https://collab.example.test', 'secret')).toBeNull()
   })
 
   it('retains the secret only for one bounded OIDC round trip', () => {

@@ -43,6 +43,7 @@ export function rehearsalSettings(environment, file) {
 
 // Only these fixed identifiers can cross the private child-output boundary.
 const smokeCheckNames = new Set([
+  'application-sign-out', 'application-logout-cookie-cleared',
   'public-checks', 'public-legal-mentions-legales', 'public-legal-confidentialite', 'public-legal-conditions-utilisation',
   'browser-launch', 'collaboration-bundle', 'application-drafts', 'application-home', 'application-open-login', 'application-username', 'application-password',
   'application-submit', 'application-session', 'application-account', 'pkce-load', 'pkce-username', 'pkce-password',

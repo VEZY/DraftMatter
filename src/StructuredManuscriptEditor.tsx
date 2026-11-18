@@ -4325,6 +4325,17 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         }),
       ]),
       handleDOMEvents: {
+        focus: (editorView) => {
+          // Keyboard navigation can focus the contenteditable while the DOM
+          // selection is empty. Restore the model selection after the native
+          // focus action so there is a visible caret without framing the paper.
+          requestAnimationFrame(() => {
+            if (editorView.isDestroyed || readOnlyRef.current || !editorView.hasFocus()) return
+            const selection = editorView.dom.ownerDocument.getSelection()
+            if (!selection?.focusNode || !editorView.dom.contains(selection.focusNode)) editorView.focus()
+          })
+          return false
+        },
         click: (_editorView, event) => {
           if (event.target instanceof Element && event.target.closest('.structured-link-edit')) return true
           const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-review-anchor]') : null
