@@ -19,6 +19,7 @@ export interface CollaborationServiceConfig {
     allowInsecureHttp: boolean
     requiredAlphaRole?: string
     registrationEnabled: boolean
+    orcidLinkingEnabled?: boolean
   }
   identityAdmission?: { token: string; registrationEnabled: boolean }
   webhookSecret: Uint8Array
@@ -198,6 +199,7 @@ export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = 
     oidc: {
       issuer, clientId, audience: audiences.length === 1 ? audiences[0] : audiences, jwksUri, allowInsecureHttp: allowInsecureOidc,
       ...(requiredAlphaRole ? { requiredAlphaRole } : {}), registrationEnabled,
+      orcidLinkingEnabled: bool(environment, 'DM_ORCID_LINKING_ENABLED', false),
     },
     ...(identityAdmissionToken ? { identityAdmission: { token: identityAdmissionToken, registrationEnabled } } : {}),
     webhookSecret: secret(required(environment, 'DM_WEBHOOK_SECRET')),

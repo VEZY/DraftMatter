@@ -72,7 +72,7 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
     dashboard: persistence.dashboard,
     connections: () => server?.hocuspocus.getConnectionsCount() ?? 0,
     allowedOrigins: config.allowedOrigins,
-    publicConfig: { oidcIssuer: config.oidc.issuer, oidcClientId: config.oidc.clientId, registrationEnabled: config.oidc.registrationEnabled },
+    publicConfig: { oidcIssuer: config.oidc.issuer, oidcClientId: config.oidc.clientId, registrationEnabled: config.oidc.registrationEnabled, orcidLinkingEnabled: config.oidc.orcidLinkingEnabled },
     ...(config.identityAdmission ? { identityAdmission: new IdentityAdmission(config.identityAdmission) } : {}),
     identitySecurity: identity.alphaSecurityPolicy,
     maintenanceMetrics: () => maintenance.snapshot(),

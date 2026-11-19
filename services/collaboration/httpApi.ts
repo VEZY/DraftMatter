@@ -29,7 +29,7 @@ export interface CollaborationHttpApiOptions {
   dashboard: CollaborationOperationsDashboard
   connections: () => number
   allowedOrigins: string[]
-  publicConfig: { oidcIssuer: string; oidcClientId: string; registrationEnabled?: boolean }
+  publicConfig: { oidcIssuer: string; oidcClientId: string; registrationEnabled?: boolean; orcidLinkingEnabled?: boolean }
   identityAdmission?: IdentityAdmission
   identitySecurity?: { requiredAlphaRole: string | null; emailVerificationRequired: boolean }
   maxBodyBytes?: number
@@ -293,7 +293,11 @@ export function createCollaborationHttpApi(options: CollaborationHttpApiOptions)
       }
       if (request.method === 'GET' && url.pathname === '/health/live') return json(200, { status: 'live' }, headers)
       if (request.method === 'GET' && url.pathname === '/config') return json(200, {
-        oidc: { issuer: options.publicConfig.oidcIssuer, clientId: options.publicConfig.oidcClientId, registrationEnabled: options.publicConfig.registrationEnabled === true },
+        oidc: {
+          issuer: options.publicConfig.oidcIssuer, clientId: options.publicConfig.oidcClientId,
+          registrationEnabled: options.publicConfig.registrationEnabled === true,
+          ...(options.publicConfig.orcidLinkingEnabled === true ? { orcidLinkingEnabled: true } : {}),
+        },
       }, headers)
       if (request.method === 'GET' && url.pathname === '/health/ready') {
         await options.readiness()

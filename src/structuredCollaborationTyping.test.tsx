@@ -2,6 +2,7 @@
 import { act, useEffect, useState } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
+import { parseReviewMarkup } from './reviewMarkup'
 import { StructuredManuscriptEditor } from './StructuredManuscriptEditor'
 import { CollaborativeDocument } from './sharedEditor/collaboration'
 import { projectCollaborationPortableSource } from './sharedEditor/collaborationCheckpoint'
@@ -58,4 +59,92 @@ it('publishes actual rendered text input to the portable Y.Text and the remote s
   expect(sources.left).toContain('Browser round trip verified.')
   expect(sources.right).toContain('Browser round trip verified.')
   expect(container.querySelector('[aria-label="Remote rendered manuscript"]')?.textContent).toContain('Browser round trip verified.')
+})
+
+it('keeps proposed wording out of both accepted manuscripts and lets its author revise the same suggestion', async () => {
+  const binding = (doc: CollaborativeDocument): CollaborativeEditorBinding => ({
+    document: doc.doc, awareness: doc.awareness,
+    publishPortableSource: (source) => { doc.reconcilePortableSource(source); return projectCollaborationPortableSource(doc) },
+  })
+  const bindings = [binding(left), binding(right)]
+  function Peers() {
+    const [local, setLocal] = useState(seed), [remote, setRemote] = useState(seed)
+    useEffect(() => right.onPortableUpdate(() => setRemote(projectCollaborationPortableSource(right))), [])
+    return <>
+      <StructuredManuscriptEditor source={local} collaboration={bindings[0]} onChange={setLocal} suggestionMode markupView="all" ariaLabel="Local manuscript" />
+      <StructuredManuscriptEditor source={remote} collaboration={bindings[1]} onChange={setRemote} markupView="all" ariaLabel="Remote manuscript" />
+    </>
+  }
+  await act(async () => root.render(<Peers />))
+  const local = container.querySelector<HTMLElement>('[aria-label="Local manuscript"]')!
+  const other = container.querySelector<HTMLElement>('[aria-label="Remote manuscript"]')!
+  const paragraph = [...local.querySelectorAll('p')].find((node) => node.textContent?.startsWith('Write locally'))!
+  const acceptedUpdates: string[] = []
+  disconnect.push(right.onUpdate(() => acceptedUpdates.push(right.source)))
+  await act(async () => {
+    paragraph.firstChild!.nodeValue = paragraph.textContent!.replace('locally', 'offline')
+    local.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: 'offline' }))
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  })
+  const field = local.querySelector<HTMLTextAreaElement>('[aria-label="Edit suggested wording"]')!
+  expect(field?.value).toBe('offline')
+  expect(other.querySelector('.dm-review-proposal')?.textContent).toBe('offline')
+  const id = field.dataset.proposalId
+  await act(async () => {
+    field.value = 'together'
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  })
+  expect(local.querySelector('[aria-label="Edit suggested wording"]')).toBe(field)
+  expect(other.querySelector('.dm-review-proposal')?.textContent).toBe('together')
+  expect(parseReviewMarkup(projectCollaborationPortableSource(right)).changes).toMatchObject([{ id, proposal: 'together' }])
+  await act(async () => {
+    field.value = 'first line\n  ~~~\nsecond line'
+    field.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    field.setSelectionRange(0, 0)
+    field.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowLeft' }))
+  })
+  expect(document.activeElement).toBe(local)
+  expect(parseReviewMarkup(projectCollaborationPortableSource(right)).changes).toMatchObject([{ id, proposal: field.value }])
+  await act(async () => {
+    const marked = local.querySelector<HTMLElement>('.dm-review-change')!
+    marked.firstChild!.nodeValue = 'away'
+    local.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: 'away' }))
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  })
+  expect(parseReviewMarkup(projectCollaborationPortableSource(right)).changes).toMatchObject([{ id, proposal: 'away' }])
+  expect(acceptedUpdates.every((text) => text.includes('Write locally and online'))).toBe(true)
+  expect(other.querySelector('p')?.textContent).toContain('locally')
+})
+
+it('captures only the inserted letters immediately after collapsing a word selection', async () => {
+  const binding: CollaborativeEditorBinding = {
+    document: left.doc, awareness: left.awareness,
+    publishPortableSource: (source) => { left.reconcilePortableSource(source); return projectCollaborationPortableSource(left) },
+  }
+  await act(async () => root.render(<StructuredManuscriptEditor source={seed} collaboration={binding}
+    onChange={vi.fn()} suggestionMode markupView="all" ariaLabel="Local manuscript" />))
+  const editor = container.querySelector<HTMLElement>('[aria-label="Local manuscript"]')!
+  const paragraph = [...editor.querySelectorAll('p')].find((node) => node.textContent?.startsWith('Write locally'))!
+  const text = paragraph.firstChild as Text
+  const start = text.data.indexOf('locally')
+  const selection = window.getSelection()!
+  await act(async () => {
+    editor.focus()
+    selection.setBaseAndExtent(text, start, text, start + 'locally'.length)
+    document.dispatchEvent(new Event('selectionchange'))
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  })
+  await act(async () => {
+    // ArrowLeft can collapse the native selection before its selectionchange is delivered.
+    selection.collapse(text, start)
+    editor.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, cancelable: true, inputType: 'insertText', data: 't' }))
+    text.insertData(start, 't')
+    selection.collapse(text, start + 1)
+    editor.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: 't' }))
+    await new Promise((resolve) => setTimeout(resolve, 30))
+  })
+  expect(parseReviewMarkup(projectCollaborationPortableSource(right)).changes).toMatchObject([
+    { changeKind: 'insert', proposal: 't' },
+  ])
 })

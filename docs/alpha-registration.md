@@ -101,6 +101,40 @@ Activation must preserve the previous **four-file** configuration together for
 rollback. An operator must not simply rename one environment file and leave
 the proxy/realm pair from another version.
 
+## Optional ORCID account linking
+
+After email verification, a participant can connect an ORCID iD while waiting
+for an invitation. Account settings also provide access to **Linked accounts**,
+where the participant can see or unlink the iD. DraftMatter authenticates the
+participant first. ORCID then authenticates the researcher and asks for consent.
+The identity service stores the authenticated identifier. Alpha admission remains
+a separate operator decision.
+
+To enable linking for a deployment, register a DraftMatter application with
+ORCID. Register the complete callback URL on the identity host, for example
+`https://auth.draftmatter.eu/realms/draftmatter/broker/orcid/endpoint`.
+Use separate credentials and realms for sandbox and production. The provider
+requests the `openid` scope and verifies the signed identity token with ORCID’s
+public keys. [ORCID application registration](https://info.orcid.org/documentation/api-tutorials/api-tutorial-get-and-authenticated-orcid-id/).
+[ORCID OpenID configuration](https://orcid.org/.well-known/openid-configuration).
+
+On the VPS, use the release containing `configure-orcid` and the public client
+ID from ORCID. The operator prompts privately for the administrator password
+and the ORCID application secret. Running it again with the same registry
+rotates the credentials.
+
+```sh
+sudo sh "$dm_bundle/scripts/server-alpha.sh" "$dm_release" /etc/draftmatter \
+  configure-orcid --orcid-environment production --client-id "$dm_orcid_client_id"
+```
+
+After `"orcidConfigured":true`, set `DM_ORCID_LINKING_ENABLED=true` in the
+deployment’s private `runtime.env` and recreate the collaboration service using
+the release’s Compose files. The public `/config` then includes
+`oidc.orcidLinkingEnabled: true`. Follow **Connect ORCID iD** with a test
+account to verify the registered callback and stored iD. Remove the link from
+**Linked accounts** to finish the check.
+
 ## Outgoing email
 
 Receiving messages at `contact@draftmatter.eu` does not prove that it is an SMTP

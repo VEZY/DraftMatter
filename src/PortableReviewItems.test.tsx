@@ -75,7 +75,12 @@ describe('portable review panel items', () => {
 
   it('renders imported alternatives and records an attributed atomic decision', async () => {
     expect(container.querySelectorAll('.proposal-option')).toHaveLength(2)
-    expect(container.textContent).not.toContain('.dm-anchor')
+    const cards = [...container.querySelectorAll<HTMLElement>('[data-review-balloon-anchor]')]
+    expect(cards).toHaveLength(2)
+    for (const card of cards) {
+      expect(text(card)).not.toContain(card.dataset.reviewBalloonAnchor)
+      expect(card.querySelector('input[type="checkbox"]')).toBeNull()
+    }
     await click(container.querySelectorAll('.proposal-option')[1])
     await click(button(container, 'Accept'))
 
@@ -92,31 +97,16 @@ describe('portable review panel items', () => {
     expect(notices.at(-1)).toContain('overlapping alternative')
   })
 
-  it('rejects all selected alternatives in one attributed batch decision', async () => {
-    expect(text(container.querySelector('.portable-review-bulk'))).toContain('0 selected')
-    await click(button(container, 'Select all 2'))
-    expect(container.querySelectorAll<HTMLInputElement>('.review-batch-toggle input:checked')).toHaveLength(2)
-    await click(button(container, 'Reject selected'))
-
+  it('rejects only the suggestion whose individual action was used', async () => {
+    const card = container.querySelector('#review-item-dm-i02')!
+    await click(card.querySelector('.proposal-option')!)
+    await click(button(card, 'Reject'))
     const parsed = parseReviewMarkup(latestSource)
     expect(parsed.changes.map((change) => [change.id, change.status])).toEqual([
-      ['dm-i01', 'rejected'],
+      ['dm-i01', 'open'],
       ['dm-i02', 'rejected'],
     ])
-    expect(parsed.decisions).toHaveLength(2)
-    expect(new Set(parsed.decisions.map((decision) => decision.authorId))).toEqual(new Set(['dm-local-author']))
-    expect(new Set(parsed.decisions.map((decision) => decision.timestamp)).size).toBe(1)
-    expect(notices.at(-1)).toBe('2 suggestions rejected atomically')
-  })
-
-  it('blocks overlapping batch acceptance without partially deciding either alternative', async () => {
-    await click(button(container, 'Select all 2'))
-    await click(button(container, 'Accept selected'))
-
-    expect(latestSource).toBe(identicalSource)
-    expect(parseReviewMarkup(latestSource).decisions).toEqual([])
-    expect(text(container.querySelector('[role="alert"]'))).toContain('overlap')
-    expect(container.querySelectorAll<HTMLInputElement>('.review-batch-toggle input:checked')).toHaveLength(2)
+    expect(parsed.decisions).toEqual([expect.objectContaining({ changeId: 'dm-i02', authorId: 'dm-local-author', action: 'rejected' })])
   })
 
   it('explains and resolves incompatible offline decisions from the live review rail', async () => {
@@ -157,7 +147,7 @@ describe('portable review panel items', () => {
     expect(container.querySelector('.review-decision-conflict')).toBeNull()
   })
 
-  it('applies a batch to the currently filtered author only', async () => {
+  it('shows individual actions on the visible author’s suggestion', async () => {
     await act(async () => root.render(
       <PortableReviewItems
         source={identicalSource}
@@ -166,9 +156,9 @@ describe('portable review panel items', () => {
       />,
     ))
 
-    expect(text(container.querySelector('.portable-review-bulk'))).toContain("Alice Martin's visible suggestions")
-    await click(button(container, 'Select all 1'))
-    await click(button(container, 'Accept selected'))
+    expect(container.querySelectorAll('.proposal-option')).toHaveLength(1)
+    expect(container.querySelector('#review-item-dm-i02')).toBeNull()
+    await click(button(container.querySelector('#review-item-dm-i01')!, 'Accept'))
 
     const parsed = parseReviewMarkup(latestSource)
     expect(parsed.changes.map((change) => [change.id, change.status])).toEqual([
@@ -176,7 +166,7 @@ describe('portable review panel items', () => {
       ['dm-i02', 'needs-rebase'],
     ])
     expect(parsed.decisions).toEqual([expect.objectContaining({ changeId: 'dm-i01', authorId: 'dm-local-author' })])
-    expect(notices.at(-1)).toContain('1 suggestion accepted atomically')
+    expect(notices.at(-1)).toContain('Suggestion accepted')
   })
 
   it('rebases a needs-rebase alternative onto accepted text and retains the audit', async () => {
@@ -517,10 +507,9 @@ describe('portable review panel items', () => {
       />,
     ))
 
-    expect(container.querySelector('.portable-review-bulk')).toBeNull()
     expect(container.textContent).toContain('New comment')
     expect(container.textContent).not.toContain('Suggest edit')
-    expect(container.textContent).not.toContain('Accept selected')
+    expect(container.querySelector('.review-actions')).toBeNull()
     await click(container.querySelector('.comment-card')!)
     await click(button(container.querySelector('.portable-thread-actions')!, 'Reply'))
     expect(container.querySelector('.reply-box')).not.toBeNull()
@@ -545,7 +534,6 @@ describe('portable review panel items', () => {
     ))
 
     expect(container.querySelectorAll('.proposal-option')).toHaveLength(2)
-    expect(container.querySelector('.portable-review-bulk')).toBeNull()
     expect(container.querySelector('.review-actions')).toBeNull()
     expect(container.querySelector('.portable-review-composer')).toBeNull()
     expect(container.textContent).not.toContain('New comment')

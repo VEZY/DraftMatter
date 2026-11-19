@@ -46,7 +46,7 @@ export function alphaRoleMapper() {
   }
 }
 
-export function alphaUserProfile() {
+export function alphaUserProfile({ orcidEnabled = false } = {}) {
   const permissions = () => ({ view: ['admin', 'user'], edit: ['admin', 'user'] })
   return {
     // Keycloak represents disabled unmanaged attributes as null, not an enum.
@@ -60,8 +60,19 @@ export function alphaUserProfile() {
         name: 'email', displayName: '${email}', required: { roles: ['user'] }, permissions: permissions(), multivalued: false,
         validations: { email: {}, length: { max: 255 } },
       },
-      ...['firstName', 'lastName'].map((name) => ({
-        name, displayName: `\${${name}}`, permissions: permissions(), multivalued: false,
+      ...[
+        {
+          name: 'firstName',
+          annotations: { inputHelperTextBefore: 'Both names are optional. Collaborators see your name beside your comments and tracked changes. If you leave both fields blank, they may see your email address.' },
+        },
+        {
+          name: 'lastName',
+          ...(orcidEnabled && {
+            annotations: { inputHelperTextAfter: 'After you verify your email, you can connect your ORCID iD to your DraftMatter account. This step is optional.' },
+          }),
+        },
+      ].map(({ name, ...field }) => ({
+        name, ...field, displayName: `\${${name}}`, permissions: permissions(), multivalued: false,
         validations: { length: { max: 255 }, 'person-name-prohibited-characters': {} },
       })),
     ],

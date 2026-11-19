@@ -306,7 +306,10 @@ async function applicationSignIn(browser, settings) {
 async function publicChecks(browser, settings) {
   const config = await http(settings, '/config', { headers: { origin: settings.appOrigin } })
   assert.equal(config.headers['access-control-allow-origin'], settings.appOrigin)
-  assert.deepEqual(config.data.oidc, { issuer: settings.issuer, clientId: settings.clientId, registrationEnabled: false })
+  assert.deepEqual(config.data.oidc, {
+    issuer: settings.issuer, clientId: settings.clientId, registrationEnabled: false,
+    ...(settings.environment.DM_ORCID_LINKING_ENABLED === 'true' && { orcidLinkingEnabled: true }),
+  })
   await http(settings, '/health/ready')
   await http(settings, '/api/session', { expected: 401 })
   await http(settings, '/metrics', { expected: 404 })

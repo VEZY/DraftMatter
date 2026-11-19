@@ -438,9 +438,22 @@ export function updateReviewRecordStatus(document: ReviewMarkupDocument, recordI
 }
 
 function anchorContextBlock(className: string, content: string, ending: string) {
-  const longest = Math.max(0, ...[...content.matchAll(/^~+/gm)].map((match) => match[0].length))
-  const fence = '~'.repeat(Math.max(3, longest + 1))
+  const fence = reviewLiteralFence(content)
   return `${fence}{.${className}}${ending}${content}${ending}${fence}${ending}`
+}
+
+/** Amend an author's open wording without replacing its anchor or review identity. */
+export function amendReviewProposal(document: ReviewMarkupDocument, id: string, authorId: string, proposal: string) {
+  const change = document.changes.find((item) => item.id === id)
+  if (!change || change.authorId !== authorId || change.status !== 'open'
+    || !['insert', 'replace'].includes(change.changeKind) || proposal.length > 200_000
+    || document.decisions.some((decision) => decision.changeId === id)) throw Error('This suggestion cannot be edited.')
+  const block = literalBlocks(change.raw).find((item) => item.className === 'dm-proposal')
+  if (!block) throw Error('This suggestion has no editable wording.')
+  const ending = change.raw.match(/\r\n|\r|\n/)?.[0] ?? '\n'
+  return document.source.slice(0, change.start + block.start)
+    + anchorContextBlock('dm-proposal', proposal, ending)
+    + document.source.slice(change.start + block.end)
 }
 
 export function updateReviewRecordAnchorContext(document: ReviewMarkupDocument, recordId: string, context: ReviewAnchorContext, updatedAt?: string) {
@@ -473,8 +486,8 @@ export function updateReviewRecordAnchorContext(document: ReviewMarkupDocument, 
   return updatedAt ? updateReviewRecordTimestamp(updated, recordId, updatedAt) : updated
 }
 
-function messageFence(message: string) {
-  const longest = Math.max(0, ...[...message.matchAll(/^~+/gm)].map((match) => match[0].length))
+export function reviewLiteralFence(message: string) {
+  const longest = Math.max(0, ...[...message.matchAll(/^[ \t]*(~+)/gm)].map((match) => match[1].length))
   return '~'.repeat(Math.max(3, longest + 1))
 }
 
@@ -520,7 +533,7 @@ export function updateReviewThreadMessages(document: ReviewMarkupDocument, recor
   if (messages.length > blocks.length) {
     const lineEnding = document.source.includes('\r\n') ? '\r\n' : document.source.includes('\r') ? '\r' : '\n'
     const added = messages.slice(blocks.length).map((message, offset) => {
-      const fence = messageFence(message)
+      const fence = reviewLiteralFence(message)
       const index = blocks.length + offset
       const timestamp = options.timestamps?.[index] ? ` data-at="${options.timestamps[index]}"` : ''
       return `${fence}{.dm-message data-author="${options.authorIds?.[index] ?? options.defaultAuthorId ?? 'dm-a01'}"${timestamp} data-index="${index}"}${lineEnding}${message}${lineEnding}${fence}${lineEnding}`

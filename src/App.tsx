@@ -73,7 +73,8 @@ import { PortableReviewItems } from './PortableReviewItems'
 import { AlignedReviewRail } from './AlignedReviewRail'
 import { SelectionCommentButton } from './SelectionCommentButton'
 import { ProjectChecksDialog, ProjectDiagnostics, prioritizeProjectDiagnostics, type ProjectCheckAction } from './ProjectDiagnostics'
-import { buildReviewQueue } from './reviewQueue'
+import { buildReviewQueue, currentReviewChange } from './reviewQueue'
+import { decidePortableSuggestion } from './sharedEditor/collaborativeReview'
 import { projectPortableReviewSource } from './reviewProjector'
 import { renderReviewReport } from './reviewExport'
 import { printNativeHtml, renderNativeHtmlExport } from './nativeHtmlExport'
@@ -2095,6 +2096,10 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   const reviewQueue = useMemo(() => reviewAuthorFilter === 'all'
     ? allReviewQueue
     : allReviewQueue.filter((item) => item.authorId === reviewAuthorFilter), [allReviewQueue, reviewAuthorFilter])
+  const hasReviewChanges = reviewQueue.some((item) => item.kind === 'change' || item.kind === 'unplaced-change')
+  const toolbarChange = useMemo(() => currentReviewChange(reviewQueue, activeReviewId), [reviewQueue, activeReviewId])
+  const toolbarChangeHint = toolbarChange &&
+    `${toolbarChange.authorName} · ${toolbarChange.excerpt.length > 100 ? toolbarChange.excerpt.slice(0, 99) + '…' : toolbarChange.excerpt}`
   const activeReviewAnchorId = allReviewQueue.find((item) => item.id === activeReviewId)?.anchorId
     ?? reviewDocument.changes.find((change) => change.id === activeReviewId)?.anchorId
     ?? reviewDocument.threads.find((thread) => thread.id === activeReviewId)?.anchorId
@@ -3937,41 +3942,6 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     }
   }
 
-  const acceptProposal = (proposal = draft.activeProposal) => {
-    if (!canDecideReview) return
-    const timestamp = new Date().toISOString()
-    if (proposal === 'alice') {
-      updateDraft({
-        aliceStatus: 'accepted',
-        marcusStatus: draft.marcusStatus === 'open' ? 'needs-rebase' : draft.marcusStatus,
-        reviewUpdatedAt: {
-          ...draft.reviewUpdatedAt,
-          alice: timestamp,
-          ...(draft.marcusStatus === 'open' ? { marcus: timestamp } : {}),
-        },
-      })
-    } else {
-      updateDraft({
-        marcusStatus: 'accepted',
-        aliceStatus: draft.aliceStatus === 'open' ? 'needs-rebase' : draft.aliceStatus,
-        reviewUpdatedAt: {
-          ...draft.reviewUpdatedAt,
-          marcus: timestamp,
-          ...(draft.aliceStatus === 'open' ? { alice: timestamp } : {}),
-        },
-      })
-    }
-    setToast('Suggestion accepted · intersecting proposal preserved')
-  }
-
-  const rejectProposal = (proposal = draft.activeProposal) => {
-    if (!canDecideReview) return
-    const timestamp = new Date().toISOString()
-    if (proposal === 'alice') updateDraft({ aliceStatus: 'rejected', activeProposal: 'marcus', reviewUpdatedAt: { ...draft.reviewUpdatedAt, alice: timestamp } })
-    else updateDraft({ marcusStatus: 'rejected', activeProposal: 'alice', reviewUpdatedAt: { ...draft.reviewUpdatedAt, marcus: timestamp } })
-    setToast('Suggestion rejected · accepted text unchanged')
-  }
-
   const copyPortableReference = async (label: string) => {
     const reference = `@${label}`
     const copied = await copyPlainText(reference)
@@ -3986,6 +3956,42 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     commitDraftHistory(parsed.draft)
     setDiagnostics(parsed.diagnostics)
     setToast(message)
+    return nextSource
+  }
+
+  const decideSuggestion = (changeId: string, action: 'accepted' | 'rejected', advance = false) => {
+    if (!canDecideReview || !manuscriptFileActive || sourceEditing) return
+    try {
+      const document = reviewDocument.source === manuscriptSourceRef.current
+        ? reviewDocument : parseReviewMarkup(manuscriptSourceRef.current)
+      if (document.changes.find((change) => change.id === changeId)?.status !== 'open') {
+        setToast('This suggestion has already changed. Review the current wording.')
+        return
+      }
+      const result = decidePortableSuggestion(document, changeId, action, activeReviewAuthor, collaborativeEditorBinding?.review)
+      const source = applyPortableReviewSource(result.source, result.message)
+      if (!advance) return
+
+      // Accepting one alternative can also put other changes into needs-rebase.
+      const queue = buildReviewQueue(parseReviewMarkup(source), {
+        authorIds: reviewAuthorFilter === 'all' ? undefined : [reviewAuthorFilter],
+      })
+      const next = currentReviewChange(queue, changeId)
+      setActiveReviewId(next?.id ?? changeId)
+      showReviewPanel()
+      if (markupView === 'original' || markupView === 'final') setMarkupView('all')
+      if (next) {
+        requestAnimationFrame(() => {
+          if (!structuredEditorRef.current?.scrollToReviewAnchor(next.anchorId)) {
+            globalThis.document.getElementById(`review-item-${next.id}`)?.scrollIntoView?.({ block: 'nearest' })
+          }
+        })
+      } else {
+        setToast(`${result.message} · No further changes ready for review`)
+      }
+    } catch (error) {
+      setToast(readableError(error))
+    }
   }
 
   const queueFileExport = (file: GeneratedFileExport) => {
@@ -4283,7 +4289,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     const enabled = !suggestionMode
     setSuggestionMode(enabled)
     if (enabled) {
-      if (markupView === 'original' || markupView === 'final') setMarkupView('all')
+      setMarkupView('all')
       showReviewPanel()
       setToast('Track changes on · additions and deletions will be proposed for review')
     } else setToast('Track changes off · edits apply directly')
@@ -6228,6 +6234,20 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
             </button>
           </div>
           <div className="topbar-completion-actions">
+            {manuscriptFileActive && canDecideReview && !sourceEditing && toolbarChange && (
+              <div className="sequential-review-actions" role="group" aria-label="Review tracked changes">
+                <button type="button" className="accept-change" aria-label="Accept and go to next change"
+                  title={`Accept and go to next change · ${toolbarChangeHint}`}
+                  onClick={() => decideSuggestion(toolbarChange.id, 'accepted', true)}>
+                  <Icon name="check" size={15} /><span>Accept</span>
+                </button>
+                <button type="button" className="reject-change" aria-label="Reject and go to next change"
+                  title={`Reject and go to next change · ${toolbarChangeHint}`}
+                  onClick={() => decideSuggestion(toolbarChange.id, 'rejected', true)}>
+                  <Icon name="x" size={15} /><span>Reject</span>
+                </button>
+              </div>
+            )}
             <div className="tracking-controls">
             <button
               className={`topbar-track-changes ${suggestionMode ? 'active' : ''}`}
@@ -7034,7 +7054,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
                 </div>
 
                 {reviewProposalStatus === 'open' && canDecideReview ? (
-                  <div className="review-actions"><button className="accept" onClick={() => acceptProposal(reviewProposal)}><Icon name="check" size={15} /> Accept</button><button className="reject" onClick={() => rejectProposal(reviewProposal)}><Icon name="x" size={15} /> Reject</button></div>
+                  <div className="review-actions"><button className="accept" onClick={() => decideSuggestion(reviewProposal === 'alice' ? 'dm-c01' : 'dm-c02', 'accepted')}><Icon name="check" size={15} /> Accept</button><button className="reject" onClick={() => decideSuggestion(reviewProposal === 'alice' ? 'dm-c01' : 'dm-c02', 'rejected')}><Icon name="x" size={15} /> Reject</button></div>
                 ) : reviewProposalStatus !== 'open' ? (
                   <div className="decision-note"><Icon name={reviewProposalStatus === 'accepted' ? 'check' : reviewProposalStatus === 'rejected' ? 'x' : 'branch'} size={15} /> This proposal is {reviewProposalStatus === 'needs-rebase' ? 'preserved and needs rebase' : reviewProposalStatus}.</div>
                 ) : null}
@@ -7057,7 +7077,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
                 selectedTarget={structuredMode ? structuredReviewSelection : null}
                 openCommentRequest={openCommentRequest}
                 composerAnchorTop={composerAnchorTop}
-                showFooter={reviewQueue.some((item) => item.kind === 'change' || item.kind === 'unplaced-change')}
+                showFooter={hasReviewChanges}
                 onComposeChange={setCommentComposerOpen}
                 collaborativeReview={collaborativeEditorBinding?.review}
                 onApply={applyPortableReviewSource}
@@ -7147,13 +7167,19 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
           <form className="user-settings-dialog" onMouseDown={(event) => event.stopPropagation()} onSubmit={commitSettings} role="dialog" aria-modal="true" aria-labelledby="user-settings-title">
             <div className="execution-dialog-head">
               <span className="execution-shield"><Icon name="users" size={19} /></span>
-              <div><span className="eyebrow">Local profile</span><h2 id="user-settings-title">Review identity</h2><p>This name appears on new comments, suggestions, decisions, and local collaboration presence.</p></div>
+              <div><span className="eyebrow">Local profile</span><h2 id="user-settings-title">Review identity</h2><p>This name appears on new comments, suggestions and decisions in local papers.</p></div>
               <button className="icon-button" type="button" onClick={() => setSettingsOpen(false)} aria-label="Close settings"><Icon name="close" /></button>
             </div>
             <div className="user-settings-body">
               <label><span>Display name</span><input autoFocus value={settingsName} onChange={(event) => setSettingsName(event.target.value)} maxLength={240} autoComplete="name" /></label>
               <div className="user-settings-identity"><Avatar initials={authorInitials(settingsName)} label={settingsName.trim() || 'Review author'} /><span><strong>Current portable author ID</strong><code>{userSettings.author.id}</code></span></div>
               <p>Changing the name creates a new portable author identity. Existing comments and decisions keep their original attribution.</p>
+              {collaborationSession?.profile && (
+                <p>
+                  In shared papers, your comments and tracked changes are signed as <strong>{collaborationSession.profile.displayName?.trim() || collaborationSession.profile.email || collaborationSession.profile.userId}</strong>.
+                  {collaborationSession.orcidAccountUrl && <> <a href={collaborationSession.orcidAccountUrl} target="_blank" rel="noopener noreferrer">Manage your ORCID iD</a></>}
+                </p>
+              )}
               {desktopHost.available && (
                 <section className="settings-ai-connections">
                   <span><Icon name="spark" size={17} /><span><strong>AI assistants</strong><small>Manage device-wide DraftMatter connections independently of project access.</small></span></span>

@@ -226,7 +226,7 @@ describe('authenticated Hocuspocus transport', () => {
     const forgedAuthor = updateFrom(document, (candidate) => candidate.getMap('draftmatter:authors').set('owner', { id: 'owner', name: 'Project Owner' }))
     const rewrittenProposal = updateFrom(document, (candidate) => {
       const proposals = candidate.getMap<Record<string, unknown>>('draftmatter:proposals')
-      proposals.set('dm-change-editor', { ...proposals.get('dm-change-editor'), proposal: 'Silently rewritten wording' })
+      proposals.set('dm-change-editor', { ...proposals.get('dm-change-editor'), proposal: 'Amended wording' })
     })
     const forgedDecision = updateFrom(document, (candidate) => candidate.getMap('draftmatter:decisions').set('dm-decision-forged', {
       id: 'dm-decision-forged',
@@ -250,7 +250,8 @@ describe('authenticated Hocuspocus transport', () => {
 
     expect(editorUpdateDiagnostic(document, renamedAuthor, 'editor')).toBe('review-record-invalid')
     expect(editorUpdateDiagnostic(document, forgedAuthor, 'editor')).toBe('review-record-invalid')
-    expect(editorUpdateDiagnostic(document, rewrittenProposal, 'editor')).toBe('review-record-invalid')
+    expect(editorUpdateDiagnostic(document, rewrittenProposal, 'editor')).toBeNull()
+    expect(editorUpdateDiagnostic(document, rewrittenProposal, 'other-editor')).toBe('review-record-invalid')
     expect(editorUpdateDiagnostic(document, forgedDecision, 'editor')).toBe('review-record-invalid')
     expect(editorUpdateDiagnostic(document, unversionedDecision, 'editor')).toBe('review-record-invalid')
     expect(editorUpdateDiagnostic(document, changedMetadata, 'editor')).toBe('review-record-invalid')

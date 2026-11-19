@@ -2881,25 +2881,6 @@ button:disabled {
 
 .conflict-heading > small { margin-left: auto; }
 
-.review-batch-toggle {
-  align-items: center;
-  color: #795f3f;
-  cursor: pointer;
-  display: flex;
-  font-size: 7px;
-  gap: 3px;
-  margin-left: auto;
-}
-
-.review-batch-toggle input {
-  accent-color: var(--sage-dark);
-  height: 11px;
-  margin: 0;
-  width: 11px;
-}
-
-.conflict-heading .review-batch-toggle + small { margin-left: 2px; }
-
 .proposal-option {
   align-items: center;
   background: white;
@@ -3160,69 +3141,6 @@ button:disabled {
   border-color: #cdd9d2;
   box-shadow: 0 0 0 1px rgba(71, 105, 91, 0.08), var(--shadow-sm);
 }
-
-.portable-review-card.batch-selected {
-  border-color: #b9ccc1;
-  box-shadow: 0 0 0 1px rgba(71, 105, 91, 0.12), var(--shadow-sm);
-}
-
-.portable-review-bulk {
-  align-items: center;
-  background: #f8faf8;
-  border: 1px solid #dce6e0;
-  border-radius: 6px;
-  display: grid;
-  gap: 6px 8px;
-  grid-template-columns: minmax(0, 1fr) auto;
-  margin: 8px 0 10px;
-  padding: 8px 9px;
-}
-
-.portable-review-bulk > span {
-  display: grid;
-  gap: 2px;
-}
-
-.portable-review-bulk > span strong {
-  color: #4d5b53;
-  font-size: 8.5px;
-}
-
-.portable-review-bulk > span small,
-.portable-review-bulk > small {
-  color: #78827d;
-  font-size: 7px;
-}
-
-.portable-review-bulk > button {
-  background: transparent;
-  color: var(--sage-dark);
-  font-size: 7.5px;
-  padding: 3px 0;
-}
-
-.portable-review-bulk > small { justify-self: start; }
-
-.portable-review-bulk > div {
-  display: flex;
-  gap: 5px;
-  justify-content: end;
-}
-
-.portable-review-bulk > div button {
-  align-items: center;
-  border-radius: 4px;
-  display: flex;
-  font-size: 7.5px;
-  font-weight: 700;
-  gap: 3px;
-  min-height: 25px;
-  padding: 0 7px;
-}
-
-.portable-review-bulk .accept { background: var(--sage-dark); color: white; }
-.portable-review-bulk .reject { background: #edf0ee; color: #626d67; }
-.portable-review-bulk button:disabled { cursor: not-allowed; opacity: 0.48; }
 
 .portable-thread-actions {
   align-items: center;
@@ -5534,6 +5452,20 @@ img.ProseMirror-separator { border: 0 !important; display: inline !important; he
 .dm-review-thread.dm-review-active { background: rgba(230, 194, 83, .28); box-shadow: 0 2px 0 rgba(178, 139, 34, .3); }
 .dm-review-proposal { background: rgba(91, 145, 112, .12); border: 0; border-bottom: 1px solid rgba(69, 119, 88, .58); border-radius: 2px; color: #426452; cursor: pointer; font: inherit; margin: 0 2px; padding: 0 2px; text-align: left; text-decoration: none; }
 .dm-review-proposal::before { color: #6f8d7a; content: '+ '; font-family: Inter, ui-sans-serif, sans-serif; font-size: .72em; font-weight: 700; }
+.structured-editor-content textarea.dm-review-wording {
+  field-sizing: content;
+  min-width: 1ch;
+  max-width: 100%;
+  vertical-align: baseline;
+  resize: none;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  line-height: inherit;
+}
 .dm-review-proposal:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
 .dm-review-proposal.dm-review-rejected { opacity: .62; text-decoration: line-through; }
 .dm-review-point { align-items: center; background: #f8efd4; border: 1px solid #dec985; border-radius: 50%; color: #78622e; cursor: pointer; display: inline-flex; font: 700 9px/1 Inter, ui-sans-serif, sans-serif; height: 15px; justify-content: center; margin: 0 2px; padding: 0; vertical-align: text-top; width: 15px; }
@@ -7171,7 +7103,6 @@ textarea:focus,
 .tracked-changes-display,
 .markup-view-control,
 .suggestion-mode-control,
-.portable-review-bulk,
 .portable-review-composer {
   background: var(--paper);
   border-color: var(--line-strong);
@@ -7251,7 +7182,6 @@ textarea:focus,
 .proposal-author strong,
 .comment-author strong,
 .reply-message strong,
-.portable-review-bulk > span strong,
 .portable-review-composer > strong {
   color: var(--graphite);
 }
@@ -7270,35 +7200,30 @@ textarea:focus,
 }
 
 .review-actions > button,
-.portable-review-bulk > div button,
 .review-rebase-form > div button {
   border: 1px solid var(--line-strong);
   border-radius: 7px;
   box-shadow: var(--pencil-echo);
 }
 
-.review-actions .accept,
-.portable-review-bulk .accept {
+.review-actions .accept {
   background-color: #373735;
   background-image: repeating-linear-gradient(116deg, transparent 0 3px, rgba(255, 255, 255, 0.08) 3px 4px);
   border-color: var(--graphite);
   color: var(--paper);
 }
 
-.review-actions .accept svg,
-.portable-review-bulk .accept svg {
+.review-actions .accept svg {
   color: #7eb18e;
 }
 
 .review-actions .reject,
-.portable-review-bulk .reject,
 .review-actions .rebase {
   background: var(--paper);
   color: var(--graphite);
 }
 
 .review-actions .reject svg,
-.portable-review-bulk .reject svg,
 .review-actions .rebase svg {
   color: var(--rust-pen);
 }
@@ -8455,7 +8380,6 @@ kbd {
 
 .tracked-changes-display,
 .markup-view-control,
-.portable-review-bulk,
 .portable-review-composer {
   background: #fff;
   border-color: rgba(36, 36, 36, .38);

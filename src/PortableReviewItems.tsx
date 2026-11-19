@@ -5,8 +5,6 @@ import {
   appendReviewThreadMessage,
   createReviewChange,
   createReviewThread,
-  decideReviewChange,
-  decideReviewChanges,
   ensureReviewAuthor,
   rebaseReviewChange,
   setReviewThreadStatus,
@@ -17,6 +15,7 @@ import { DEFAULT_USER_SETTINGS, type LocalAuthorIdentity } from './userSettings'
 import { ReviewTimestamp } from './ReviewTimestamp'
 import { reviewProposalText } from './reviewPresentation'
 import {
+  decidePortableSuggestion,
   portableReviewDecisionConflicts,
   resolvePortableReviewDecisionConflict,
   type CollaborativeReviewBinding,
@@ -99,11 +98,7 @@ export function PortableReviewItems({
     const excluded = new Set(excludeIds)
     return buildReviewQueue(document, authorId ? { authorIds: [authorId] } : {}).filter((item) => !excluded.has(item.id))
   }, [authorId, document, excludeIds])
-  const batchableChangeIds = useMemo(() => queue
-    .filter((item) => item.kind === 'change' && (item.status === 'open' || item.status === 'needs-rebase'))
-    .map((item) => item.id), [queue])
   const [internalActiveId, setInternalActiveId] = useState<string>()
-  const [selectedChangeIds, setSelectedChangeIds] = useState<string[]>([])
   const activeId = onActiveIdChange ? controlledActiveId : internalActiveId
   const setActiveId = useCallback((id: string | undefined) => {
     if (onActiveIdChange) onActiveIdChange(id)
@@ -158,7 +153,6 @@ export function PortableReviewItems({
     if ((compose === 'comment' && !canComment) || (compose === 'suggestion' && !canSuggest)) setCompose(null)
     if (!canComment) { setReply(''); setReplyingThreadId(undefined) }
     if (!canDecide) {
-      setSelectedChangeIds([])
       setPlacementAnchorId(undefined)
       setRebaseChangeId(undefined)
     }
@@ -167,14 +161,6 @@ export function PortableReviewItems({
   useEffect(() => {
     if (!navigableQueue.some((item) => item.id === activeId)) setActiveId(navigableQueue[0]?.id)
   }, [activeId, navigableQueue, setActiveId])
-
-  useEffect(() => {
-    const available = new Set(batchableChangeIds)
-    setSelectedChangeIds((current) => {
-      const retained = current.filter((id) => available.has(id))
-      return retained.length === current.length && retained.every((id, index) => id === current[index]) ? current : retained
-    })
-  }, [batchableChangeIds])
 
   useEffect(() => {
     const resolved = new Set(document.threads.filter((thread) => thread.status === 'resolved').map((thread) => thread.id))
@@ -214,53 +200,8 @@ export function PortableReviewItems({
   const decide = (changeId: string, action: 'accepted' | 'rejected') => {
     if (!canDecide) return
     try {
-      if (collaborativeReview) {
-        const result = collaborativeReview.decide({ changeIds: [changeId], action, author: localAuthor })
-        apply(result.source, action === 'accepted'
-          ? `Suggestion accepted transactionally${result.rebasedChangeIds.length ? ` · ${result.rebasedChangeIds.length} overlapping alternative${result.rebasedChangeIds.length === 1 ? '' : 's'} need rebase` : ''}`
-          : 'Suggestion rejected transactionally · accepted text unchanged')
-        return
-      }
-      const withAuthor = ensureReviewAuthor(document, localAuthor).document
-      const result = decideReviewChange(withAuthor, { changeId, action, authorId: localAuthor.id })
-      apply(result.document.source, action === 'accepted'
-        ? `Suggestion accepted${result.rebasedChangeIds.length ? ` · ${result.rebasedChangeIds.length} overlapping alternative${result.rebasedChangeIds.length === 1 ? '' : 's'} need rebase` : ''}`
-        : 'Suggestion rejected · accepted text unchanged')
-    } catch (error) {
-      fail(error)
-    }
-  }
-
-  const toggleBatchSelection = (changeId: string) => {
-    if (!canDecide) return
-    setSelectedChangeIds((current) => current.includes(changeId)
-      ? current.filter((id) => id !== changeId)
-      : [...current, changeId])
-  }
-
-  const decideBatch = (action: 'accepted' | 'rejected') => {
-    if (!canDecide) return
-    try {
-      if (collaborativeReview) {
-        const result = collaborativeReview.decide({ changeIds: selectedChangeIds, action, author: localAuthor })
-        setSelectedChangeIds([])
-        apply(
-          result.source,
-          `${result.decidedChangeIds.length} suggestion${result.decidedChangeIds.length === 1 ? '' : 's'} ${action} in one shared transaction${result.rebasedChangeIds.length ? ` · ${result.rebasedChangeIds.length} overlapping alternative${result.rebasedChangeIds.length === 1 ? '' : 's'} need rebase` : ''}`,
-        )
-        return
-      }
-      const withAuthor = ensureReviewAuthor(document, localAuthor).document
-      const result = decideReviewChanges(withAuthor, {
-        changeIds: selectedChangeIds,
-        action,
-        authorId: localAuthor.id,
-      })
-      setSelectedChangeIds([])
-      apply(
-        result.document.source,
-        `${result.decidedChangeIds.length} suggestion${result.decidedChangeIds.length === 1 ? '' : 's'} ${action} atomically${result.rebasedChangeIds.length ? ` · ${result.rebasedChangeIds.length} overlapping alternative${result.rebasedChangeIds.length === 1 ? '' : 's'} need rebase` : ''}`,
-      )
+      const result = decidePortableSuggestion(document, changeId, action, localAuthor, collaborativeReview)
+      apply(result.source, result.message)
     } catch (error) {
       fail(error)
     }
@@ -402,22 +343,10 @@ export function PortableReviewItems({
   }
 
   const activePosition = navigableQueue.findIndex((item) => item.id === activeId)
-  const allVisibleSelected = batchableChangeIds.length > 0 && batchableChangeIds.every((id) => selectedChangeIds.includes(id))
-  const selectedChanges = document.changes.filter((change) => selectedChangeIds.includes(change.id))
-  const canAcceptSelection = selectedChanges.length > 0 && selectedChanges.every((change) => change.status === 'open')
-  const filteredAuthorName = authorId ? document.authors.find((author) => author.id === authorId)?.name : undefined
 
   return (
     <>
       {problem && <div className="portable-review-problem" role="alert">{problem}</div>}
-      {canDecide && batchableChangeIds.length > 0 && (
-        <div className="portable-review-bulk" role="group" aria-label="Batch suggestion decisions">
-          <span><strong>Batch decisions</strong><small>{filteredAuthorName ? `${filteredAuthorName}'s visible suggestions` : 'Visible open suggestions'}</small></span>
-          <button onClick={() => setSelectedChangeIds(allVisibleSelected ? [] : batchableChangeIds)}>{allVisibleSelected ? 'Clear selection' : `Select all ${batchableChangeIds.length}`}</button>
-          <small>{selectedChangeIds.length} selected</small>
-          {selectedChangeIds.length > 0 && <div><button className="accept" onClick={() => decideBatch('accepted')} disabled={!canAcceptSelection} title={canAcceptSelection ? undefined : 'Needs-rebase alternatives can be rejected or rebased, but not accepted directly.'}><Icon name="check" size={14} /> Accept selected</button><button className="reject" onClick={() => decideBatch('rejected')}><Icon name="x" size={14} /> Reject selected</button></div>}
-        </div>
-      )}
       {queue.map((item) => {
         const active = item.id === activeId
         if (item.kind === 'change' || item.kind === 'unplaced-change') {
@@ -425,8 +354,8 @@ export function PortableReviewItems({
           const recovery = recoveryByAnchor.get(item.anchorId)
           const decisionConflict = decisionConflictByChange.get(item.id)
           return (
-            <div className={`conflict-card portable-review-card ${active ? 'active' : ''} ${selectedChangeIds.includes(item.id) ? 'batch-selected' : ''}`} id={`review-item-${item.id}`} data-review-balloon={item.id} data-review-balloon-anchor={item.anchorId} key={item.id}>
-              <div className="conflict-heading"><Icon name="branch" size={16} /><span>{item.conflictId ? 'Overlapping suggestion' : item.kind === 'unplaced-change' ? 'Unplaced suggestion' : 'Suggestion'}</span>{canDecide && batchableChangeIds.includes(item.id) && <label className="review-batch-toggle" onClick={(event) => event.stopPropagation()}><input type="checkbox" checked={selectedChangeIds.includes(item.id)} onChange={() => toggleBatchSelection(item.id)} aria-label={`Select suggestion by ${item.authorName}`} /><span>Select</span></label>}<small>{item.anchorId}</small></div>
+            <div className={`conflict-card portable-review-card ${active ? 'active' : ''}`} id={`review-item-${item.id}`} data-review-balloon={item.id} data-review-balloon-anchor={item.anchorId} key={item.id}>
+              <div className="conflict-heading"><Icon name="branch" size={16} /><span>{item.conflictId ? 'Overlapping suggestion' : item.kind === 'unplaced-change' ? 'Unplaced suggestion' : 'Suggestion'}</span></div>
               <button className={`proposal-option ${active ? 'selected' : ''}`} onClick={() => activate(item.id)}>
                 <span className="avatar avatar-blue avatar-small">{initials(item.authorName)}</span>
                 <span className="proposal-author"><strong>{item.authorName}</strong><small><ReviewTimestamp value={change.updatedAt ?? change.createdAt} verb={change.updatedAt ? 'Updated' : 'Created'} fallback={item.kind === 'unplaced-change' ? 'Location needs attention' : item.excerpt} detail={item.kind === 'unplaced-change' ? 'Location needs attention' : item.excerpt} /></small></span>

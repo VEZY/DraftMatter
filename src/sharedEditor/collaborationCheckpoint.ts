@@ -1,5 +1,5 @@
 import { sourceHash } from '../document'
-import { parseReviewMarkup, type ReviewAnchorContext } from '../reviewMarkup'
+import { parseReviewMarkup, reviewLiteralFence, type ReviewAnchorContext } from '../reviewMarkup'
 import type {
   CollaborationSnapshot,
   CollaborativeAnchor,
@@ -34,14 +34,9 @@ function escapedAttribute(value: string) {
     .replaceAll('>', '&gt;')
 }
 
-function literalFence(content: string) {
-  const longest = Math.max(0, ...[...content.matchAll(/^~+/gm)].map((match) => match[0].length))
-  return '~'.repeat(Math.max(3, longest + 1))
-}
-
 function literalBlock(className: string, content: string, attributes: Record<string, string> = {}) {
   const normalized = content.replaceAll('\r\n', '\n').replaceAll('\r', '\n')
-  const fence = literalFence(normalized)
+  const fence = reviewLiteralFence(normalized)
   const serialized = Object.entries(attributes).sort(([left], [right]) => left.localeCompare(right))
     .map(([key, value]) => ` ${key}="${escapedAttribute(value)}"`).join('')
   return `${fence}{.${className}${serialized}}\n${normalized}\n${fence}\n`

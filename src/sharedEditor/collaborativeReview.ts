@@ -1,6 +1,6 @@
 import { buildReviewConflictGraph } from '../reviewConflicts'
-import { parseReviewMarkup } from '../reviewMarkup'
-import { decideReviewChanges } from '../reviewOperations'
+import { parseReviewMarkup, type ReviewMarkupDocument } from '../reviewMarkup'
+import { decideReviewChange, decideReviewChanges, ensureReviewAuthor } from '../reviewOperations'
 import type { LocalAuthorIdentity } from '../userSettings'
 import { CollaborativeDocument, type CollaborativeProposal } from './collaboration'
 import { projectCollaborationPortableSource } from './collaborationCheckpoint'
@@ -26,6 +26,30 @@ export interface CollaborativeReviewDecisionResult {
   source: string
   decidedChangeIds: string[]
   rebasedChangeIds: string[]
+}
+
+export function decidePortableSuggestion(
+  document: ReviewMarkupDocument,
+  changeId: string,
+  action: 'accepted' | 'rejected',
+  author: LocalAuthorIdentity,
+  collaborativeReview?: CollaborativeReviewBinding | null,
+) {
+  let source: string
+  let rebasedChangeIds: string[]
+  if (collaborativeReview) {
+    const result = collaborativeReview.decide({ changeIds: [changeId], action, author })
+    source = result.source
+    rebasedChangeIds = result.rebasedChangeIds
+  } else {
+    const withAuthor = ensureReviewAuthor(document, author).document
+    const result = decideReviewChange(withAuthor, { changeId, action, authorId: author.id })
+    source = result.document.source
+    rebasedChangeIds = result.rebasedChangeIds
+  }
+  const count = rebasedChangeIds.length
+  const overlap = count === 1 ? '1 overlapping alternative needs rebase' : `${count} overlapping alternatives need rebase`
+  return { source, message: `Suggestion ${action}${count ? ` · ${overlap}` : ''}` }
 }
 
 export interface CollaborativeReviewConflictResolutionRequest {

@@ -53,7 +53,9 @@ function PrivacyPolicy({ configuration }: { configuration: LegalConfiguration })
       <h2 id="privacy-purpose">Data used and purposes</h2>
       <dl>
         <dt>Account and access</dt>
-        <dd>Email address, optional first and last names, account identifier, authentication information, verification status and alpha approval roles are used to identify you, review requests to join, manage invitations and enforce permissions. The identity provider handles registration, sign-in and passwords; DraftMatter’s collaboration service receives the information needed to verify access, not your password.</dd>
+        <dd>Your email address, account identifier, verification status and alpha approval roles are used to review requests to join, manage invitations and enforce permissions. The identity provider handles registration, sign-in and passwords. If you provide your name, collaborators see it on your comments and tracked changes in shared papers.</dd>
+        <dt>Optional ORCID iD</dt>
+        <dd>When linking is available, you can connect your ORCID account in account settings. ORCID asks you to authorize the connection. DraftMatter’s identity provider stores the verified identifier with your account. You can remove the connection in the same settings. Linking does not send your manuscript to ORCID.</dd>
         <dt>Account emails</dt>
         <dd>Your email address is used for verification, password recovery and the invitation message sent when alpha access is approved. Limited delivery records help the operator avoid duplicate notifications and resolve failed delivery. These operational messages are separate from marketing.</dd>
         <dt>Collaborative projects</dt>

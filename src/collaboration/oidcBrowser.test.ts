@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { completeOidcAuthorization, hasOidcCallback, OidcSignInRequiredError, prepareOidcAuthorization, readOidcRegistrationCapability } from './oidcBrowser'
+import { completeOidcAuthorization, hasOidcCallback, OidcSignInRequiredError, prepareOidcAuthorization, readOidcAccountCapabilities } from './oidcBrowser'
 
 function memoryStorage() {
   const values = new Map<string, string>()
@@ -75,9 +75,20 @@ describe('browser OIDC Authorization Code + PKCE', () => {
     const request = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(Response.json({ oidc: { registrationEnabled: true } }))
       .mockResolvedValueOnce(Response.json({ oidc: {} }))
-    await expect(readOidcRegistrationCapability('https://sync.example.test', request)).resolves.toBe(true)
-    await expect(readOidcRegistrationCapability('https://sync.example.test', request)).resolves.toBe(false)
+    await expect(readOidcAccountCapabilities('https://sync.example.test', request)).resolves.toEqual({ registrationEnabled: true })
+    await expect(readOidcAccountCapabilities('https://sync.example.test', request)).resolves.toEqual({ registrationEnabled: false })
     expect(request).toHaveBeenCalledWith('https://sync.example.test/config', { credentials: 'omit', redirect: 'error' })
+  })
+
+  it('opens linked accounts at the configured issuer only when the ORCID broker is enabled', async () => {
+    const issuer = 'https://identity.example.test/realms/draftmatter/'
+    const config = (orcidLinkingEnabled: unknown, address = issuer) => vi.fn<typeof fetch>()
+      .mockResolvedValue(Response.json({ oidc: { issuer: address, orcidLinkingEnabled } }))
+    const read = (request: typeof fetch) => readOidcAccountCapabilities('https://sync.example.test', request)
+    expect((await read(config(true))).orcidAccountUrl).toBe(issuer + 'account/account-security/linked-accounts')
+    expect((await read(config('true'))).orcidAccountUrl).toBeUndefined()
+    expect((await read(config(true, 'http://identity.example.test'))).orcidAccountUrl).toBeUndefined()
+    expect((await read(config(true, 'https://identity.example.test/realm?state=private'))).orcidAccountUrl).toBeUndefined()
   })
 
   it('invalidates retained tokens on logout and keeps the identity hint out of browser storage', async () => {

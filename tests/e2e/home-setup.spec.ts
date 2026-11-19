@@ -27,7 +27,7 @@ for (const width of [1440, 1080, 390]) {
     await expect(page.getByRole('button', { name: 'Settings & account', exact: true })).toHaveCount(0)
     await expect(page.locator('#home-setup')).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Collaboration account setup', exact: true })).toHaveCount(0)
-    const demo = page.locator('.home-app-heading-actions').getByRole('link', { name: 'Try now', exact: true })
+    const demo = page.locator('.home-app-heading-actions').getByRole('link', { name: 'Try it', exact: true })
     await expect(demo).toHaveAttribute('href', '/demo')
     await expect(demo).toBeInViewport()
     await page.evaluate(async () => { await document.fonts.ready })

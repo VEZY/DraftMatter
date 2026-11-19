@@ -103,6 +103,13 @@ describe('single-host production identity import', () => {
     for (const attribute of profile.attributes.filter((attribute) => /Name$/.test(attribute.name))) {
       expect(attribute.required).toBeUndefined()
     }
+    expect(profile.attributes.find((attribute) => attribute.name === 'firstName').annotations.inputHelperTextBefore)
+      .toContain('Collaborators see your name beside your comments and tracked changes.')
+    expect(JSON.stringify(profile)).not.toContain('ORCID')
+    const orcidProfile = alphaUserProfile({ orcidEnabled: true })
+    expect(orcidProfile.attributes.map((attribute) => attribute.name)).toEqual(['username', 'email', 'firstName', 'lastName'])
+    expect(orcidProfile.attributes.find((attribute) => attribute.name === 'lastName').annotations.inputHelperTextAfter)
+      .toContain('After you verify your email, you can connect your ORCID iD')
     expect(JSON.stringify(profile)).not.toMatch(/draftmatter_roles|draftmatter-alpha|emailVerified|EMAIL_VERIFIED|realmRoles|clientRoles/)
     const realm = buildSingleHostRealm(publicHosts)
     const component = realm.components['org.keycloak.userprofile.UserProfileProvider'][0]

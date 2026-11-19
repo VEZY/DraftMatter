@@ -136,7 +136,7 @@ export async function validateAlphaIdentity(admin) {
   return realm
 }
 
-export async function migrateAlphaIdentity(admin, { ownerEmail } = {}) {
+export async function migrateAlphaIdentity(admin, { ownerEmail, orcidEnabled = false } = {}) {
   // Close first. A failed migration leaves registration closed.
   await admin(base, { method: 'PUT', body: { registrationAllowed: false } })
   await assertApprovalIsPrivate(admin)
@@ -157,7 +157,7 @@ export async function migrateAlphaIdentity(admin, { ownerEmail } = {}) {
     method: existing.length ? 'PUT' : 'POST', body: existing.length ? { ...expected, id: existing[0].id } : expected,
   })
   await admin(`${client}/scope-mappings/realm`, { method: 'POST', body: [role] })
-  await admin(`${base}/users/profile`, { method: 'PUT', body: alphaUserProfile() })
+  await admin(`${base}/users/profile`, { method: 'PUT', body: alphaUserProfile({ orcidEnabled }) })
   const realm = await admin(base)
   const flow = realm.registrationFlow || 'registration'
   const executions = await admin(`${base}/authentication/flows/${segment(flow)}/executions`)

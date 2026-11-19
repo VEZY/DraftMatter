@@ -1,5 +1,6 @@
 import {
   parseReviewMarkup,
+  reviewLiteralFence,
   updateReviewRecordStatus,
   updateReviewRecordTimestamp,
   type ReviewAuthor,
@@ -167,11 +168,6 @@ function escapedAttribute(value: string) {
     .replace(/[\r\n]/g, ' ')
 }
 
-function messageFence(message: string) {
-  const longest = Math.max(0, ...[...message.matchAll(/^~+/gm)].map((match) => match[0].length))
-  return '~'.repeat(Math.max(3, longest + 1))
-}
-
 function validBoundary(source: string, offset: number) {
   if (!Number.isInteger(offset) || offset < 0 || offset > source.length) return false
   if (offset > 0 && offset < source.length && source[offset - 1] === '\r' && source[offset] === '\n') return false
@@ -269,12 +265,12 @@ function authorRecord(author: ReviewAuthorIdentity, timestamp: string, ending: s
 }
 
 function messageBlock(message: string, authorId: string, timestamp: string, index: number, ending: string) {
-  const fence = messageFence(message)
+  const fence = reviewLiteralFence(message)
   return `${fence}{.dm-message data-author="${authorId}" data-at="${timestamp}" data-index="${index}"}${ending}${message}${ending}${fence}${ending}`
 }
 
 function literalBlock(className: string, content: string, ending: string) {
-  const fence = messageFence(content)
+  const fence = reviewLiteralFence(content)
   return `${fence}{.${className}}${ending}${content}${ending}${fence}${ending}`
 }
 

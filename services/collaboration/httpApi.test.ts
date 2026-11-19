@@ -4,7 +4,7 @@ import { createCollaborationHttpApi } from './httpApi'
 import { CollaborationOperationsDashboard } from './operations'
 import { IdentityAdmission } from './identityAdmission'
 
-function fixture(options: { identityAdmission?: IdentityAdmission; registrationEnabled?: boolean; identitySecurity?: { requiredAlphaRole: string | null; emailVerificationRequired: boolean } } = {}) {
+function fixture(options: { identityAdmission?: IdentityAdmission; registrationEnabled?: boolean; orcidLinkingEnabled?: boolean; identitySecurity?: { requiredAlphaRole: string | null; emailVerificationRequired: boolean } } = {}) {
   const workspaces = {
     getCurrentIdentity: vi.fn(async () => ({ userId: 'owner', displayName: 'Owner Researcher', email: 'owner@example.test' })),
     getOnboardingProgress: vi.fn(async () => ({ completedTaskIds: ['create-or-open' as const], dismissed: false })),
@@ -68,7 +68,7 @@ function fixture(options: { identityAdmission?: IdentityAdmission; registrationE
     dashboard,
     connections: () => 3,
     allowedOrigins: ['https://app.example.test'],
-    publicConfig: { oidcIssuer: 'https://identity.example.test', oidcClientId: 'draftmatter-browser', registrationEnabled: options.registrationEnabled },
+    publicConfig: { oidcIssuer: 'https://identity.example.test', oidcClientId: 'draftmatter-browser', registrationEnabled: options.registrationEnabled, orcidLinkingEnabled: options.orcidLinkingEnabled },
     identityAdmission: options.identityAdmission,
     identitySecurity: options.identitySecurity,
     maintenanceMetrics: () => ({
@@ -119,6 +119,14 @@ describe('collaboration HTTP API', () => {
     const response = await api(request('/config', { headers: { origin: 'https://app.example.test' } }))
     expect(response.status).toBe(200)
     expect(await response.json()).toEqual({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-browser', registrationEnabled: false } })
+  })
+
+  it('advertises ORCID linking independently of signup or alpha admission', async () => {
+    const { api } = fixture({ orcidLinkingEnabled: true })
+    const response = await api(request('/config'))
+    expect(await response.json()).toEqual({ oidc: {
+      issuer: 'https://identity.example.test', clientId: 'draftmatter-browser', registrationEnabled: false, orcidLinkingEnabled: true,
+    } })
   })
 
   it('publishes registration readiness without exposing the approval role or private admission secret', async () => {

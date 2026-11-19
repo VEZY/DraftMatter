@@ -53,7 +53,7 @@ test('finds owned and shared papers, shows the signed-in identity and opens new-
     const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': 'authorization,content-type', 'access-control-allow-methods': 'GET,POST,OPTIONS' }
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers })
     const path = new URL(request.url()).pathname
-    if (path === '/config') return route.fulfill({ headers, json: { oidc: publicOidc } })
+    if (path === '/config') return route.fulfill({ headers, json: { oidc: { ...publicOidc, orcidLinkingEnabled: true } } })
     expect(request.headers().authorization).toBe('Bearer mock-account-token')
     const response = path === '/api/session'
       ? { userId: 'ada', displayName: 'Ada Researcher', email: 'ada@example.test' }
@@ -73,6 +73,7 @@ test('finds owned and shared papers, shows the signed-in identity and opens new-
   await expect(page.getByRole('button', { name: 'Sign in', exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Sign in', exact: true }).click()
   await expect(page.getByLabel('Signed-in account', { exact: true })).toContainText('ada@example.test')
+  await expect(page.getByRole('link', { name: 'ORCID settings' })).toHaveAttribute('href', identityUrl + '/account/account-security/linked-accounts')
   const shared = page.locator('section', { has: page.getByRole('heading', { name: 'Shared with me', exact: true }) })
   await expect(shared.getByRole('button', { name: /Shared drought manuscript/ })).toBeVisible()
   const owned = page.locator('section', { has: page.getByRole('heading', { name: 'My drafts', exact: true }) })
@@ -110,7 +111,7 @@ test('can dismiss a workspace invitation without accepting it or connecting to t
   expect(serviceRequests).toEqual([])
 })
 
-async function mockPendingAccount(target: BrowserContext | Page) {
+async function mockPendingAccount(target: BrowserContext | Page, orcidLinkingEnabled = false) {
   const apiRequests: string[] = []
   await target.route(`${serviceUrl}/**`, (route) => {
     const request = route.request()
@@ -118,7 +119,7 @@ async function mockPendingAccount(target: BrowserContext | Page) {
     const path = new URL(request.url()).pathname
     if (path === '/config') {
       expect(request.headers().authorization).toBeUndefined()
-      return route.fulfill({ headers: cors, json: { oidc: publicOidc } })
+      return route.fulfill({ headers: cors, json: { oidc: { ...publicOidc, orcidLinkingEnabled } } })
     }
     apiRequests.push(path)
     return route.fulfill({ status: 403, headers: cors, json: { error: { code: 'alpha_access_pending', message: 'Approval required.' } } })
@@ -131,12 +132,15 @@ test('registers through the identity provider and keeps pending alpha accounts o
   page.on('pageerror', (error) => errors.push(error.message))
   await page.addInitScript((service) => localStorage.setItem('draftmatter.collaboration.development-service.v1', service), serviceUrl)
   await mockIdentityProvider(page, 'create')
-  const apiRequests = await mockPendingAccount(page)
+  const apiRequests = await mockPendingAccount(page, true)
   await page.goto('/')
   await expect(page.getByRole('button', { name: 'Register', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: 'Register', exact: true }).click()
   await expect(page.getByRole('heading', { name: 'Awaiting an invitation', exact: true })).toBeVisible()
   await expect(page.getByRole('status')).toHaveText('Your account is awaiting an invitation. We’ll email you when access is granted.')
+  const orcidLink = page.getByRole('link', { name: 'Connect your ORCID iD' })
+  await expect(orcidLink).toHaveAttribute('href', identityUrl + '/account/account-security/linked-accounts')
+  await expect(orcidLink).toHaveAttribute('rel', /noreferrer/)
   await expect(page.getByRole('button', { name: 'New draft', exact: true })).toHaveCount(0)
   await expect(page.getByRole('link', { name: /Try the example while you wait/ })).toHaveAttribute('href', '/demo')
   expect(apiRequests).toEqual(['/api/session'])
@@ -181,6 +185,7 @@ test('continues sign-in when an email verification returns in a separate tab', a
   const signIn = emailTab.getByRole('button', { name: 'Sign in to continue', exact: true })
   await expect(signIn).toBeInViewport({ ratio: 1 })
   await expect(emailTab.getByRole('status')).toBeInViewport({ ratio: 1 })
+  await emailTab.screenshot({ path: test.info().outputPath('email-verification-new-tab.png') })
   await expect(emailTab).toHaveURL(registration.searchParams.get('redirect_uri')!)
   expect(exchangedCodes).toEqual([])
   expect(apiRequests).toEqual([])
@@ -191,6 +196,7 @@ test('continues sign-in when an email verification returns in a separate tab', a
   expect(fresh.searchParams.get('state')).toBeTruthy()
   expect(fresh.searchParams.get('state')).not.toBe(registrationState)
   await expect(emailTab.getByRole('heading', { name: 'Awaiting an invitation', exact: true })).toBeVisible()
+  await expect(emailTab.getByRole('link', { name: /ORCID/ })).toHaveCount(0)
   expect(exchangedCodes).toEqual(['mock-authorization-code'])
   expect(apiRequests).toEqual(['/api/session'])
 })

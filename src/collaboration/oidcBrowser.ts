@@ -4,7 +4,7 @@ const TRANSACTION_KEY = 'draftmatter.collaboration.oidc.v1'
 const TRANSACTION_TTL_MS = 10 * 60_000
 
 interface OidcPublicConfig {
-  oidc: { issuer: string; clientId: string; registrationEnabled?: boolean }
+  oidc: { issuer: string; clientId: string; registrationEnabled?: boolean; orcidLinkingEnabled?: boolean }
 }
 
 interface OidcDiscovery {
@@ -196,10 +196,23 @@ export function hasOidcCallback(locationUrl: string) {
 }
 
 /** Read only public capability metadata; account credentials are never sent. */
-export async function readOidcRegistrationCapability(serviceUrl: string, request: typeof fetch = fetch) {
+export async function readOidcAccountCapabilities(serviceUrl: string, request: typeof fetch = fetch) {
   const urls = normalizeCollaborationServiceUrl(serviceUrl)
   const configuration = await json<OidcPublicConfig>(request, `${urls.apiUrl}/config`, { credentials: 'omit', redirect: 'error' })
-  return configuration.oidc?.registrationEnabled === true
+  const oidc = configuration.oidc
+  let orcidAccountUrl: string | undefined
+  if (oidc?.orcidLinkingEnabled === true && typeof oidc.issuer === 'string') {
+    try {
+      const issuer = new URL(secureEndpoint(oidc.issuer, 'OIDC issuer'))
+      if (!issuer.search) {
+        issuer.pathname = issuer.pathname.replace(/\/$/, '') + '/account/account-security/linked-accounts'
+        orcidAccountUrl = issuer.href
+      }
+    } catch {
+      // Only offer the optional link when the service supplies a usable issuer.
+    }
+  }
+  return { registrationEnabled: oidc?.registrationEnabled === true, orcidAccountUrl }
 }
 
 export async function prepareOidcAuthorization(

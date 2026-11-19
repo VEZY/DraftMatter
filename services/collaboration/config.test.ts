@@ -51,6 +51,14 @@ describe('collaboration service configuration', () => {
     await expect(verifier.verify(await accessToken(issuer.slice(0, -1)))).rejects.toMatchObject({ code: 'unauthenticated' })
   })
 
+  it('keeps ORCID linking optional and validates its capability independently', () => {
+    expect(loadCollaborationServiceConfig(environment()).oidc.orcidLinkingEnabled).toBe(false)
+    const enabled = loadCollaborationServiceConfig(environment({ DM_ORCID_LINKING_ENABLED: 'true' }))
+    expect(enabled.oidc.orcidLinkingEnabled).toBe(true)
+    expect(enabled.oidc.registrationEnabled).toBe(false)
+    expect(() => loadCollaborationServiceConfig(environment({ DM_ORCID_LINKING_ENABLED: 'sometimes' }))).toThrow(/DM_ORCID_LINKING_ENABLED/)
+  })
+
   it('defaults the public client ID to the first accepted audience', () => {
     expect(loadCollaborationServiceConfig(environment({ DM_OIDC_CLIENT_ID: '' })).oidc.clientId).toBe('draftmatter-collaboration')
   })

@@ -7,6 +7,15 @@
     "core:default",
     "core:window:allow-destroy",
     "dialog:allow-open",
-    "deep-link:default"
+    "deep-link:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [
+        { "url": "https://*/account/account-security/linked-accounts" },
+        { "url": "http://localhost:*/realms/draftmatter/account/account-security/linked-accounts" },
+        { "url": "http://127.0.0.1:*/realms/draftmatter/account/account-security/linked-accounts" },
+        { "url": "http://[[]::1]:*/realms/draftmatter/account/account-security/linked-accounts" }
+      ]
+    }
   ]
 }

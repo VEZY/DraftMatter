@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Shared manuscript review</title></head>
+  <body><div id="root"></div>
+    <script type="module">
+      import React from 'react'
+      import { createRoot } from 'react-dom/client'
+      import App from '/src/App.tsx'
+      import { CollaborationServiceClient } from '/src/collaboration/serviceClient.ts'
+      import '/src/styles.css'
+      import 'katex/dist/katex.min.css'
+
+      const launch = window.sharedReviewLaunch
+      launch.client = new CollaborationServiceClient(launch.serviceUrl, launch.token)
+      createRoot(document.getElementById('root')).render(React.createElement(App, { collaborationLaunch: launch }))
+    </script>
+  </body>
+</html>

@@ -31,7 +31,7 @@ interface Span {
 
 interface OffsetView {
   source: string
-  toOriginal(offset: number): number
+  toOriginal(offset: number, association?: -1 | 1): number
 }
 
 interface Match {
@@ -63,15 +63,16 @@ function withoutSpans(source: string, spans: Span[]): OffsetView {
   view += tail
   return {
     source: view,
-    toOriginal(offset) {
-      const segment = segments.find((candidate) => offset >= candidate.viewStart && offset <= candidate.viewEnd)
+    toOriginal(offset, association = -1) {
+      const candidates = association === -1 ? segments : [...segments].reverse()
+      const segment = candidates.find((candidate) => offset >= candidate.viewStart && offset <= candidate.viewEnd)
       if (!segment) return source.length
       return segment.originalStart + offset - segment.viewStart
     },
   }
 }
 
-function manuscriptView(source: string): OffsetView {
+export function manuscriptView(source: string): OffsetView {
   const document = parseReviewMarkup(source)
   const limit = document.sectionStart ?? source.length
   const anchors = document.anchors.filter((anchor) => anchor.start < limit)

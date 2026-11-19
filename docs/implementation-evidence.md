@@ -164,7 +164,7 @@ Remaining scope limits: complex bibliography YAML is preserved and rejected expl
 | DM-P4-01 | `src/PortableReviewItems.test.tsx`, `src/reviewOperations.test.ts`, `src/reviewBalloonAlignment.test.ts`, and comment/thread end-to-end specs cover point/range threads, replies, lifecycle actions, attribution, persistence, and aligned balloons. | `74889b8` |
 | DM-P4-02 | `src/reviewSuggestionCapture.test.ts` and `tests/e2e/suggestion-capture.spec.ts` cover grouped typing, paste, delete, and replace transactions without mutating accepted base text. | `ba75677` |
 | DM-P4-03 | `src/reviewConflicts.test.ts` enumerates deterministic identical, nested, crossing, and alternative-range conflict components. | `3e0ec9c` |
-| DM-P4-04 | `src/reviewOperations.test.ts`, `src/sharedEditor/reviewDecisions.test.ts`, `tests/e2e/review-batch-decisions.spec.ts`, and `tests/e2e/review-rebase.spec.ts` prove exactly-once decisions and preserved conflicts/Needs rebase. | `7a603d2` |
+| DM-P4-04 | `src/reviewOperations.test.ts`, `src/sharedEditor/reviewDecisions.test.ts`, `tests/e2e/review-next-change.spec.ts`, and `tests/e2e/review-rebase.spec.ts` prove exactly-once decisions and preserved conflicts/Needs rebase. | `7a603d2` |
 | DM-P4-05 | `src/reviewPresentation.test.ts`, `src/PortableReviewItems.test.tsx`, and `tests/e2e/markup-navigation.spec.ts` cover Simple/All/Original/Final, author filters, and change navigation over one proposal set. | `ac0b370` |
 | DM-P4-06 | `src/reviewReanchor.test.ts` and `tests/e2e/review-reanchoring.spec.ts` cover successful, ambiguous, and failed context recovery plus the manual unplaced queue. | `63ab604` |
 | DM-P4-07 | `src/reviewExport.test.ts`, `src/draftmatterCli.test.ts`, and the real-process CLI verifier cover Original, resolved Final, review report, reserved-markup removal, and fail-closed conflicts. | `23cb4a8` |
@@ -231,7 +231,7 @@ are complete in the canonical register.
 | AC-L09 | Persistent attributed review UI is covered by portable review component/operation tests and comment/thread/balloon end-to-end specs. | `74889b8` |
 | AC-L10 | Deterministic anchors/records and exactly-once decisions are covered by `src/reviewMarkup.test.ts` and `src/reviewOperations.test.ts`. | `7a603d2` |
 | AC-L11 | Independent identical/nested/crossing proposals are covered by `src/reviewMarkup.test.ts` and `src/reviewConflicts.test.ts`. | `3e0ec9c` |
-| AC-L12 | Needs-rebase/explicit-conflict preservation is covered by `src/reviewOperations.test.ts`, shared decision tests, and batch/rebase end-to-end specs. | `7a603d2` |
+| AC-L12 | Needs-rebase/explicit-conflict preservation is covered by `src/reviewOperations.test.ts`, shared decision tests, and sequential review and rebase end-to-end specs. | `7a603d2` |
 | AC-L13 | Clean Markdown/HTML/PDF/DOCX is covered by review/CLI/native HTML/DOCX tests and `tests/e2e/publication-export.spec.ts`; reserved review structures are rejected. | `22f33cb` |
 | AC-L14 | No implicit execution is covered by project lifecycle, execution trust, runtime discovery, browser boundary, and native-host tests. | `936836d` |
 | AC-L15 | Unknown syntax preservation/flagging is covered by fixture 28, portable round-trip tests, and raw-node editor tests. | `6fff187` |

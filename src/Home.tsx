@@ -153,6 +153,12 @@ function PendingAlphaHome({ onOpenLegal, onOpenLearn }: Pick<HomeProps, 'onOpenL
           <div><span className="home-kicker">Closed alpha</span><h1>Awaiting an invitation</h1><p role="status">Your account is awaiting an invitation.{session.registrationEnabled ? ' We’ll email you when access is granted.' : ''}</p>{!session.registrationEnabled && <p>For updates, contact <a href={`mailto:${legalConfiguration.contactEmail}`}>{legalConfiguration.contactEmail}</a>.</p>}</div>
           <div className="home-app-heading-actions"><button onClick={session.signOut}>Sign out / use another account</button></div>
         </section>
+        {session.orcidAccountUrl && (
+          <p className="home-orcid-link">
+            <a href={session.orcidAccountUrl} target="_blank" rel="noopener noreferrer">Connect your ORCID iD</a>
+            {' · Optional. You can also do this later in your account settings.'}
+          </p>
+        )}
         <section className="home-browser-actions" aria-label="Try DraftMatter"><a href="/demo"><span><Icon name="spark" size={19} /></span><strong>Try the example while you wait</strong><small>No account needed. Your example is private and resets when you reload.</small><Icon name="arrowRight" size={16} /></a></section>
         <AlphaAccountNotice onOpenLegal={onOpenLegal} />
       </div>
@@ -229,14 +235,14 @@ function AppHome({
           </div>
           <div className="home-app-heading-actions">
             {hostedBrowser && <>
-              <a className="home-primary" href="/demo"><Icon name="spark" size={16} />Try now</a>
+              <a className="home-primary" href="/demo"><Icon name="spark" size={16} />Try it</a>
               {session.state !== 'sign-in-required' && <button onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}><Icon name="users" size={16} />{session.state === 'signing-in' ? 'Signing in…' : 'Sign in'}</button>}
               <button onClick={onRegister} disabled={!onRegister || session.state === 'signing-in'}>Register</button>
             </>}
             {desktopHost.available
               ? <button className="home-primary" onClick={onOpenLocalPaper}><Icon name="document" size={16} />Open existing paper</button>
               : <button className={hostedBrowser ? undefined : 'home-primary'} onClick={onOpenBrowserDraft}><Icon name="plus" size={16} />New browser draft</button>}
-            {!desktopHost.available && !hostedBrowser && <a href="/demo"><Icon name="spark" size={16} />Try now</a>}
+            {!desktopHost.available && !hostedBrowser && <a href="/demo"><Icon name="spark" size={16} />Try it</a>}
             {desktopHost.available && <button onClick={onOpenLocalProject}><Icon name="folder" size={16} />Open project folder</button>}
             {desktopHost.available && <div className="home-paper-create-actions">
               <button onClick={onNewLocalDraft}><Icon name="plus" size={16} />New paper</button>
@@ -377,6 +383,7 @@ function Catalogue({
         <div className="home-account">
           <span aria-hidden="true">{accountName.slice(0, 1).toUpperCase()}</span>
           <span><strong>{accountName}</strong><small>Signed in</small></span>
+          {session.orcidAccountUrl && <a href={session.orcidAccountUrl} target="_blank" rel="noopener noreferrer">ORCID settings</a>}
           <button onClick={session.signOut}>Sign out</button>
         </div>
       </header>

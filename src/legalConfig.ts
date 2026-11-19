@@ -18,7 +18,7 @@ export interface LegalConfiguration {
   ready: boolean
 }
 
-export const LEGAL_DOCUMENT_VERSION = '2026-11-18'
+export const LEGAL_DOCUMENT_VERSION = '2026-11-19'
 
 export function isLegalDocumentId(value: string): value is LegalDocumentId {
   return legalDocuments.some((document) => document.id === value)

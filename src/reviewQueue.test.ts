@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest'
 import identicalSource from './fixtures/portable/25-review-identical.qmd?raw'
 import { parseReviewMarkup } from './reviewMarkup'
-import { buildReviewQueue, navigateReviewQueue } from './reviewQueue'
-import { createReviewThread } from './reviewOperations'
+import { buildReviewQueue, currentReviewChange, navigateReviewQueue, type ReviewQueueItem } from './reviewQueue'
+import { createReviewThread, decideReviewChange } from './reviewOperations'
 
 describe('review queue and navigation', () => {
   it('orders review items by manuscript location and carries conflict identity', () => {
@@ -45,5 +45,32 @@ describe('review queue and navigation', () => {
     expect(navigateReviewQueue(queue, 'dm-i01', 'next')?.id).toBe('dm-i02')
     expect(navigateReviewQueue(queue, 'dm-i01', 'previous')?.id).toBe('dm-i02')
     expect(navigateReviewQueue([], undefined, 'next')).toBeUndefined()
+  })
+
+  it('continues from the selected manuscript location through placed, undecided changes only', () => {
+    const [first, last] = buildReviewQueue(parseReviewMarkup(identicalSource))
+    const queue: ReviewQueueItem[] = [
+      first,
+      { ...first, id: 'thread', kind: 'thread' },
+      { ...first, id: 'accepted', status: 'accepted' },
+      { ...first, id: 'conflict', status: 'decision-conflict' },
+      { ...first, id: 'rebase', status: 'needs-rebase' },
+      last,
+      { ...first, id: 'unplaced', kind: 'unplaced-change', start: undefined, end: undefined },
+    ]
+    expect(currentReviewChange(queue)?.id).toBe(first.id)
+    expect(currentReviewChange(queue, 'thread')?.id).toBe(last.id)
+    expect(currentReviewChange(queue, last.id)?.id).toBe(last.id)
+    expect(currentReviewChange(queue, 'unplaced')?.id).toBe(first.id)
+    expect(currentReviewChange(queue.filter((item) => item.authorId === last.authorId), first.id)?.id).toBe(last.id)
+  })
+
+  it('re-evaluates overlapping suggestions after each decision', () => {
+    const document = parseReviewMarkup(identicalSource)
+    const decide = (action: 'accepted' | 'rejected') => buildReviewQueue(
+      decideReviewChange(document, { changeId: 'dm-i01', action, authorId: 'dm-a01' }).document,
+    )
+    expect(currentReviewChange(decide('rejected'), 'dm-i01')?.id).toBe('dm-i02')
+    expect(currentReviewChange(decide('accepted'), 'dm-i01')).toBeUndefined()
   })
 })

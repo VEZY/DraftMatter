@@ -151,7 +151,7 @@ describe('DraftMatter desktop home', () => {
     expect(container.textContent).not.toContain('Settings & account')
     expect(container.textContent).not.toContain('Configure collaboration')
     expect(container.textContent).not.toMatch(/free alpha|alpha is free/i)
-    expect(actions.firstElementChild?.textContent).toBe('Try now')
+    expect(actions.firstElementChild?.textContent).toBe('Try it')
     expect(actions.querySelector<HTMLAnchorElement>('a.home-primary')?.getAttribute('href')).toBe('/demo')
     expect(container.textContent).toContain('Register with your email and a password.')
     expect(container.textContent).toContain('we’ll email you when you’re invited')

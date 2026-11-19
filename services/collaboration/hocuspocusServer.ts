@@ -381,11 +381,16 @@ function validDecision(value: unknown, key: string, userId: string) {
     && Object.keys(decision).every((field) => ['id', 'changeId', 'authorId', 'action', 'timestamp', 'baseRevision', 'resolves'].includes(field))
 }
 
-function validExistingProposal(before: unknown, after: unknown, hasNewDecision: boolean) {
+function validExistingProposal(before: unknown, after: unknown, hasNewDecision: boolean, userId: string, decided: boolean) {
   if (!before || !after || typeof before !== 'object' || typeof after !== 'object' || Array.isArray(before) || Array.isArray(after)) return false
   const previous = before as Record<string, unknown>
   const next = after as Record<string, unknown>
-  for (const field of ['id', 'anchorId', 'authorId', 'kind', 'proposal', 'rationale', 'baseRevision']) {
+  if (!same(previous.proposal, next.proposal) && (
+    previous.authorId !== userId || previous.status !== 'open' || next.status !== 'open' || decided
+    || !['insert', 'replace'].includes(String(previous.kind))
+    || typeof next.proposal !== 'string' || next.proposal.length > 200_000
+  )) return false
+  for (const field of ['id', 'anchorId', 'authorId', 'kind', 'rationale', 'baseRevision']) {
     if (!same(previous[field], next[field])) return false
   }
   return typeof next.status === 'string'
@@ -574,6 +579,7 @@ function editorMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
 
   const beforeProposals = mapSnapshot(before, ROOTS.proposals)
   const afterProposals = mapSnapshot(after, ROOTS.proposals)
+  const decidedChanges = new Set([...afterDecisions.values()].map((decision) => (decision as Record<string, unknown>).changeId))
   const newProposalIds = new Set<string>()
   const changedProposalStatusIds = new Set<string>()
   for (const key of new Set([...beforeProposals.keys(), ...afterProposals.keys()])) {
@@ -584,7 +590,7 @@ function editorMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
       if (!validProposal(next, key, userId) || (next as Record<string, unknown>).status !== 'open') return false
       newProposalIds.add(key)
     } else {
-      if (!validExistingProposal(previous, next, hasNewDecision)) return false
+      if (!validExistingProposal(previous, next, hasNewDecision, userId, decidedChanges.has(key))) return false
       if (!same((previous as Record<string, unknown>).status, (next as Record<string, unknown>).status)) changedProposalStatusIds.add(key)
     }
   }

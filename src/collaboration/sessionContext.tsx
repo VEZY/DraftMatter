@@ -18,7 +18,7 @@ import {
   cleanOidcCallbackUrl,
   hasOidcCallback,
   prepareOidcAuthorization,
-  readOidcRegistrationCapability,
+  readOidcAccountCapabilities,
   submitOidcLogout,
   OidcSignInRequiredError,
   type OidcLoginResult,
@@ -67,6 +67,7 @@ interface CollaborationSessionContextValue {
   state: CollaborationAccountState
   serviceUrl: string
   registrationEnabled: boolean
+  orcidAccountUrl?: string
   profile: CollaborationSessionProfile | null
   workspaces: WorkspaceSummary[]
   drafts: CatalogueDraft[]
@@ -151,8 +152,12 @@ export function CollaborationSessionProvider({
   const [pendingInvitation, setPendingInvitation] = useState<CollaborationInvitationLink | null>(invitationRejected ? null : initialInvitation)
   const [error, setError] = useState(invitationRejected ? 'This invitation belongs to a different collaboration server. Ask the sender for a link to this DraftMatter service.' : '')
   const [client, setClient] = useState<CollaborationServiceClient | null>(null)
-  const [registrationCapability, setRegistrationCapability] = useState({ serviceUrl: '', enabled: false })
-  const registrationEnabled = !disabledNetwork && registrationCapability.serviceUrl === serviceUrl && registrationCapability.enabled
+  const [accountCapabilities, setAccountCapabilities] = useState<{
+    serviceUrl: string; registrationEnabled: boolean; orcidAccountUrl?: string
+  }>()
+  const capabilities = !disabledNetwork && accountCapabilities?.serviceUrl === serviceUrl ? accountCapabilities : undefined
+  const registrationEnabled = capabilities?.registrationEnabled === true
+  const orcidAccountUrl = capabilities?.orcidAccountUrl
   const tokenRef = useRef<CollaborationAccessToken | null>(null)
   const clientRef = useRef<CollaborationServiceClient | null>(null)
   const callbackStartedRef = useRef(false)
@@ -163,10 +168,10 @@ export function CollaborationSessionProvider({
     // Merely opening an invitation must not contact an inviter-selected server.
     if (disabledNetwork || !serviceUrl || (initialInvitation && !trustedServiceUrl) || invitationRejected) return
     let active = true
-    void readOidcRegistrationCapability(serviceUrl).then((enabled) => {
-      if (active) setRegistrationCapability({ serviceUrl, enabled })
+    void readOidcAccountCapabilities(serviceUrl).then((options) => {
+      if (active) setAccountCapabilities({ serviceUrl, ...options })
     }).catch(() => {
-      if (active) setRegistrationCapability({ serviceUrl, enabled: false })
+      if (active) setAccountCapabilities(undefined)
     })
     return () => { active = false }
   }, [disabledNetwork, initialInvitation, invitationRejected, serviceUrl, trustedServiceUrl])
@@ -453,6 +458,7 @@ export function CollaborationSessionProvider({
     state,
     serviceUrl,
     registrationEnabled,
+    orcidAccountUrl,
     profile,
     workspaces,
     drafts,
@@ -473,7 +479,7 @@ export function CollaborationSessionProvider({
     createProject,
     projectsForWorkspace,
     launchFor,
-  }), [client, drafts, error, launchFor, pendingInvitation, profile, projectsForWorkspace, registrationEnabled, serviceUrl, state, workspaceFailures, workspaces])
+  }), [client, drafts, error, launchFor, pendingInvitation, profile, projectsForWorkspace, registrationEnabled, orcidAccountUrl, serviceUrl, state, workspaceFailures, workspaces])
 
   return <CollaborationSessionContext.Provider value={value}>{children}</CollaborationSessionContext.Provider>
 }

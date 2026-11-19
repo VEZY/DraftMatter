@@ -2827,6 +2827,16 @@
   color: var(--home-muted);
 }
 
+.home-account a,
+.home-orcid-link a {
+  color: var(--home-sage-dark);
+  text-underline-offset: .18em;
+}
+
+.home-orcid-link {
+  color: var(--home-muted);
+}
+
 .home-catalogue-content {
   width: min(1080px, calc(100% - 48px));
   margin: 0 auto;

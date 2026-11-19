@@ -46,6 +46,6 @@ describe('public alpha legal configuration', () => {
     expect(isLegalDocumentId('../confidentialite')).toBe(false)
     expect(isLegalDocumentId('confidentialite?token=private')).toBe(false)
     expect(isLegalDocumentId('privacy-policy')).toBe(false)
-    expect(LEGAL_DOCUMENT_VERSION).toBe('2026-11-18')
+    expect(LEGAL_DOCUMENT_VERSION).toBe('2026-11-19')
   })
 })

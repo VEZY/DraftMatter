@@ -2,11 +2,12 @@ import { parseArgs, parseEnv } from 'node:util'
 import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { administratorSession, createIdentityAdmin, migrateAlphaIdentity, configureIdentityMail, enableAlphaRegistration, listPendingAccounts, approveAlphaAccount, notificationReceipts } from './alpha-admin.mjs'
+import { configureOrcid } from './orcid.mjs'
 import { createAlphaMailer, parseMailConfiguration, readPrivateFile } from './alpha-mail.mjs'
 
-async function privatePassword() {
+async function privatePassword(label = 'Keycloak administrator password') {
   if (!process.stdin.isTTY || !process.stdout.isTTY) throw new Error('Run the operator interactively in a terminal. Never pass administrator passwords as command arguments.')
-  process.stdout.write('Keycloak administrator password (hidden): ')
+  process.stdout.write(`${label} (hidden): `)
   const input = process.stdin
   const wasRaw = input.isRaw
   input.setRawMode(true)
@@ -31,12 +32,13 @@ async function privatePassword() {
 export async function runAlphaOperator(args = process.argv.slice(2)) {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: {
     directory: { type: 'string', default: '/runtime' }, admin: { type: 'string', default: 'remi-admin' },
+    'orcid-environment': { type: 'string' }, 'client-id': { type: 'string' },
     email: { type: 'string' }, 'owner-email': { type: 'string' }, resend: { type: 'boolean', default: false },
     'mail-delivery-confirmed': { type: 'boolean', default: false },
   } })
   const operation = positionals[0]
-  if (positionals.length !== 1 || !['migrate', 'configure-mail', 'test-mail', 'pending', 'approve', 'notify', 'enable-registration', 'close-registration'].includes(operation)) {
-    throw new Error('Operations: migrate [--owner-email EMAIL], configure-mail, test-mail --email EMAIL, pending, approve --email EMAIL, notify --email EMAIL [--resend], enable-registration --mail-delivery-confirmed, close-registration.')
+  if (positionals.length !== 1 || !['migrate', 'configure-mail', 'configure-orcid', 'test-mail', 'pending', 'approve', 'notify', 'enable-registration', 'close-registration'].includes(operation)) {
+    throw new Error('Operations: migrate [--owner-email EMAIL], configure-mail, configure-orcid --orcid-environment sandbox|production --client-id ID, test-mail --email EMAIL, pending, approve --email EMAIL, notify --email EMAIL [--resend], enable-registration --mail-delivery-confirmed, close-registration.')
   }
   const directory = resolve(values.directory)
   const runtime = parseEnv(readPrivateFile(resolve(directory, 'runtime.env')))
@@ -48,7 +50,10 @@ export async function runAlphaOperator(args = process.argv.slice(2)) {
     session = await administratorSession({ username: values.admin, password: await privatePassword() })
     const admin = createIdentityAdmin(session.token)
     let result
-    if (operation === 'migrate') result = await migrateAlphaIdentity(admin, { ownerEmail: values['owner-email'] })
+    if (operation === 'migrate') result = await migrateAlphaIdentity(admin, { ownerEmail: values['owner-email'], orcidEnabled: runtime.DM_ORCID_LINKING_ENABLED === 'true' })
+    if (operation === 'configure-orcid') result = await configureOrcid(admin, {
+      environment: values['orcid-environment'], clientId: values['client-id'], clientSecret: await privatePassword('ORCID application client secret'),
+    })
     if (operation === 'configure-mail') result = await configureIdentityMail(admin, mail, mailer)
     if (operation === 'test-mail') {
       await mailer.verify()

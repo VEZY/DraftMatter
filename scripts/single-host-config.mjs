@@ -86,6 +86,7 @@ ${env.AUTH_ORIGIN} {${tls}
 export function validateSingleHostEnvironment(env, { checkFiles = true } = {}) {
   if (!['production', 'rehearsal'].includes(env.DM_SINGLE_HOST_MODE)) throw new Error('DM_SINGLE_HOST_MODE must be production or rehearsal.')
   if (env.DM_ALPHA_REGISTRATION_ENABLED !== undefined && !['true', 'false'].includes(env.DM_ALPHA_REGISTRATION_ENABLED)) throw new Error('DM_ALPHA_REGISTRATION_ENABLED must be true or false.')
+  if (env.DM_ORCID_LINKING_ENABLED !== undefined && !['true', 'false'].includes(env.DM_ORCID_LINKING_ENABLED)) throw new Error('DM_ORCID_LINKING_ENABLED must be true or false.')
   if (env.DM_OIDC_REQUIRED_ALPHA_ROLE && env.DM_OIDC_REQUIRED_ALPHA_ROLE !== DRAFTMATTER_ALPHA_ROLE) throw new Error('DM_OIDC_REQUIRED_ALPHA_ROLE differs from the hosted identity policy.')
   const rehearsal = env.DM_SINGLE_HOST_MODE === 'rehearsal'
   const settings = validateProductionEnvironment(env, { localRehearsal: rehearsal })

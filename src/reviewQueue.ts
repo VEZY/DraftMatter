@@ -82,3 +82,14 @@ export function navigateReviewQueue(
   const offset = direction === 'next' ? 1 : -1
   return queue[(current + offset + queue.length) % queue.length]
 }
+
+export function isPendingReviewChange(item: ReviewQueueItem) {
+  return item.kind === 'change' && item.status === 'open'
+}
+
+/** Keep the selected open change, or continue from its position in manuscript order. */
+export function currentReviewChange(queue: ReviewQueueItem[], activeId?: string) {
+  const start = queue.findIndex((item) => item.id === activeId)
+  return queue.find((item, index) => index >= start && isPendingReviewChange(item))
+    ?? queue.find(isPendingReviewChange)
+}
