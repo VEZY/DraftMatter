@@ -27,9 +27,11 @@ Use a newly published, versioned server release containing these changes.
 Do not modify an existing GitHub release or replace a running image by a mutable
 tag. These changes are not part of `0.1.0-alpha.2`.
 
-1. Create and verify an encrypted server backup, and retain the current private
-   environment pair and public realm/proxy configuration for rollback. Preserve
-   the existing `backup.key`, TLS keys and database credentials.
+1. Retain the current private environment pair and public realm/proxy
+   configuration for rollback. Preserve the existing `backup.key`, TLS keys and
+   database credentials. For a populated service, create and verify a fresh
+   encrypted data backup too. An empty pre-production installation does not
+   need a fresh data archive just to update the application.
 2. Download and verify the new release as described in `server-releases.md`.
    Its `server-alpha.sh` wrapper verifies the release checksums and uses only
    its pinned operator image. Set `dm_release` below to that reviewed directory.
@@ -76,6 +78,12 @@ dm_bundle="$dm_release/draftmatter-server"
 sudo sh "$dm_bundle/scripts/server-alpha.sh" "$dm_release" /etc/draftmatter \
   migrate --owner-email vezy.remi@gmail.com
 ```
+
+If there are no application accounts yet, run `migrate` without `--owner-email`.
+After SMTP checks and registration activation, create and verify the first
+personal account through Register, then approve it explicitly with the operator.
+The private `remi-admin` account belongs to the separate administration realm;
+it is not a personal application account.
 
 The command prompts privately for the permanent Keycloak `remi-admin` password.
 Do not put that password on the command line, in chat, in shell history, or in
@@ -128,6 +136,8 @@ Run on the VPS, in the interactive `deploy@draftmatter` terminal:
 ```sh
 command -v python3 >/dev/null && sudo python3 - <<'PY'
 import base64, getpass, os, stat
+if os.uname().sysname != 'Linux' or os.geteuid() != 0:
+    raise SystemExit('Run this command through sudo on the Linux VPS, not on the Mac.')
 directory = '/etc/draftmatter'
 info = os.lstat(directory)
 if not stat.S_ISDIR(info.st_mode) or info.st_uid != 0 or stat.S_IMODE(info.st_mode) != 0o700:

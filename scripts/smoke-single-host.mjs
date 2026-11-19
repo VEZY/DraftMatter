@@ -17,6 +17,7 @@ const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const CHUNK_BYTES = 8 * 1024 * 1024
 const QUOTA_BYTES = 1_000_000_000
 const accounts = ['alice', 'bob', 'eve']
+const accountEmail = (name) => `rehearsal-${name}@example.test`
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const privateDiagnosticValues = new Set()
 
@@ -169,8 +170,10 @@ fi`
 
 async function provision(settings) {
   for (const name of accounts) {
-    const username = `rehearsal-${name}`
-    const email = `${username}@example.test`
+    // The production identity policy uses email as the username, including
+    // users created through the admin API rather than the registration form.
+    const username = accountEmail(name)
+    const email = username
     const matches = JSON.parse(await admin(settings, ['get', 'users', '-r', 'draftmatter', '-q', `username=${username}`]))
     assert(matches.length <= 1, 'Rehearsal username is ambiguous')
     if (matches.length) {
@@ -227,7 +230,7 @@ async function login(browser, settings, name) {
       observeCallback(frame.url())
     })
     await runSmokeCheck('pkce-load', () => page.goto(authorization.toString()))
-    await runSmokeCheck('pkce-username', () => page.locator('input[name="username"]').fill(`rehearsal-${name}`))
+    await runSmokeCheck('pkce-username', () => page.locator('input[name="username"]').fill(accountEmail(name)))
     await runSmokeCheck('pkce-password', () => page.locator('input[name="password"]').fill(settings.environment[`REHEARSAL_${name.toUpperCase()}_PASSWORD`]))
     await runSmokeCheck('pkce-submit', () => page.locator('#kc-login').click())
     const code = await runSmokeCheck('pkce-callback', () => Promise.race([callback, new Promise((_, reject) => setTimeout(() => reject(new Error(`OIDC browser login timed out for ${name}`)), 30_000).unref())]))
@@ -266,7 +269,7 @@ async function applicationSignIn(browser, settings) {
   try {
     await runSmokeCheck('application-home', () => page.goto(settings.appOrigin))
     await runSmokeCheck('application-open-login', () => page.getByRole('button', { name: 'Sign in', exact: true }).click())
-    await runSmokeCheck('application-username', () => page.locator('input[name="username"]').fill('rehearsal-alice'))
+    await runSmokeCheck('application-username', () => page.locator('input[name="username"]').fill(accountEmail('alice')))
     await runSmokeCheck('application-password', () => page.locator('input[name="password"]').fill(settings.environment.REHEARSAL_ALICE_PASSWORD))
     await runSmokeCheck('application-submit', () => page.locator('#kc-login').click())
     await runSmokeCheck('application-session', () => page.getByRole('button', { name: 'Sign out', exact: true }).waitFor({ state: 'visible', timeout: 30_000 }))
@@ -303,7 +306,7 @@ async function applicationSignIn(browser, settings) {
 async function publicChecks(browser, settings) {
   const config = await http(settings, '/config', { headers: { origin: settings.appOrigin } })
   assert.equal(config.headers['access-control-allow-origin'], settings.appOrigin)
-  assert.deepEqual(config.data.oidc, { issuer: settings.issuer, clientId: settings.clientId })
+  assert.deepEqual(config.data.oidc, { issuer: settings.issuer, clientId: settings.clientId, registrationEnabled: false })
   await http(settings, '/health/ready')
   await http(settings, '/api/session', { expected: 401 })
   await http(settings, '/metrics', { expected: 404 })
@@ -330,7 +333,7 @@ async function publicChecks(browser, settings) {
   } finally { await context.close() }
   const tokenEndpoint = `${settings.issuer}/protocol/openid-connect/token`
   const rejected = await http(settings, tokenEndpoint, { method: 'POST', expected: [400, 401], form: new URLSearchParams({
-    grant_type: 'password', client_id: settings.clientId, username: 'rehearsal-alice', password: settings.environment.REHEARSAL_ALICE_PASSWORD,
+    grant_type: 'password', client_id: settings.clientId, username: accountEmail('alice'), password: settings.environment.REHEARSAL_ALICE_PASSWORD,
   }) })
   assert.equal(rejected.data?.error, 'unauthorized_client', 'Password grant must be disabled, not merely reject an incorrect password')
   const authorizationParameters = new URLSearchParams({ client_id: settings.clientId, response_type: 'code', scope: 'openid', redirect_uri: `${settings.appOrigin}/smoke-auth-callback`, state: 'rehearsal-registration-check', code_challenge: createHash('sha256').update('registration-check').digest('base64url'), code_challenge_method: 'S256' })
