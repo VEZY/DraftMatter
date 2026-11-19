@@ -40,7 +40,7 @@ export function LegalPage({ documentId, onBack, linkBase = '/', onNavigate }: { 
         <button type="button" onClick={onBack}>Back</button>
       </header>
       <article aria-labelledby="legal-page-title">
-        <p className="legal-kicker">Free closed alpha · by invitation</p>
+        <p className="legal-kicker">Closed alpha · by invitation</p>
         <h1 id="legal-page-title" tabIndex={-1} ref={titleRef}>{document.title}</h1>
         <p className="legal-version">Version dated <time dateTime={LEGAL_DOCUMENT_VERSION}>{new Intl.DateTimeFormat('en-GB', { dateStyle: 'long', timeZone: 'UTC' }).format(new Date(`${LEGAL_DOCUMENT_VERSION}T00:00:00Z`))}</time></p>
         {!legalConfiguration.ready && (

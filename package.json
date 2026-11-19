@@ -74,6 +74,7 @@
     "@tauri-apps/plugin-dialog": "^2.7.1",
     "jose": "6.2.3",
     "katex": "^0.19.1",
+    "nodemailer": "10.6.0",
     "pdfjs-dist": "6.5.438",
     "pg": "8.22.0",
     "prosemirror-commands": "^1.7.1",
@@ -98,8 +99,8 @@
   "devDependencies": {
     "@playwright/test": "^1.61.1",
     "@tauri-apps/cli": "^2.11.4",
-    "@types/node": "26.1.1",
     "@types/mdast": "4.0.4",
+    "@types/node": "26.1.1",
     "@types/pg": "8.20.0",
     "@types/react": "latest",
     "@types/react-dom": "latest",

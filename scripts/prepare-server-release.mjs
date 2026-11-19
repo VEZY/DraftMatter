@@ -49,15 +49,15 @@ export function serverDeploymentPaths(treeEntries) {
     'scripts/init-single-host.mjs', 'scripts/check-single-host.mjs', 'scripts/single-host-config.mjs',
     'scripts/check-production-config.mjs', 'scripts/renew-single-host-tls.mjs',
     'scripts/check-server-release.mjs', 'scripts/install-server-release.mjs', 'scripts/server-operator.sh',
-    'scripts/server-backup.sh', 'deploy/offhost-mac/pull.mjs', 'deploy/offhost-mac/install.mjs',
+    'scripts/server-backup.sh', 'scripts/server-alpha.sh', 'scripts/stage-alpha-registration.mjs', 'deploy/offhost-mac/pull.mjs', 'deploy/offhost-mac/install.mjs',
     'services/collaboration/config.ts', 'src/legalConfig.ts',
     'docs/alpha-operations.md', 'docs/single-host-backups.md', 'docs/server-releases.md',
-    'docs/offhost-mac-backups.md',
+    'docs/offhost-mac-backups.md', 'docs/alpha-registration.md',
   ])
   return treeEntries.filter(({ path, mode }) => {
     if (!files.has(path) && !path.startsWith('deploy/single-host/')) return false
     if (mode !== '100644' && mode !== '100755') throw new ServerReleaseError('Server deployment sources must be ordinary committed files, without symlinks.')
-    if (path.split('/').some((part) => !part || part === '.' || part === '..' || /[\r\n\0]/.test(part) || /^(?:secrets|tls|runtime\.env|release\.env|backup\.key|\.env(?:\..*)?)$/i.test(part)) || /\.(?:pem|key|crt|dmbackup)$/i.test(path)) {
+    if (path.split('/').some((part) => !part || part === '.' || part === '..' || /[\r\n\0]/.test(part) || /^(?:secrets|tls|runtime\.env|release\.env|mail\.env|alpha-notifications|backup\.key|\.env(?:\..*)?)$/i.test(part)) || /\.(?:pem|key|crt|dmbackup)$/i.test(path)) {
       throw new ServerReleaseError('Private runtime files cannot be included in a server release.')
     }
     return true

@@ -9,6 +9,8 @@ playwright-report/
 *.local
 .env
 .env.*
+**/mail.env
+**/alpha-notifications/
 !.env.example
 deploy/production/secrets/
 deploy/single-host/secrets/

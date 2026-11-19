@@ -83,7 +83,7 @@ export function InvitationEntry({
         {session.profile
           ? <p>Signed in as <strong>{session.profile.email ?? session.profile.displayName ?? session.profile.userId}</strong>. Use the email address your colleague invited.</p>
           : <p>A project invitation does not create an alpha account. If you do not yet have sign-in details, <a href={accessLink.href}>request alpha access</a> first.</p>}
-        <p>The hosted alpha is free and by invitation. Please read the terms of use and privacy policy before continuing.</p>
+        <p>The hosted alpha is by invitation. Please read the terms of use and privacy policy before continuing.</p>
         <LegalLinks onNavigate={onOpenLegal} target={onOpenLegal ? undefined : '_blank'} />
         {(message || session.error) && <p className="home-account-error" role="alert">{message || session.error}</p>}
         <div>

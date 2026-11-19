@@ -55,6 +55,38 @@ describe('collaboration service configuration', () => {
     expect(loadCollaborationServiceConfig(environment({ DM_OIDC_CLIENT_ID: '' })).oidc.clientId).toBe('draftmatter-collaboration')
   })
 
+  it('opts hosted alpha admission in explicitly without changing standalone identity providers', async () => {
+    expect(loadCollaborationServiceConfig(environment()).oidc.requiredAlphaRole).toBeUndefined()
+    expect(loadCollaborationServiceConfig(environment({ DM_OIDC_REQUIRED_ALPHA_ROLE: '' })).oidc.requiredAlphaRole).toBeUndefined()
+    const config = loadCollaborationServiceConfig(environment({ DM_OIDC_REQUIRED_ALPHA_ROLE: 'draftmatter-alpha' }))
+    expect(config.oidc.requiredAlphaRole).toBe('draftmatter-alpha')
+    const pair = await generateKeyPair('ES256')
+    const verifier = new OidcIdentityVerifier({ ...config.oidc, keyResolver: async () => pair.publicKey })
+    const accessToken = (roles?: string[]) => new SignJWT({ email: 'owner@example.test', email_verified: true, draftmatter_roles: roles })
+      .setProtectedHeader({ alg: 'ES256' }).setIssuer(config.oidc.issuer).setAudience(config.oidc.audience)
+      .setSubject('existing-owner').setIssuedAt().setExpirationTime('5m').sign(pair.privateKey)
+    await expect(verifier.verify(await accessToken())).rejects.toMatchObject({ code: 'alpha_access_pending' })
+    await expect(verifier.verify(await accessToken(['draftmatter-alpha']))).resolves.toMatchObject({ subject: 'existing-owner' })
+    for (const value of ['draftmatter-alpha,admin', 'draftmatter alpha', 'a'.repeat(129)]) {
+      expect(() => loadCollaborationServiceConfig(environment({ DM_OIDC_REQUIRED_ALPHA_ROLE: value }))).toThrow(/DM_OIDC_REQUIRED_ALPHA_ROLE/)
+    }
+  })
+
+  it('enables public registration only behind an approval role and a private admission secret', () => {
+    const token = '4'.repeat(64)
+    expect(loadCollaborationServiceConfig(environment()).oidc.registrationEnabled).toBe(false)
+    expect(loadCollaborationServiceConfig(environment()).identityAdmission).toBeUndefined()
+    const enabled = { DM_ALPHA_REGISTRATION_ENABLED: 'true', DM_OIDC_REQUIRED_ALPHA_ROLE: 'draftmatter-alpha', DM_IDENTITY_ADMISSION_TOKEN: token }
+    const config = loadCollaborationServiceConfig(environment(enabled))
+    expect(config.oidc.registrationEnabled).toBe(true)
+    expect(config.identityAdmission).toEqual({ token, registrationEnabled: true })
+    for (const overrides of [
+      { ...enabled, DM_OIDC_REQUIRED_ALPHA_ROLE: '' }, { ...enabled, DM_IDENTITY_ADMISSION_TOKEN: '' },
+      { ...enabled, DM_IDENTITY_ADMISSION_TOKEN: 'short' }, { ...enabled, DM_ALPHA_REGISTRATION_ENABLED: 'maybe' },
+      { ...enabled, DM_WEBHOOK_SECRET: token },
+    ]) expect(() => loadCollaborationServiceConfig(environment(overrides))).toThrow()
+  })
+
   it('fails closed for missing secrets, insecure remote identity, and empty production origins', () => {
     expect(() => loadCollaborationServiceConfig(environment({ DM_WEBHOOK_SECRET: 'short' }))).toThrow(/32 bytes/)
     expect(() => loadCollaborationServiceConfig(environment({ NODE_ENV: 'production', DM_ALLOWED_ORIGINS: 'https://app.example.test', DM_OIDC_JWKS_URI: 'http://identity.example.test/jwks' }))).toThrow(/HTTPS/)

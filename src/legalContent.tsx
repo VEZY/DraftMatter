@@ -15,7 +15,7 @@ function LegalNotice({ configuration }: { configuration: LegalConfiguration }) {
   return <>
     <section aria-labelledby="legal-publisher">
       <h2 id="legal-publisher">Publisher and contact</h2>
-      <p>DraftMatter is scientific writing software and an experimental collaboration service. The free, invitation-only alpha is operated by {configuration.publisherName}, an individual who is also the publication director.</p>
+      <p>DraftMatter is scientific writing software and an experimental collaboration service. The invitation-only alpha is operated by {configuration.publisherName}, an individual who is also the publication director.</p>
       <p>To contact the publisher, report content, or make a personal data request: <Contact configuration={configuration} />.</p>
     </section>
     <section aria-labelledby="legal-hosting">
@@ -53,7 +53,9 @@ function PrivacyPolicy({ configuration }: { configuration: LegalConfiguration })
       <h2 id="privacy-purpose">Data used and purposes</h2>
       <dl>
         <dt>Account and access</dt>
-        <dd>Email address, display name, account identifier, authentication information and roles are used to identify you, manage invitations and enforce permissions. The identity provider handles sign-in and any passwords; the collaboration service receives the information needed to verify access.</dd>
+        <dd>Email address, optional first and last names, account identifier, authentication information, verification status and alpha approval roles are used to identify you, review requests to join, manage invitations and enforce permissions. The identity provider handles registration, sign-in and passwords; DraftMatter’s collaboration service receives the information needed to verify access, not your password.</dd>
+        <dt>Account emails</dt>
+        <dd>Your email address is used for verification, password recovery and the invitation message sent when alpha access is approved. Limited delivery records help the operator avoid duplicate notifications and resolve failed delivery. These operational messages are separate from marketing.</dd>
         <dt>Collaborative projects</dt>
         <dd>Manuscripts, files, project and file names, references, change attribution and activity dates are used to store, synchronise, display, download and recover shared work. Collaborators can see content and attribution according to their permissions.</dd>
         <dt>Support and testing feedback</dt>
@@ -61,7 +63,7 @@ function PrivacyPolicy({ configuration }: { configuration: LegalConfiguration })
         <dt>Operations and security</dt>
         <dd>Connection and request information available to the service, technical identifiers, access and administration events, errors and diagnostic records are used to protect accounts, prevent abuse and operate the service.</dd>
       </dl>
-      <p>Account and project management is based on performing the alpha’s terms of use. Security, abuse prevention and support are based on the legitimate interest in operating and improving a reliable service, subject to your rights. Applicable legal obligations are a separate basis where they require processing.</p>
+      <p>Account registration and project management are based on handling your request to join and performing the alpha’s terms of use. Security, abuse prevention and support are based on the legitimate interest in operating and improving a reliable service, subject to your rights. Applicable legal obligations are a separate basis where they require processing.</p>
       <p>Information essential to sign-in and sharing is required for those functions. You may choose not to use hosted collaboration and continue working locally. Testing feedback and external features are optional.</p>
     </section>
     <section aria-labelledby="privacy-access">
@@ -69,7 +71,7 @@ function PrivacyPolicy({ configuration }: { configuration: LegalConfiguration })
       <p>Hosted projects are not published openly on the Internet. Access depends on workspace membership and roles, together with project-specific roles. Workspace members may have default access to its projects: use separate workspaces for groups that should not share their work.</p>
       <p>The operator and service providers may access data where necessary for operations, support, security or a legal obligation. DraftMatter does not provide end-to-end encryption that prevents the operator from reading content. Administrative access must be limited to those needs.</p>
       <HostingSummary configuration={configuration} />
-      <p>The hosting provider’s legal identification is given in the Legal notice. Hosting, storage, backup and authentication providers process data only for the functions they provide.</p>
+      <p>The hosting provider’s legal identification is given in the Legal notice. Hosting, storage, backup, authentication and transactional email providers process data only for the functions they provide.</p>
       {configuration.additionalProcessors && <p>Other service providers: {configuration.additionalProcessors}</p>}
       {configuration.contactEmail.toLowerCase().endsWith('@gmail.com') && <p>This alpha’s contact address uses Gmail, provided by Google. Support messages therefore pass through that service and may be processed outside the European Union under <a href="https://policies.google.com/privacy?hl=en">Google’s terms and safeguards</a>. Do not send confidential research data by email. Contact email is separate from project storage.</p>}
       <p>The publisher does not sell your data, use it for targeted advertising, or provide your manuscripts to an AI provider to train its models.</p>
@@ -81,6 +83,7 @@ function PrivacyPolicy({ configuration }: { configuration: LegalConfiguration })
     </section>
     <section aria-labelledby="privacy-retention">
       <h2 id="privacy-retention">Retention and the end of the alpha</h2>
+      <p>A registration request remains pending until an access decision, withdrawal of the request, or closure of the alpha. Registration does not create a shared workspace or upload a manuscript. After approval, the account follows participant retention. To withdraw a request or request deletion, contact <Contact configuration={configuration} />; the deletion deadlines below apply.</p>
       <p>Accounts and shared content are retained during participation and while needed for active projects. Earlier versions and history may be retained for collaboration and recovery; replacing a file does not automatically delete its previous version.</p>
       <p>Following a valid deletion request or service closure, the affected data is removed from active systems within {configuration.deletionDays} days. Copies may remain in backups for up to {configuration.backupDays} additional days before expiring. A legal obligation or dispute may justify separate, limited retention; you will be informed where the law permits.</p>
       <p>Deleting your account does not necessarily erase other authors’ shared work. Attribution, comments or history may need to be anonymised or retained to a limited extent to protect their rights. Requests are reviewed individually and the publisher will explain the outcome.</p>
@@ -105,7 +108,7 @@ function AlphaTerms({ configuration }: { configuration: LegalConfiguration }) {
   return <>
     <section aria-labelledby="terms-purpose">
       <h2 id="terms-purpose">Purpose and scope</h2>
-      <p>These terms govern participation in the DraftMatter collaboration service operated by {configuration.publisherName}. This is a free, invitation-only, pre-production alpha for testing scientific writing and collecting feedback. No paid subscription, storage payment or commitment to a future purchase is required during this alpha.</p>
+      <p>These terms govern participation in the DraftMatter collaboration service operated by {configuration.publisherName}. This is an invitation-only, pre-production alpha for testing scientific writing and collecting feedback. No paid subscription, storage payment or commitment to a future purchase is required during this alpha.</p>
       <p>These terms are available before you use hosted collaboration. The MIT licence continues to apply to the open-source software, including local use and installations independent of this alpha. Participation does not require you to publish your research or provide testing feedback.</p>
     </section>
     <section aria-labelledby="terms-experimental">
@@ -118,7 +121,8 @@ function AlphaTerms({ configuration }: { configuration: LegalConfiguration }) {
     </section>
     <section aria-labelledby="terms-access">
       <h2 id="terms-access">Invitations, accounts and sharing</h2>
-      <p>Access is limited to invited participants. Use your own account, protect your sign-in credentials, and do not use someone else’s account. Report suspected unauthorised access promptly to <Contact configuration={configuration} />.</p>
+      <p>Access is limited to approved alpha participants. When registration is available, you can create an account with an email address and password, verify your email address, and wait for an invitation. Registration alone does not grant access to shared papers or create a workspace. You will receive an email when your request is approved; there is no guaranteed invitation date. A project or workspace invitation does not bypass alpha approval.</p>
+      <p>Use your own account, protect your sign-in credentials, and do not use someone else’s account. Report suspected unauthorised access promptly to <Contact configuration={configuration} />.</p>
       <p>Workspace owners manage invitations and roles. A member’s workspace rights may apply to its projects by default; project-specific roles then determine permitted actions. Check workspace membership and project permissions before sharing content. Create a separate workspace for a different group of collaborators.</p>
       <p>Authorised collaborators may view or download content according to their permissions. Revoking access prevents subsequent access to the service, but does not remove copies already downloaded.</p>
     </section>

@@ -44,6 +44,8 @@ export function createSingleHostEnvironment(options) {
     DM_OIDC_ISSUER: `https://${authHost}${suffix}/realms/draftmatter`,
     DM_OIDC_JWKS_URI: `https://${authHost}${suffix}/realms/draftmatter/protocol/openid-connect/certs`,
     DM_OIDC_AUDIENCE: 'draftmatter-collaboration', DM_OIDC_CLIENT_ID: 'draftmatter-public',
+    DM_OIDC_REQUIRED_ALPHA_ROLE: 'draftmatter-alpha', DM_ALPHA_REGISTRATION_ENABLED: 'false',
+    DM_IDENTITY_ADMISSION_TOKEN: secret(),
     DM_ALLOWED_ORIGINS: `https://${appHost}${suffix},tauri://localhost,http://tauri.localhost`,
     DM_WEBHOOK_SECRET: secret(), DM_PROJECT_FILES_TOTAL_QUOTA_BYTES: '25000000000',
   }
@@ -84,7 +86,7 @@ export function initializeSingleHost(options) {
   chmodSync(resolve(tls, 'ca.key'), 0o600)
   writeFileSync(resolve(directory, 'runtime.env'), serializeEnvironment(env), { mode: 0o600 })
   writeFileSync(resolve(directory, 'backup.key'), randomBytes(32), { mode: 0o600 })
-  writeFileSync(resolve(directory, 'realm.json'), JSON.stringify(buildSingleHostRealm({ appHost: env.APP_HOST, authHost: env.AUTH_HOST, httpsPort: Number(env.HTTPS_PORT) }), null, 2) + '\n', { mode: 0o644 })
+  writeFileSync(resolve(directory, 'realm.json'), JSON.stringify(buildSingleHostRealm({ appHost: env.APP_HOST, authHost: env.AUTH_HOST, httpsPort: Number(env.HTTPS_PORT), registrationEnabled: env.DM_ALPHA_REGISTRATION_ENABLED === 'true' }), null, 2) + '\n', { mode: 0o644 })
   // The directory is private; these single-file mounts must be readable by UID 1000.
   writeFileSync(resolve(directory, 's3.json'), JSON.stringify(singleHostS3Identity(env), null, 2) + '\n', { mode: 0o644 })
   writeFileSync(resolve(directory, 'Caddyfile'), renderSingleHostCaddy(env), { mode: 0o644 })

@@ -17,7 +17,14 @@ describe('isolated single-host deployment preparation', () => {
       const env = readSingleHostEnvironment(file)
       const settings = validateSingleHostEnvironment(env)
       expect(settings).toMatchObject({ rehearsal: true, appOrigin: 'https://app.draftmatter.localhost:8443' })
-      expect(new Set(['POSTGRES_PASSWORD', 'DM_DB_PASSWORD', 'KC_DB_PASSWORD', 'KC_BOOTSTRAP_ADMIN_PASSWORD', 'DM_OBJECT_SECRET_KEY', 'DM_WEBHOOK_SECRET'].map((name) => env[name])).size).toBe(6)
+      expect(new Set(['POSTGRES_PASSWORD', 'DM_DB_PASSWORD', 'KC_DB_PASSWORD', 'KC_BOOTSTRAP_ADMIN_PASSWORD', 'DM_OBJECT_SECRET_KEY', 'DM_WEBHOOK_SECRET', 'DM_IDENTITY_ADMISSION_TOKEN'].map((name) => env[name])).size).toBe(7)
+      expect(env.DM_IDENTITY_ADMISSION_TOKEN).toMatch(/^[a-f0-9]{64}$/)
+      expect(env.DM_OIDC_REQUIRED_ALPHA_ROLE).toBe('draftmatter-alpha')
+      expect(env.DM_ALPHA_REGISTRATION_ENABLED).toBe('false')
+      const proxy = readFileSync(join(directory, 'Caddyfile'), 'utf8')
+      expect(proxy).toContain('import draftmatter_identity_admission registration')
+      expect(proxy).toContain('import draftmatter_identity_admission account')
+      expect(proxy).not.toContain(env.DM_IDENTITY_ADMISSION_TOKEN)
       expect(env.DM_SINGLE_HOST_DIR).not.toContain('\\')
       expect(parseEnv(serializeEnvironment(env))).toEqual(env)
       if (process.platform !== 'win32') {
@@ -61,7 +68,11 @@ describe('isolated single-host deployment preparation', () => {
       ['DM_DATABASE_URL', 'postgresql://draftmatter:private@elsewhere.fr/draftmatter'],
       ['DM_OBJECT_ENDPOINT', 'http://object-storage:8333'], ['DM_OIDC_JWKS_URI', 'https://other.fr/certs'],
       ['DM_DB_PASSWORD', env.KC_DB_PASSWORD], ['COMPOSE_PROJECT_NAME', 'another-production-service'],
+      ['DM_ALPHA_REGISTRATION_ENABLED', '1'],
+      ['DM_IDENTITY_ADMISSION_TOKEN', env.DM_WEBHOOK_SECRET],
     ]) expect(() => validateSingleHostEnvironment({ ...env, [name]: value }, { checkFiles: false })).toThrow()
+    expect(() => validateSingleHostEnvironment({ ...env, DM_ALPHA_REGISTRATION_ENABLED: 'true', DM_OIDC_REQUIRED_ALPHA_ROLE: '' }, { checkFiles: false })).toThrow(/DM_OIDC_REQUIRED_ALPHA_ROLE/)
+    expect(() => validateSingleHostEnvironment({ ...env, DM_ALPHA_REGISTRATION_ENABLED: 'true', DM_IDENTITY_ADMISSION_TOKEN: '' }, { checkFiles: false })).toThrow(/DM_IDENTITY_ADMISSION_TOKEN/)
   })
 
   it('requires confirmed hosting information for production and rejects injected proxy inputs', () => {

@@ -4,6 +4,8 @@ import { act } from 'react'
 import { createRoot } from 'react-dom/client'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { DraftMatterApplication } from './DraftMatterApplication'
+import { webcrypto } from 'node:crypto'
+import { prepareOidcAuthorization } from './collaboration/oidcBrowser'
 
 vi.mock('./App', () => ({
   default: ({ initialExperience, startExampleTour, active = true, onOpenLanguages }: { initialExperience?: string; startExampleTour?: boolean; active?: boolean; onOpenLanguages?: () => void }) => <>
@@ -37,7 +39,71 @@ function jsonResponse(payload: unknown) {
   })
 }
 
+async function prepareAccountCallback(serviceUrl: string) {
+  const request = vi.fn<typeof fetch>()
+    .mockResolvedValueOnce(jsonResponse({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-public' } }))
+    .mockResolvedValueOnce(jsonResponse({ issuer: 'https://identity.example.test', authorization_endpoint: 'https://identity.example.test/authorize', token_endpoint: 'https://identity.example.test/token' }))
+  const authorization = await prepareOidcAuthorization(serviceUrl, window.location.href, sessionStorage, request, webcrypto as Crypto)
+  const callback = new URL(window.location.href)
+  callback.searchParams.set('code', 'mock-authorization-code')
+  callback.searchParams.set('state', new URL(authorization.authorizationUrl).searchParams.get('state')!)
+  window.history.replaceState({}, '', callback)
+}
+
 describe('DraftMatter application entry', () => {
+  it('welcomes hosted guests and sends enabled registration to the identity provider', async () => {
+    vi.stubGlobal('crypto', webcrypto)
+    const request = vi.fn<typeof fetch>(async (input) => String(input).endsWith('/config')
+      ? jsonResponse({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-public', registrationEnabled: true } })
+      : jsonResponse({ issuer: 'https://identity.example.test', authorization_endpoint: 'https://identity.example.test/authorize', token_endpoint: 'https://identity.example.test/token' }))
+    vi.stubGlobal('fetch', request)
+    const navigate = vi.fn()
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<DraftMatterApplication collaboration={{ initialServiceUrl: 'https://sync.example.test', navigateToIdentity: navigate }} />))
+    expect(container.querySelector('h1')?.textContent).toBe('Welcome to DraftMatter')
+    expect(container.querySelector('#home-setup')).toBeNull()
+    expect(container.querySelector('input[type="password"]')).toBeNull()
+    expect(container.textContent).not.toContain('Settings & account')
+    expect(container.textContent).not.toMatch(/free alpha|alpha is free/i)
+    const register = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Register')!
+    expect(register.disabled).toBe(false)
+    expect(container.textContent).toContain('we’ll email you when you’re invited')
+    await act(async () => register.click())
+    await waitFor(() => navigate.mock.calls.length > 0)
+    expect(new URL(navigate.mock.calls[0][0]).searchParams.get('prompt')).toBe('create')
+    expect(request.mock.calls.some(([input]) => String(input).includes('/api/'))).toBe(false)
+    await act(async () => root.unmount())
+    container.remove()
+  })
+
+  it('shows pending alpha approval rather than a project or catalogue and allows account switching', async () => {
+    window.history.replaceState({}, '', '/workspace/lab/project/paper')
+    await prepareAccountCallback('https://sync.example.test')
+    const request = vi.fn<typeof fetch>(async (input) => {
+      const url = String(input)
+      if (url.endsWith('/config')) return jsonResponse({ oidc: { registrationEnabled: false } })
+      if (url.endsWith('/token')) return jsonResponse({ access_token: 'pending-token', expires_in: 300 })
+      return new Response(JSON.stringify({ error: { code: 'alpha_access_pending', message: 'Approval required.' } }), { status: 403 })
+    })
+    vi.stubGlobal('fetch', request)
+    const container = document.createElement('div')
+    const root = createRoot(container)
+    await act(async () => root.render(<DraftMatterApplication collaboration={{ initialServiceUrl: 'https://sync.example.test' }} />))
+    expect(container.querySelector('h1')?.textContent).toBe('Awaiting an invitation')
+    expect(container.textContent).toContain('Your account is awaiting an invitation.')
+    expect(container.textContent).not.toContain('We’ll email you when access is granted.')
+    expect(container.querySelector('a[href^="mailto:"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="editor"]')).toBeNull()
+    expect(container.textContent).not.toContain('New draft')
+    expect(request.mock.calls.filter(([input]) => String(input).includes('/api/')).map(([input]) => input)).toEqual(['https://sync.example.test/api/session'])
+    await act(async () => [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Sign out / use another account')!.click())
+    expect(container.querySelector('h1')?.textContent).toBe('Welcome to DraftMatter')
+    expect(sessionStorage.length).toBe(0)
+    await act(async () => root.unmount())
+    container.remove()
+  })
+
   it('shows the signed-out application workspace without the public marketing story', async () => {
     const container = document.createElement('div')
     const root = createRoot(container)
@@ -51,7 +117,7 @@ describe('DraftMatter application entry', () => {
     expect(container.textContent).toContain('Set up DraftMatter')
     expect(container.textContent).toContain('AI connections')
     expect(container.textContent).toContain('Account & collaboration')
-    expect(container.textContent).toContain('The hosted alpha is free and by invitation.')
+    expect(container.textContent).toContain('Before using the hosted alpha, read the terms of use and privacy policy.')
     expect(container.textContent).toContain('Pre-production: data loss is possible. Keep independent backups of your work outside DraftMatter.')
     expect(container.querySelector('footer a[href="/legal/mentions-legales"]')).not.toBeNull()
     expect(container.querySelector('footer a[href="/legal/confidentialite"]')).not.toBeNull()
@@ -122,7 +188,7 @@ describe('DraftMatter application entry', () => {
   it.each([
     { reducedMotion: false, behavior: 'smooth' },
     { reducedMotion: true, behavior: 'auto' },
-  ] as const)('scrolls the settings action to application setup with $behavior behavior', async ({ reducedMotion, behavior }) => {
+  ] as const)('scrolls the clearly named setup action to application setup with $behavior behavior', async ({ reducedMotion, behavior }) => {
     const scrollIntoView = vi.fn()
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
       configurable: true,
@@ -133,7 +199,7 @@ describe('DraftMatter application entry', () => {
     document.body.append(container)
     const root = createRoot(container)
     await act(async () => root.render(<DraftMatterApplication />))
-    const action = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Settings & account'))!
+    const action = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Set up DraftMatter'))!
     await act(async () => action.click())
 
     expect(container.querySelector('#home-setup')).not.toBeNull()
@@ -275,8 +341,10 @@ describe('DraftMatter application entry', () => {
   })
 
   it('preserves the signed-in Home as a task-focused draft catalogue', async () => {
+    await prepareAccountCallback('http://127.0.0.1:4319')
     vi.stubGlobal('fetch', vi.fn(async (input: string | URL | Request) => {
       const url = String(input)
+      if (url.endsWith('/token')) return jsonResponse({ access_token: 'short-lived-test-token', expires_in: 300 })
       if (url.endsWith('/api/session')) return jsonResponse({ userId: 'researcher-1', displayName: 'Ari Morgan' })
       if (url.endsWith('/api/workspaces')) {
         return jsonResponse({
@@ -299,16 +367,7 @@ describe('DraftMatter application entry', () => {
     const root = createRoot(container)
     await act(async () => root.render(<DraftMatterApplication collaboration={{ initialServiceUrl: 'http://127.0.0.1:4319' }} />))
 
-    const advanced = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent?.includes('Collaboration account setup'))!
-    await act(async () => advanced.click())
-    const token = container.querySelector<HTMLInputElement>('input[type="password"]')!
-    await act(async () => {
-      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(token, 'short-lived-test-token')
-      token.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    const submit = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Use this service')!
-    await act(async () => submit.click())
-    await waitFor(() => container.querySelector('.home-catalogue') !== null)
+    await waitFor(() => container.querySelector('.home-catalogue h1')?.textContent === 'Drafts')
 
     expect(container.querySelector('.home-catalogue h1')?.textContent).toBe('Drafts')
     expect(container.textContent).toContain('Canopy recovery paper')

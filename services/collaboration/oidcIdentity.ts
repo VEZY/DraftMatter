@@ -17,6 +17,8 @@ export interface OidcIdentityVerifierOptions {
   clockToleranceSeconds?: number
   maxTokenAge?: string | number
   allowInsecureHttp?: boolean
+  /** Hosted alpha admission is separate from project invitations and roles. */
+  requiredAlphaRole?: string
 }
 
 function opaqueId(prefix: string, value: string) {
@@ -35,6 +37,9 @@ export class OidcIdentityVerifier implements CollaborationIdentityVerifier {
 
   constructor(private readonly options: OidcIdentityVerifierOptions) {
     if (!options.issuer.trim()) throw new Error('OIDC issuer is required.')
+    if (options.requiredAlphaRole !== undefined && (options.requiredAlphaRole.trim() !== options.requiredAlphaRole || !/^[A-Za-z][A-Za-z0-9._:-]{0,127}$/.test(options.requiredAlphaRole))) {
+      throw new Error('OIDC required alpha role must be a single safe role name.')
+    }
     if (!options.keyResolver && !options.jwksUri) throw new Error('OIDC JWKS URI or key resolver is required.')
     const jwksUrl = options.jwksUri ? new URL(options.jwksUri) : undefined
     if (jwksUrl && jwksUrl.protocol !== 'https:' && jwksUrl.hostname !== 'localhost' && jwksUrl.hostname !== '127.0.0.1' && !options.allowInsecureHttp) {
@@ -45,6 +50,11 @@ export class OidcIdentityVerifier implements CollaborationIdentityVerifier {
       cooldownDuration: 30_000,
       cacheMaxAge: 10 * 60_000,
     })
+  }
+
+  /** Private operator readiness evidence; this is never part of public /config. */
+  get alphaSecurityPolicy() {
+    return { requiredAlphaRole: this.options.requiredAlphaRole ?? null, emailVerificationRequired: Boolean(this.options.requiredAlphaRole) }
   }
 
   async verify(token: string): Promise<VerifiedCollaborationIdentity> {
@@ -65,6 +75,14 @@ export class OidcIdentityVerifier implements CollaborationIdentityVerifier {
       // Email is an authorization boundary for addressed invitations. An absent
       // or truthy-but-nonboolean claim is not evidence of verified ownership.
       const email = payload.email_verified === true ? optionalClaim(payload.email, 320)?.toLowerCase() : undefined
+      if (this.options.requiredAlphaRole) {
+        const roles = payload.draftmatter_roles
+        // Only the provider-signed role array authorizes admission. Neither an
+        // invitation nor user-editable profile text can activate an account.
+        if (!email || !Array.isArray(roles) || !roles.every((role) => typeof role === 'string') || !roles.includes(this.options.requiredAlphaRole)) {
+          throw new WorkspaceAccessError('alpha_access_pending', 'Your account is awaiting an invitation to the DraftMatter alpha.')
+        }
+      }
       const displayName = optionalClaim(payload.name, 200) ?? optionalClaim(payload.preferred_username, 200)
       const userId = opaqueId('oidc', `${issuer}\0${subject}`)
       const sessionId = suppliedSession && SAFE_ID.test(suppliedSession) ? suppliedSession : opaqueId('session', token)

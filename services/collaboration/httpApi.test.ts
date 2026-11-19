@@ -2,8 +2,9 @@ import { describe, expect, it, vi } from 'vitest'
 import { WorkspaceAccessError, type ProjectCapability } from '../../src/collaboration/workspaceService'
 import { createCollaborationHttpApi } from './httpApi'
 import { CollaborationOperationsDashboard } from './operations'
+import { IdentityAdmission } from './identityAdmission'
 
-function fixture() {
+function fixture(options: { identityAdmission?: IdentityAdmission; registrationEnabled?: boolean; identitySecurity?: { requiredAlphaRole: string | null; emailVerificationRequired: boolean } } = {}) {
   const workspaces = {
     getCurrentIdentity: vi.fn(async () => ({ userId: 'owner', displayName: 'Owner Researcher', email: 'owner@example.test' })),
     getOnboardingProgress: vi.fn(async () => ({ completedTaskIds: ['create-or-open' as const], dismissed: false })),
@@ -67,7 +68,9 @@ function fixture() {
     dashboard,
     connections: () => 3,
     allowedOrigins: ['https://app.example.test'],
-    publicConfig: { oidcIssuer: 'https://identity.example.test', oidcClientId: 'draftmatter-browser' },
+    publicConfig: { oidcIssuer: 'https://identity.example.test', oidcClientId: 'draftmatter-browser', registrationEnabled: options.registrationEnabled },
+    identityAdmission: options.identityAdmission,
+    identitySecurity: options.identitySecurity,
     maintenanceMetrics: () => ({
       runs: 4,
       backupSuccesses: 3,
@@ -115,7 +118,51 @@ describe('collaboration HTTP API', () => {
     const { api } = fixture()
     const response = await api(request('/config', { headers: { origin: 'https://app.example.test' } }))
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-browser' } })
+    expect(await response.json()).toEqual({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-browser', registrationEnabled: false } })
+  })
+
+  it('publishes registration readiness without exposing the approval role or private admission secret', async () => {
+    const token = '4'.repeat(64)
+    const { api } = fixture({ registrationEnabled: true, identityAdmission: new IdentityAdmission({ token, registrationEnabled: true }) })
+    const response = await api(request('/config'))
+    expect(await response.json()).toEqual({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-browser', registrationEnabled: true } })
+  })
+
+  it('keeps identity admission private, header-only and independent of app authorization/CORS', async () => {
+    const token = '4'.repeat(64)
+    const { api, workspaces } = fixture({ identityAdmission: new IdentityAdmission({ token, registrationEnabled: true, policies: { registration: { perAddressHour: 1, globalDay: 100 } } }) })
+    const path = '/internal/identity-admission?kind=registration'
+    expect((await api(request(path))).status).toBe(404)
+    const headers = { 'x-dm-identity-admission': token, 'x-dm-identity-ip': '192.0.2.1', origin: 'https://identity.example.test' }
+    expect((await api(request(path, { headers }))).status).toBe(204)
+    const limited = await api(request(path, { headers }))
+    expect(limited.status).toBe(429)
+    expect(limited.headers.get('retry-after')).toBe('3600')
+    expect(await limited.json()).toMatchObject({ error: { code: 'identity_rate_limited' } })
+    expect(workspaces.getCurrentIdentity).not.toHaveBeenCalled()
+    expect((await api(request('/internal/anything', { headers }))).status).toBe(404)
+    expect((await fixture().api(request(path, { headers }))).status).toBe(404)
+  })
+
+  it('reports the active alpha policy privately without using admission budgets or trusting an older backend', async () => {
+    const token = '4'.repeat(64)
+    const identityAdmission = new IdentityAdmission({ token, registrationEnabled: true, policies: { registration: { perAddressHour: 1, globalDay: 1 } } })
+    const { api, workspaces } = fixture({ identityAdmission, identitySecurity: { requiredAlphaRole: 'draftmatter-alpha', emailVerificationRequired: true } })
+    const path = '/internal/identity-security'
+    expect((await api(request(path))).status).toBe(404)
+    expect((await api(request(path, { headers: { 'x-dm-identity-admission': '5'.repeat(64) } }))).status).toBe(404)
+    const headers = { 'x-dm-identity-admission': token }
+    for (let index = 0; index < 3; index++) {
+      const response = await api(request(path, { headers }))
+      expect(response.status).toBe(200)
+      expect(await response.json()).toEqual({ gateVersion: 1, registrationEnabled: true, requiredAlphaRole: 'draftmatter-alpha', emailVerificationRequired: true })
+      expect(response.headers.get('cache-control')).toBe('no-store')
+    }
+    expect(identityAdmission.check(new Request('http://collaboration:1234/internal/identity-admission?kind=registration', { headers: { ...headers, 'x-dm-identity-ip': '192.0.2.1' } }))).toEqual({ allowed: true })
+    expect((await fixture().api(request(path, { headers }))).status).toBe(404)
+    expect((await fixture({ identityAdmission }).api(request(path, { headers }))).status).toBe(404)
+    expect((await api(request(path, { method: 'POST', headers }))).status).toBe(405)
+    expect(workspaces.getCurrentIdentity).not.toHaveBeenCalled()
   })
 
   it('routes bearer-authenticated workspace operations and returns strict CORS headers', async () => {

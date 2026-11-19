@@ -1,5 +1,11 @@
+import {
+  alphaRealmSettings, alphaRegistrationFlows, alphaRegistrationPasswordConfig,
+  alphaRole, alphaRoleMapper, alphaUserProfile,
+  DRAFTMATTER_ALPHA_ROLE, DRAFTMATTER_CLIENT_ID, DRAFTMATTER_REGISTRATION_FLOW,
+} from './alpha.mjs'
+
 const REALM = 'draftmatter'
-const CLIENT_ID = 'draftmatter-public'
+const CLIENT_ID = DRAFTMATTER_CLIENT_ID
 const AUDIENCE = 'draftmatter-collaboration'
 
 function dnsHost(value, name) {
@@ -19,7 +25,7 @@ function dnsHost(value, name) {
  * Reserved DNS suffixes are accepted for the isolated TLS rehearsal; the
  * production environment validator must reject them before a public deployment.
  */
-export function buildSingleHostRealm({ appHost, authHost, httpsPort = 443 }) {
+export function buildSingleHostRealm({ appHost, authHost, httpsPort = 443, registrationEnabled = false }) {
   dnsHost(appHost, 'appHost')
   dnsHost(authHost, 'authHost')
   if (appHost === authHost) throw new Error('appHost and authHost must be distinct DNS hostnames.')
@@ -35,16 +41,10 @@ export function buildSingleHostRealm({ appHost, authHost, httpsPort = 443 }) {
     enabled: true,
     displayName: 'DraftMatter',
     sslRequired: 'all',
-    registrationAllowed: false,
-    registrationEmailAsUsername: false,
-    loginWithEmailAllowed: true,
-    duplicateEmailsAllowed: false,
-    editUsernameAllowed: false,
-    verifyEmail: true,
-    // The invitation-only pilot has no SMTP delivery. Provision an invited
-    // account only after verifying its email out of band; self-service email
-    // verification/reset can be enabled when mail delivery is configured.
     resetPasswordAllowed: false,
+    ...alphaRealmSettings({ registrationEnabled }),
+    // Public signup is enabled explicitly only after SMTP, admission limits,
+    // and the collaboration approval gate have been configured and checked.
     rememberMe: false,
     bruteForceProtected: true,
     permanentLockout: false,
@@ -61,6 +61,17 @@ export function buildSingleHostRealm({ appHost, authHost, httpsPort = 443 }) {
     revokeRefreshToken: true,
     refreshTokenMaxReuse: 0,
     attributes: { frontendUrl: authOrigin },
+    roles: { realm: [alphaRole()] },
+    scopeMappings: [{ client: CLIENT_ID, roles: [DRAFTMATTER_ALPHA_ROLE] }],
+    components: {
+      'org.keycloak.userprofile.UserProfileProvider': [{
+        providerId: 'declarative-user-profile',
+        config: { 'kc.user.profile.config': [JSON.stringify(alphaUserProfile())] },
+      }],
+    },
+    registrationFlow: DRAFTMATTER_REGISTRATION_FLOW,
+    authenticationFlows: alphaRegistrationFlows(),
+    authenticatorConfig: [alphaRegistrationPasswordConfig()],
     clients: [{
       clientId: CLIENT_ID,
       name: 'DraftMatter browser and desktop',
@@ -100,7 +111,7 @@ export function buildSingleHostRealm({ appHost, authHost, httpsPort = 443 }) {
           'id.token.claim': 'false',
           'introspection.token.claim': 'true',
         },
-      }],
+      }, alphaRoleMapper()],
     }],
   }
 }

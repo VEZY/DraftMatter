@@ -4,7 +4,7 @@ const TRANSACTION_KEY = 'draftmatter.collaboration.oidc.v1'
 const TRANSACTION_TTL_MS = 10 * 60_000
 
 interface OidcPublicConfig {
-  oidc: { issuer: string; clientId: string }
+  oidc: { issuer: string; clientId: string; registrationEnabled?: boolean }
 }
 
 interface OidcDiscovery {
@@ -179,9 +179,20 @@ function readTransaction(storage: Pick<Storage, 'getItem'>): OidcTransaction | n
   }
 }
 
+export function discardOidcAuthorization(storage: Pick<Storage, 'getItem' | 'removeItem'>, expectedState?: string) {
+  if (!expectedState || readTransaction(storage)?.state === expectedState) storage.removeItem(TRANSACTION_KEY)
+}
+
 export function hasOidcCallback(locationUrl: string) {
   const url = new URL(locationUrl)
   return url.searchParams.has('code') || url.searchParams.has('error')
+}
+
+/** Read only public capability metadata; account credentials are never sent. */
+export async function readOidcRegistrationCapability(serviceUrl: string, request: typeof fetch = fetch) {
+  const urls = normalizeCollaborationServiceUrl(serviceUrl)
+  const configuration = await json<OidcPublicConfig>(request, `${urls.apiUrl}/config`, { credentials: 'omit', redirect: 'error' })
+  return configuration.oidc?.registrationEnabled === true
 }
 
 export async function prepareOidcAuthorization(
@@ -191,9 +202,13 @@ export async function prepareOidcAuthorization(
   request: typeof fetch = fetch,
   webCrypto: Crypto = crypto,
   clock: () => number = Date.now,
+  intent: 'sign-in' | 'register' = 'sign-in',
 ): Promise<OidcAuthorizationRequest> {
   const urls = normalizeCollaborationServiceUrl(serviceUrl)
   const publicConfig = await json<OidcPublicConfig>(request, `${urls.apiUrl}/config`, { credentials: 'omit' })
+  if (intent === 'register' && publicConfig.oidc?.registrationEnabled !== true) {
+    throw new Error('Registration is not available for this DraftMatter service yet.')
+  }
   const issuer = secureIssuer(publicConfig.oidc.issuer, 'OIDC issuer')
   if (!publicConfig.oidc.clientId.trim()) throw new Error('The collaboration service did not publish an OIDC client ID.')
   const discovery = await json<OidcDiscovery>(request, `${issuer.replace(/\/$/, '')}/.well-known/openid-configuration`, { credentials: 'omit' })
@@ -232,6 +247,7 @@ export async function prepareOidcAuthorization(
   authorization.searchParams.set('state', state)
   authorization.searchParams.set('code_challenge', challenge)
   authorization.searchParams.set('code_challenge_method', 'S256')
+  if (intent === 'register') authorization.searchParams.set('prompt', 'create')
   return { authorizationUrl: authorization.toString(), serviceUrl: urls.apiUrl }
 }
 
@@ -290,10 +306,10 @@ export async function completeOidcAuthorization(
     // The actionable status fallback below avoids exposing an intermediary page.
   }
   if (!response.ok || !payload.access_token || payload.access_token.length > 16_384) {
-    storage.removeItem(TRANSACTION_KEY)
+    discardOidcAuthorization(storage, transaction.state)
     throw new Error(payload.error_description || payload.error || `Identity token exchange returned ${response.status}.`)
   }
-  storage.removeItem(TRANSACTION_KEY)
+  discardOidcAuthorization(storage, transaction.state)
   const expiresAt = typeof payload.expires_in === 'number' && payload.expires_in > 0 ? clock() + payload.expires_in * 1_000 : undefined
   const tokenSession = new OidcTokenSession(payload.access_token, payload.refresh_token, expiresAt, transaction.tokenEndpoint, transaction.clientId, request, clock, transaction.logoutEndpoint, typeof payload.id_token === 'string' && payload.id_token.length <= 32_768 ? payload.id_token : undefined)
   return {

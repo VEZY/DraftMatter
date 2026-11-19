@@ -8,6 +8,7 @@ import { CollaborationMaintenanceCoordinator } from './maintenance'
 import { WebhookNotificationEmailDelivery } from './notificationDelivery'
 import { S3ObjectStorage } from './objectStorage'
 import { OidcIdentityVerifier } from './oidcIdentity'
+import { IdentityAdmission } from './identityAdmission'
 import { PostgresCollaborationStore } from './postgresStore'
 import { PostgresWorkspaceService } from './postgresWorkspaceService'
 import { PostgresProjectFileService } from './projectFiles'
@@ -71,7 +72,9 @@ export function createCollaborationService(config: CollaborationServiceConfig) {
     dashboard: persistence.dashboard,
     connections: () => server?.hocuspocus.getConnectionsCount() ?? 0,
     allowedOrigins: config.allowedOrigins,
-    publicConfig: { oidcIssuer: config.oidc.issuer, oidcClientId: config.oidc.clientId },
+    publicConfig: { oidcIssuer: config.oidc.issuer, oidcClientId: config.oidc.clientId, registrationEnabled: config.oidc.registrationEnabled },
+    ...(config.identityAdmission ? { identityAdmission: new IdentityAdmission(config.identityAdmission) } : {}),
+    identitySecurity: identity.alphaSecurityPolicy,
     maintenanceMetrics: () => maintenance.snapshot(),
     backups: persistence,
     files,

@@ -120,7 +120,7 @@ describe('DraftMatter website', () => {
     expect(links).toHaveLength(3)
     expect(links.map((link) => link.textContent)).toEqual(['Legal notice', 'Privacy policy', 'Terms of use'])
     for (const link of links) expect(link.getAttribute('href')).toMatch(/^.*#legal\//)
-    expect(container.textContent).toContain('The hosted alpha is free and available by invitation.')
+    expect(container.textContent).toContain('The hosted alpha is available by invitation.')
   })
 
   it('opens a bookmarked legal document and returns to the website through hash navigation', async () => {

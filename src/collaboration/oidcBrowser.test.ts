@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { completeOidcAuthorization, hasOidcCallback, prepareOidcAuthorization } from './oidcBrowser'
+import { completeOidcAuthorization, hasOidcCallback, prepareOidcAuthorization, readOidcRegistrationCapability } from './oidcBrowser'
 
 function memoryStorage() {
   const values = new Map<string, string>()
@@ -12,6 +12,57 @@ function memoryStorage() {
 }
 
 describe('browser OIDC Authorization Code + PKCE', () => {
+  it('keeps a newer PKCE transaction when an earlier token exchange finishes late', async () => {
+    const storage = memoryStorage()
+    const metadata = () => vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-public' } }))
+      .mockResolvedValueOnce(Response.json({ issuer: 'https://identity.example.test', authorization_endpoint: 'https://identity.example.test/authorize', token_endpoint: 'https://identity.example.test/token' }))
+    const first = await prepareOidcAuthorization('https://sync.example.test', 'https://app.example.test/', storage, metadata())
+    const state = new URL(first.authorizationUrl).searchParams.get('state')!
+    let resolveExchange!: (value: Response) => void
+    const request = vi.fn<typeof fetch>(() => new Promise<Response>((resolve) => { resolveExchange = resolve }))
+    const pending = completeOidcAuthorization(`https://app.example.test/?code=code&state=${state}`, storage, request)
+    await prepareOidcAuthorization('https://sync.example.test', 'https://app.example.test/', storage, metadata())
+    const newerTransaction = [...storage.values.values()][0]
+    resolveExchange(Response.json({ access_token: 'late-token', expires_in: 300 }))
+    await pending
+    expect([...storage.values.values()]).toEqual([newerTransaction])
+  })
+
+  it('starts registration through the same PKCE authorization endpoint with prompt=create', async () => {
+    const storage = memoryStorage()
+    const request = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-public', registrationEnabled: true } }))
+      .mockResolvedValueOnce(Response.json({ issuer: 'https://identity.example.test', authorization_endpoint: 'https://identity.example.test/authorize', token_endpoint: 'https://identity.example.test/token', code_challenge_methods_supported: ['S256'] }))
+    const result = await prepareOidcAuthorization('https://sync.example.test', 'https://app.example.test/', storage, request, crypto, Date.now, 'register')
+    const authorization = new URL(result.authorizationUrl)
+    expect(authorization.pathname).toBe('/authorize')
+    expect(authorization.searchParams.get('prompt')).toBe('create')
+    expect(authorization.searchParams.get('response_type')).toBe('code')
+    expect(authorization.searchParams.get('code_challenge_method')).toBe('S256')
+    expect(authorization.searchParams.get('code_challenge')).toMatch(/^[A-Za-z0-9_-]{43}$/)
+    expect(authorization.searchParams.get('state')).toBeTruthy()
+    expect(storage.values.size).toBe(1)
+    expect(request.mock.calls[0][1]).toEqual({ credentials: 'omit' })
+  })
+
+  it.each([undefined, false, 'true', 1])('refuses registration with capability %s before discovery or storing a transaction', async (registrationEnabled) => {
+    const storage = memoryStorage()
+    const request = vi.fn<typeof fetch>().mockResolvedValueOnce(Response.json({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-public', registrationEnabled } }))
+    await expect(prepareOidcAuthorization('https://sync.example.test', 'https://app.example.test/', storage, request, crypto, Date.now, 'register')).rejects.toThrow(/Registration is not available/)
+    expect(request).toHaveBeenCalledTimes(1)
+    expect(storage.values.size).toBe(0)
+  })
+
+  it('reads registration readiness without account credentials and defaults to disabled', async () => {
+    const request = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ oidc: { registrationEnabled: true } }))
+      .mockResolvedValueOnce(Response.json({ oidc: {} }))
+    await expect(readOidcRegistrationCapability('https://sync.example.test', request)).resolves.toBe(true)
+    await expect(readOidcRegistrationCapability('https://sync.example.test', request)).resolves.toBe(false)
+    expect(request).toHaveBeenCalledWith('https://sync.example.test/config', { credentials: 'omit', redirect: 'error' })
+  })
+
   it('invalidates retained tokens on logout and keeps the identity hint out of browser storage', async () => {
     const storage = memoryStorage()
     const request = vi.fn<typeof fetch>()

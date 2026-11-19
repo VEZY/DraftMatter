@@ -1,3 +1,8 @@
+FROM node:24.22.3-bookworm-slim AS mail-dependencies
+WORKDIR /mail-dependencies
+COPY deploy/single-host/operator-mail/package.json deploy/single-host/operator-mail/package-lock.json ./
+RUN npm ci --omit=dev --ignore-scripts --no-audit --no-fund
+
 FROM node:24.22.3-bookworm-slim
 
 # Initialization and TLS renewal need OpenSSL, not npm or a host Node install.
@@ -6,8 +11,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /opt/draftmatter-operator
-COPY scripts/init-single-host.mjs scripts/check-single-host.mjs scripts/single-host-config.mjs scripts/check-production-config.mjs scripts/renew-single-host-tls.mjs scripts/check-server-release.mjs scripts/install-server-release.mjs ./scripts/
-COPY deploy/single-host/keycloak/realm.mjs ./deploy/single-host/keycloak/realm.mjs
+COPY scripts/init-single-host.mjs scripts/check-single-host.mjs scripts/single-host-config.mjs scripts/check-production-config.mjs scripts/renew-single-host-tls.mjs scripts/check-server-release.mjs scripts/install-server-release.mjs scripts/stage-alpha-registration.mjs ./scripts/
+COPY deploy/single-host/keycloak/*.mjs ./deploy/single-host/keycloak/
+COPY --from=mail-dependencies /mail-dependencies/node_modules ./node_modules/
 COPY services/collaboration/config.ts ./services/collaboration/config.ts
 COPY src/legalConfig.ts ./src/legalConfig.ts
 COPY deploy/single-host/backup/backup.mjs deploy/single-host/backup/crypto.mjs ./deploy/single-host/backup/

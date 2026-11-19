@@ -7290,6 +7290,11 @@
 .home-alpha-access p + p { margin-top: 4px; }
 .home-alpha-access strong { color: var(--home-ink); }
 .home-alpha-access a { color: var(--home-sage-dark); text-underline-offset: 3px; }
+.home-alpha-access .alpha-account-notice {
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--home-line);
+}
 
 .home-browser-storage-note {
   margin-top: 14px;

@@ -590,6 +590,7 @@ DraftMatter is licensed under MIT. The following third-party packages retain the
 | npm | nanoid | 3.3.20 | MIT | development |
 | npm | nearley | 2.20.1 | MIT | development |
 | npm | negotiator | 1.0.0 | MIT | required |
+| npm | nodemailer | 10.6.0 | MIT-0 | required |
 | npm | object-assign | 4.1.1 | MIT | required |
 | npm | object-hash | 2.2.0 | MIT | development |
 | npm | object-inspect | 1.13.4 | MIT | required |

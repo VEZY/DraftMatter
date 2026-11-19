@@ -20,6 +20,8 @@ dist-website
 test-results
 playwright-report
 **/runtime.env
+**/mail.env
+**/alpha-notifications
 **/backup.key
 **/*.key
 **/rehearsal-report.json

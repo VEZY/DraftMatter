@@ -124,7 +124,7 @@ export function Website() {
         <div>
           <span className="website-alpha-label">Private alpha · pre-release</span>
           <h2 id="website-alpha-title">Help shape a better way to write research.</h2>
-          <p>DraftMatter is not a finished public release yet. The hosted alpha is free and available by invitation. Participants will test real paper workflows, report rough edges, and help decide what deserves attention before wider distribution.</p>
+          <p>DraftMatter is not a finished public release yet. The hosted alpha is available by invitation. Participants will test real paper workflows, report rough edges, and help decide what deserves attention before wider distribution.</p>
           <ul>
             <li><Icon name="check" size={14} />Clear pre-release expectations</li>
             <li><Icon name="check" size={14} />No DraftMatter account required for local papers</li>

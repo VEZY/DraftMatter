@@ -33,6 +33,10 @@ Keep a protected copy of the key outside the VPS and outside application/S3
 credentials. Losing this key means losing the backups; storing the only copy
 beside the VPS does not protect against host loss. Preserve the reviewed release,
 deployment environment and independent secrets through a separate secure process.
+When registration is enabled, this separate private configuration copy must also
+preserve `mail.env` and `alpha-notifications/` receipts; they are not part of the
+database/object archive. The identity database dump does contain Keycloak's SMTP
+configuration, so protect its decryption key accordingly.
 They are needed to recreate the stack, but should not be placed in an unencrypted
 sidecar beside the archive.
 

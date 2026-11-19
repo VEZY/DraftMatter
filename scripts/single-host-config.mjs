@@ -5,6 +5,7 @@ import { parseEnv } from 'node:util'
 import { isDeepStrictEqual } from 'node:util'
 import { validateProductionEnvironment } from './check-production-config.mjs'
 import { buildSingleHostRealm } from '../deploy/single-host/keycloak/realm.mjs'
+import { DRAFTMATTER_ALPHA_ROLE } from '../deploy/single-host/keycloak/alpha.mjs'
 
 export const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 
@@ -65,6 +66,14 @@ ${env.AUTH_ORIGIN} {${tls}
 \t\tStrict-Transport-Security "max-age=31536000"
 \t}
 \t# The master realm, admin API/console and management endpoints stay private.
+\t@registration path /realms/draftmatter/login-actions/registration*
+\thandle @registration {
+\t\timport draftmatter_identity_admission registration
+\t}
+\t@accountAction path /realms/draftmatter/login-actions/required-action* /realms/draftmatter/login-actions/reset-credentials* /realms/draftmatter/login-actions/action-token*
+\thandle @accountAction {
+\t\timport draftmatter_identity_admission account
+\t}
 \t@identity path /realms/draftmatter/* /resources/* /robots.txt
 \thandle @identity {
 \t\treverse_proxy keycloak:8080
@@ -76,10 +85,13 @@ ${env.AUTH_ORIGIN} {${tls}
 
 export function validateSingleHostEnvironment(env, { checkFiles = true } = {}) {
   if (!['production', 'rehearsal'].includes(env.DM_SINGLE_HOST_MODE)) throw new Error('DM_SINGLE_HOST_MODE must be production or rehearsal.')
+  if (env.DM_ALPHA_REGISTRATION_ENABLED !== undefined && !['true', 'false'].includes(env.DM_ALPHA_REGISTRATION_ENABLED)) throw new Error('DM_ALPHA_REGISTRATION_ENABLED must be true or false.')
+  if (env.DM_OIDC_REQUIRED_ALPHA_ROLE && env.DM_OIDC_REQUIRED_ALPHA_ROLE !== DRAFTMATTER_ALPHA_ROLE) throw new Error('DM_OIDC_REQUIRED_ALPHA_ROLE differs from the hosted identity policy.')
   const rehearsal = env.DM_SINGLE_HOST_MODE === 'rehearsal'
   const settings = validateProductionEnvironment(env, { localRehearsal: rehearsal })
   if (!rehearsal && env.RELEASE_ID.startsWith('local-')) throw new Error('Set RELEASE_ID to the exact reviewed commit or release before production.')
-  buildSingleHostRealm({ appHost: env.APP_HOST, authHost: env.AUTH_HOST, httpsPort: Number(env.HTTPS_PORT) })
+  const registrationEnabled = env.DM_ALPHA_REGISTRATION_ENABLED === 'true'
+  buildSingleHostRealm({ appHost: env.APP_HOST, authHost: env.AUTH_HOST, httpsPort: Number(env.HTTPS_PORT), registrationEnabled })
   if (env.HTTP_PORT !== (rehearsal ? '8088' : '80') || env.HTTPS_PORT !== (rehearsal ? '8443' : '443') ||
       env.BIND_ADDRESS !== (rehearsal ? '127.0.0.1' : '0.0.0.0')) throw new Error('Unexpected binding or ports for this deployment mode.')
   if (rehearsal ? env.AUTH_HOST !== 'auth.draftmatter.localhost' : !/^[a-z0-9.-]+\.[a-z]{2,}$/.test(env.AUTH_HOST ?? '') || /\.(localhost|test|invalid|example|local)$/.test(env.AUTH_HOST)) {
@@ -103,7 +115,7 @@ export function validateSingleHostEnvironment(env, { checkFiles = true } = {}) {
   for (const name of ['POSTGRES_PASSWORD', 'DM_DB_PASSWORD', 'KC_DB_PASSWORD', 'KC_BOOTSTRAP_ADMIN_PASSWORD', 'DM_OBJECT_ACCESS_KEY', 'DM_OBJECT_SECRET_KEY']) {
     if (!/^[a-f0-9]{48,128}$/.test(env[name] ?? '')) throw new Error(`${name} must be an independently generated hexadecimal secret.`)
   }
-  const secrets = ['POSTGRES_PASSWORD', 'DM_DB_PASSWORD', 'KC_DB_PASSWORD', 'KC_BOOTSTRAP_ADMIN_PASSWORD', 'DM_OBJECT_ACCESS_KEY', 'DM_OBJECT_SECRET_KEY', 'DM_WEBHOOK_SECRET'].map((name) => env[name])
+  const secrets = ['POSTGRES_PASSWORD', 'DM_DB_PASSWORD', 'KC_DB_PASSWORD', 'KC_BOOTSTRAP_ADMIN_PASSWORD', 'DM_OBJECT_ACCESS_KEY', 'DM_OBJECT_SECRET_KEY', 'DM_WEBHOOK_SECRET', ...(env.DM_IDENTITY_ADMISSION_TOKEN ? ['DM_IDENTITY_ADMISSION_TOKEN'] : [])].map((name) => env[name])
   if (new Set(secrets).size !== secrets.length) throw new Error('Do not reuse deployment secrets between services.')
   if (!/^draftmatter-(alpha|rehearsal|restore)-[a-z0-9-]+$/.test(env.COMPOSE_PROJECT_NAME ?? '')) throw new Error('Use a dedicated DraftMatter Compose project name.')
   const directory = outsideCheckout(env.DM_SINGLE_HOST_DIR)
@@ -111,7 +123,7 @@ export function validateSingleHostEnvironment(env, { checkFiles = true } = {}) {
     const info = lstatSync(directory)
     if (!info.isDirectory() || info.isSymbolicLink() || (process.platform !== 'win32' && (info.mode & 0o077))) throw new Error('The deployment directory must be private (chmod 700), without links.')
     const realm = JSON.parse(readFileSync(resolve(directory, 'realm.json'), 'utf8'))
-    if (!isDeepStrictEqual(realm, buildSingleHostRealm({ appHost: env.APP_HOST, authHost: env.AUTH_HOST, httpsPort: Number(env.HTTPS_PORT) }))) throw new Error('The realm import differs from the closed-alpha identity policy.')
+    if (!isDeepStrictEqual(realm, buildSingleHostRealm({ appHost: env.APP_HOST, authHost: env.AUTH_HOST, httpsPort: Number(env.HTTPS_PORT), registrationEnabled }))) throw new Error('The realm import differs from the closed-alpha identity policy.')
     if (readFileSync(resolve(directory, 'Caddyfile'), 'utf8') !== renderSingleHostCaddy(env)) throw new Error('The proxy configuration differs from the checked deployment environment.')
     const storage = JSON.parse(readFileSync(resolve(directory, 's3.json'), 'utf8'))
     if (!isDeepStrictEqual(storage, singleHostS3Identity(env))) throw new Error('The object-storage credentials or bucket permissions differ from this deployment.')

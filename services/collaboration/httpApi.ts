@@ -8,6 +8,7 @@ import type { PostgresCollaborationStore } from './postgresStore'
 import { WorkspaceAccessError, type ProjectAuthorizationService } from '../../src/collaboration/workspaceService'
 import { PROJECT_FILE_CHUNK_BYTES } from '../../src/collaboration/projectFiles'
 import { ProjectFileError, type PostgresProjectFileService } from './projectFiles'
+import { IDENTITY_ADMISSION_PATH, type IdentityAdmission } from './identityAdmission'
 
 type WorkspaceApi = Pick<PostgresWorkspaceService,
   'getCurrentIdentity' | 'createWorkspace' | 'listWorkspaces' | 'createProject' | 'getProject' | 'listProjects'
@@ -28,7 +29,9 @@ export interface CollaborationHttpApiOptions {
   dashboard: CollaborationOperationsDashboard
   connections: () => number
   allowedOrigins: string[]
-  publicConfig: { oidcIssuer: string; oidcClientId: string }
+  publicConfig: { oidcIssuer: string; oidcClientId: string; registrationEnabled?: boolean }
+  identityAdmission?: IdentityAdmission
+  identitySecurity?: { requiredAlphaRole: string | null; emailVerificationRequired: boolean }
   maxBodyBytes?: number
   files?: Pick<PostgresProjectFileService, 'list' | 'begin' | 'getUpload' | 'putPart' | 'complete' | 'cancel' | 'readPart' | 'deleteVersion'> & Partial<Pick<PostgresProjectFileService, 'readPreview'>>
   fileAuthorization?: ProjectAuthorizationService
@@ -223,7 +226,7 @@ function mappedError(error: unknown) {
   if (error instanceof WorkspaceAccessError) {
     const status = error.code === 'unauthenticated' ? 401
       : error.code === 'not-found' || error.code === 'invitation-unavailable' ? 404
-        : error.code === 'forbidden' ? 403
+        : error.code === 'forbidden' || error.code === 'alpha_access_pending' ? 403
           : error.code === 'rate-limited' ? 429 : 400
     return new CollaborationHttpError(status, error.code, error.message, error.retryAfterMs)
   }
@@ -259,8 +262,28 @@ export function createCollaborationHttpApi(options: CollaborationHttpApiOptions)
     const origin = request.headers.get('origin')?.replace(/\/$/, '')
     const headers = safeHeaders(requestId, origin && allowedOrigins.has(origin) ? origin : undefined)
     try {
-      if (origin && !allowedOrigins.has(origin)) throw new CollaborationHttpError(403, 'origin-forbidden', 'This browser origin is not allowed.')
       const url = new URL(request.url)
+      if (url.pathname === '/internal' || url.pathname.startsWith('/internal/')) {
+        // This endpoint belongs only to the private edge-to-service network.
+        // It intentionally precedes user auth/CORS and never consumes a body.
+        if (url.pathname === '/internal/identity-security' && options.identityAdmission && options.identitySecurity) {
+          const access = options.identityAdmission.checkPrivateRequest(request)
+          if (!access.allowed) return json(access.status, { error: { code: access.code, message: access.message }, requestId }, headers)
+          if (url.search) return json(400, { error: { code: 'invalid-admission', message: 'The private security check does not accept query parameters.' }, requestId }, headers)
+          return json(200, {
+            gateVersion: 1,
+            registrationEnabled: options.identityAdmission.registrationEnabled,
+            requiredAlphaRole: options.identitySecurity.requiredAlphaRole,
+            emailVerificationRequired: options.identitySecurity.emailVerificationRequired,
+          }, headers)
+        }
+        if (url.pathname !== IDENTITY_ADMISSION_PATH || !options.identityAdmission) return json(404, { error: { code: 'not-found', message: 'Not found.' }, requestId }, headers)
+        const admission = options.identityAdmission.check(request)
+        if (admission.allowed) return new Response(null, { status: 204, headers })
+        if (admission.retryAfterSeconds) headers.set('retry-after', String(admission.retryAfterSeconds))
+        return json(admission.status, { error: { code: admission.code, message: admission.message }, requestId }, headers)
+      }
+      if (origin && !allowedOrigins.has(origin)) throw new CollaborationHttpError(403, 'origin-forbidden', 'This browser origin is not allowed.')
       const parts = pathParts(url.pathname)
       if (request.method === 'OPTIONS') {
         headers.set('access-control-allow-headers', 'authorization, content-type, draftmatter-signature, x-draftmatter-sha256')
@@ -270,7 +293,7 @@ export function createCollaborationHttpApi(options: CollaborationHttpApiOptions)
       }
       if (request.method === 'GET' && url.pathname === '/health/live') return json(200, { status: 'live' }, headers)
       if (request.method === 'GET' && url.pathname === '/config') return json(200, {
-        oidc: { issuer: options.publicConfig.oidcIssuer, clientId: options.publicConfig.oidcClientId },
+        oidc: { issuer: options.publicConfig.oidcIssuer, clientId: options.publicConfig.oidcClientId, registrationEnabled: options.publicConfig.registrationEnabled === true },
       }, headers)
       if (request.method === 'GET' && url.pathname === '/health/ready') {
         await options.readiness()
@@ -623,6 +646,17 @@ export async function handleNodeHttpRequest(
   try {
     request.pause()
     webRequest = nodeWebRequest(request)
+    const pathname = new URL(webRequest.url).pathname
+    if (pathname === '/internal' || pathname.startsWith('/internal/')) {
+      // An internal check is header-only even for a malformed/direct request.
+      // Close on any attempted body rather than buffering or draining it.
+      if (request.method !== 'GET' || request.headers['transfer-encoding'] || Number(request.headers['content-length'] ?? 0) !== 0) {
+        response.shouldKeepAlive = false
+        response.setHeader('connection', 'close')
+      }
+      await writeNodeResponse(await handler(webRequest), response, interrupted)
+      return
+    }
     const route = binaryRoute(request.method ?? 'GET', pathParts(new URL(webRequest.url).pathname))
     if (route) {
       const timeoutMs = options.filePartTimeoutMs ?? 120_000

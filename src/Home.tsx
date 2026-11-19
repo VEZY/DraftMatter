@@ -12,7 +12,6 @@ import type { LocalProjectRecent } from './localProjectCatalogue'
 import { HomeLearningGuide } from './HomeLearningGuide'
 import { LegalLinks } from './LegalDocuments'
 import { legalConfiguration, type LegalDocumentId } from './legalConfig'
-import { alphaAccessLink } from './alphaAccess'
 
 interface HomeProps {
   preferredWorkspaceId?: string
@@ -33,6 +32,7 @@ interface HomeProps {
   onOpenAiLearn: () => void
   onOpenLanguages: () => void
   onOpenTutorial: () => void
+  onRegister?: () => void
   onOpenLegal?: (documentId: LegalDocumentId) => void
 }
 
@@ -105,7 +105,7 @@ function AdvancedConnectionSetup() {
 function AlphaAccountNotice({ onOpenLegal }: Pick<HomeProps, 'onOpenLegal'>) {
   return (
     <div className="alpha-account-notice">
-      <p>The hosted alpha is free and by invitation. Before signing in, read the terms of use and privacy policy.</p>
+      <p>Before using the hosted alpha, read the terms of use and privacy policy.</p>
       <p>Pre-production: data loss is possible. Keep independent backups of your work outside DraftMatter.</p>
       <LegalLinks onNavigate={onOpenLegal} target={onOpenLegal ? undefined : '_blank'} />
     </div>
@@ -113,7 +113,28 @@ function AlphaAccountNotice({ onOpenLegal }: Pick<HomeProps, 'onOpenLegal'>) {
 }
 
 function AlphaLegalFooter({ onOpenLegal }: Pick<HomeProps, 'onOpenLegal'>) {
-  return <footer className="legal-footer"><p>Free closed alpha · DraftMatter</p><LegalLinks onNavigate={onOpenLegal} /></footer>
+  return <footer className="legal-footer"><p>Closed alpha · DraftMatter</p><LegalLinks onNavigate={onOpenLegal} /></footer>
+}
+
+function PendingAlphaHome({ onOpenLegal, onOpenLearn }: Pick<HomeProps, 'onOpenLegal' | 'onOpenLearn'>) {
+  const session = useCollaborationSession()
+  return (
+    <main className="home-catalogue home-app-home">
+      <header className="home-catalogue-bar">
+        <a className="home-brand" href="/" aria-label="DraftMatter home"><img src={`${import.meta.env.BASE_URL}draftmatter-pencil-mark.svg`} alt="" /><span>DraftMatter</span></a>
+        <button className="home-link-button" onClick={onOpenLearn}>How to</button>
+      </header>
+      <div className="home-catalogue-content">
+        <section className="home-catalogue-heading home-app-heading">
+          <div><span className="home-kicker">Closed alpha</span><h1>Awaiting an invitation</h1><p role="status">Your account is awaiting an invitation.{session.registrationEnabled ? ' We’ll email you when access is granted.' : ''}</p>{!session.registrationEnabled && <p>For updates, contact <a href={`mailto:${legalConfiguration.contactEmail}`}>{legalConfiguration.contactEmail}</a>.</p>}</div>
+          <div className="home-app-heading-actions"><button onClick={session.signOut}>Sign out / use another account</button></div>
+        </section>
+        <section className="home-browser-actions" aria-label="Try DraftMatter"><a href="/demo"><span><Icon name="spark" size={19} /></span><strong>Try the example while you wait</strong><small>No account needed. Your example is private and resets when you reload.</small><Icon name="arrowRight" size={16} /></a></section>
+        <AlphaAccountNotice onOpenLegal={onOpenLegal} />
+      </div>
+      <AlphaLegalFooter onOpenLegal={onOpenLegal} />
+    </main>
+  )
 }
 
 function AppHome({
@@ -132,12 +153,12 @@ function AppHome({
   onOpenTutorial,
   onConnectAssistants,
   onOpenAiLearn,
+  onRegister,
   onOpenLegal,
-}: Pick<HomeProps, 'onOpenLocalPaper' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'onClonePaper' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenBrowserDraft' | 'onOpenLearn' | 'onOpenAiLearn' | 'onOpenLanguages' | 'onOpenTutorial' | 'onOpenLegal'> & { onConnectAssistants: () => void }) {
+}: Pick<HomeProps, 'onOpenLocalPaper' | 'onOpenLocalProject' | 'onOpenLocalRecent' | 'onForgetLocalRecent' | 'onStartLocalCollaboration' | 'onNewLocalDraft' | 'onClonePaper' | 'localProjects' | 'localProblem' | 'onOpenExample' | 'onOpenBrowserDraft' | 'onOpenLearn' | 'onOpenAiLearn' | 'onOpenLanguages' | 'onOpenTutorial' | 'onRegister' | 'onOpenLegal'> & { onConnectAssistants: () => void }) {
   const session = useCollaborationSession()
   const [query, setQuery] = useState('')
   const normalizedQuery = query.trim().toLocaleLowerCase()
-  const accessLink = alphaAccessLink(legalConfiguration.contactEmail)
   const hostedBrowser = !desktopHost.available && Boolean(session.serviceUrl)
   const visibleProjects = useMemo(() => localProjects.filter((project) => (
     !normalizedQuery || `${project.name} ${project.root}`.toLocaleLowerCase().includes(normalizedQuery)
@@ -163,26 +184,29 @@ function AppHome({
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search papers on this computer" />
           </label>
         )}
-        <nav className="home-app-nav" aria-label="DraftMatter setup and help">
+        <nav className="home-app-nav" aria-label="DraftMatter help">
           {desktopHost.available && <button className="home-link-button" onClick={onConnectAssistants}><Icon name="spark" size={15} />AI connections</button>}
           <button className="home-link-button" onClick={onOpenLearn}><Icon name="book" size={15} />How to</button>
-          <button className="home-link-button" onClick={scrollToSetup}><Icon name="settings" size={15} />Settings &amp; account</button>
+          {!hostedBrowser && <button className="home-link-button" onClick={scrollToSetup}><Icon name="settings" size={15} />Set up DraftMatter</button>}
         </nav>
       </header>
 
       <div className="home-catalogue-content">
         <section className="home-catalogue-heading home-app-heading">
           <div>
-            <span className="home-kicker">{desktopHost.available ? 'Your research workspace' : 'Browser workspace'}</span>
-            <h1>Your papers</h1>
+            <span className="home-kicker">{desktopHost.available ? 'Your research workspace' : hostedBrowser ? 'Closed alpha' : 'Browser workspace'}</span>
+            <h1>{hostedBrowser ? 'Welcome to DraftMatter' : 'Your papers'}</h1>
             <p>{desktopHost.available
               ? 'Open a Markdown or Quarto manuscript, or start a new paper on this computer.'
               : hostedBrowser
-                ? 'Sign in to find your shared papers, or explore the example without an account.'
+                ? 'Write scientific papers with citations, reproducible results, and collaborative review. Sign in to your workspace, or try the example without an account.'
                 : 'Start a portable browser draft, open the complete example, or connect to a collaboration account.'}</p>
           </div>
           <div className="home-app-heading-actions">
-            {hostedBrowser && <button className="home-primary" onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}><Icon name="users" size={16} />{session.state === 'signing-in' ? 'Signing in…' : 'Sign in'}</button>}
+            {hostedBrowser && <>
+              <button className="home-primary" onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}><Icon name="users" size={16} />{session.state === 'signing-in' ? 'Signing in…' : 'Sign in'}</button>
+              <button onClick={onRegister} disabled={!onRegister || session.state === 'signing-in'}>Register</button>
+            </>}
             {desktopHost.available
               ? <button className="home-primary" onClick={onOpenLocalPaper}><Icon name="document" size={16} />Open existing paper</button>
               : <button className={hostedBrowser ? undefined : 'home-primary'} onClick={onOpenBrowserDraft}><Icon name="plus" size={16} />New browser draft</button>}
@@ -195,9 +219,11 @@ function AppHome({
         </section>
 
         {hostedBrowser && <section className="home-alpha-access" aria-label="Alpha access">
-          <p><strong>New to DraftMatter?</strong> The free alpha is by invitation. <a href={accessLink.href}>Request alpha access</a>.</p>
+          <p><strong>New to DraftMatter?</strong> {onRegister
+            ? 'Register with your email and a password. This is a closed alpha: we’ll email you when you’re invited to use the service.'
+            : 'This is a closed alpha. Registration is being prepared. Please check back soon.'}</p>
           <p>Have a project invitation? Open the link your colleague sent, then sign in with the invited email address.</p>
-          <p>If you reloaded this page, sign in again to reconnect to your shared papers.</p>
+          <AlphaAccountNotice onOpenLegal={onOpenLegal} />
         </section>}
 
         {desktopHost.available ? (
@@ -230,7 +256,7 @@ function AppHome({
 
         {!desktopHost.available && <p className="home-browser-storage-note">Browser drafts stay in this browser until you share them. Export a copy to keep an independent backup. Opening folders and cloning Git repositories require the desktop app.</p>}
 
-        <section id="home-setup" className="home-app-setup" aria-labelledby="home-setup-title">
+        {!hostedBrowser && <section id="home-setup" className="home-app-setup" aria-labelledby="home-setup-title">
           <div className="home-section-title"><h2 id="home-setup-title">Set up DraftMatter</h2></div>
           <div className="home-app-setup-grid">
             <article>
@@ -250,10 +276,10 @@ function AppHome({
               <div className="home-app-setup-actions">{session.serviceUrl && desktopHost.available && <button onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}>Sign in</button>}{(!session.serviceUrl || import.meta.env.DEV) && <button onClick={() => document.getElementById('home-account-setup')?.querySelector<HTMLButtonElement>('.home-disclosure')?.click()}>Configure collaboration</button>}</div>
             </article>
           </div>
-        </section>
+        </section>}
 
         {session.error && <p className="home-account-error" role="alert">{session.error}</p>}
-        {(!session.serviceUrl || import.meta.env.DEV) && <AdvancedConnectionSetup />}
+        {!hostedBrowser && (!session.serviceUrl || import.meta.env.DEV) && <AdvancedConnectionSetup />}
       </div>
       <AlphaLegalFooter onOpenLegal={onOpenLegal} />
     </main>
@@ -464,7 +490,9 @@ export function Home(props: HomeProps) {
   return (
     <>
       <HomeSketchDefinitions />
-      {session.profile
+      {session.state === 'pending-approval'
+        ? <PendingAlphaHome onOpenLegal={props.onOpenLegal} onOpenLearn={props.onOpenLearn} />
+        : session.profile
         ? <Catalogue {...props} onConnectAssistants={() => setAssistantConnectionsOpen(true)} />
         : <AppHome {...props} onConnectAssistants={() => setAssistantConnectionsOpen(true)} />}
       <AssistantConnectionsDialog

@@ -193,7 +193,7 @@ export function workspaceRoleCapabilities(role: WorkspaceRole): WorkspaceRoleCap
 
 export class WorkspaceAccessError extends Error {
   constructor(
-    readonly code: 'unauthenticated' | 'not-found' | 'forbidden' | 'rate-limited' | 'invalid-request' | 'invitation-unavailable',
+    readonly code: 'unauthenticated' | 'alpha_access_pending' | 'not-found' | 'forbidden' | 'rate-limited' | 'invalid-request' | 'invitation-unavailable',
     message: string,
     readonly retryAfterMs?: number,
   ) {

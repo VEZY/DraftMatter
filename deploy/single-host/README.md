@@ -197,11 +197,17 @@ marketing website is not served by this stack.
 Initial accounts require operator provisioning through Keycloak's private admin
 interface (for example `kcadm.sh` inside its container). Verify the invitee's email
 before marking it verified; use unique temporary initial passwords delivered
-through an appropriate private channel. The bootstrap admin is temporary: create
+through an appropriate private channel. Initialised stacks now also require the
+explicit `draftmatter-alpha` role: approve each reviewed participant individually,
+including the first owner, before expecting access to shared papers. That role
+must never be a default role or group assignment. The bootstrap admin is temporary: create
 a permanent operator account, secure it and remove the bootstrap account before
 opening the alpha. Password reset is disabled until an actual mail delivery
 provider is configured; in-app invitations and notifications remain available.
-The scripts do not create or send real invitations.
+For self-service email/password registration with operator approval and email
+invitations, follow [Closed-alpha registration and approval](../../docs/alpha-registration.md).
+Registration remains closed by default. The operator sends mail only when its
+explicit test/approval commands are invoked with a configured private mailbox.
 
 ## Operating limits
 

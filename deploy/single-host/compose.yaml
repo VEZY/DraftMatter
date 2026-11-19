@@ -97,7 +97,9 @@ services:
       - ${DM_SINGLE_HOST_DIR:?Set DM_SINGLE_HOST_DIR}/realm.json:/opt/keycloak/data/import/draftmatter.json:ro
     depends_on:
       postgres: { condition: service_healthy }
-    networks: [database, identity]
+    # This separate bridge provides outbound SMTP. No identity/admin port is
+    # published; database and identity traffic remain on internal networks.
+    networks: [database, identity, mail]
     tmpfs: ["/tmp:rw,nosuid,size=128m"]
     mem_limit: 1g
     stop_grace_period: 60s
@@ -124,6 +126,9 @@ services:
       DM_OIDC_JWKS_URI: ${DM_OIDC_JWKS_URI:?Set DM_OIDC_JWKS_URI}
       DM_OIDC_AUDIENCE: draftmatter-collaboration
       DM_OIDC_CLIENT_ID: draftmatter-public
+      DM_OIDC_REQUIRED_ALPHA_ROLE: ${DM_OIDC_REQUIRED_ALPHA_ROLE:-}
+      DM_ALPHA_REGISTRATION_ENABLED: ${DM_ALPHA_REGISTRATION_ENABLED:-false}
+      DM_IDENTITY_ADMISSION_TOKEN: ${DM_IDENTITY_ADMISSION_TOKEN:-}
       DM_ALLOWED_ORIGINS: ${DM_ALLOWED_ORIGINS:?Set DM_ALLOWED_ORIGINS}
       DM_WEBHOOK_SECRET: ${DM_WEBHOOK_SECRET:?Set DM_WEBHOOK_SECRET}
       DM_PROJECT_FILES_TOTAL_QUOTA_BYTES: ${DM_PROJECT_FILES_TOTAL_QUOTA_BYTES:-25000000000}
@@ -152,6 +157,7 @@ services:
     environment:
       DM_PUBLIC_COLLABORATION_URL: ${COLLABORATION_ORIGIN:?Set COLLABORATION_ORIGIN}
       DM_PUBLIC_AUTH_ORIGIN: ${AUTH_ORIGIN:?Set AUTH_ORIGIN}
+      DM_IDENTITY_ADMISSION_TOKEN: ${DM_IDENTITY_ADMISSION_TOKEN:-}
       DM_LEGAL_PUBLISHER_NAME: ${DM_LEGAL_PUBLISHER_NAME:?Set DM_LEGAL_PUBLISHER_NAME}
       DM_LEGAL_CONTACT_EMAIL: ${DM_LEGAL_CONTACT_EMAIL:?Set DM_LEGAL_CONTACT_EMAIL}
       DM_LEGAL_HOSTING_DETAILS: ${DM_LEGAL_HOSTING_DETAILS:?Set DM_LEGAL_HOSTING_DETAILS}
@@ -192,3 +198,4 @@ networks:
   database: { internal: true }
   objects: { internal: true }
   identity: { internal: true }
+  mail:

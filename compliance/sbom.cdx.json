@@ -20,7 +20,7 @@
       },
       {
         "name": "draftmatter:dependency-fingerprint",
-        "value": "sha256:444402e25ae4b84df548c23f7bd09af8bc682e3e8800264cfc1ab6da42f840e1"
+        "value": "sha256:c0ca0907ecad1049b6255d94df95dd1ba04ffd53097b061b14cd932ab5e83f78"
       }
     ]
   },
@@ -15160,6 +15160,35 @@
         {
           "type": "distribution",
           "url": "https://registry.npmjs.org/negotiator/-/negotiator-1.0.0.tgz"
+        }
+      ],
+      "properties": [
+        {
+          "name": "draftmatter:ecosystem",
+          "value": "npm"
+        },
+        {
+          "name": "draftmatter:target",
+          "value": "aarch64-apple-darwin"
+        }
+      ]
+    },
+    {
+      "type": "library",
+      "bom-ref": "pkg:npm/nodemailer@10.6.0",
+      "name": "nodemailer",
+      "version": "10.6.0",
+      "scope": "required",
+      "licenses": [
+        {
+          "expression": "MIT-0"
+        }
+      ],
+      "purl": "pkg:npm/nodemailer@10.6.0",
+      "externalReferences": [
+        {
+          "type": "distribution",
+          "url": "https://registry.npmjs.org/nodemailer/-/nodemailer-10.6.0.tgz"
         }
       ],
       "properties": [

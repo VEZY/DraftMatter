@@ -17,7 +17,10 @@ export interface CollaborationServiceConfig {
     audience: string | string[]
     jwksUri: string
     allowInsecureHttp: boolean
+    requiredAlphaRole?: string
+    registrationEnabled: boolean
   }
+  identityAdmission?: { token: string; registrationEnabled: boolean }
   webhookSecret: Uint8Array
   notificationDelivery?: {
     webhookUrl: string
@@ -137,6 +140,21 @@ export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = 
   const audiences = required(environment, 'DM_OIDC_AUDIENCE').split(',').map((value) => value.trim()).filter(Boolean)
   if (!audiences.length) throw new CollaborationConfigError('DM_OIDC_AUDIENCE must contain at least one audience.')
   const clientId = environment.DM_OIDC_CLIENT_ID?.trim() || audiences[0]
+  const requiredAlphaRole = environment.DM_OIDC_REQUIRED_ALPHA_ROLE?.trim()
+  if (requiredAlphaRole && !/^[A-Za-z][A-Za-z0-9._:-]{0,127}$/.test(requiredAlphaRole)) {
+    throw new CollaborationConfigError('DM_OIDC_REQUIRED_ALPHA_ROLE must be a single safe role name.')
+  }
+  const registrationEnabled = bool(environment, 'DM_ALPHA_REGISTRATION_ENABLED', false)
+  const identityAdmissionToken = environment.DM_IDENTITY_ADMISSION_TOKEN?.trim()
+  if (identityAdmissionToken && !/^[a-f0-9]{64}$/.test(identityAdmissionToken)) {
+    throw new CollaborationConfigError('DM_IDENTITY_ADMISSION_TOKEN must be a separate 64-character hexadecimal secret.')
+  }
+  if (registrationEnabled && (!requiredAlphaRole || !identityAdmissionToken)) {
+    throw new CollaborationConfigError('DM_ALPHA_REGISTRATION_ENABLED requires DM_OIDC_REQUIRED_ALPHA_ROLE and DM_IDENTITY_ADMISSION_TOKEN.')
+  }
+  if (identityAdmissionToken && identityAdmissionToken === environment.DM_WEBHOOK_SECRET?.trim()) {
+    throw new CollaborationConfigError('DM_IDENTITY_ADMISSION_TOKEN must not reuse the webhook secret.')
+  }
   const allowedOrigins = (environment.DM_ALLOWED_ORIGINS ?? '').split(',').map((value) => value.trim()).filter(Boolean).map(allowedOrigin)
   if (mode === 'production' && !allowedOrigins.length) throw new CollaborationConfigError('DM_ALLOWED_ORIGINS is required in production.')
 
@@ -177,7 +195,11 @@ export function loadCollaborationServiceConfig(environment: NodeJS.ProcessEnv = 
         ...(accessKeyId && secretAccessKey ? { credentials: { accessKeyId, secretAccessKey } } : {}),
       },
     },
-    oidc: { issuer, clientId, audience: audiences.length === 1 ? audiences[0] : audiences, jwksUri, allowInsecureHttp: allowInsecureOidc },
+    oidc: {
+      issuer, clientId, audience: audiences.length === 1 ? audiences[0] : audiences, jwksUri, allowInsecureHttp: allowInsecureOidc,
+      ...(requiredAlphaRole ? { requiredAlphaRole } : {}), registrationEnabled,
+    },
+    ...(identityAdmissionToken ? { identityAdmission: { token: identityAdmissionToken, registrationEnabled } } : {}),
     webhookSecret: secret(required(environment, 'DM_WEBHOOK_SECRET')),
     ...(notificationWebhookUrl && notificationWebhookSecret && publicAppUrl ? {
       notificationDelivery: {

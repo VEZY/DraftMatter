@@ -1,9 +1,14 @@
-# Closed, free alpha: data operations
+# Closed alpha: data operations
+
+For email/password registration, the waiting list and operator approval, follow
+[Closed-alpha registration and approval](alpha-registration.md). Keep signup
+closed until outbound email, the running approval gate and abuse limits have
+been checked; a project invitation does not approve a new alpha account.
 
 The public alpha documents identify Rémi Vezy as the operator. The single-VPS
 initializer selects `contact@draftmatter.eu`; older unconfigured builds retain
 `vezy.remi@gmail.com`. Publish and monitor the actual configured contact. The
-pilot is invitation-only and free. Its commitments include handling
+pilot is invitation-only. Its commitments include handling
 eligible requests to remove active data within 30 days, limiting technical backup
 copies to 30 days, and giving 30 days' notice before a planned shutdown. This
 runbook describes operator work; it does not claim that account erasure or all

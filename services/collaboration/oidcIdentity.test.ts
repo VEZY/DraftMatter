@@ -4,6 +4,7 @@ import { OidcIdentityVerifier } from './oidcIdentity'
 
 describe('OIDC collaboration identity verification', () => {
   let verifier: OidcIdentityVerifier
+  let alphaVerifier: OidcIdentityVerifier
   let privateKey: CryptoKey
   const issuer = 'https://identity.example.test'
   const audience = 'draftmatter-collaboration'
@@ -12,11 +13,13 @@ describe('OIDC collaboration identity verification', () => {
     const pair = await generateKeyPair('RS256', { extractable: true })
     privateKey = pair.privateKey
     const publicKey = await exportJWK(pair.publicKey)
-    verifier = new OidcIdentityVerifier({
+    const options = {
       issuer,
       audience,
       keyResolver: createLocalJWKSet({ keys: [{ ...publicKey, kid: 'primary', alg: 'RS256', use: 'sig' }] }),
-    })
+    }
+    verifier = new OidcIdentityVerifier(options)
+    alphaVerifier = new OidcIdentityVerifier({ ...options, requiredAlphaRole: 'draftmatter-alpha' })
   })
 
   async function token(claims: Record<string, unknown> = {}, requestedAudience = audience) {
@@ -60,5 +63,34 @@ describe('OIDC collaboration identity verification', () => {
 
   it('requires HTTPS for a remote key set outside loopback development', () => {
     expect(() => new OidcIdentityVerifier({ issuer, audience, jwksUri: 'http://identity.example.test/jwks' })).toThrow(/HTTPS/)
+  })
+
+  it('admits only a verified email and the provider-signed alpha role when the gate is enabled', async () => {
+    expect(alphaVerifier.alphaSecurityPolicy).toEqual({ requiredAlphaRole: 'draftmatter-alpha', emailVerificationRequired: true })
+    expect(verifier.alphaSecurityPolicy).toEqual({ requiredAlphaRole: null, emailVerificationRequired: false })
+    await expect(alphaVerifier.verify(await token({ draftmatter_roles: ['other-role', 'draftmatter-alpha'] }))).resolves.toMatchObject({ email: 'researcher@example.org' })
+    // Existing standalone identity providers do not need an alpha-specific claim.
+    await expect(verifier.verify(await token())).resolves.toMatchObject({ email: 'researcher@example.org' })
+    await expect(alphaVerifier.verify(await token({ draftmatter_roles: ['draftmatter-alpha'] }, 'another-service'))).rejects.toMatchObject({ code: 'unauthenticated' })
+  })
+
+  it.each([
+    undefined, null, false, true, 'draftmatter-alpha', 'other-role,draftmatter-alpha',
+    { 'draftmatter-alpha': true }, [], ['other-role'], ['draftmatter-alpha-admin'],
+    [' draftmatter-alpha'], ['draftmatter-alpha '], ['Draftmatter-alpha'], ['draftmatter-alpha', null],
+  ])('keeps a valid signed account pending for a missing or malformed approval claim (%j)', async (roles) => {
+    await expect(alphaVerifier.verify(await token({ draftmatter_roles: roles }))).rejects.toMatchObject({ code: 'alpha_access_pending' })
+  })
+
+  it.each([undefined, null, false, 'true', 1])('cannot replace verified ownership with an approved role (%j)', async (emailVerified) => {
+    await expect(alphaVerifier.verify(await token({ draftmatter_roles: ['draftmatter-alpha'], email_verified: emailVerified }))).rejects.toMatchObject({ code: 'alpha_access_pending' })
+  })
+
+  it.each([undefined, '', null, 12])('requires a usable verified email for alpha admission (%j)', async (email) => {
+    await expect(alphaVerifier.verify(await token({ draftmatter_roles: ['draftmatter-alpha'], email }))).rejects.toMatchObject({ code: 'alpha_access_pending' })
+  })
+
+  it.each(['', 'draftmatter-alpha,admin', 'draftmatter alpha', 'draftmatter-alpha\n', 'a'.repeat(129)])('rejects a malformed required role configuration (%j)', (requiredAlphaRole) => {
+    expect(() => new OidcIdentityVerifier({ issuer, audience, jwksUri: 'https://identity.example.test/jwks', requiredAlphaRole })).toThrow(/single safe role/)
   })
 })

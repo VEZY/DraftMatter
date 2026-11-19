@@ -11,6 +11,7 @@ import { chromium } from '@playwright/test'
 import { build } from 'vite'
 import { readSingleHostEnvironment, validateSingleHostEnvironment } from './single-host-config.mjs'
 import { runSmokeCheck } from './rehearse-single-host.mjs'
+import { DRAFTMATTER_ALPHA_CLAIM, DRAFTMATTER_ALPHA_ROLE } from '../deploy/single-host/keycloak/alpha.mjs'
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const CHUNK_BYTES = 8 * 1024 * 1024
@@ -176,12 +177,15 @@ async function provision(settings) {
       assert.equal(matches[0].username, username)
       assert.equal(matches[0].email, email)
       assert.equal(matches[0].emailVerified, true)
-      continue
+    } else {
+      await admin(settings, ['create', 'users', '-r', 'draftmatter'], {
+        username, email, enabled: true, emailVerified: true, firstName: name, lastName: 'Rehearsal',
+        credentials: [{ type: 'password', value: settings.environment[`REHEARSAL_${name.toUpperCase()}_PASSWORD`], temporary: false }],
+      })
     }
-    await admin(settings, ['create', 'users', '-r', 'draftmatter'], {
-      username, email, enabled: true, emailVerified: true, firstName: name, lastName: 'Rehearsal',
-      credentials: [{ type: 'password', value: settings.environment[`REHEARSAL_${name.toUpperCase()}_PASSWORD`], temporary: false }],
-    })
+    // Approval is an explicit operator step even in the isolated fixture. A
+    // default/composite role must never activate future self-registered users.
+    await admin(settings, ['add-roles', '-r', 'draftmatter', '--uusername', username, '--rolename', DRAFTMATTER_ALPHA_ROLE])
   }
 }
 
@@ -236,6 +240,9 @@ async function login(browser, settings, name) {
     assert([claims.aud].flat().includes('draftmatter-collaboration'), 'Access token has no collaboration audience')
     assert.equal(typeof claims.sub, 'string', 'Access token must carry a subject')
     assert.equal(claims.email_verified, true)
+    if (settings.environment.DM_OIDC_REQUIRED_ALPHA_ROLE) {
+      assert(Array.isArray(claims[DRAFTMATTER_ALPHA_CLAIM]) && claims[DRAFTMATTER_ALPHA_CLAIM].includes(settings.environment.DM_OIDC_REQUIRED_ALPHA_ROLE), 'The fixture account has no explicit alpha approval')
+    }
     return { token: response.data.access_token, refreshToken: response.data.refresh_token }
   } catch (error) {
     if (page) {

@@ -16,6 +16,15 @@ const images = Object.fromEntries(['collaboration', 'web', 'operator'].map((kind
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex')
 
 describe('immutable server release publication boundary', () => {
+  it('keeps the operator SMTP lock identical to the audited root dependency', async () => {
+    const rootLock = JSON.parse(await readFile(new URL('../../package-lock.json', import.meta.url), 'utf8'))
+    const operatorLock = JSON.parse(await readFile(new URL('../../deploy/single-host/operator-mail/package-lock.json', import.meta.url), 'utf8'))
+    const operatorPackage = JSON.parse(await readFile(new URL('../../deploy/single-host/operator-mail/package.json', import.meta.url), 'utf8'))
+    expect(operatorPackage.dependencies).toEqual({ nodemailer: rootLock.packages[''].dependencies.nodemailer })
+    expect(operatorLock.packages['node_modules/nodemailer']).toEqual(rootLock.packages['node_modules/nodemailer'])
+    expect(Object.keys(operatorLock.packages).sort()).toEqual(['', 'node_modules/nodemailer'])
+  })
+
   it('requires a fixed main source and safe version before accepting image identities', () => {
     expect(identity.tag).toBe('server-v0.1.0-alpha.1')
     for (const override of [
@@ -37,11 +46,11 @@ describe('immutable server release publication boundary', () => {
   })
 
   it('refuses private runtime assets and symlinks even when accidentally committed under a deployment directory', () => {
-    const publicHelpers = ['scripts/server-backup.sh', 'deploy/offhost-mac/pull.mjs', 'deploy/offhost-mac/install.mjs', 'docs/offhost-mac-backups.md']
+    const publicHelpers = ['scripts/server-backup.sh', 'scripts/server-alpha.sh', 'scripts/stage-alpha-registration.mjs', 'docs/alpha-registration.md', 'deploy/offhost-mac/pull.mjs', 'deploy/offhost-mac/install.mjs', 'docs/offhost-mac-backups.md']
     expect(serverDeploymentPaths(publicHelpers.map((path) => ({ mode: '100644', path })))).toHaveLength(publicHelpers.length)
     expect(serverDeploymentPaths([{ mode: '100644', path: 'deploy/offhost-mac/config.json' }])).toEqual([])
     expect(serverDeploymentPaths([{ mode: '100644', path: 'papers/private-manuscript.md' }, { mode: '100644', path: 'deploy/single-host/compose.yaml' }])).toEqual([{ mode: '100644', path: 'deploy/single-host/compose.yaml' }])
-    for (const path of ['deploy/single-host/runtime.env', 'deploy/single-host/tls/ca.key', 'deploy/single-host/secrets/password', 'deploy/single-host/backup.key']) {
+    for (const path of ['deploy/single-host/runtime.env', 'deploy/single-host/tls/ca.key', 'deploy/single-host/secrets/password', 'deploy/single-host/backup.key', 'deploy/single-host/mail.env', 'deploy/single-host/alpha-notifications/receipt']) {
       expect(() => serverDeploymentPaths([{ mode: '100644', path }])).toThrow('Private')
     }
     expect(() => serverDeploymentPaths([{ mode: '120000', path: 'deploy/single-host/compose.yaml' }])).toThrow('symlinks')

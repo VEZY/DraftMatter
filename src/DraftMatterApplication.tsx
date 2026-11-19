@@ -168,6 +168,7 @@ function ApplicationRouter({ saveBeforeLeaveRef, demoMode = false }: { saveBefor
         onOpenAiLearn={() => navigate({ destination: 'learn-ai' })}
         onOpenLanguages={openLanguages}
         onOpenTutorial={() => navigate({ destination: 'tutorial' })}
+        onRegister={session.registrationEnabled ? () => void session.register() : undefined}
         onOpenLegal={openLegal}
       />
       <NewDraftWizard
@@ -216,6 +217,8 @@ function ApplicationRouter({ saveBeforeLeaveRef, demoMode = false }: { saveBefor
   if (route.destination === 'legal') return <LegalPage documentId={route.documentId} onNavigate={openLegal} onBack={() => navigate(session.pendingInvitation ? { destination: 'invitation' } : legalReturnRouteRef.current)} />
 
   if (route.destination === 'demo') return <main className="home-route-status"><a href="/demo">Open the interactive example</a></main>
+
+  if (session.state === 'pending-approval') return home()
 
   if (session.pendingInvitation || route.destination === 'invitation') {
     return <InvitationEntry onOpenDraft={openDraft} onBack={() => navigate({ destination: 'home' })} onOpenLegal={openLegal} />

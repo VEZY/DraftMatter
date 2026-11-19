@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import {
   CollaborationServiceClient,
+  CollaborationServiceError,
   normalizeCollaborationServiceUrl,
   type CollaborationAccessToken,
   type WorkspaceSummary,
@@ -13,9 +14,11 @@ import {
 } from './invitationLink'
 import {
   completeOidcAuthorization,
+  discardOidcAuthorization,
   cleanOidcCallbackUrl,
   hasOidcCallback,
   prepareOidcAuthorization,
+  readOidcRegistrationCapability,
   submitOidcLogout,
   type OidcLoginResult,
 } from './oidcBrowser'
@@ -31,7 +34,7 @@ import { publicRuntimeEnvironment } from '../publicRuntimeConfiguration'
 
 const DEVELOPMENT_SERVICE_KEY = 'draftmatter.collaboration.development-service.v1'
 
-export type CollaborationAccountState = 'signed-out' | 'signing-in' | 'loading' | 'ready' | 'error'
+export type CollaborationAccountState = 'signed-out' | 'signing-in' | 'loading' | 'ready' | 'pending-approval' | 'error'
 
 export interface CatalogueDraft extends WorkspaceProject {
   role: WorkspaceRole
@@ -62,6 +65,7 @@ export interface CollaborationProjectLaunch {
 interface CollaborationSessionContextValue {
   state: CollaborationAccountState
   serviceUrl: string
+  registrationEnabled: boolean
   profile: CollaborationSessionProfile | null
   workspaces: WorkspaceSummary[]
   drafts: CatalogueDraft[]
@@ -72,6 +76,7 @@ interface CollaborationSessionContextValue {
   token: CollaborationAccessToken | null
   configureDevelopmentService: (serviceUrl: string) => void
   signIn: () => Promise<void>
+  register: () => Promise<void>
   useAccessToken: (serviceUrl: string, token: string) => Promise<void>
   signOut: () => void
   refresh: () => Promise<void>
@@ -145,11 +150,25 @@ export function CollaborationSessionProvider({
   const [pendingInvitation, setPendingInvitation] = useState<CollaborationInvitationLink | null>(invitationRejected ? null : initialInvitation)
   const [error, setError] = useState(invitationRejected ? 'This invitation belongs to a different collaboration server. Ask the sender for a link to this DraftMatter service.' : '')
   const [client, setClient] = useState<CollaborationServiceClient | null>(null)
+  const [registrationCapability, setRegistrationCapability] = useState({ serviceUrl: '', enabled: false })
+  const registrationEnabled = !disabledNetwork && registrationCapability.serviceUrl === serviceUrl && registrationCapability.enabled
   const tokenRef = useRef<CollaborationAccessToken | null>(null)
   const clientRef = useRef<CollaborationServiceClient | null>(null)
   const callbackStartedRef = useRef(false)
   const sessionGenerationRef = useRef(0)
   const endIdentitySessionRef = useRef<OidcLoginResult['endSession']>(undefined)
+
+  useEffect(() => {
+    // Merely opening an invitation must not contact an inviter-selected server.
+    if (disabledNetwork || !serviceUrl || (initialInvitation && !trustedServiceUrl) || invitationRejected) return
+    let active = true
+    void readOidcRegistrationCapability(serviceUrl).then((enabled) => {
+      if (active) setRegistrationCapability({ serviceUrl, enabled })
+    }).catch(() => {
+      if (active) setRegistrationCapability({ serviceUrl, enabled: false })
+    })
+    return () => { active = false }
+  }, [disabledNetwork, initialInvitation, invitationRejected, serviceUrl, trustedServiceUrl])
 
   const checkedService = useCallback((candidate: string) => {
     if (disabledNetwork) throw new Error('The interactive example does not connect to collaboration accounts.')
@@ -162,10 +181,10 @@ export function CollaborationSessionProvider({
     if (generation !== sessionGenerationRef.current || nextClient !== clientRef.current) return
     setState('loading')
     setError('')
-    const [nextProfile, nextWorkspaces] = await Promise.all([
-      nextClient.getSession(),
-      nextClient.listWorkspaces(),
-    ])
+    // Approval is checked before any catalogue request or user-facing identity.
+    const nextProfile = await nextClient.getSession()
+    if (generation !== sessionGenerationRef.current || nextClient !== clientRef.current) return
+    const nextWorkspaces = await nextClient.listWorkspaces()
     if (generation !== sessionGenerationRef.current) return
     const results = await Promise.allSettled(nextWorkspaces.map((workspace) => nextClient.listProjects(workspace.id)))
     const nextDrafts: CatalogueDraft[] = []
@@ -193,32 +212,40 @@ export function CollaborationSessionProvider({
     setState('ready')
   }, [])
 
-  const activate = useCallback(async (nextServiceUrl: string, token: CollaborationAccessToken, endSession?: OidcLoginResult['endSession']) => {
+  const clearFailedAccount = useCallback((nextError: unknown, generation: number) => {
+    if (generation !== sessionGenerationRef.current) return
+    tokenRef.current = null
+    clientRef.current = null
+    setClient(null)
+    setProfile(null)
+    setWorkspaces([])
+    setDrafts([])
+    setWorkspaceFailures([])
+    const pending = nextError instanceof CollaborationServiceError && nextError.status === 403 && nextError.code === 'alpha_access_pending'
+    setState(pending ? 'pending-approval' : 'error')
+    setError(pending ? '' : readableError(nextError))
+  }, [])
+
+  const activate = useCallback(async (nextServiceUrl: string, token: CollaborationAccessToken, endSession?: OidcLoginResult['endSession'], generation = ++sessionGenerationRef.current) => {
+    if (generation !== sessionGenerationRef.current) { endSession?.(); return }
     const normalized = checkedService(nextServiceUrl)
     endIdentitySessionRef.current?.()
     endIdentitySessionRef.current = endSession
-    const generation = ++sessionGenerationRef.current
     const nextClient = new CollaborationServiceClient(normalized, token)
     tokenRef.current = token
     clientRef.current = nextClient
     setServiceUrl(normalized)
     setClient(nextClient)
+    setProfile(null)
+    setWorkspaces([])
+    setDrafts([])
+    setWorkspaceFailures([])
     try {
       await loadCatalogue(nextClient, generation)
     } catch (nextError) {
-      if (generation !== sessionGenerationRef.current) return
-      tokenRef.current = null
-      clientRef.current = null
-      setClient(null)
-      setProfile(null)
-      setWorkspaces([])
-      setDrafts([])
-      setWorkspaceFailures([])
-      setState('error')
-      setError(readableError(nextError))
-      throw nextError
+      clearFailedAccount(nextError, generation)
     }
-  }, [checkedService, loadCatalogue])
+  }, [checkedService, clearFailedAccount, loadCatalogue])
 
   useEffect(() => {
     if (!initialInvitation) return
@@ -228,6 +255,7 @@ export function CollaborationSessionProvider({
   useEffect(() => {
     if (disabledNetwork || !hasOidcCallback(window.location.href) || callbackStartedRef.current) return
     callbackStartedRef.current = true
+    const generation = ++sessionGenerationRef.current
     const retainedInvitation = takePendingCollaborationInvitation(sessionStorage)
     setState('signing-in')
     setError('')
@@ -235,6 +263,7 @@ export function CollaborationSessionProvider({
     window.history.replaceState({}, '', cleanOidcCallbackUrl(callbackUrl))
     void completeOidcAuthorization(callbackUrl, sessionStorage, undefined, undefined, trustedServiceUrl || undefined).then(async (result) => {
       if (!result) return
+      if (generation !== sessionGenerationRef.current) { result.endSession?.(); return }
       window.history.replaceState({}, '', result.cleanUrl)
       if (retainedInvitation?.serviceUrl === result.serviceUrl) {
         setPendingInvitation({
@@ -242,8 +271,9 @@ export function CollaborationSessionProvider({
           cleanUrl: result.cleanUrl,
         })
       }
-      await activate(result.serviceUrl, result.token, result.endSession)
+      await activate(result.serviceUrl, result.token, result.endSession, generation)
     }).catch((nextError) => {
+      if (generation !== sessionGenerationRef.current) return
       setState('error')
       setError(readableError(nextError))
     })
@@ -258,7 +288,7 @@ export function CollaborationSessionProvider({
     } catch (nextError) { setError(readableError(nextError)) }
   }
 
-  const signIn = async () => {
+  const beginAuthorization = async (intent: 'sign-in' | 'register') => {
     if (disabledNetwork || !serviceUrl || state === 'signing-in') {
       if (!serviceUrl) {
         setState('error')
@@ -266,31 +296,51 @@ export function CollaborationSessionProvider({
       }
       return
     }
+    if (intent === 'register' && (!registrationEnabled || usesDesktopIdentity())) {
+      setError('Registration is not available for this DraftMatter service yet.')
+      return
+    }
+    const generation = ++sessionGenerationRef.current
     setState('signing-in')
     setError('')
     try {
       if (usesDesktopIdentity()) {
         const result = await signInDesktop(serviceUrl)
-        await activate(result.serviceUrl, result.token, result.endSession)
+        await activate(result.serviceUrl, result.token, result.endSession, generation)
         return
       }
-      const request = await prepareOidcAuthorization(serviceUrl, window.location.href, sessionStorage)
+      const transactionStorage = {
+        setItem: (key: string, value: string) => {
+          if (generation === sessionGenerationRef.current) sessionStorage.setItem(key, value)
+        },
+      }
+      const request = await prepareOidcAuthorization(serviceUrl, window.location.href, transactionStorage, undefined, undefined, undefined, intent)
+      if (generation !== sessionGenerationRef.current) {
+        discardOidcAuthorization(sessionStorage, new URL(request.authorizationUrl).searchParams.get('state') ?? undefined)
+        return
+      }
       if (pendingInvitation) {
         storePendingCollaborationInvitation(sessionStorage, pendingInvitation)
       }
       ;(navigateToIdentity ?? ((url: string) => window.location.assign(url)))(request.authorizationUrl)
     } catch (nextError) {
+      if (generation !== sessionGenerationRef.current) return
       setState('error')
       setError(readableError(nextError))
     }
   }
 
+  const signIn = () => beginAuthorization('sign-in')
+  const register = () => beginAuthorization('register')
+
   const useAccessToken = async (nextServiceUrl: string, accessToken: string) => {
+    const generation = ++sessionGenerationRef.current
     setState('loading')
     setError('')
     try {
-      await activate(nextServiceUrl, accessToken)
+      await activate(nextServiceUrl, accessToken, undefined, generation)
     } catch (nextError) {
+      if (generation !== sessionGenerationRef.current) return
       setState('error')
       setError(readableError(nextError))
     }
@@ -300,6 +350,7 @@ export function CollaborationSessionProvider({
     const logout = endIdentitySessionRef.current?.()
     endIdentitySessionRef.current = undefined
     sessionGenerationRef.current++
+    discardOidcAuthorization(sessionStorage)
     tokenRef.current = null
     clientRef.current = null
     setClient(null)
@@ -323,9 +374,7 @@ export function CollaborationSessionProvider({
     try {
       await loadCatalogue(current, generation)
     } catch (nextError) {
-      if (generation !== sessionGenerationRef.current) return
-      setState('error')
-      setError(readableError(nextError))
+      clearFailedAccount(nextError, generation)
     }
   }
 
@@ -396,6 +445,7 @@ export function CollaborationSessionProvider({
   const value = useMemo<CollaborationSessionContextValue>(() => ({
     state,
     serviceUrl,
+    registrationEnabled,
     profile,
     workspaces,
     drafts,
@@ -406,6 +456,7 @@ export function CollaborationSessionProvider({
     token: tokenRef.current,
     configureDevelopmentService,
     signIn,
+    register,
     useAccessToken,
     signOut,
     refresh,
@@ -415,7 +466,7 @@ export function CollaborationSessionProvider({
     createProject,
     projectsForWorkspace,
     launchFor,
-  }), [client, drafts, error, launchFor, pendingInvitation, profile, projectsForWorkspace, serviceUrl, state, workspaceFailures, workspaces])
+  }), [client, drafts, error, launchFor, pendingInvitation, profile, projectsForWorkspace, registrationEnabled, serviceUrl, state, workspaceFailures, workspaces])
 
   return <CollaborationSessionContext.Provider value={value}>{children}</CollaborationSessionContext.Provider>
 }

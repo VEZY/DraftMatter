@@ -8,6 +8,7 @@ const session = vi.hoisted(() => ({
   state: 'ready',
   profile: null as null | { displayName: string; email: string; userId: string },
   serviceUrl: '',
+  registrationEnabled: false,
   error: '',
   workspaces: [],
   drafts: [],
@@ -56,6 +57,7 @@ const props = {
   onOpenAiLearn: vi.fn(),
   onOpenLanguages: vi.fn(),
   onOpenTutorial: vi.fn(),
+  onRegister: vi.fn(),
 }
 
 describe('DraftMatter desktop home', () => {
@@ -74,6 +76,8 @@ describe('DraftMatter desktop home', () => {
     container.remove()
     vi.clearAllMocks()
     session.serviceUrl = ''
+    session.registrationEnabled = false
+    session.state = 'ready'
     session.profile = null
     desktopHost.available = true
   })
@@ -87,6 +91,8 @@ describe('DraftMatter desktop home', () => {
     expect(container.textContent).toContain('Canopy recovery paper')
     expect(container.textContent).toContain('Manage AI connections')
     expect(container.textContent).toContain('Account & collaboration')
+    expect(container.querySelector('#home-setup')).not.toBeNull()
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Register')).toBe(false)
     expect(container.querySelector('input[placeholder="Search papers on this computer"]')).not.toBeNull()
     expect(container.querySelector('.home-showcase')).toBeNull()
     expect(container.textContent).not.toContain('Your paper should be as reproducible as your research.')
@@ -125,27 +131,75 @@ describe('DraftMatter desktop home', () => {
     expect(container.querySelector('input[type="password"]')).not.toBeNull()
   })
 
-  it('puts hosted sign-in above the browser draft action and routes the public example to an isolated entry', async () => {
+  it('offers hosted guests sign-in and registration without device or account setup', async () => {
     desktopHost.available = false
     session.serviceUrl = 'https://sync.draftmatter.test'
     await act(async () => root.render(<Home {...props} />))
+    expect(container.querySelector('h1')?.textContent).toBe('Welcome to DraftMatter')
     const actions = container.querySelector('.home-app-heading-actions')!
     expect(actions.querySelector('button')?.textContent).toBe('Sign in')
     expect([...container.querySelectorAll('button')].filter((button) => button.textContent === 'Sign in')).toHaveLength(1)
     await act(async () => actions.querySelector<HTMLButtonElement>('button')!.click())
     expect(session.signIn).toHaveBeenCalledTimes(1)
+    const register = [...actions.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Register')!
+    expect(register.disabled).toBe(false)
+    await act(async () => register.click())
+    expect(props.onRegister).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('#home-setup')).toBeNull()
+    expect(container.querySelector('#home-account-setup')).toBeNull()
+    expect(container.textContent).not.toContain('Settings & account')
+    expect(container.textContent).not.toContain('Configure collaboration')
+    expect(container.textContent).not.toMatch(/free alpha|alpha is free/i)
     expect(container.querySelector<HTMLAnchorElement>('.home-browser-actions a')?.getAttribute('href')).toBe('/demo')
-    expect(container.textContent).toContain('The free alpha is by invitation.')
+    expect(container.textContent).toContain('Register with your email and a password.')
+    expect(container.textContent).toContain('we’ll email you when you’re invited')
     expect(container.textContent).toContain('Open the link your colleague sent')
     expect(container.textContent).toContain('Export a copy to keep an independent backup')
     expect(container.textContent).toContain('cloning Git repositories require the desktop app')
-    expect(container.textContent).toContain('sign in again to reconnect to your shared papers')
+    expect(container.textContent).toContain('Keep independent backups')
+  })
+
+  it('explains when hosted registration is not configured instead of promising an invitation email', async () => {
+    desktopHost.available = false
+    session.serviceUrl = 'https://sync.draftmatter.test'
+    await act(async () => root.render(<Home {...props} onRegister={undefined} />))
+    const register = [...container.querySelectorAll<HTMLButtonElement>('button')].find((button) => button.textContent === 'Register')!
+    expect(register.disabled).toBe(true)
+    expect(container.textContent).toContain('Registration is being prepared.')
+    expect(container.textContent).not.toContain('we’ll email you')
+    expect(container.querySelector('#home-setup')).toBeNull()
+  })
+
+  it('prevents starting another authentication flow while signing in', async () => {
+    desktopHost.available = false
+    session.serviceUrl = 'https://sync.draftmatter.test'
+    session.state = 'signing-in'
+    await act(async () => root.render(<Home {...props} />))
+    const actions = [...container.querySelectorAll<HTMLButtonElement>('.home-app-heading-actions button')]
+    expect(actions.find((button) => button.textContent === 'Signing in…')?.disabled).toBe(true)
+    expect(actions.find((button) => button.textContent === 'Register')?.disabled).toBe(true)
+  })
+
+  it.each([false, true])('describes pending approval honestly when registration readiness is %s', async (registrationEnabled) => {
+    desktopHost.available = false
+    session.serviceUrl = 'https://sync.draftmatter.test'
+    session.state = 'pending-approval'
+    session.registrationEnabled = registrationEnabled
+    await act(async () => root.render(<Home {...props} />))
+    expect(container.querySelector('h1')?.textContent).toBe('Awaiting an invitation')
+    expect(container.querySelector('[role="status"]')?.textContent).toBe(`Your account is awaiting an invitation.${registrationEnabled ? ' We’ll email you when access is granted.' : ''}`)
+    expect(container.querySelector('a[href^="mailto:"]') !== null).toBe(!registrationEnabled)
+    expect(container.textContent).not.toContain('New draft')
+    if (!registrationEnabled) expect(container.textContent).not.toContain('We’ll email you')
   })
 
   it('distinguishes an empty filtered catalogue from having no papers and lets the user clear filters', async () => {
+    desktopHost.available = false
     session.profile = { displayName: 'Ada Researcher', email: 'ada@example.test', userId: 'ada' }
     await act(async () => root.render(<Home {...props} />))
     expect(container.querySelector('[aria-label="Signed-in account"]')?.textContent).toBe('Signed in as ada@example.test.')
+    expect(container.querySelector('#home-setup')).toBeNull()
+    expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Register')).toBe(false)
     const roles = [...container.querySelectorAll<HTMLSelectElement>('select')].find((element) => element.closest('label')?.textContent?.startsWith('Role'))!
     await act(async () => {
       roles.value = 'viewer'
