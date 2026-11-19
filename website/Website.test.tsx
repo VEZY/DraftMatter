@@ -33,7 +33,6 @@ describe('DraftMatter website', () => {
     document.body.append(container)
     root = createRoot(container)
     vi.stubEnv('VITE_ALPHA_SIGNUP_URL', '')
-    vi.stubEnv('VITE_DM_WEBSITE_DEMO_READY', undefined)
     window.history.replaceState({}, '', '/DraftMatter/')
   })
 
@@ -57,7 +56,7 @@ describe('DraftMatter website', () => {
     expect(container.querySelector('.home-app-setup')).toBeNull()
   })
 
-  it('offers invitation requests and sign-in without advertising an unpublished example by default', async () => {
+  it('puts the public demo first while keeping invitation requests and sign-in available', async () => {
     await act(async () => root.render(<Website />))
 
     const alpha = container.querySelector<HTMLElement>('#alpha')!
@@ -68,25 +67,13 @@ describe('DraftMatter website', () => {
     expect(alpha.textContent).toContain('requesting access does not create an account')
     expect(alpha.textContent).not.toContain('The alpha is being prepared.')
     expect(container.querySelector<HTMLAnchorElement>('.website-nav .website-app-link')?.href).toBe('https://app.draftmatter.eu/')
-    expect(container.querySelector('a[href="https://app.draftmatter.eu/demo"]')).toBeNull()
+    const tryNow = container.querySelector<HTMLAnchorElement>('.home-hero-actions > a:first-child')
+    expect(tryNow?.textContent).toBe('Try now')
+    expect(tryNow?.href).toBe('https://app.draftmatter.eu/demo')
+    expect(tryNow?.classList.contains('home-primary')).toBe(true)
+    expect(container.querySelector('.website-example-note')?.textContent).toContain('without an account')
     expect(container.querySelector('.website-example-note')?.textContent).toContain('available by invitation')
-    expect(container.textContent).not.toContain('private to this tab and resets when you reload')
     expect(container.querySelector<HTMLAnchorElement>('.home-hero-actions a[href="https://app.draftmatter.eu/"]')?.textContent).toBe('Open DraftMatter')
-  })
-
-  it('advertises the isolated example only after an explicit publication opt-in', async () => {
-    vi.stubEnv('VITE_DM_WEBSITE_DEMO_READY', 'true')
-    await act(async () => root.render(<Website />))
-    expect(container.querySelector<HTMLAnchorElement>('a[href="https://app.draftmatter.eu/demo"]')?.textContent).toContain('Try the example')
-    expect(container.textContent).toContain('private to this tab and resets when you reload')
-    expect(container.querySelector<HTMLAnchorElement>('.website-app-link')?.href).toBe('https://app.draftmatter.eu/')
-  })
-
-  it.each(['false', 'TRUE', 'yes'])('keeps the unpublished example hidden for a non-opt-in value %s', async (value) => {
-    vi.stubEnv('VITE_DM_WEBSITE_DEMO_READY', value)
-    await act(async () => root.render(<Website />))
-    expect(container.querySelector('a[href="https://app.draftmatter.eu/demo"]')).toBeNull()
-    expect(container.textContent).not.toContain('private to this tab and resets when you reload')
   })
 
   it('uses a configured HTTPS intake while keeping sign-in and access requests separate', async () => {

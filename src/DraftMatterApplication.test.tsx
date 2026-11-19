@@ -113,7 +113,7 @@ describe('DraftMatter application entry', () => {
     expect(container.querySelector('h1')?.textContent).toBe('Your papers')
     expect(container.textContent).toContain('Browser workspace')
     expect(container.textContent).toContain('New browser draft')
-    expect(container.textContent).toContain('Open the complete example')
+    expect(container.textContent).toContain('Try now')
     expect(container.textContent).toContain('Set up DraftMatter')
     expect(container.textContent).toContain('AI connections')
     expect(container.textContent).toContain('Account & collaboration')
@@ -300,7 +300,7 @@ describe('DraftMatter application entry', () => {
     const container = document.createElement('div')
     const root = createRoot(container)
     await act(async () => root.render(<DraftMatterApplication />))
-    const example = [...container.querySelectorAll<HTMLAnchorElement>('a')].find((link) => link.textContent?.includes('Open the complete example'))!
+    const example = [...container.querySelectorAll<HTMLAnchorElement>('a')].find((link) => link.textContent === 'Try now')!
     expect(example.getAttribute('href')).toBe('/demo')
     expect(container.querySelector('[data-testid="editor"]')).toBeNull()
     await act(async () => root.unmount())

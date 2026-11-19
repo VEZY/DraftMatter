@@ -27,7 +27,9 @@ for (const width of [1440, 1080, 390]) {
     await expect(page.getByRole('button', { name: 'Settings & account', exact: true })).toHaveCount(0)
     await expect(page.locator('#home-setup')).toHaveCount(0)
     await expect(page.getByRole('button', { name: 'Collaboration account setup', exact: true })).toHaveCount(0)
-    await expect(page.getByRole('link', { name: /Open the complete example/ })).toHaveAttribute('href', '/demo')
+    const demo = page.locator('.home-app-heading-actions').getByRole('link', { name: 'Try now', exact: true })
+    await expect(demo).toHaveAttribute('href', '/demo')
+    await expect(demo).toBeInViewport()
     await page.evaluate(async () => { await document.fonts.ready })
 
     const account = page.getByRole('region', { name: 'Alpha access', exact: true })
@@ -54,6 +56,14 @@ for (const width of [1440, 1080, 390]) {
     await signIn.scrollIntoViewIfNeeded()
     await expect(signIn).toBeEnabled()
     await expect(signIn).toBeInViewport()
+    if (width === 390) {
+      const requestCount = serviceRequests.length
+      await demo.click()
+      await expect(page).toHaveURL(/\/demo$/)
+      await expect(page.getByRole('complementary', { name: 'Interactive example' })).toBeVisible()
+      await expect(page.getByRole('textbox', { name: 'Rendered manuscript editor' })).toBeVisible({ timeout: 30_000 })
+      expect(serviceRequests).toHaveLength(requestCount)
+    }
     // React's development StrictMode may repeat the public bootstrap request.
     expect([...new Set(serviceRequests)]).toEqual([`${serviceUrl}/config`])
     expect(errors).toEqual([])

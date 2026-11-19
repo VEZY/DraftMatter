@@ -199,17 +199,19 @@ function AppHome({
             <p>{desktopHost.available
               ? 'Open a Markdown or Quarto manuscript, or start a new paper on this computer.'
               : hostedBrowser
-                ? 'Write scientific papers with citations, reproducible results, and collaborative review. Sign in to your workspace, or try the example without an account.'
-                : 'Start a portable browser draft, open the complete example, or connect to a collaboration account.'}</p>
+                ? 'Write scientific papers with citations, reproducible results, and collaborative review. Try an editable example without an account.'
+                : 'Start a portable browser draft or try an editable example without an account.'}</p>
           </div>
           <div className="home-app-heading-actions">
             {hostedBrowser && <>
-              <button className="home-primary" onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}><Icon name="users" size={16} />{session.state === 'signing-in' ? 'Signing in…' : 'Sign in'}</button>
+              <a className="home-primary" href="/demo"><Icon name="spark" size={16} />Try now</a>
+              <button onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}><Icon name="users" size={16} />{session.state === 'signing-in' ? 'Signing in…' : 'Sign in'}</button>
               <button onClick={onRegister} disabled={!onRegister || session.state === 'signing-in'}>Register</button>
             </>}
             {desktopHost.available
               ? <button className="home-primary" onClick={onOpenLocalPaper}><Icon name="document" size={16} />Open existing paper</button>
               : <button className={hostedBrowser ? undefined : 'home-primary'} onClick={onOpenBrowserDraft}><Icon name="plus" size={16} />New browser draft</button>}
+            {!desktopHost.available && !hostedBrowser && <a href="/demo"><Icon name="spark" size={16} />Try now</a>}
             {desktopHost.available && <button onClick={onOpenLocalProject}><Icon name="folder" size={16} />Open project folder</button>}
             {desktopHost.available && <div className="home-paper-create-actions">
               <button onClick={onNewLocalDraft}><Icon name="plus" size={16} />New paper</button>
@@ -249,7 +251,6 @@ function AppHome({
           </>
         ) : (
           <section className="home-browser-actions" aria-label="Browser paper actions">
-            <a href="/demo"><span><Icon name="spark" size={19} /></span><strong>Open the complete example</strong><small>No account needed. Edit a private example that resets when you reload.</small><Icon name="arrowRight" size={16} /></a>
             <button onClick={onOpenTutorial}><span><Icon name="book" size={19} /></span><strong>Take the guided tour</strong><small>Learn writing, citations, results, and review inside one paper.</small><Icon name="arrowRight" size={16} /></button>
           </section>
         )}
@@ -360,7 +361,10 @@ function Catalogue({
       <div className="home-catalogue-content">
         <section className="home-catalogue-heading">
           <div><span className="home-kicker">Your research workspace</span><h1>Drafts</h1><p>Every manuscript you can access, across all of your workspaces.</p><p className="home-signed-in-note" aria-label="Signed-in account">Signed in as <strong>{session.profile?.email ?? accountName}</strong>.</p></div>
-          <button className="home-primary" onClick={onNewDraft}><Icon name="plus" size={16} />New draft</button>
+          <div className="home-app-heading-actions">
+            {!desktopHost.available && <a href="/demo" target="_blank" rel="noopener"><Icon name="spark" size={16} />Try the demo</a>}
+            <button className="home-primary" onClick={onNewDraft}><Icon name="plus" size={16} />New draft</button>
+          </div>
         </section>
 
         <div className="home-catalogue-tools">

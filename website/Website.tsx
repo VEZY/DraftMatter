@@ -33,7 +33,6 @@ function AlphaAction({ compact = false }: { compact?: boolean }) {
 }
 
 export function Website() {
-  const exampleReady = import.meta.env.VITE_DM_WEBSITE_DEMO_READY === 'true'
   const [legalDocument, setLegalDocument] = useState(legalDocumentFromHash)
   useEffect(() => {
     const onHashChange = () => setLegalDocument(legalDocumentFromHash())
@@ -64,11 +63,8 @@ export function Website() {
             <span className="home-kicker">A calm workspace for rigorous research</span>
             <h1 id="website-title">Your paper should be as <span>reproducible</span> as your research.</h1>
             <p className="home-hero-support">Research writing, with the missing pieces built in.</p>
-            <p className="home-hero-summary">DraftMatter brings writing, citations, reproducible results, review, and collaboration into one focused workspace. Everything is available when needed and quiet when it is not.</p>
             <div className="home-hero-actions">
-              {exampleReady
-                ? <a className="home-primary website-alpha-primary" href={exampleUrl}>Try the example<Icon name="arrowRight" size={16} /></a>
-                : <AlphaAction />}
+              <a className="home-primary website-alpha-primary" href={exampleUrl}>Try now<Icon name="arrowRight" size={16} /></a>
               <a href={applicationUrl}>Open DraftMatter</a>
               <button className="home-preview-action" onClick={() => scrollTo('home-showcase')}>
                 See how it works
@@ -78,9 +74,8 @@ export function Website() {
                 View the source
               </a>
             </div>
-            <p className="website-example-note">{exampleReady
-              ? 'Try writing and citations without an account. Your example is private to this tab and resets when you reload. Shared papers require an alpha invitation.'
-              : 'The hosted alpha is available by invitation. Already invited? Open DraftMatter to sign in.'}</p>
+            <p className="website-example-note">Try writing and citations without an account. Changes stay in this tab and reset when you reload. The hosted alpha is available by invitation.</p>
+            <p className="home-hero-summary">DraftMatter brings writing, citations, reproducible results, review, and collaboration into one focused workspace. Everything is available when needed and quiet when it is not.</p>
             <ul className="home-hero-proof" aria-label="DraftMatter principles">
               <li><Icon name="check" size={13} />Portable manuscript</li>
               <li><Icon name="check" size={13} />Local computation</li>

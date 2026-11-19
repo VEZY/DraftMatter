@@ -51,7 +51,6 @@ Create the `ovh-website` environment in `VEZY/DraftMatter`. Set these variables:
 | `DRAFTMATTER_WEBSITE_HOSTING_DETAILS` | Actual website hosting provider's name, address and contact |
 | `DRAFTMATTER_WEBSITE_DATA_LOCATION` | Confirmed website/data location; distinguish the unopened collaboration service |
 | `DRAFTMATTER_LEGAL_ADDITIONAL_PROCESSORS` | Actual contact email and other enabled providers |
-| `DRAFTMATTER_WEBSITE_DEMO_READY` | Leave absent or `false` until the hosted `/demo` is deployed and verified; only exact `true` advertises it |
 
 Create two **environment secrets**: `OVH_SFTP_USERNAME` and `OVH_SFTP_PASSWORD`.
 The build job receives only public variables. The SFTP secrets are referenced
@@ -110,16 +109,11 @@ claim France as the actual location until the hosting service confirms it.
 Update the website's hosting information separately when the alpha backend opens.
 The signup link stays disabled until its intake or the live application is ready.
 
-The anonymous-example link is a separate opt-in. First deploy the application
-release containing `/demo`, then use a fresh browser to verify the editable
-example opens without a login and cannot contact the collaboration service.
-An HTTP 200 alone does not prove this: an older app can return its fallback page.
-Only then set `DRAFTMATTER_WEBSITE_DEMO_READY=true` for the public website and
-rebuild/redeploy it. Both website workflows pass this public setting to
-`VITE_DM_WEBSITE_DEMO_READY`; leave it absent or `false` for a safe default.
-For GitHub Pages use the repository variable; for OVH use the `ovh-website`
-environment variable (or the repository fallback). Pushing application code
-without deploying it must not advertise an example that is not live yet.
+The website's **Try now** button links directly to the public demo at
+`https://app.draftmatter.eu/demo`. When verifying a deployment in a fresh
+browser, follow that link and check that the editable example opens without
+sign-in. The app's browser tests also check that the demo stays disconnected
+from the collaboration service.
 
 ## Sources
 

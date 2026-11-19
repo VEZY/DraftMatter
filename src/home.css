@@ -7186,13 +7186,26 @@
   }
 }
 
-.home-app-heading-actions button {
+.home-app-heading-actions button,
+.home-app-heading-actions a {
   min-height: 42px;
   padding: 9px 13px;
   display: inline-flex;
   align-items: center;
   gap: 7px;
   font-weight: 750;
+}
+
+.home-app-heading-actions a {
+  border: 1px solid var(--home-line);
+  border-radius: 8px;
+  background: white;
+  color: var(--home-ink);
+  text-decoration: none;
+}
+
+.home-app-heading-actions a:hover {
+  border-color: #b7cbbf;
 }
 
 .home-app-filter-status {
@@ -7217,8 +7230,7 @@
 .home-browser-actions {
   margin-top: 36px;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
+  max-width: 540px;
 }
 
 .home-browser-actions > button,
@@ -7309,6 +7321,7 @@
   overflow-wrap: anywhere;
 }
 
+.home-app-heading-actions a:focus-visible,
 .home-browser-actions > a:focus-visible,
 .home-alpha-access a:focus-visible {
   outline: 3px solid rgba(63, 113, 94, .3);
@@ -7439,9 +7452,5 @@
 
   .home-app-heading-actions {
     justify-content: flex-start;
-  }
-
-  .home-browser-actions {
-    grid-template-columns: 1fr;
   }
 }

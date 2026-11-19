@@ -131,7 +131,7 @@ describe('DraftMatter desktop home', () => {
     expect(container.querySelector('input[type="password"]')).not.toBeNull()
   })
 
-  it('offers hosted guests sign-in and registration without device or account setup', async () => {
+  it('offers hosted guests the demo, sign-in and registration without device setup', async () => {
     desktopHost.available = false
     session.serviceUrl = 'https://sync.draftmatter.test'
     await act(async () => root.render(<Home {...props} />))
@@ -150,7 +150,8 @@ describe('DraftMatter desktop home', () => {
     expect(container.textContent).not.toContain('Settings & account')
     expect(container.textContent).not.toContain('Configure collaboration')
     expect(container.textContent).not.toMatch(/free alpha|alpha is free/i)
-    expect(container.querySelector<HTMLAnchorElement>('.home-browser-actions a')?.getAttribute('href')).toBe('/demo')
+    expect(actions.firstElementChild?.textContent).toBe('Try now')
+    expect(actions.querySelector<HTMLAnchorElement>('a.home-primary')?.getAttribute('href')).toBe('/demo')
     expect(container.textContent).toContain('Register with your email and a password.')
     expect(container.textContent).toContain('we’ll email you when you’re invited')
     expect(container.textContent).toContain('Open the link your colleague sent')
@@ -198,6 +199,9 @@ describe('DraftMatter desktop home', () => {
     session.profile = { displayName: 'Ada Researcher', email: 'ada@example.test', userId: 'ada' }
     await act(async () => root.render(<Home {...props} />))
     expect(container.querySelector('[aria-label="Signed-in account"]')?.textContent).toBe('Signed in as ada@example.test.')
+    const demo = container.querySelector<HTMLAnchorElement>('.home-catalogue-heading a[href="/demo"]')
+    expect(demo?.textContent).toBe('Try the demo')
+    expect(demo?.target).toBe('_blank')
     expect(container.querySelector('#home-setup')).toBeNull()
     expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Register')).toBe(false)
     const roles = [...container.querySelectorAll<HTMLSelectElement>('select')].find((element) => element.closest('label')?.textContent?.startsWith('Role'))!

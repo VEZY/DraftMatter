@@ -1,10 +1,11 @@
 import { expect, test } from '@playwright/test'
 import { showWritingTools } from './writing-tools'
 
-test('the anonymous example supports editing and citations without reading, replacing or uploading a private draft', async ({ page }) => {
+test('the anonymous example supports editing and citations without reading, replacing or uploading a private draft', async ({ page, baseURL }) => {
   test.setTimeout(90_000)
   const errors: string[] = []
   const accountRequests: string[] = []
+  const devSocketOrigin = baseURL?.replace(/^http/, 'ws')
   page.on('pageerror', (error) => errors.push(error.message))
   page.on('request', (request) => {
     const url = new URL(request.url())
@@ -13,7 +14,7 @@ test('the anonymous example supports editing and citations without reading, repl
   page.on('websocket', (socket) => {
     const url = new URL(socket.url())
     // Vite's development-only hot-reload socket is not an account connection.
-    if (url.origin === 'ws://127.0.0.1:4173' && url.pathname === '/' && url.searchParams.has('token')) return
+    if (url.origin === devSocketOrigin && url.pathname === '/' && url.searchParams.has('token')) return
     accountRequests.push(socket.url())
   })
   await page.goto('/')

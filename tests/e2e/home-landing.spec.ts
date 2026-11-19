@@ -10,9 +10,11 @@ const features = [
 ] as const
 
 test.describe('signed-out Home landing experience', () => {
-  test('keeps invitation requests and sign-in visible while the anonymous example awaits publication', async ({ page }) => {
+  test('makes the anonymous demo the first action and keeps sign-in and access requests visible', async ({ page }) => {
     await page.goto('/')
-    await expect(page.getByRole('link', { name: 'Try the example', exact: true })).toHaveCount(0)
+    const demo = page.getByRole('link', { name: 'Try now', exact: true })
+    await expect(demo).toHaveAttribute('href', 'https://app.draftmatter.eu/demo')
+    await expect(demo).toBeInViewport()
     await expect(page.locator('.website-example-note')).toContainText('available by invitation')
     await expect(page.getByRole('link', { name: 'Open DraftMatter', exact: true })).toHaveAttribute('href', 'https://app.draftmatter.eu/')
     const navigation = page.getByRole('navigation', { name: 'DraftMatter website', exact: true })
@@ -21,7 +23,8 @@ test.describe('signed-out Home landing experience', () => {
     const desktopScreenshot = test.info().outputPath('website-desktop-entry.png')
     await page.screenshot({ path: desktopScreenshot })
     await test.info().attach('website-desktop-entry', { path: desktopScreenshot, contentType: 'image/png' })
-    await page.setViewportSize({ width: 360, height: 800 })
+    await page.setViewportSize({ width: 360, height: 640 })
+    await expect(demo).toBeInViewport()
     await expect(navigation.getByRole('link', { name: 'Sign in', exact: true })).toBeVisible()
     await expect(navigation.getByRole('link', { name: 'Request alpha access', exact: true })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(360)
