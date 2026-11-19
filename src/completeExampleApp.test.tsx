@@ -65,8 +65,13 @@ describe('built-in complete example project', () => {
     expect(manuscript.textContent).toContain('Vezy and Martin, 2024')
     expect(manuscript.textContent).toContain('Chen and Silva, 2025')
     expect(localStorage.getItem('draftmatter.built-in-project.v1')).toBe('complete-example')
-    expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('cell-julia-table')
-    expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('.draftmatter-reviews')
+    // Rendering precedes the debounced browser save; reload must use that save.
+    await act(async () => {
+      await vi.waitFor(() => {
+        expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('cell-julia-table')
+        expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('.draftmatter-reviews')
+      })
+    })
 
     await act(async () => container.querySelector<HTMLButtonElement>('.project-switcher')!.click())
     expect(container.querySelector('.project-menu-current')?.textContent).toContain('Built-in example · copy before execution')
