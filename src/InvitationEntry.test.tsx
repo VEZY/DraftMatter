@@ -67,6 +67,16 @@ describe('workspace invitation entry', () => {
     expect(container.textContent).not.toContain('This invitation is no longer available')
   })
 
+  it('offers Home and the original workspace link after an email callback with no invitation in this tab', async () => {
+    session.pendingInvitation = null
+    session.state = 'sign-in-required'
+    await act(async () => root.render(<InvitationEntry onBack={onBack} onOpenDraft={onOpenDraft} />))
+    expect(container.querySelector('[role="status"]')?.textContent).toContain('use its original invitation link')
+    expect(container.textContent).not.toContain('no longer available')
+    await act(async () => button('Return to Home').click())
+    expect(onBack).toHaveBeenCalled()
+  })
+
   it('clears the pending invitation before leaving when Not now is selected', async () => {
     const order: string[] = []
     session.dismissInvitation.mockImplementationOnce(() => order.push('dismiss'))
@@ -79,7 +89,7 @@ describe('workspace invitation entry', () => {
   it('shows authentication failures instead of leaving an unexplained sign-in button', async () => {
     session.error = 'The identity service could not be reached.'
     await act(async () => root.render(<InvitationEntry onBack={onBack} onOpenDraft={onOpenDraft} />))
-    expect(container.querySelector('[role="alert"]')?.textContent).toContain('identity service could not be reached')
+    expect(container.querySelector('h1 + [role="alert"]')?.textContent).toContain('identity service could not be reached')
     session.error = ''
     session.signIn.mockRejectedValueOnce(new Error('The browser could not start sign-in.'))
     await act(async () => button('Sign in to continue').click())

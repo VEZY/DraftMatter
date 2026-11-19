@@ -77,6 +77,7 @@ describe('DraftMatter desktop home', () => {
     vi.clearAllMocks()
     session.serviceUrl = ''
     session.registrationEnabled = false
+    session.error = ''
     session.state = 'ready'
     session.profile = null
     desktopHost.available = true
@@ -158,6 +159,51 @@ describe('DraftMatter desktop home', () => {
     expect(container.textContent).toContain('Export a copy to keep an independent backup')
     expect(container.textContent).toContain('cloning Git repositories require the desktop app')
     expect(container.textContent).toContain('Keep independent backups')
+  })
+
+  it('shows a sign-in error above the page heading even if Home has been scrolled', async () => {
+    desktopHost.available = false
+    session.serviceUrl = 'https://sync.draftmatter.test'
+    await act(async () => root.render(<Home {...props} />))
+    const page = container.querySelector('main')!
+    page.scrollTop = 600
+    session.state = 'error'
+    session.error = 'The identity service could not be reached.'
+    await act(async () => root.render(<Home {...props} />))
+
+    const content = page.querySelector('.home-catalogue-content')!
+    expect(content.firstElementChild?.querySelector('[role="alert"]')?.textContent).toBe(session.error)
+    expect(page.querySelectorAll('[role="alert"]')).toHaveLength(1)
+    expect(page.scrollTop).toBe(0)
+    expect(page.textContent).not.toContain('If you just verified your email')
+  })
+
+  it('shows account and local file errors above the signed-in catalogue', async () => {
+    session.profile = { displayName: 'Ada Researcher', email: 'ada@example.test', userId: 'ada' }
+    session.error = 'The workspace could not be refreshed.'
+    const localProblem = 'The project folder could not be opened.'
+    await act(async () => root.render(<Home {...props} localProblem={localProblem} />))
+
+    const content = container.querySelector('.home-catalogue-content')!
+    const alerts = [...content.firstElementChild!.querySelectorAll('[role="alert"]')]
+    expect(alerts.map((alert) => alert.textContent)).toEqual([session.error, localProblem])
+    expect(content.querySelectorAll('[role="alert"]')).toHaveLength(2)
+  })
+
+  it('offers a fresh sign-in at the top after returning in a different tab', async () => {
+    desktopHost.available = false
+    session.serviceUrl = 'https://sync.draftmatter.test'
+    session.state = 'sign-in-required'
+    await act(async () => root.render(<Home {...props} />))
+
+    const notice = container.querySelector('.home-catalogue-content')!.firstElementChild!
+    expect(notice.querySelector('[role="status"]')?.textContent).toContain('If you just verified your email')
+    expect(container.querySelector('[role="alert"]')).toBeNull()
+    const actions = [...container.querySelectorAll<HTMLButtonElement>('button')].filter((button) => button.textContent?.startsWith('Sign in'))
+    expect(actions).toHaveLength(1)
+    expect(notice.contains(actions[0])).toBe(true)
+    await act(async () => actions[0].click())
+    expect(session.signIn).toHaveBeenCalledTimes(1)
   })
 
   it('explains when hosted registration is not configured instead of promising an invitation email', async () => {

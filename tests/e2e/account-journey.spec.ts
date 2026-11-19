@@ -1,4 +1,4 @@
-import { expect, test, type Page } from '@playwright/test'
+import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 
 const serviceUrl = 'https://sync.example.test'
 const identityUrl = 'https://identity.example.test'
@@ -110,13 +110,9 @@ test('can dismiss a workspace invitation without accepting it or connecting to t
   expect(serviceRequests).toEqual([])
 })
 
-test('registers through the identity provider and keeps pending alpha accounts outside the catalogue', async ({ page }) => {
+async function mockPendingAccount(target: BrowserContext | Page) {
   const apiRequests: string[] = []
-  const errors: string[] = []
-  page.on('pageerror', (error) => errors.push(error.message))
-  await page.addInitScript((service) => localStorage.setItem('draftmatter.collaboration.development-service.v1', service), serviceUrl)
-  await mockIdentityProvider(page, 'create')
-  await page.route(`${serviceUrl}/**`, (route) => {
+  await target.route(`${serviceUrl}/**`, (route) => {
     const request = route.request()
     if (request.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: cors })
     const path = new URL(request.url()).pathname
@@ -127,6 +123,15 @@ test('registers through the identity provider and keeps pending alpha accounts o
     apiRequests.push(path)
     return route.fulfill({ status: 403, headers: cors, json: { error: { code: 'alpha_access_pending', message: 'Approval required.' } } })
   })
+  return apiRequests
+}
+
+test('registers through the identity provider and keeps pending alpha accounts outside the catalogue', async ({ page }) => {
+  const errors: string[] = []
+  page.on('pageerror', (error) => errors.push(error.message))
+  await page.addInitScript((service) => localStorage.setItem('draftmatter.collaboration.development-service.v1', service), serviceUrl)
+  await mockIdentityProvider(page, 'create')
+  const apiRequests = await mockPendingAccount(page)
   await page.goto('/')
   await expect(page.getByRole('button', { name: 'Register', exact: true })).toBeEnabled()
   await page.getByRole('button', { name: 'Register', exact: true }).click()
@@ -140,4 +145,52 @@ test('registers through the identity provider and keeps pending alpha accounts o
   await page.getByRole('button', { name: 'Sign out / use another account', exact: true }).click()
   await expect(page.getByText('Signed out of the mocked identity provider.')).toBeVisible()
   expect(errors).toEqual([])
+})
+
+test('continues sign-in when an email verification returns in a separate tab', async ({ page, context }) => {
+  await context.addInitScript((service) => localStorage.setItem('draftmatter.collaboration.development-service.v1', service), serviceUrl)
+  const apiRequests = await mockPendingAccount(context)
+  const exchangedCodes: (string | null)[] = []
+  context.on('request', (request) => {
+    if (request.url() === `${identityUrl}/token` && request.method() === 'POST') {
+      exchangedCodes.push(new URLSearchParams(request.postData()!).get('code'))
+    }
+  })
+
+  await mockIdentityProvider(page, 'create')
+  // Registration stays at the identity provider while the user opens their email.
+  await page.route(`${identityUrl}/authorize?**`, (route) => route.fulfill({
+    contentType: 'text/html', body: '<p>Check your email</p>',
+  }))
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Register', exact: true }).click()
+  await expect(page.getByText('Check your email')).toBeVisible()
+  const registration = new URL(page.url())
+  expect(registration.searchParams.get('prompt')).toBe('create')
+  const registrationState = registration.searchParams.get('state')!
+  expect(registrationState).toBeTruthy()
+  const callback = new URL(registration.searchParams.get('redirect_uri')!)
+  callback.searchParams.set('state', registrationState)
+  callback.searchParams.set('code', 'email-verification-code')
+  callback.searchParams.set('iss', identityUrl)
+
+  const emailTab = await context.newPage()
+  await emailTab.setViewportSize({ width: 390, height: 844 })
+  await mockIdentityProvider(emailTab)
+  await emailTab.goto(callback.href)
+  const signIn = emailTab.getByRole('button', { name: 'Sign in to continue', exact: true })
+  await expect(signIn).toBeInViewport({ ratio: 1 })
+  await expect(emailTab.getByRole('status')).toBeInViewport({ ratio: 1 })
+  await expect(emailTab).toHaveURL(registration.searchParams.get('redirect_uri')!)
+  expect(exchangedCodes).toEqual([])
+  expect(apiRequests).toEqual([])
+
+  const authorizationRequest = emailTab.waitForRequest((request) => new URL(request.url()).pathname === '/authorize')
+  await signIn.click()
+  const fresh = new URL((await authorizationRequest).url())
+  expect(fresh.searchParams.get('state')).toBeTruthy()
+  expect(fresh.searchParams.get('state')).not.toBe(registrationState)
+  await expect(emailTab.getByRole('heading', { name: 'Awaiting an invitation', exact: true })).toBeVisible()
+  expect(exchangedCodes).toEqual(['mock-authorization-code'])
+  expect(apiRequests).toEqual(['/api/session'])
 })

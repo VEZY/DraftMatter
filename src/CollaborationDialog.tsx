@@ -14,7 +14,7 @@ import {
   storePendingCollaborationInvitation,
   takePendingCollaborationInvitation,
 } from './collaboration/invitationLink'
-import { completeOidcAuthorization, hasOidcCallback, prepareOidcAuthorization } from './collaboration/oidcBrowser'
+import { cleanOidcCallbackUrl, completeOidcAuthorization, hasOidcCallback, prepareOidcAuthorization } from './collaboration/oidcBrowser'
 import type { CollaborationSessionProfile, WorkspaceProject, WorkspaceRole } from './collaboration/workspaceService'
 import type { CollaborationProjectLaunch } from './collaboration/sessionContext'
 import { Icon } from './Icon'
@@ -352,13 +352,14 @@ export function CollaborationDialog({
   useEffect(() => {
     if (!hasOidcCallback(window.location.href) || oidcCallbackStartedRef.current) return
     oidcCallbackStartedRef.current = true
-    const pendingInvitation = takePendingCollaborationInvitation(sessionStorage)
+    const callbackUrl = window.location.href
+    window.history.replaceState({}, '', cleanOidcCallbackUrl(callbackUrl))
     onRequestOpen?.()
     setServiceState('loading')
     setDetail('Completing secure sign-in…')
-    void completeOidcAuthorization(window.location.href, sessionStorage).then(async (result) => {
+    void completeOidcAuthorization(callbackUrl, sessionStorage).then(async (result) => {
       if (!result) return
-      window.history.replaceState({}, '', result.cleanUrl)
+      const pendingInvitation = takePendingCollaborationInvitation(sessionStorage)
       setUrl(result.serviceUrl)
       setToken('')
       accessTokenRef.current = result.token

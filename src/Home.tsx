@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { AssistantConnectionsDialog } from './AssistantConnectionsDialog'
 import { desktopHost } from './desktopHost'
 import { Icon } from './Icon'
@@ -116,6 +116,29 @@ function AlphaLegalFooter({ onOpenLegal }: Pick<HomeProps, 'onOpenLegal'>) {
   return <footer className="legal-footer"><p>Closed alpha · DraftMatter</p><LegalLinks onNavigate={onOpenLegal} /></footer>
 }
 
+function HomeFeedback({ localProblem }: { localProblem?: string }) {
+  const { error, state, signIn } = useCollaborationSession()
+  const needsSignIn = state === 'sign-in-required'
+  const feedback = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const page = feedback.current?.closest('main')
+    if (page) page.scrollTop = 0
+  }, [error, localProblem, needsSignIn])
+
+  if (!needsSignIn && !error && !localProblem) return null
+  return (
+    <div ref={feedback} className="home-feedback">
+      {needsSignIn && <div className="home-sign-in-notice">
+        <p role="status">This tab needs a new sign-in. If you just verified your email, use the account you registered.</p>
+        <button className="home-primary" onClick={() => void signIn()}>Sign in to continue</button>
+      </div>}
+      {error && <p className="home-account-error" role="alert">{error}</p>}
+      {localProblem && <p className="home-account-error" role="alert">{localProblem}</p>}
+    </div>
+  )
+}
+
 function PendingAlphaHome({ onOpenLegal, onOpenLearn }: Pick<HomeProps, 'onOpenLegal' | 'onOpenLearn'>) {
   const session = useCollaborationSession()
   return (
@@ -125,6 +148,7 @@ function PendingAlphaHome({ onOpenLegal, onOpenLearn }: Pick<HomeProps, 'onOpenL
         <button className="home-link-button" onClick={onOpenLearn}>How to</button>
       </header>
       <div className="home-catalogue-content">
+        <HomeFeedback />
         <section className="home-catalogue-heading home-app-heading">
           <div><span className="home-kicker">Closed alpha</span><h1>Awaiting an invitation</h1><p role="status">Your account is awaiting an invitation.{session.registrationEnabled ? ' We’ll email you when access is granted.' : ''}</p>{!session.registrationEnabled && <p>For updates, contact <a href={`mailto:${legalConfiguration.contactEmail}`}>{legalConfiguration.contactEmail}</a>.</p>}</div>
           <div className="home-app-heading-actions"><button onClick={session.signOut}>Sign out / use another account</button></div>
@@ -192,6 +216,7 @@ function AppHome({
       </header>
 
       <div className="home-catalogue-content">
+        <HomeFeedback localProblem={desktopHost.available ? localProblem : undefined} />
         <section className="home-catalogue-heading home-app-heading">
           <div>
             <span className="home-kicker">{desktopHost.available ? 'Your research workspace' : hostedBrowser ? 'Closed alpha' : 'Browser workspace'}</span>
@@ -205,7 +230,7 @@ function AppHome({
           <div className="home-app-heading-actions">
             {hostedBrowser && <>
               <a className="home-primary" href="/demo"><Icon name="spark" size={16} />Try now</a>
-              <button onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}><Icon name="users" size={16} />{session.state === 'signing-in' ? 'Signing in…' : 'Sign in'}</button>
+              {session.state !== 'sign-in-required' && <button onClick={() => void session.signIn()} disabled={session.state === 'signing-in'}><Icon name="users" size={16} />{session.state === 'signing-in' ? 'Signing in…' : 'Sign in'}</button>}
               <button onClick={onRegister} disabled={!onRegister || session.state === 'signing-in'}>Register</button>
             </>}
             {desktopHost.available
@@ -238,7 +263,6 @@ function AppHome({
             )}
             <LocalProjectsSection
               projects={visibleProjects}
-              problem={localProblem}
               onOpen={onOpenLocalRecent}
               onForget={onForgetLocalRecent}
               onStartCollaboration={onStartLocalCollaboration}
@@ -279,7 +303,6 @@ function AppHome({
           </div>
         </section>}
 
-        {session.error && <p className="home-account-error" role="alert">{session.error}</p>}
         {!hostedBrowser && (!session.serviceUrl || import.meta.env.DEV) && <AdvancedConnectionSetup />}
       </div>
       <AlphaLegalFooter onOpenLegal={onOpenLegal} />
@@ -359,6 +382,15 @@ function Catalogue({
       </header>
 
       <div className="home-catalogue-content">
+        <HomeFeedback localProblem={desktopHost.available ? localProblem : undefined} />
+        {session.workspaceFailures.length > 0 && (
+          <section className="home-partial-failure" role="status" aria-label="Some workspaces could not be loaded">
+            <Icon name="info" size={17} />
+            <span><strong>Some workspaces could not be loaded.</strong><small>{session.workspaceFailures.map((failure) => failure.workspaceName).join(', ')}</small></span>
+            <button onClick={() => void session.refresh()}>Retry</button>
+          </section>
+        )}
+
         <section className="home-catalogue-heading">
           <div><span className="home-kicker">Your research workspace</span><h1>Drafts</h1><p>Every manuscript you can access, across all of your workspaces.</p><p className="home-signed-in-note" aria-label="Signed-in account">Signed in as <strong>{session.profile?.email ?? accountName}</strong>.</p></div>
           <div className="home-app-heading-actions">
@@ -373,14 +405,6 @@ function Catalogue({
           <label><span>Sort</span><select value={sort} onChange={(event) => setSort(event.target.value as typeof sort)}><option value="activity">Recent activity</option><option value="created">Created</option><option value="title">Title</option></select></label>
           <span>{visibleDrafts.length} draft{visibleDrafts.length === 1 ? '' : 's'}</span>
         </div>
-
-        {session.workspaceFailures.length > 0 && (
-          <section className="home-partial-failure" role="status" aria-label="Some workspaces could not be loaded">
-            <Icon name="info" size={17} />
-            <span><strong>Some workspaces could not be loaded.</strong><small>{session.workspaceFailures.map((failure) => failure.workspaceName).join(', ')}</small></span>
-            <button onClick={() => void session.refresh()}>Retry</button>
-          </section>
-        )}
 
         {session.state === 'loading' ? (
           <div className="home-loading" role="status">Loading your drafts…</div>
@@ -401,7 +425,7 @@ function Catalogue({
           </div>
         )}
 
-        {desktopHost.available && <LocalProjectsSection projects={localProjects} problem={localProblem} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenPaper={onOpenLocalPaper} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} onClone={onClonePaper} />}
+        {desktopHost.available && <LocalProjectsSection projects={localProjects} onOpen={onOpenLocalRecent} onForget={onForgetLocalRecent} onStartCollaboration={onStartLocalCollaboration} onOpenPaper={onOpenLocalPaper} onOpenFolder={onOpenLocalProject} onCreate={onNewLocalDraft} onClone={onClonePaper} />}
         <HomeLearningGuide onStartTour={onOpenTutorial} />
       </div>
       <AlphaLegalFooter onOpenLegal={onOpenLegal} />
@@ -417,7 +441,6 @@ function openedLabel(lastOpenedAt: string) {
 
 function LocalProjectsSection({
   projects,
-  problem,
   onOpen,
   onForget,
   onStartCollaboration,
@@ -430,7 +453,6 @@ function LocalProjectsSection({
   showActions = true,
 }: {
   projects: LocalProjectRecent[]
-  problem?: string
   onOpen: (project: LocalProjectRecent) => void
   onForget: (project: LocalProjectRecent) => void
   onStartCollaboration: (project: LocalProjectRecent) => void
@@ -448,7 +470,6 @@ function LocalProjectsSection({
         <div><span className="home-kicker">{kicker}</span><h2 id="local-projects-title">{title}</h2></div>
         {showActions && <div><button onClick={onOpenPaper}><Icon name="document" size={15} />Open existing paper</button><button onClick={onOpenFolder}><Icon name="folder" size={15} />Open project folder</button><button onClick={onCreate}><Icon name="plus" size={15} />New local draft</button>{onClone && <button onClick={onClone}><Icon name="branch" size={15} />Clone a paper</button>}</div>}
       </div>
-      {problem && <p className="home-account-error" role="alert">{problem}</p>}
       {projects.length ? (
         <div className="home-local-list">
           {projects.map((project) => (

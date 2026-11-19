@@ -20,6 +20,7 @@ import {
   prepareOidcAuthorization,
   readOidcRegistrationCapability,
   submitOidcLogout,
+  OidcSignInRequiredError,
   type OidcLoginResult,
 } from './oidcBrowser'
 import type {
@@ -34,7 +35,7 @@ import { publicRuntimeEnvironment } from '../publicRuntimeConfiguration'
 
 const DEVELOPMENT_SERVICE_KEY = 'draftmatter.collaboration.development-service.v1'
 
-export type CollaborationAccountState = 'signed-out' | 'signing-in' | 'loading' | 'ready' | 'pending-approval' | 'error'
+export type CollaborationAccountState = 'signed-out' | 'sign-in-required' | 'signing-in' | 'loading' | 'ready' | 'pending-approval' | 'error'
 
 export interface CatalogueDraft extends WorkspaceProject {
   role: WorkspaceRole
@@ -256,7 +257,6 @@ export function CollaborationSessionProvider({
     if (disabledNetwork || !hasOidcCallback(window.location.href) || callbackStartedRef.current) return
     callbackStartedRef.current = true
     const generation = ++sessionGenerationRef.current
-    const retainedInvitation = takePendingCollaborationInvitation(sessionStorage)
     setState('signing-in')
     setError('')
     const callbackUrl = window.location.href
@@ -265,6 +265,7 @@ export function CollaborationSessionProvider({
       if (!result) return
       if (generation !== sessionGenerationRef.current) { result.endSession?.(); return }
       window.history.replaceState({}, '', result.cleanUrl)
+      const retainedInvitation = takePendingCollaborationInvitation(sessionStorage)
       if (retainedInvitation?.serviceUrl === result.serviceUrl) {
         setPendingInvitation({
           ...retainedInvitation,
@@ -274,10 +275,16 @@ export function CollaborationSessionProvider({
       await activate(result.serviceUrl, result.token, result.endSession, generation)
     }).catch((nextError) => {
       if (generation !== sessionGenerationRef.current) return
+      if (nextError instanceof OidcSignInRequiredError && serviceUrl) {
+        setState('sign-in-required')
+        return
+      }
       setState('error')
-      setError(readableError(nextError))
+      setError(nextError instanceof OidcSignInRequiredError
+        ? 'Sign-in is unavailable until a collaboration service is configured.'
+        : readableError(nextError))
     })
-  }, [activate, disabledNetwork, trustedServiceUrl])
+  }, [activate, disabledNetwork, serviceUrl, trustedServiceUrl])
 
   const configureDevelopmentService = (nextServiceUrl: string) => {
     try {

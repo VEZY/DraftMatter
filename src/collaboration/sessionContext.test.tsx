@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest'
 import { webcrypto } from 'node:crypto'
 import { CollaborationSessionProvider, useCollaborationSession } from './sessionContext'
 import { prepareOidcAuthorization } from './oidcBrowser'
+import { storePendingCollaborationInvitation, takePendingCollaborationInvitation } from './invitationLink'
 
 ;(globalThis as typeof globalThis & { IS_REACT_ACT_ENVIRONMENT: boolean }).IS_REACT_ACT_ENVIRONMENT = true
 
@@ -266,6 +267,27 @@ describe('shared collaboration session', () => {
     expect(window.location.search).toBe('?keep=yes')
     expect(latest.state).toBe('error')
     expect(request).not.toHaveBeenCalled()
+    await act(async () => root.unmount())
+  })
+
+  it('keeps an outstanding sign-in and workspace invitation when an older callback arrives', async () => {
+    await prepareCallback()
+    const current = sessionStorage.getItem('draftmatter.collaboration.oidc.v1')
+    const invitation = { token: 'pending-workspace-invite', serviceUrl: 'https://sync.example.test' }
+    storePendingCollaborationInvitation(sessionStorage, invitation)
+    window.history.replaceState({}, '', '/invite?code=older-code&state=older-sign-in')
+    const request = vi.fn<typeof fetch>(() => response({ oidc: publicOidc }))
+    vi.stubGlobal('fetch', request)
+    let latest!: ReturnType<typeof useCollaborationSession>
+    function Harness() { latest = useCollaborationSession(); return null }
+    const root = createRoot(document.createElement('div'))
+    await act(async () => root.render(<CollaborationSessionProvider initialServiceUrl={invitation.serviceUrl}><Harness /></CollaborationSessionProvider>))
+    expect(window.location.search).toBe('')
+    expect(latest.state).toBe('error')
+    expect(latest.pendingInvitation).toBeNull()
+    expect(sessionStorage.getItem('draftmatter.collaboration.oidc.v1')).toBe(current)
+    expect(takePendingCollaborationInvitation(sessionStorage)).toEqual(invitation)
+    expect(request.mock.calls.map(([url]) => url)).toEqual([`${invitation.serviceUrl}/config`])
     await act(async () => root.unmount())
   })
 

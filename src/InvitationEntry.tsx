@@ -21,7 +21,7 @@ export function InvitationEntry({
   const accessLink = alphaAccessLink(legalConfiguration.contactEmail)
 
   useEffect(() => {
-    acceptButtonRef.current?.focus()
+    acceptButtonRef.current?.focus({ preventScroll: true })
   }, [])
 
   const accept = async () => {
@@ -63,11 +63,20 @@ export function InvitationEntry({
     }
   }
 
+  const problem = message || session.error
+  const needsSignIn = session.state === 'sign-in-required'
   if (!session.pendingInvitation && !accepting) {
-    const problem = message || session.error
     return (
       <main className="home-invitation">
-        <section><span className="home-invitation-icon"><Icon name="link" size={23} /></span><h1>{problem ? 'Could not finish opening this workspace' : 'This invitation is no longer available'}</h1>{problem ? <p role="alert">{problem}</p> : <p>It may already have been accepted, expired, or been revoked. Ask the workspace owner for a new invitation.</p>}<button onClick={onBack}>Return to Home</button><LegalLinks onNavigate={onOpenLegal} target={onOpenLegal ? undefined : '_blank'} /></section>
+        <section>
+          <span className="home-invitation-icon"><Icon name="link" size={23} /></span>
+          <h1>{problem ? 'Could not finish opening this workspace' : needsSignIn ? 'Continue signing in' : 'This invitation is no longer available'}</h1>
+          {problem ? <p role="alert">{problem}</p> : needsSignIn
+            ? <p role="status">Sign in from Home to continue. To open a shared workspace, use its original invitation link.</p>
+            : <p>It may already have been accepted, expired, or been revoked. Ask the workspace owner for a new invitation.</p>}
+          <button onClick={onBack}>Return to Home</button>
+          <LegalLinks onNavigate={onOpenLegal} target={onOpenLegal ? undefined : '_blank'} />
+        </section>
       </main>
     )
   }
@@ -78,6 +87,8 @@ export function InvitationEntry({
         <span className="home-kicker">Workspace invitation</span>
         <span className="home-invitation-icon"><Icon name="users" size={24} /></span>
         <h1>You have been invited to collaborate</h1>
+        {problem && <p className="home-account-error" role="alert">{problem}</p>}
+        {needsSignIn && <p role="status">Sign in again in this tab to continue with your workspace invitation.</p>}
         <p>{session.profile ? 'Accept the invitation to add this workspace to your DraftMatter account.' : 'Sign in securely first. DraftMatter will keep this invitation through the sign-in round trip.'}</p>
         <p>This is a workspace invitation. Accepting gives your account access to its current and future papers and shared files, according to your assigned role.</p>
         {session.profile
@@ -85,7 +96,6 @@ export function InvitationEntry({
           : <p>A project invitation does not create an alpha account. If you do not yet have sign-in details, <a href={accessLink.href}>request alpha access</a> first.</p>}
         <p>The hosted alpha is by invitation. Please read the terms of use and privacy policy before continuing.</p>
         <LegalLinks onNavigate={onOpenLegal} target={onOpenLegal ? undefined : '_blank'} />
-        {(message || session.error) && <p className="home-account-error" role="alert">{message || session.error}</p>}
         <div>
           <button onClick={() => { session.dismissInvitation(); onBack() }} disabled={accepting || session.state === 'signing-in'}>Not now</button>
           <button ref={acceptButtonRef} className="home-primary" onClick={() => void accept()} disabled={accepting || session.state === 'signing-in'}>{accepting ? 'Accepting…' : session.profile ? 'Accept invitation' : 'Sign in to continue'}</button>

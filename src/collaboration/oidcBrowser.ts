@@ -44,6 +44,13 @@ export interface OidcLoginResult {
 
 export interface OidcLogoutRequest { endpoint: string; clientId: string; idToken?: string }
 
+/** A new sign-in in this tab can continue the flow without reusing the callback. */
+export class OidcSignInRequiredError extends Error {
+  constructor() {
+    super('Sign in again in this tab to continue with your account.')
+  }
+}
+
 interface OidcTokenPayload {
   access_token?: string
   refresh_token?: string
@@ -260,22 +267,21 @@ export async function completeOidcAuthorization(
 ): Promise<OidcLoginResult | null> {
   if (!hasOidcCallback(locationUrl)) return null
   const callback = new URL(locationUrl)
+  const code = callback.searchParams.get('code')
+  const error = callback.searchParams.get('error')
+  const state = callback.searchParams.get('state')
+  if (!state || Boolean(code) === Boolean(error)) {
+    throw new Error('The sign-in response is incomplete or invalid. Sign in again to continue.')
+  }
   const transaction = readTransaction(storage)
-  if (transaction && expectedServiceUrl && normalizeCollaborationServiceUrl(transaction.serviceUrl).apiUrl !== normalizeCollaborationServiceUrl(expectedServiceUrl).apiUrl) {
+  if (!transaction) throw new OidcSignInRequiredError()
+  if (state !== transaction.state) {
+    // This callback may be from an older attempt. Keep the current one usable.
+    throw new Error('This sign-in response does not match the sign-in started in this tab. Sign in again to continue.')
+  }
+  if (expectedServiceUrl && normalizeCollaborationServiceUrl(transaction.serviceUrl).apiUrl !== normalizeCollaborationServiceUrl(expectedServiceUrl).apiUrl) {
     storage.removeItem(TRANSACTION_KEY)
     throw new Error('The identity sign-in belongs to a different collaboration server.')
-  }
-  const error = callback.searchParams.get('error')
-  const errorDescription = callback.searchParams.get('error_description')
-  if (error) {
-    storage.removeItem(TRANSACTION_KEY)
-    throw new Error(errorDescription || `Identity sign-in was not completed (${error}).`)
-  }
-  const code = callback.searchParams.get('code')
-  const state = callback.searchParams.get('state')
-  if (!transaction || !code || !state || state !== transaction.state || transaction.createdAt + TRANSACTION_TTL_MS < clock()) {
-    storage.removeItem(TRANSACTION_KEY)
-    throw new Error('The identity sign-in response is missing, expired, or does not match this browser session.')
   }
   if (callbackUri(locationUrl) !== transaction.redirectUri) {
     storage.removeItem(TRANSACTION_KEY)
@@ -284,6 +290,14 @@ export async function completeOidcAuthorization(
   if (callback.searchParams.has('iss') && callback.searchParams.get('iss') !== transaction.issuer) {
     storage.removeItem(TRANSACTION_KEY)
     throw new Error('The identity sign-in response issuer does not match this session.')
+  }
+  if (!Number.isFinite(transaction.createdAt) || transaction.createdAt + TRANSACTION_TTL_MS <= clock()) {
+    storage.removeItem(TRANSACTION_KEY)
+    throw new OidcSignInRequiredError()
+  }
+  if (!code) {
+    storage.removeItem(TRANSACTION_KEY)
+    throw new Error(callback.searchParams.get('error_description') || `Identity sign-in was not completed (${error}).`)
   }
 
   const form = new URLSearchParams({

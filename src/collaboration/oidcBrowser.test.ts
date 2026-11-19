@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { completeOidcAuthorization, hasOidcCallback, prepareOidcAuthorization, readOidcRegistrationCapability } from './oidcBrowser'
+import { completeOidcAuthorization, hasOidcCallback, OidcSignInRequiredError, prepareOidcAuthorization, readOidcRegistrationCapability } from './oidcBrowser'
 
 function memoryStorage() {
   const values = new Map<string, string>()
@@ -44,6 +44,23 @@ describe('browser OIDC Authorization Code + PKCE', () => {
     expect(authorization.searchParams.get('state')).toBeTruthy()
     expect(storage.values.size).toBe(1)
     expect(request.mock.calls[0][1]).toEqual({ credentials: 'omit' })
+  })
+
+  it('requires a fresh sign-in in another tab or after the original registration expires', async () => {
+    const originalTab = memoryStorage()
+    const emailTab = memoryStorage()
+    const metadata = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(Response.json({ oidc: { issuer: 'https://id.example', clientId: 'app', registrationEnabled: true } }))
+      .mockResolvedValueOnce(Response.json({ issuer: 'https://id.example', authorization_endpoint: 'https://id.example/auth', token_endpoint: 'https://id.example/token' }))
+    const registration = await prepareOidcAuthorization('https://sync.example', 'https://app.example/', originalTab, metadata, crypto, () => 0, 'register')
+    const state = new URL(registration.authorizationUrl).searchParams.get('state')
+    const callback = `https://app.example/?state=${state}&code=verification-return`
+    const exchange = vi.fn()
+    await expect(completeOidcAuthorization(callback, emailTab, exchange, () => 5_000)).rejects.toBeInstanceOf(OidcSignInRequiredError)
+    expect(originalTab.values.size).toBe(1)
+    await expect(completeOidcAuthorization(callback, originalTab, exchange, () => 11 * 60_000)).rejects.toBeInstanceOf(OidcSignInRequiredError)
+    expect(originalTab.values.size).toBe(0)
+    expect(exchange).not.toHaveBeenCalled()
   })
 
   it.each([undefined, false, 'true', 1])('refuses registration with capability %s before discovery or storing a transaction', async (registrationEnabled) => {
@@ -196,8 +213,12 @@ describe('browser OIDC Authorization Code + PKCE', () => {
     const request = vi.fn<typeof fetch>()
       .mockResolvedValueOnce(new Response(JSON.stringify({ oidc: { issuer: 'https://identity.example.test', clientId: 'draftmatter-browser' } }), { status: 200 }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ issuer: 'https://identity.example.test', authorization_endpoint: 'https://identity.example.test/authorize', token_endpoint: 'https://identity.example.test/token' }), { status: 200 }))
-    await prepareOidcAuthorization('https://collab.example.test', 'https://app.example.test/', storage, request)
+    const current = await prepareOidcAuthorization('https://collab.example.test', 'https://app.example.test/', storage, request)
     await expect(completeOidcAuthorization('https://app.example.test/?code=code&state=wrong', storage, request)).rejects.toThrow(/does not match/)
+    await expect(completeOidcAuthorization('https://app.example.test/?error=access_denied&error_description=Unrelated&state=old', storage, request)).rejects.toThrow(/does not match/)
+    const state = new URL(current.authorizationUrl).searchParams.get('state')
+    await expect(completeOidcAuthorization(`https://app.example.test/?error=access_denied&state=${state}`, storage, request)).rejects.toThrow(/access_denied/)
+    expect(storage.values.size).toBe(0)
     expect(request).toHaveBeenCalledTimes(2)
     expect(hasOidcCallback('https://app.example.test/?code=code')).toBe(true)
     expect(hasOidcCallback('https://app.example.test/')).toBe(false)
