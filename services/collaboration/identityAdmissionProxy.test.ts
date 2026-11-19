@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { chmod, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { createServer, request as httpRequest, type IncomingHttpHeaders, type Server } from 'node:http'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -77,7 +77,19 @@ describe('real Caddy identity admission proxy', () => {
       env: { ...process.env, DM_IDENTITY_ADMISSION_TOKEN: admissionToken, DM_PUBLIC_AUTH_ORIGIN: 'http://auth.identity.test:8080' },
       maxBuffer: 1024 * 1024,
     })
+    const containerDiagnostics = async () => {
+      const results = await Promise.allSettled([
+        docker(['inspect', '--format', '{{.State.Status}} (exit {{.State.ExitCode}}): {{.State.Error}}', container]),
+        docker(['logs', '--tail', '20', container]),
+      ])
+      return results.map((result) => result.status === 'fulfilled'
+        ? `${result.value.stdout}${result.value.stderr}`.slice(-4_000).replaceAll(admissionToken, '[test token]')
+        : 'Container diagnostic unavailable.').join('\n')
+    }
     try {
+      // mkdtemp creates 0700 owned by the runner (UID 1001 on Linux CI).
+      // Only public config/test canaries live here; Caddy UID 1000 must traverse it.
+      await chmod(directory, 0o755)
       const admissionPort = await listen(admissionServer), keycloakPort = await listen(keycloakServer)
       const routes = (await readFile(new URL('../../deploy/production/routes.caddy', import.meta.url), 'utf8'))
         .replaceAll('collaboration:1234', `host.docker.internal:${admissionPort}`)
@@ -99,9 +111,17 @@ describe('real Caddy identity admission proxy', () => {
       const published = (await docker(['port', container, '8080/tcp'])).stdout.trim()
       const port = Number(published.split(':').at(-1))
       const deadline = Date.now() + 10_000
+      let nextStateCheck = 0
       while (true) {
         try { await send(port, 'sync.identity.test', '/internal/identity-admission?kind=registration'); break }
-        catch (error) { if (Date.now() >= deadline) throw error; await new Promise((resolve) => setTimeout(resolve, 100)) }
+        catch (error) {
+          if (Date.now() >= nextStateCheck) {
+            const state = (await docker(['inspect', '--format', '{{.State.Running}}', container])).stdout.trim()
+            if (state !== 'true' || Date.now() >= deadline) throw new Error(`Identity proxy did not become ready:\n${await containerDiagnostics()}`, { cause: error })
+            nextStateCheck = Date.now() + 1_000
+          }
+          await new Promise((resolve) => setTimeout(resolve, 100))
+        }
       }
       for (const host of ['app.identity.test', 'sync.identity.test', 'auth.identity.test']) {
         for (const path of ['/internal/identity-admission?kind=registration', '//internal/identity-admission?kind=registration', '/%69nternal/identity-admission?kind=registration']) {
