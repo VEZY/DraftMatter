@@ -25,7 +25,7 @@ export type InsertBlockKind = InsertBlockRequest['kind']
 
 const details: Record<InsertBlockKind, { eyebrow: string; title: string; description: string }> = {
   section: { eyebrow: 'Document structure', title: 'Add section', description: 'Create a new heading at the current position.' },
-  figure: { eyebrow: 'Visual evidence', title: 'Insert figure', description: 'Add an image, an accessible description, and an optional caption.' },
+  figure: { eyebrow: 'Visual evidence', title: 'Insert figure', description: 'Add an image, alt text, and an optional caption.' },
   table: { eyebrow: 'Structured data', title: 'Insert table', description: 'Create a table whose cells can be edited directly.' },
   'equation-inline': { eyebrow: 'Mathematics', title: 'Insert inline equation', description: 'Enter the equation without surrounding delimiters.' },
   'equation-display': { eyebrow: 'Mathematics', title: 'Insert display equation', description: 'Create a centered equation that can be referenced elsewhere.' },
@@ -144,7 +144,7 @@ export function InsertBlockDialog({
           {kind === 'figure' && <>
             {onImportFigure && <label className="figure-file-picker"><Icon name="image" size={24} /><strong>{importing ? 'Adding image…' : source ? source.split('/').at(-1) : 'Choose an image'}</strong><span>PNG, JPEG, SVG, GIF or WebP · up to 2 MB</span><input autoFocus type="file" accept={FIGURE_FILE_ACCEPT} aria-label="Choose figure image" disabled={importing} onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void importFigure(file) }} /><small>You can also drop an image directly into the manuscript.</small></label>}
             {availableFigures.length > 0 && <label><span>Or use a project image</span><select aria-label="Use existing project image" value={availableFigures.some((figure) => figure.path === source) ? source : ''} onChange={(event) => { setSource(event.target.value); if (!alt) setAlt(event.target.value.split('/').at(-1)?.replace(/\.[^.]+$/, '').replace(/[_-]+/g, ' ') ?? '') }}><option value="">Choose from project files…</option>{availableFigures.map((figure) => <option key={figure.path} value={figure.path}>{figure.label ? `${figure.label} · ` : ''}{figure.path}</option>)}</select></label>}
-            <label><span>Accessible description</span><textarea value={alt} onChange={(event) => setAlt(event.target.value)} rows={2} placeholder="Describe the evidence shown in the figure" /></label>
+            <label><span>Alt text (image description)</span><textarea value={alt} onChange={(event) => setAlt(event.target.value)} rows={2} aria-label="Alt text (image description)" /><small>Describe what someone would miss if they could read the caption but couldn’t see the figure.</small></label>
             <label><span>Caption</span><textarea value={caption} onChange={(event) => setCaption(event.target.value)} rows={2} placeholder="Optional figure caption" /></label>
             <details className="figure-advanced-options" open={!onImportFigure}><summary>Image path and reference label</summary><label><span>Project-relative image path</span><input value={source} onChange={(event) => setSource(event.target.value)} placeholder="figures/result.svg" spellCheck={false} /></label>{labelField('Cross-reference label', 'fig-result', 'Leave blank to generate a readable portable fig- label.')}</details>
           </>}

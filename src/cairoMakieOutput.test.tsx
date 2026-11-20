@@ -93,7 +93,7 @@ scatter(1:10)
 
     await act(async () => output.querySelector<HTMLButtonElement>('[aria-label="Edit figure object details"]')?.click())
     const caption = output.querySelector<HTMLTextAreaElement>('[aria-label="Generated output caption"]')!
-    const alt = output.querySelector<HTMLTextAreaElement>('[aria-label="Generated figure accessible description"]')!
+    const alt = output.querySelector<HTMLTextAreaElement>('[aria-label="Alt text (image description)"]')!
     const label = output.querySelector<HTMLInputElement>('[aria-label="Generated output label"]')!
     const numbering = output.querySelector<HTMLSelectElement>('[aria-label="Generated output numbering"]')!
     const provenance = output.querySelector<HTMLDetailsElement>('.semantic-object-provenance')!

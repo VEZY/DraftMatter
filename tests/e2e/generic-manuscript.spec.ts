@@ -151,7 +151,7 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('$$ {#eq-response .unnumbered}')
 
     await manuscript.getByRole('button', { name: 'Edit figure fig-canopy' }).click()
-    await manuscript.getByRole('textbox', { name: 'Figure accessible description' }).fill('Revised canopy response')
+    await manuscript.getByRole('textbox', { name: 'Alt text (image description)' }).fill('Revised canopy response')
     await manuscript.getByRole('textbox', { name: 'Figure title' }).fill('Observed canopy trajectory')
     await manuscript.getByRole('textbox', { name: 'Figure label' }).fill('fig-trajectory')
     await expect(manuscript.locator('#fig-canopy')).toHaveScreenshot('semantic-figure-editor.png')

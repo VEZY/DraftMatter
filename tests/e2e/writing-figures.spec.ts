@@ -53,7 +53,7 @@ test.describe('ordinary writing and portable figure files', () => {
     await page.locator('.toolbar-insert-menu').getByRole('button', { name: /^Figure/ }).click()
     const dialog = page.getByRole('dialog', { name: 'Insert figure', exact: true })
     await dialog.getByLabel('Choose figure image').setInputFiles({ name: 'field-response.svg', mimeType: 'image/svg+xml', buffer: figure })
-    await dialog.getByLabel('Accessible description').fill('Measured field response')
+    await dialog.getByLabel('Alt text (image description)').fill('Measured field response')
     await dialog.getByLabel('Caption', { exact: true }).fill('Observed response through time.')
     await dialog.getByRole('button', { name: 'Insert', exact: true }).click()
     await expect(dialog).toBeHidden()

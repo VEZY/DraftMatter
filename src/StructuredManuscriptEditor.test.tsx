@@ -1676,7 +1676,7 @@ Compare @fig-first with @fig-second.
 
     const values = [
       ['Figure source path', 'figures/growth-revised.svg'],
-      ['Figure accessible description', 'Revised growth response'],
+      ['Alt text (image description)', 'Revised growth response'],
       ['Figure title', 'Measured canopy response'],
       ['Figure caption', 'Revised figure legend.'],
       ['Figure label', 'fig-response'],

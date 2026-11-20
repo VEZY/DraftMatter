@@ -2358,11 +2358,13 @@ function outputNodeView(
   captionInput.setAttribute('aria-label', 'Generated output caption')
   captionField.append(captionInput)
   const altField = document.createElement('label')
-  altField.append(document.createTextNode('Accessible description'))
+  altField.append(document.createTextNode('Alt text (image description)'))
   const altInput = document.createElement('textarea')
   altInput.className = 'structured-output-input'
-  altInput.setAttribute('aria-label', 'Generated figure accessible description')
-  altField.append(altInput)
+  altInput.setAttribute('aria-label', 'Alt text (image description)')
+  const altHint = document.createElement('small')
+  altHint.textContent = 'Describe what someone would miss if they could read the caption but couldn’t see the figure.'
+  altField.append(altInput, altHint)
   const labelField = document.createElement('label')
   labelField.append(document.createTextNode('Cross-reference label'))
   const labelInput = document.createElement('input')
@@ -3096,7 +3098,7 @@ function imageNodeView(
   const alt = document.createElement('input')
   alt.type = 'text'
   alt.className = 'structured-figure-input'
-  alt.setAttribute('aria-label', 'Figure accessible description')
+  alt.setAttribute('aria-label', 'Alt text (image description)')
   const title = document.createElement('input')
   title.type = 'text'
   title.className = 'structured-figure-input'
@@ -3113,7 +3115,7 @@ function imageNodeView(
   const numbering = semanticNumberingField('Figure numbering')
   fields.append(
     field('Caption', captionInput, 'Optional; shown below the numbered figure.'),
-    field('Accessible description', alt, 'Describe the visual meaning; leave blank only when decorative.'),
+    field('Alt text (image description)', alt, 'Describe what someone would miss if they could read the caption but couldn’t see the figure.'),
     field('Cross-reference label', labelInput, 'Optional; changing it also updates matching references.'),
     numbering.field,
     field('Image source', source, 'Use a project-relative path.'),
