@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: Immutable server version, for example 0.1.0-alpha.1
+        description: Leave blank for the next alpha, or enter an explicit server version
         type: string
-        required: true
+        required: false
 
 concurrency:
   # Serialize all versions, including the collision check and final publication.
@@ -20,6 +20,8 @@ jobs:
   preflight:
     runs-on: ubuntu-24.04
     timeout-minutes: 5
+    outputs:
+      version: ${{ steps.release.outputs.version }}
     permissions:
       contents: read
     steps:
@@ -29,7 +31,8 @@ jobs:
       - uses: actions/setup-node@v6
         with:
           node-version-file: '.node-version'
-      - name: Refuse other branches or existing release tags before verification
+      - name: Choose the version and check the release commit
+        id: release
         env:
           RELEASE_VERSION: ${{ inputs.version }}
           RELEASE_COMMIT: ${{ github.sha }}
@@ -41,7 +44,7 @@ jobs:
     uses: ./.github/workflows/collaboration-service.yml
     with:
       export-server-images: true
-      server-release-version: ${{ inputs.version }}
+      server-release-version: ${{ needs.preflight.outputs.version }}
     permissions:
       contents: read
 
@@ -53,13 +56,14 @@ jobs:
       contents: write
       packages: write
     env:
-      RELEASE_VERSION: ${{ inputs.version }}
+      RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
       RELEASE_COMMIT: ${{ github.sha }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
         with:
           ref: ${{ github.sha }}
+          fetch-depth: 0
       - uses: actions/setup-node@v6
         with:
           node-version-file: '.node-version'
@@ -81,18 +85,25 @@ jobs:
       - name: Recheck collisions, promote tested images and prepare public assets
         run: node scripts/prepare-server-release.mjs publish-images "$RUNNER_TEMP/server-images/tested-images.json" "$RUNNER_TEMP/server-release"
       - name: Publish the complete server release after all assets exist
-        env:
-          VERSION: ${{ inputs.version }}
         run: |
-          tag="server-v$VERSION"
+          tag="server-v$RELEASE_VERSION"
+          previous=$(git describe --tags --match 'server-v[0-9]*' --abbrev=0 --always "$GITHUB_SHA")
+          notes="$RUNNER_TEMP/server-release/server-release-notes.md"
+          if [[ "$previous" == server-v* ]]; then
+            printf '\n[Changes since %s](%s/%s/compare/%s...%s)\n' \
+              "$previous" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$previous" "$tag" >> "$notes"
+          fi
           gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "DraftMatter server $VERSION" --notes-file "$RUNNER_TEMP/server-release/server-release-notes.md" \
+            --title "DraftMatter server $RELEASE_VERSION" --notes-file "$notes" \
             --draft --prerelease
           gh release upload "$tag" --repo "$GITHUB_REPOSITORY" \
             "$RUNNER_TEMP/server-release/server-release.json" \
-            "$RUNNER_TEMP/server-release/draftmatter-server-$VERSION.tar.gz" \
+            "$RUNNER_TEMP/server-release/draftmatter-server-$RELEASE_VERSION.tar.gz" \
             "$RUNNER_TEMP/server-release/SHA256SUMS"
           gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
+          printf 'Published [%s](%s/%s/releases/tag/%s) from [%s](%s/%s/commit/%s).\n' \
+            "$tag" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$tag" "$GITHUB_SHA" \
+            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
       - name: Remove temporary registry authentication
         if: always()
         run: rm -f "$RUNNER_TEMP/draftmatter-registry-auth/config.json"

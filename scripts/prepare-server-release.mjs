@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
@@ -12,11 +12,40 @@ export const serverImageKinds = ['collaboration', 'web', 'operator']
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex')
 const command = (program, args, cwd = process.cwd()) => execFileSync(program, args, { cwd, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }).trim()
 
+function validateServerVersion(version) {
+  if (typeof version !== 'string' || version.length > 100 || !/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:alpha|beta|rc)\.\d+)?$/.test(version)) throw new ServerReleaseError('Use a server version such as 0.1.0-alpha.1, without a v prefix.')
+  return version
+}
+
 export function serverReleaseIdentity({ version, commit, repository = 'VEZY/DraftMatter', ref = 'refs/heads/main' }) {
-  if (!/^(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)(?:-(?:alpha|beta|rc)\.\d+)?$/.test(version ?? '')) throw new ServerReleaseError('Use a server version such as 0.1.0-alpha.1, without a v prefix.')
+  validateServerVersion(version)
   if (!/^[a-f0-9]{40}$/.test(commit ?? '')) throw new ServerReleaseError('A full lowercase source commit is required.')
   if (repository !== 'VEZY/DraftMatter' || ref !== 'refs/heads/main') throw new ServerReleaseError('Server releases may only be published from VEZY/DraftMatter main.')
   return { version, commit, repository, tag: `server-v${version}`, platform: 'linux/amd64' }
+}
+
+export function resolveServerReleaseVersion({ version, commit, tags }) {
+  let latestAlpha
+  for (const line of tags.split(/\r?\n/)) {
+    const [sha, ref] = line.split(/\s+/)
+    if (!ref?.startsWith('refs/tags/server-v')) continue
+    // ls-remote lists both an annotated tag object and its peeled commit.
+    const tag = ref.slice('refs/tags/'.length).replace(/\^\{\}$/, '')
+    if (sha === commit) throw new ServerReleaseError(`This commit is already released as ${tag}. Choose a new main commit.`)
+    const alpha = /^server-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)-alpha\.(\d+)$/.exec(tag)
+    if (!alpha) continue
+    const parts = alpha.slice(1).map(BigInt)
+    if (!latestAlpha) {
+      latestAlpha = parts
+    } else {
+      const different = parts.findIndex((part, index) => part !== latestAlpha[index])
+      if (different >= 0 && parts[different] > latestAlpha[different]) latestAlpha = parts
+    }
+  }
+  if (version !== undefined && version !== '') return validateServerVersion(version)
+  if (!latestAlpha) throw new ServerReleaseError('No server alpha tag was found. Enter an explicit version to start an alpha series.')
+  const [major, minor, patch, counter] = latestAlpha
+  return validateServerVersion(`${major}.${minor}.${patch}-alpha.${counter + 1n}`)
 }
 
 export function serverImageRepository(kind) {
@@ -97,7 +126,7 @@ export async function prepareServerAssets({ directory, output, identity, images 
     await writeFile(join(output, 'server-release.json'), manifestBytes, { flag: 'wx' })
     const checksums = `${sha256(Buffer.from(manifestBytes))}  server-release.json\n${sha256(await readFile(archivePath))}  ${archiveName}\n`
     await writeFile(join(output, 'SHA256SUMS'), checksums, { flag: 'wx' })
-    const notes = `DraftMatter server ${identity.version}\n\nSource: https://github.com/${identity.repository}/commit/${identity.commit}\nPlatform: linux/amd64\n\nDownload the deployment archive and SHA256SUMS, verify the checksums, then follow docs/server-releases.md in the archive. The images in server-release.json are immutable digests promoted from the exact tested images. No DraftMatter compilation is required on the VPS. Configure the three GHCR packages as public before using anonymous docker pull.\n\nThis is a server release, separate from desktop installers. It contains code and deployment templates, never manuscripts, user data, runtime environments or secrets.\n`
+    const notes = `DraftMatter server ${identity.version}\n\nSource: https://github.com/${identity.repository}/commit/${identity.commit}\nPlatform: linux/amd64\n\nDownload the deployment archive, server-release.json and SHA256SUMS, verify the checksums, then follow docs/server-releases.md in the archive. The images in server-release.json are immutable digests promoted from the exact tested images. No DraftMatter compilation is required on the VPS. Configure the three GHCR packages as public before using anonymous docker pull.\n\nThis is a server release, separate from desktop installers. It contains code and deployment templates, never manuscripts, user data, runtime environments or secrets.\n`
     await writeFile(join(output, 'server-release-notes.md'), notes, { flag: 'wx' })
     return { manifest, archiveName, files: selected.map(({ path }) => path) }
   } finally { await rm(staging, { recursive: true, force: true }) }
@@ -163,13 +192,25 @@ export async function assertServerReleaseUnused(identity, { token, actor, reques
 
 async function main() {
   const [mode, fileOrDirectory, output] = process.argv.slice(2)
-  const identity = serverReleaseIdentity({ version: process.env.RELEASE_VERSION, commit: process.env.RELEASE_COMMIT, repository: process.env.GITHUB_REPOSITORY, ref: process.env.GITHUB_REF })
+  const commit = process.env.RELEASE_COMMIT
+  let version = process.env.RELEASE_VERSION
+  if (mode === 'preflight') {
+    let tags
+    try {
+      tags = command('git', ['ls-remote', '--tags', 'origin', 'refs/tags/server-v*'])
+    } catch {
+      throw new ServerReleaseError('Cannot read server release tags from origin. Check repository access before retrying.')
+    }
+    version = resolveServerReleaseVersion({ version, commit, tags })
+  }
+  const identity = serverReleaseIdentity({ version, commit, repository: process.env.GITHUB_REPOSITORY, ref: process.env.GITHUB_REF })
   if (command('git', ['rev-parse', 'HEAD']) !== identity.commit) throw new ServerReleaseError('The checked-out source does not match the workflow commit.')
   const inspect = (tag) => JSON.parse(command('docker', ['image', 'inspect', tag]))[0]
   if (mode === 'preflight') {
     // A read-only job must not request push scope for a package that may not
     // exist yet. Registry collision checks run under packages:write below.
     await assertServerReleaseUnused(identity, { token: process.env.GH_TOKEN, actor: process.env.GITHUB_ACTOR, registry: false })
+    if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `version=${identity.version}\n`)
     console.log(`Server release preflight passed: ${identity.tag}, ${identity.commit}.`)
   } else if (mode === 'export-tested-images') {
     await mkdir(fileOrDirectory, { recursive: true })

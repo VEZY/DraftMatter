@@ -5,7 +5,7 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import {
-  assertServerReleaseUnused, createServerManifest, prepareServerAssets,
+  assertServerReleaseUnused, createServerManifest, prepareServerAssets, resolveServerReleaseVersion,
   serverDeploymentPaths, serverReleaseIdentity, testedImageRecord,
   verifyPublishedServerImage,
 } from '../../scripts/prepare-server-release.mjs'
@@ -34,6 +34,40 @@ describe('immutable server release publication boundary', () => {
     expect(createServerManifest(identity, images)).toMatchObject({ commit, platform: 'linux/amd64', images })
     expect(() => createServerManifest(identity, { ...images, web: 'ghcr.io/vezy/draftmatter-web:latest' })).toThrow('digest')
     expect(() => createServerManifest(identity, { ...images, operator: images.web })).toThrow('operator')
+  })
+
+  it('increments the greatest numeric alpha in the newest server alpha series', () => {
+    const earlier = 'b'.repeat(40)
+    const tags = [
+      `${earlier}\trefs/tags/server-v1.9.0-alpha.99`,
+      `${earlier}\trefs/tags/server-v1.10.2-alpha.10`,
+      `${earlier}\trefs/tags/server-v1.10.2-alpha.9`,
+      `${earlier}\trefs/tags/server-v1.10.0-alpha.88`,
+      `${earlier}\trefs/tags/server-v2.0.0-beta.3`,
+      `${commit}\trefs/tags/v3.0.0-alpha.70`,
+    ].join('\n')
+    expect(resolveServerReleaseVersion({ version: '', commit, tags })).toBe('1.10.2-alpha.11')
+    expect(resolveServerReleaseVersion({ version: '2.0.0-rc.1', commit, tags })).toBe('2.0.0-rc.1')
+  })
+
+  it('requires an explicit version to start the first server alpha series', () => {
+    expect(() => resolveServerReleaseVersion({ version: '', commit, tags: '' })).toThrow()
+    expect(resolveServerReleaseVersion({ version: '0.1.0-alpha.1', commit, tags: '' })).toBe('0.1.0-alpha.1')
+  })
+
+  it('refuses to re-release the source of lightweight or annotated server tags, including stable releases', () => {
+    const priorAlpha = `${'c'.repeat(40)}\trefs/tags/server-v0.1.0-alpha.4`
+    const stable = 'refs/tags/server-v0.1.0'
+    const taggedSources = [
+      `${commit}\trefs/tags/server-v0.1.0-alpha.5`,
+      `${'b'.repeat(40)}\t${stable}\n${commit}\t${stable}^{}`,
+    ]
+    for (const taggedSource of taggedSources) {
+      const tags = `${priorAlpha}\n${taggedSource}`
+      for (const version of ['', '0.2.0-alpha.1']) {
+        expect(() => resolveServerReleaseVersion({ version, commit, tags })).toThrow()
+      }
+    }
   })
 
   it('accepts only loaded image IDs built for the exact tested source and platform', () => {

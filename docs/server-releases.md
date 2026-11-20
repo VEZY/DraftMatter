@@ -6,9 +6,25 @@ Desktop installers remain a separate release workflow.
 
 ## Publish a reviewed server version
 
-Use **Actions → Server release → Run workflow**, select `main`, and enter a new
-version such as `0.1.0-alpha.1`. The workflow refuses another branch, an existing
-release/tag, an existing image version, or a reused source-commit image tag.
+From your development machine, push the changes you want to publish to `main`.
+With the GitHub CLI signed in, run this from the repository:
+
+```sh
+npm run release:server
+```
+
+You can also open **Actions → Server release → Run workflow**, select `main`
+and leave **version** blank. Both paths build the commit on GitHub's `main` at
+dispatch time. The workflow increments the highest existing server alpha series
+(for example, `0.1.0-alpha.9` becomes `0.1.0-alpha.10`). To start a new series
+or publish a beta or release candidate, enter the version explicitly in Actions.
+A commit that already has a server release tag is caught before the build.
+The workflow also refuses an existing version or a reused image tag.
+
+On success, the Actions summary links to the release and its source commit.
+The release notes link to the changes since the preceding server tag when one
+exists. Updating the VPS is a separate operator action.
+
 Do not supply private environment files, application credentials or research
 data to the workflow. The repository's source code is its only build context.
 
@@ -80,7 +96,7 @@ release-directory/
 ```
 
 Continue with the **prebuilt release** procedure in
-[`deploy/single-host/README.md`](../deploy/single-host/README.md). The operator
+[`deploy/single-host/PREBUILT.md`](../deploy/single-host/PREBUILT.md). The operator
 wrapper runs the pinned helper image without network access, maps the operator's
 UID, and initializes the existing private runtime directory. Initialization
 refuses existing configuration rather than rotating secrets. Runtime settings
