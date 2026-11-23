@@ -220,6 +220,7 @@ export function shouldRequestStructuredCommands(state: EditorState, event: Pick<
 
 export interface StructuredManuscriptEditorHandle {
   focus: () => void
+  captureTextSelection: () => void
   setSearch: (query: string, settings?: ManuscriptSearchSettings) => ManuscriptSearchState
   replaceSearch: (replacement: string, all?: boolean) => ManuscriptReplacementResult
   findNext: (direction?: 1 | -1) => ManuscriptSearchState
@@ -4006,6 +4007,21 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
 
   useImperativeHandle(forwardedRef, () => ({
     focus: () => viewRef.current?.focus(),
+    captureTextSelection: () => {
+      const view = viewRef.current
+      if (!view?.hasFocus() || view.composing || !(view.state.selection instanceof TextSelection)) return
+      // A shortcut can move focus before the browser delivers selectionchange for an arrow key.
+      const native = view.dom.ownerDocument.getSelection()
+      if (native?.rangeCount !== 1 || !native.anchorNode || !native.focusNode
+        || !view.dom.contains(native.anchorNode) || !view.dom.contains(native.focusNode)) return
+      const anchor = view.posAtDOM(native.anchorNode, native.anchorOffset, 1)
+      const head = view.posAtDOM(native.focusNode, native.focusOffset, 1)
+      if (anchor === view.state.selection.anchor && head === view.state.selection.head) return
+      const $anchor = view.state.doc.resolve(anchor), $head = view.state.doc.resolve(head)
+      if ($anchor.parent.inlineContent && $head.parent.inlineContent) {
+        view.dispatch(view.state.tr.setSelection(new TextSelection($anchor, $head)))
+      }
+    },
     setSearch: (query, settings) => {
       searchQueryRef.current = query
       if (settings) searchSettingsRef.current = settings

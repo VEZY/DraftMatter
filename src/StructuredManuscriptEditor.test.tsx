@@ -2,7 +2,8 @@
 
 import { act, createRef } from 'react'
 import { createRoot } from 'react-dom/client'
-import { EditorState } from 'prosemirror-state'
+import { EditorState, NodeSelection } from 'prosemirror-state'
+import { CellSelection } from 'prosemirror-tables'
 import { EditorView } from 'prosemirror-view'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
 import { EditorView as CodeMirrorView } from '@codemirror/view'
@@ -211,6 +212,46 @@ describe('full structured manuscript editor', () => {
       expect(event.defaultPrevented).toBe(true)
       expect(editor.current!.source().includes('A new edit')).toBe(inputType === 'historyRedo')
     }
+  })
+
+  it('captures a backwards text range in the focused editor and preserves object and table selections', async () => {
+    const editor = createRef<StructuredManuscriptEditorHandle>()
+    const setProps = vi.spyOn(EditorView.prototype, 'setProps')
+    const changed = vi.fn()
+    await act(async () => root.render(<StructuredManuscriptEditor ref={editor} source={source} onChange={changed} />))
+    const view = setProps.mock.contexts[0] as EditorView
+    const text = view.dom.querySelector('p')!.firstChild as Text
+    const native = document.getSelection()!
+    view.focus()
+    native.setBaseAndExtent(text, 6, text, 2)
+    editor.current!.captureTextSelection()
+    expect(view.state.selection.anchor).toBe(view.posAtDOM(text, 6))
+    expect(view.state.selection.head).toBe(view.posAtDOM(text, 2))
+
+    const other = document.createElement('div')
+    other.setAttribute('contenteditable', 'true')
+    other.textContent = 'Second editor'
+    container.append(other)
+    other.focus()
+    native.collapse(other.firstChild, 3)
+    const retained = view.state.selection
+    editor.current!.captureTextSelection()
+    expect(view.state.selection).toBe(retained)
+    expect(other).toBe(document.activeElement)
+
+    let citation = 0, cell = 0
+    view.state.doc.descendants((node, position) => {
+      if (node.type.name === 'citation') citation = position
+      if (node.type.name === 'table_cell') cell = position
+    })
+    view.focus()
+    for (const selection of [NodeSelection.create(view.state.doc, citation), CellSelection.create(view.state.doc, cell)]) {
+      view.dispatch(view.state.tr.setSelection(selection))
+      native.collapse(text, 1)
+      editor.current!.captureTextSelection()
+      expect(view.state.selection.eq(selection)).toBe(true)
+    }
+    expect(changed).not.toHaveBeenCalled()
   })
 
   it('finds prose without changing the editing selection, source or undo history and updates counts after edits', async () => {

@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test'
+import { advanceCaretBeforeDialog } from './writing-tools'
 
 const SOURCE_KEY = 'draftmatter.structured-source.v1'
 const source = `---
@@ -34,13 +35,7 @@ for (const modifier of ['Meta', 'Control']) {
     await seed(page)
     const editor = page.getByRole('textbox', { name: 'Rendered manuscript editor', exact: true })
     const target = editor.locator('p').filter({ hasText: 'A separate paragraph' })
-    await target.evaluate((paragraph) => {
-      const editor = paragraph.closest<HTMLElement>('[contenteditable="true"]')!
-      editor.focus()
-      const range = document.createRange(); range.selectNodeContents(paragraph); range.collapse(false)
-      const selection = getSelection()!; selection.removeAllRanges(); selection.addRange(range)
-    })
-    await page.keyboard.press('ArrowLeft'); await page.keyboard.press('ArrowRight')
+    await advanceCaretBeforeDialog(page, target)
     const original = await page.evaluate((key) => localStorage.getItem(key), SOURCE_KEY)
     await page.keyboard.press(`${modifier}+f`)
     const search = page.getByRole('search', { name: 'Find in document', exact: true })

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test'
 import axe from 'axe-core'
+import { advanceCaretBeforeDialog } from './writing-tools'
 
 const SOURCE_KEY = 'draftmatter.structured-source.v1'
 const FIRST_PARAGRAPH = 'This first paragraph must keep its own text.'
@@ -119,7 +120,8 @@ test('inserts a project citation at the remembered caret from the writing toolba
 
 test('uses the same empty citation picker and insertion target through its keyboard shortcut', async ({ page }) => {
   await openStudy(page)
-  await placeCitationCaret(page)
+  const editor = page.getByRole('textbox', { name: 'Rendered manuscript editor', exact: true })
+  await advanceCaretBeforeDialog(page, editor.getByText(CITATION_TARGET, { exact: true }))
   await page.keyboard.press('ControlOrMeta+Shift+C')
   await insertSelectedReference(page)
 })

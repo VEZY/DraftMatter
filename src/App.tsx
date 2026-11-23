@@ -1388,6 +1388,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   }
 
   const openDocumentFind = () => {
+    structuredEditorRef.current?.captureTextSelection()
     fileWorkspaceRef.current?.showManuscript()
     setInsertMenuOpen(false)
     setReviewOptionsOpen(false)
@@ -5292,6 +5293,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   }
 
   const openCitationPicker = (intent: 'insert' | 'edit' = 'insert') => {
+    structuredEditorRef.current?.captureTextSelection()
     setInsertMenuOpen(false)
     setCommandOpen(false)
     const editingStructuredCitation = structuredMode && intent === 'edit' && structuredCitationSelection
