@@ -237,8 +237,8 @@ function deriveRanges(anchors: ReviewAnchor[], diagnostics: DocumentDiagnostic[]
 
 export function parseReviewMarkup(source: string): ReviewMarkupDocument {
   const diagnostics: DocumentDiagnostic[] = []
-  const lossless = parseLosslessPortableSource(source)
-  const anchors = lossless.semanticNodes
+  const semanticNodes = source.includes('.dm-anchor') ? parseLosslessPortableSource(source).semanticNodes : []
+  const anchors = semanticNodes
     .filter((node) => node.kind === 'review-anchor')
     .map<ReviewAnchor>((node) => ({
       markerId: String(node.attributes.label ?? node.id.slice('anchor:'.length)),
@@ -249,7 +249,7 @@ export function parseReviewMarkup(source: string): ReviewMarkupDocument {
       end: node.end,
       raw: node.raw,
     }))
-  const lines = indexedLines(source)
+  const lines = source.includes('draftmatter-reviews') ? indexedLines(source) : []
   const fencedLines = fencedLineIndexes(lines)
   const sectionOpeners = lines
     .map((line, index) => ({ line, index, match: line.content.match(/^(:{5,})[ \t]+\{([^}]*)\}[ \t]*$/) }))

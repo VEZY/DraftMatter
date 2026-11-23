@@ -4548,6 +4548,13 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       ]),
       handleDOMEvents: {
         beforeinput: (editorView, event) => {
+          if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
+            // Leave embedded inputs to the browser or their own code editor.
+            if (event.target instanceof Element && event.target.closest('input,textarea,.cm-editor')) return true
+            event.preventDefault()
+            performHistory(event.inputType === 'historyRedo')
+            return true
+          }
           if (!collaborationRef.current || !suggestionModeRef.current || editorView.state.selection.empty
             || event.inputType !== 'insertText' || event.isComposing) return false
           // Typing can arrive before selectionchange after an arrow key collapses a selection.
@@ -4636,8 +4643,10 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           // Handle shortcuts while a card is active using the same command as
           // toolbar clicks. Embedded text fields keep their own native history.
           if (event.target instanceof Element && event.target.closest('input,textarea,.cm-editor')) return false
-          if (readOnlyRef.current) return true
-          return performHistory(key === 'y' || event.shiftKey)
+          if (!readOnlyRef.current) performHistory(key === 'y' || event.shiftKey)
+          // An empty Redo must still consume Shift-Mod-z. A later keymap can
+          // otherwise match Mod-z and undo the most recent ordinary edit.
+          return true
         }
         if (!shouldRequestStructuredCommands(editorView.state, event, readOnlyRef.current)) return false
         if (!onCommandRequestRef.current) return false
@@ -4754,7 +4763,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         refreshSemanticPresentation(view)
         refreshFootnotePresentation(view)
         emitReviewSelection(view)
-        onOutlineRef.current?.(outlineFor(next.doc))
+        if (next.doc !== previous.doc) onOutlineRef.current?.(outlineFor(next.doc))
         if (reviewStep instanceof ReviewSourceStep) {
           if (!transaction.getMeta('dm-external-review-source')) publishSourceChange(reviewStep.after)
           return

@@ -193,6 +193,26 @@ describe('full structured manuscript editor', () => {
     })
   }
 
+  it('consumes empty keyboard redo and handles browser history commands once', async () => {
+    const editor = createRef<StructuredManuscriptEditorHandle>()
+    await act(async () => root.render(<StructuredManuscriptEditor ref={editor} source="# A paper" onChange={() => {}} />))
+    const content = container.querySelector<HTMLElement>('.structured-editor-content')!
+    await act(async () => { editor.current!.insertHeading('A new edit', 2) })
+    const edited = editor.current!.source()
+    for (const modifier of ['ctrlKey', 'metaKey'] as const) {
+      const redo = new KeyboardEvent('keydown', { key: 'z', keyCode: 90, [modifier]: true, shiftKey: true, bubbles: true, cancelable: true })
+      await act(async () => { content.dispatchEvent(redo) })
+      expect(redo.defaultPrevented).toBe(true)
+      expect(editor.current!.source()).toBe(edited)
+    }
+    for (const inputType of ['historyUndo', 'historyRedo', 'historyRedo']) {
+      const event = new InputEvent('beforeinput', { inputType, bubbles: true, cancelable: true })
+      await act(async () => { content.dispatchEvent(event) })
+      expect(event.defaultPrevented).toBe(true)
+      expect(editor.current!.source().includes('A new edit')).toBe(inputType === 'historyRedo')
+    }
+  })
+
   it('finds prose without changing the editing selection, source or undo history and updates counts after edits', async () => {
     const manuscript = '# Evidence study\n\nBefore **evidence** after. Another evidence.\n'
     const onChange = vi.fn(), onSearch = vi.fn(), selected = vi.fn(), editor = createRef<StructuredManuscriptEditorHandle>()

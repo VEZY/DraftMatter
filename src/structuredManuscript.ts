@@ -534,9 +534,10 @@ export interface StructuredCitationCluster {
   signature: string
 }
 
-export function structuredCitationClusters(source: string): StructuredCitationCluster[] {
+export function structuredCitationClusters(source: string | ProseMirrorNode): StructuredCitationCluster[] {
   const clusters: StructuredCitationCluster[] = []
-  parseStructuredManuscript(source).document.descendants((node) => {
+  const document = typeof source === 'string' ? parseStructuredManuscript(source).document : source
+  document.descendants((node) => {
     if (node.type === manuscriptSchema.nodes.citation) {
       const items = Array.isArray(node.attrs.items) ? node.attrs.items as CitationItem[] : []
       clusters.push({ id: String(node.attrs.id), items, signature: serializeCitationCluster(items) })

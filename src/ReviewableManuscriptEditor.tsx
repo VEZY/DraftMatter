@@ -55,8 +55,10 @@ export const ReviewableManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       const key = event.key.toLowerCase()
       if (!(event.metaKey || event.ctrlKey) || event.altKey || (key !== 'z' && key !== 'y')
         || !(event.target instanceof Element) || event.target.closest('input, textarea, .cm-editor')) return
-      const handled = key === 'y' || event.shiftKey ? working.current?.redo() : working.current?.undo()
-      if (handled) { event.preventDefault(); event.stopPropagation() }
+      event.preventDefault()
+      event.stopPropagation()
+      if (key === 'y' || event.shiftKey) working.current?.redo()
+      else working.current?.undo()
     }}>
       <StructuredManuscriptEditor {...props} ref={preview} source={previewSource} collaboration={null}
         readOnly suggestionMode={false} codeCellActionsEnabled={false} onReviewContextMenu={undefined} onChange={() => {}} />

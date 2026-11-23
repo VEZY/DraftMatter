@@ -1242,9 +1242,10 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   )
   const pickerResults = [...citationResults, ...crossrefRecords]
   const draftCitationItems = citationItemsForDraft(draft)
+  const workingDocument = useMemo(() => parseStructuredManuscript(manuscriptSource).document, [manuscriptSource])
   const manuscriptCitationClusters = useMemo(
-    () => structuredMode ? structuredCitationClusters(manuscriptSource) : [],
-    [manuscriptSource, structuredMode],
+    () => structuredMode ? structuredCitationClusters(workingDocument) : [],
+    [workingDocument, structuredMode],
   )
   const { renderedCitations, renderedBibliography, cslState, cslDiagnostics } = useCslDocument({
     records: citations,
@@ -1255,6 +1256,9 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     style: citationStyle,
     locale: citationLocale,
   })
+  const bibliographyEntries = useMemo(() => (
+    <div className="bibliography-entries">{renderedBibliography.map((entry) => <p key={entry.id} data-citekey={entry.id}>{entry.value}</p>)}</div>
+  ), [renderedBibliography])
   const documentCitationKeys = structuredMode
     ? [...new Set(manuscriptCitationClusters.flatMap((cluster) => cluster.items.map((item) => item.citekey)))]
     : draft.citationKeys
@@ -2018,11 +2022,12 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       const key = event.key.toLowerCase()
       if (manuscriptFileActive && modifier && !event.altKey && !nativeTextField && !event.defaultPrevented && (key === 'z' || key === 'y')) {
         const redo = key === 'y' || event.shiftKey
+        event.preventDefault()
         if (structuredMode) {
           const editor = structuredEditorRef.current
-          if (redo ? editor?.redo() : editor?.undo()) event.preventDefault()
+          if (redo) editor?.redo()
+          else editor?.undo()
         } else {
-          event.preventDefault()
           if (redo) redoDraft()
           else undoDraft()
         }
@@ -2125,7 +2130,9 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     return projectPortableReviewSource(manuscriptSource, { view: markupView })
   }, [manuscriptSource, markupView, structuredMode])
   const structuredEditorSource = structuredReviewProjection?.ok ? structuredReviewProjection.source : manuscriptSource
-  const structuredDocument = useMemo(() => parseStructuredManuscript(structuredEditorSource).document, [structuredEditorSource])
+  const structuredDocument = useMemo(() => structuredEditorSource === manuscriptSource
+    ? workingDocument
+    : parseStructuredManuscript(structuredEditorSource).document, [structuredEditorSource, manuscriptSource, workingDocument])
   const semanticObjects = useMemo(() => semanticManuscriptObjects(structuredDocument), [structuredDocument])
   const semanticReferenceDiagnostics = useMemo(() => referenceIntegrityDiagnostics(structuredDocument), [structuredDocument])
   const demoAliceChange = reviewDocument.changes.find((change) => change.id === 'dm-c01')
@@ -6734,7 +6741,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
                   <div><span className="eyebrow">Live CSL bibliography</span><h2 id="references-heading">References</h2></div>
                   <CitationFormattingControls style={citationStyle} locale={citationLocale} onStyleChange={changeCitationStyle} onLocaleChange={changeCitationLocale} disabled={!canEditManuscript} />
                 </div>
-                <div className="bibliography-entries">{renderedBibliography.map((entry) => <p key={entry.id} data-citekey={entry.id}>{entry.value}</p>)}</div>
+                {bibliographyEntries}
               </section>
             )}
             <button className="end-insert" onClick={() => setCommandOpen(true)}><Icon name="plus" size={15} /> Add block or type /</button>
@@ -6891,9 +6898,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
                 <i className={cslState} />
                 {cslState === 'loading' ? 'Formatting citations and references…' : cslState === 'error' ? 'Using readable fallback citations' : `${citationStyleOptions.find((option) => option.id === citationStyle)?.label} · ${citationLocaleOptions.find((option) => option.id === citationLocale)?.label}`}
               </div>
-              {renderedBibliography.length ? (
-                <div className="bibliography-entries">{renderedBibliography.map((entry) => <p key={entry.id} data-citekey={entry.id}>{entry.value}</p>)}</div>
-              ) : cslState === 'ready' ? (
+              {renderedBibliography.length ? bibliographyEntries : cslState === 'ready' ? (
                 <p className="bibliography-empty">Cited works will appear here.</p>
               ) : null}
             </section>

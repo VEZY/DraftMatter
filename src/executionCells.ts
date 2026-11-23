@@ -175,6 +175,8 @@ export function extractExecutableCells(source: string): ExecutableCellResult {
 }
 
 function parseExecutableCells(source: string): ExecutableCellResult {
+  // Only a fenced block can carry a Markdown language and executable attributes.
+  if (!source.includes('```') && !source.includes('~~~')) return { cells: [], diagnostics: [] }
   const tree = unified().use(remarkParse).parse(source) as Root
   const excluded = excludedDivRanges(source)
   const diagnostics: DocumentDiagnostic[] = []
