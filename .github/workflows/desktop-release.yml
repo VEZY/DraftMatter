@@ -117,7 +117,7 @@ jobs:
             platform: ubuntu-22.04-arm
             target: aarch64-unknown-linux-gnu
             bunTarget: bun-linux-arm64
-            args: --target aarch64-unknown-linux-gnu --bundles deb,appimage
+            args: --verbose --target aarch64-unknown-linux-gnu --bundles deb,appimage
           - label: Windows ARM64 release
             platform: windows-11-arm
             target: aarch64-pc-windows-msvc
@@ -196,6 +196,10 @@ jobs:
 
       - name: Prepare release configuration
         run: node scripts/prepare-desktop-release.mjs config
+
+      - name: Preserve the standalone MCP executable in the ARM64 AppImage
+        if: matrix.target == 'aarch64-unknown-linux-gnu'
+        run: echo "PATCHELF=$GITHUB_WORKSPACE/scripts/appimage-arm64-patchelf.sh" >> "$GITHUB_ENV"
 
       - name: Build unsigned release candidate bundles
         run: npm run desktop:build -- ${{ matrix.args }} --config src-tauri/tauri.release.conf.json

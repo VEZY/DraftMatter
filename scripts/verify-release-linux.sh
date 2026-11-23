@@ -21,5 +21,8 @@ for root in "$work/deb" "$work/squashfs-root"; do
       exit 1
     fi
   done
+  if [[ ${2:-} == aarch64-unknown-linux-gnu ]]; then
+    cmp "src-tauri/binaries/draftmatter-mcp-$2" "$root/usr/bin/draftmatter-mcp"
+  fi
   if [[ -n ${2:-} ]]; then node scripts/verify-installed-desktop.mjs "$root/usr/bin" "$2"; fi
 done
