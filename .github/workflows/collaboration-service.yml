@@ -11,6 +11,10 @@ on:
       server-release-version:
         type: string
         default: '0.0.0-alpha.0'
+      tested-image-retention-days:
+        description: How long to keep tested images while waiting for the rest of this release
+        type: number
+        default: 1
   pull_request:
   push:
     branches: [main]
@@ -166,7 +170,7 @@ jobs:
           name: draftmatter-server-tested-images-${{ github.sha }}
           path: ${{ runner.temp }}/server-images/
           compression-level: 0
-          retention-days: 1
+          retention-days: ${{ inputs.tested-image-retention-days }}
           if-no-files-found: error
 
       - name: Stop isolated rehearsal containers

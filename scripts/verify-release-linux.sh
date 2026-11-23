@@ -21,4 +21,5 @@ for root in "$work/deb" "$work/squashfs-root"; do
       exit 1
     fi
   done
+  if [[ -n ${2:-} ]]; then node scripts/verify-installed-desktop.mjs "$root/usr/bin" "$2"; fi
 done

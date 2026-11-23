@@ -8,6 +8,7 @@ import { dirname, join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 
 const workflow = readFileSync('.github/workflows/desktop-release.yml', 'utf8').replace(/\r\n/g, '\n')
+const tagWorkflow = readFileSync('.github/workflows/desktop-tag.yml', 'utf8').replace(/\r\n/g, '\n')
 const portabilityWorkflow = readFileSync('.github/workflows/desktop-portability.yml', 'utf8').replace(/\r\n/g, '\n')
 const desktopMain = readFileSync('src-tauri/src/main.rs', 'utf8')
 const windowsInstallerHooks = readFileSync('src-tauri/windows/installer-hooks.nsh', 'utf8')
@@ -15,7 +16,7 @@ const tauriConfig = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8')
   bundle?: { windows?: { nsis?: { installerHooks?: string } } }
 }
 const version = JSON.parse(readFileSync('package.json', 'utf8')).version as string
-const targets = ['x86_64-unknown-linux-gnu', 'x86_64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-apple-darwin']
+const targets = ['x86_64-unknown-linux-gnu', 'aarch64-unknown-linux-gnu', 'x86_64-pc-windows-msvc', 'aarch64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-apple-darwin']
 
 describe('DM-P5-08 production release pipeline', () => {
   it('keeps npm, Cargo, Tauri, and a matching release tag on one version', () => {
@@ -37,14 +38,16 @@ describe('DM-P5-08 production release pipeline', () => {
   })
 
   it('builds candidates and draft releases without paid publisher credentials', () => {
-    expect(workflow).toContain("tags:\n      - 'v*.*.*'")
+    expect(tagWorkflow).toContain("tags:\n      - 'v*.*.*'")
+    expect(tagWorkflow).toContain('uses: ./.github/workflows/desktop-release.yml')
+    expect(workflow).toContain('workflow_call:')
+    expect(workflow).not.toContain('contents: write')
     expect(workflow).toContain('Build unsigned release candidate bundles')
-    expect(workflow).toContain('Build release bundles without publisher signing into a draft release')
-    expect(workflow).toContain('releaseDraft: true')
-    expect(workflow).toContain('docs/installation.md')
-    expect(workflow).toContain('Windows installers are unsigned')
-    expect(workflow).toContain("if: matrix.platform == 'macos-latest'\n        shell: bash\n        run: bash scripts/verify-release-dmg.sh")
-    expect(workflow).toContain("if: matrix.platform == 'windows-latest'\n        shell: pwsh\n        run: ./scripts/verify-release-windows.ps1")
+    expect(tagWorkflow).toContain('--verify-tag --draft')
+    expect(tagWorkflow).toContain('docs/installation.md')
+    expect(tagWorkflow).toContain('Windows installers are unsigned')
+    expect(workflow).toContain("if: runner.os == 'macOS'\n        shell: bash\n        run: bash scripts/verify-release-dmg.sh")
+    expect(workflow).toContain("if: runner.os == 'Windows'\n        shell: pwsh\n        run: ./scripts/verify-release-windows.ps1")
     expect(workflow).not.toMatch(/signing-policy|notarize-release-dmg|signtool|notarytool/)
     expect(workflow).not.toMatch(/secrets\.(APPLE_|WINDOWS_CERTIFICATE)/)
     const config = JSON.parse(readFileSync('src-tauri/tauri.conf.json', 'utf8'))
@@ -153,6 +156,48 @@ codesign() {
     expect(workflow).toContain('--bundles app,dmg')
   })
 
+  it('stages alpha identity, increasing native build numbers and versioned ARM installer names in a disposable checkout', () => {
+    const root = mkdtempSync(join(tmpdir(), 'draftmatter-desktop-stage-'))
+    try {
+      for (const path of ['scripts/prepare-desktop-release.mjs', 'scripts/verify-release.mjs', 'package.json', 'package-lock.json',
+        'src-tauri/Cargo.toml', 'src-tauri/Cargo.lock', 'src-tauri/tauri.conf.json', 'compliance/security-exceptions.json',
+        'src-tauri/windows/installer-hooks.nsh', 'integrations/plugins/draftmatter/.codex-plugin/plugin.json']) {
+        mkdirSync(dirname(join(root, path)), { recursive: true })
+        copyFileSync(path, join(root, path))
+      }
+      const run = (command: string, args: string[], release: string) => {
+        const result = spawnSync(command, args, { cwd: root, encoding: 'utf8', env: {
+          ...process.env, GITHUB_REF_TYPE: 'branch', RELEASE_TAG: '', DESKTOP_RELEASE_VERSION: release,
+        } })
+        expect(result.status, result.stderr).toBe(0)
+        return result.stdout
+      }
+      run('git', ['init', '--quiet'], '')
+      const revisions = []
+      for (const release of ['0.1.0-alpha.9', '0.1.0-alpha.10']) {
+        run('git', ['-c', 'user.name=builder', '-c', 'user.email=build@example.test', 'commit', '--quiet', '--allow-empty', '-m', release], '')
+        run(process.execPath, ['scripts/prepare-desktop-release.mjs', 'stage-version'], release)
+        expect(run(process.execPath, ['scripts/verify-release.mjs'], release)).toContain('v' + release)
+        expect(readFileSync(join(root, 'src-tauri/Cargo.lock'), 'utf8')).toContain(`name = "draftmatter"\nversion = "${release}"`)
+        run(process.execPath, ['scripts/prepare-desktop-release.mjs', 'config'], release)
+        const { bundle } = JSON.parse(readFileSync(join(root, 'src-tauri/tauri.release.conf.json'), 'utf8'))
+        revisions.push([bundle.windows.wix.version, bundle.macOS.bundleVersion])
+      }
+      expect(revisions).toEqual([['0.1.1', '1.0.1'], ['0.1.2', '1.0.2']])
+      const bundle = join(root, 'src-tauri/target/aarch64-unknown-linux-gnu/release/bundle')
+      for (const [folder, file] of [['deb', 'DraftMatter_arm64.deb'], ['appimage', 'app_arm64.AppImage']]) {
+        mkdirSync(join(bundle, folder), { recursive: true })
+        writeFileSync(join(bundle, folder, file), 'test payload')
+      }
+      run(process.execPath, ['scripts/prepare-desktop-release.mjs', 'stage-installers', 'aarch64-unknown-linux-gnu', 'installers'], '0.1.0-alpha.10')
+      expect(readdirSync(join(root, 'installers')).sort()).toEqual([
+        'DraftMatter_0.1.0-alpha.10_linux_arm64_appimage.AppImage', 'DraftMatter_0.1.0-alpha.10_linux_arm64_deb.deb',
+      ])
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
   it('tests the standalone CLI on every platform and attaches one platform-neutral package', () => {
     expect(portabilityWorkflow).toContain('Build standalone clean-export CLI')
     expect(portabilityWorkflow).toContain('Test standalone clean-export CLI')
@@ -174,7 +219,10 @@ codesign() {
       writeFileSync(join(directory, filename), bytes)
       expected.set(releaseName, bytes)
     }
-    const prepare = () => spawnSync(process.execPath, ['scripts/prepare-release-metadata.mjs', artifacts, installers, output], { encoding: 'utf8' })
+    const commit = 'c'.repeat(40)
+    const prepare = () => spawnSync(process.execPath, ['scripts/prepare-release-metadata.mjs', artifacts, installers, output], {
+      encoding: 'utf8', env: { ...process.env, GITHUB_SHA: commit, DESKTOP_RELEASE_VERSION: version },
+    })
     try {
       for (const target of targets) {
         const inventory = `draftmatter-${target}-compliance`
@@ -189,21 +237,24 @@ codesign() {
       addArtifact(join(artifacts, 'draftmatter-cli'), cli, cli)
       const installerNames = [
         'darwin_x64_dmg.dmg', 'darwin_aarch64_dmg.dmg', 'windows_x64_nsis.exe', 'windows_x64_msi.msi',
-        'linux_amd64_deb.deb', 'linux_amd64_appimage.AppImage', 'darwin_aarch64_app.app.tar.gz',
+        'windows_arm64_nsis.exe', 'linux_amd64_deb.deb', 'linux_amd64_appimage.AppImage', 'linux_arm64_deb.deb', 'linux_arm64_appimage.AppImage',
+        'darwin_aarch64_app.app.tar.gz', 'darwin_x64_app.app.tar.gz',
       ].map((suffix) => `DraftMatter_${version}_${suffix}`)
       for (const name of installerNames.slice(1)) addArtifact(installers, name, name)
-      expect(prepare().stderr).toContain(`Missing installer in the draft release: ${installerNames[0]}`)
+      expect(prepare().stderr).toContain(`Missing installer in the candidate: ${installerNames[0]}`)
       addArtifact(installers, installerNames[0], installerNames[0])
       const result = prepare()
       expect(result.status, result.stderr).toBe(0)
-      const checksums = readFileSync(join(output, 'SHA256SUMS'), 'utf8').trimEnd().split('\n')
+      const manifest = readFileSync(join(output, 'desktop-release.json'), 'utf8')
+      expect(JSON.parse(manifest)).toEqual({ version, commit, installers: expect.arrayContaining(installerNames.filter((name) => !name.endsWith('.tar.gz'))) })
+      expected.set('desktop-release.json', manifest)
+      const checksums = readFileSync(join(output, 'SHA256SUMS-desktop'), 'utf8').trimEnd().split('\n')
       expect(checksums).toHaveLength(expected.size)
       for (const [releaseName, bytes] of expected) {
         expect(checksums).toContain(`${createHash('sha256').update(bytes).digest('hex')}  ${releaseName}`)
-        const dir = installerNames.includes(releaseName) ? installers : output
-        expect(readFileSync(join(dir, releaseName), 'utf8')).toBe(bytes)
+        expect(readFileSync(join(output, releaseName), 'utf8')).toBe(bytes)
       }
-      expect(readdirSync(output)).toHaveLength(14) // twelve platform assets, the CLI, and SHA256SUMS
+      expect(readdirSync(output)).toHaveLength(expected.size + 1)
     } finally {
       rmSync(root, { recursive: true, force: true })
     }
@@ -240,6 +291,6 @@ codesign() {
     expect(tauriConfig.bundle?.windows?.nsis?.installerHooks).toBe('./windows/installer-hooks.nsh')
     expect(windowsInstallerHooks).toContain('WriteRegExpandStr HKCU "Environment" "Path"')
     expect(windowsInstallerHooks).toContain('DeleteRegKey HKCU "Software\\Microsoft\\Windows\\CurrentVersion\\App Paths\\draftmatter.exe"')
-    expect(workflow).toContain("installerHooks: './windows/installer-hooks.nsh'")
+    expect(workflow).toContain('scripts/prepare-desktop-release.mjs config')
   })
 })

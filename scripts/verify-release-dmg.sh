@@ -40,3 +40,9 @@ for name in draftmatter draftmatter-agent-host draftmatter-mcp; do
 done
 codesign --verify --deep --strict "$app"
 codesign --display --verbose=4 "$app" 2>&1 | grep -Fx 'Signature=adhoc'
+if [[ -n ${2:-} ]]; then
+  node scripts/verify-installed-desktop.mjs "$app/Contents/MacOS" "$2"
+  expected=$(/usr/bin/plutil -extract bundle.macOS.bundleVersion raw src-tauri/tauri.release.conf.json)
+  actual=$(/usr/bin/plutil -extract CFBundleVersion raw "$app/Contents/Info.plist")
+  [[ "$actual" == "$expected" ]]
+fi

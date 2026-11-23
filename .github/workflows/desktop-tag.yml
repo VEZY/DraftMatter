@@ -1,0 +1,37 @@
+name: Desktop tag release
+
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    uses: ./.github/workflows/desktop-release.yml
+  draft:
+    needs: build
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/download-artifact@v7
+        with:
+          name: draftmatter-desktop-release
+          path: desktop
+      - name: Create the reviewed platform release as a draft
+        working-directory: desktop
+        shell: bash
+        run: |
+          sha256sum --check --strict SHA256SUMS-desktop --status
+          mv SHA256SUMS-desktop SHA256SUMS
+          notes="macOS bundles use an ad hoc signature. Windows installers are unsigned. [Installation instructions]($GITHUB_SERVER_URL/$GH_REPO/blob/$GITHUB_REF_NAME/docs/installation.md)"
+          flags=()
+          if [[ "$GITHUB_REF_NAME" == *-* ]]; then flags+=(--prerelease); fi
+          gh release create "$GITHUB_REF_NAME" --verify-tag --draft "${flags[@]}" \
+            --title "DraftMatter $GITHUB_REF_NAME" --generate-notes --notes "$notes" ./*

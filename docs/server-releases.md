@@ -2,7 +2,30 @@
 
 The closed alpha runs prebuilt Linux amd64 images. The VPS downloads them;
 it does not compile DraftMatter or need a host Node.js/npm installation.
-Desktop installers remain a separate release workflow.
+Desktop installers can ship in the same GitHub prerelease as the server.
+
+## Publish desktop and server together
+
+From your Mac, once the reviewed changes are on `main`, run:
+
+```sh
+npm run release:all
+```
+
+In GitHub Actions the equivalent is **Server release → Run workflow** on
+`main` with **include_desktop** enabled. Leave the version blank for the next
+alpha. One workflow chooses the version and commit for both products, runs
+the desktop builds alongside the server checks, and collects the verified
+files in one draft release tagged `server-vVERSION`. A single-platform
+failure prevents the combined version from becoming public.
+
+Open the draft from the Actions summary. Check the installers on the target
+systems as described in the [desktop release guide](release-compliance.md),
+then click **Publish release** once. The installers then become available on GitHub Releases.
+
+`SHA256SUMS-desktop` covers the desktop distribution. `SHA256SUMS` covers the
+two server downloads the VPS updater expects. Updating the running VPS is a
+separate operator action.
 
 ## Publish a reviewed server version
 
@@ -50,10 +73,10 @@ tags. For an OCI provenance index or Docker manifest list, publication verifies
 the single Linux amd64 child against the tested configuration and records that
 platform image's digest. There is no `latest` image or automatic VPS deployment.
 
-The workflow creates `server-vVERSION` as a draft GitHub prerelease, uploads all
-assets, then makes it visible only after successful upload. The `server-` tag
-prefix does not trigger desktop releases. Every server release currently remains
-a prerelease, including when the input version has no prerelease suffix.
+For a server-only run, the workflow publishes the GitHub prerelease automatically
+after uploading the server assets. A combined run leaves the release in draft
+for the installer review. Both paths use the `server-vVERSION` tag and mark
+the release as a prerelease, including when the version has no prerelease suffix.
 
 New GHCR packages are private by default. After the first publication, the
 repository owner must set all three package pages to **Public** for the intended

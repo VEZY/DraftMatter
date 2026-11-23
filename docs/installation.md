@@ -6,7 +6,7 @@ These downloads do not carry a verified publisher signature. macOS uses a free a
 
 ## Check the download
 
-Download `SHA256SUMS` from the same release. Replace the example filenames below with the exact downloaded filename, then compare the result with its entry in `SHA256SUMS`:
+Download **SHA256SUMS-desktop** from the same combined release as the installer. A desktop-only release uses **SHA256SUMS**. Replace the example filenames below with the exact downloaded filename and compare the result with the matching entry in that file.
 
 ```sh
 # macOS
@@ -36,7 +36,7 @@ See [Apple's instructions for opening downloaded apps](https://support.apple.com
 
 ## Windows
 
-1. Choose the `windows_x64_nsis.exe` installer for a regular installation, or the `windows_x64_msi.msi` installer if your deployment process uses MSI. These are x64 builds, not native ARM64 builds.
+1. Under **Settings → System → About**, check **System type**. Choose the x64 setup executable for an Intel or AMD PC, or the ARM64 setup executable for an ARM-based PC. An MSI package is also available for x64 installations managed by an administrator.
 2. Check the checksum and run the installer. If Microsoft Defender SmartScreen displays **Windows protected your PC**, choose **More info → Run anyway** only if you trust this download. An **Unknown publisher** prompt is expected for an unsigned installer.
 3. Finish setup and launch DraftMatter from the Start menu. The NSIS installer also adds the application directory to your user `PATH`; open a new terminal before using `draftmatter`.
 
@@ -46,7 +46,7 @@ See Microsoft’s [SmartScreen guidance](https://learn.microsoft.com/en-us/windo
 
 ## Linux
 
-Choose an x64 (`linux_amd64`) download. Linux ARM builds are not provided.
+Run `uname -m` if you are unsure of the architecture. Choose **x64** (`linux_amd64`) for `x86_64` or **ARM64** (`linux_arm64`) for `aarch64`.
 
 For Debian/Ubuntu, download the `.deb` and install it using your package manager so dependencies can be resolved. From the download directory, substitute the actual filename:
 

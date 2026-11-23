@@ -2,22 +2,33 @@ name: Desktop release
 
 on:
   workflow_dispatch:
-  push:
-    tags:
-      - 'v*.*.*'
+    inputs:
+      version:
+        description: Optional version for a local-download candidate
+        type: string
+        required: false
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: false
+env:
+  DESKTOP_RELEASE_VERSION: ${{ inputs.version }}
 
 concurrency:
-  group: desktop-release-${{ github.ref }}
+  group: desktop-build-${{ github.run_id }}
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   verify:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
 
       - uses: actions/setup-node@v6
         with:
@@ -37,8 +48,13 @@ jobs:
       - name: Install the pinned Chromium runtime
         run: npx playwright install --with-deps chromium
 
-      - name: Verify release version identity
+      - name: Verify checkout version identity
         run: npm run release:verify
+
+      - name: Stage and verify the requested desktop version
+        run: |
+          node scripts/prepare-desktop-release.mjs stage-version
+          npm run release:verify
 
       - name: Check locked dependencies for high and critical advisories
         run: npm audit --audit-level=high
@@ -54,6 +70,8 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
 
       - uses: actions/setup-node@v6
         with:
@@ -62,6 +80,9 @@ jobs:
 
       - name: Install locked dependencies
         run: npm ci
+
+      - name: Stage the requested desktop version
+        run: node scripts/prepare-desktop-release.mjs stage-version
 
       - name: Build and test standalone clean-export CLI
         run: |
@@ -92,6 +113,17 @@ jobs:
             target: x86_64-unknown-linux-gnu
             bunTarget: bun-linux-x64
             args: --target x86_64-unknown-linux-gnu --bundles deb,appimage
+          - label: Linux ARM64 release
+            platform: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+            bunTarget: bun-linux-arm64
+            args: --target aarch64-unknown-linux-gnu --bundles deb,appimage
+          - label: Windows ARM64 release
+            platform: windows-11-arm
+            target: aarch64-pc-windows-msvc
+            bunVersion: 1.3.10
+            bunTarget: bun-windows-arm64
+            args: --target aarch64-pc-windows-msvc --bundles nsis
           - label: Windows x64 release
             platform: windows-latest
             target: x86_64-pc-windows-msvc
@@ -103,16 +135,19 @@ jobs:
             bunTarget: bun-darwin-arm64
             args: --target aarch64-apple-darwin --bundles app,dmg
           - label: macOS Intel release
-            platform: macos-latest
+            platform: macos-15-intel
             target: x86_64-apple-darwin
             bunTarget: bun-darwin-x64
             args: --target x86_64-apple-darwin --bundles app,dmg
 
     steps:
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
 
       - name: Install Linux desktop dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
@@ -124,7 +159,7 @@ jobs:
 
       - uses: oven-sh/setup-bun@v2
         with:
-          bun-version: 1.3.8
+          bun-version: ${{ matrix.bunVersion || '1.3.8' }}
 
       - uses: dtolnay/rust-toolchain@stable
         with:
@@ -138,8 +173,13 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
-      - name: Verify release version identity
+      - name: Verify checkout version identity
         run: npm run release:verify
+
+      - name: Stage and verify the requested desktop version
+        run: |
+          node scripts/prepare-desktop-release.mjs stage-version
+          npm run release:verify
 
       - name: Generate platform compliance inventory
         env:
@@ -155,54 +195,28 @@ jobs:
           npm run build:desktop-sidecars -- ${{ matrix.target }} ${{ matrix.bunTarget }}
 
       - name: Prepare release configuration
-        run: >-
-          node -e "require('node:fs').writeFileSync('src-tauri/tauri.release.conf.json', JSON.stringify({ bundle: { externalBin: ['binaries/draftmatter-mcp'], windows: { nsis: { installerHooks: './windows/installer-hooks.nsh' } } } }, null, 2))"
+        run: node scripts/prepare-desktop-release.mjs config
 
       - name: Build unsigned release candidate bundles
-        if: github.event_name == 'workflow_dispatch'
-        uses: tauri-apps/tauri-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
-          uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: draftmatter-candidate-[platform]-[arch]-[bundle]
-
-      - name: Build release bundles without publisher signing into a draft release
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
-        uses: tauri-apps/tauri-action@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          args: ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
-          tagName: ${{ github.ref_name }}
-          releaseName: DraftMatter ${{ github.ref_name }}
-          releaseDraft: true
-          prerelease: ${{ contains(github.ref_name, '-') }}
-          generateReleaseNotes: true
-          releaseBody: |
-            DraftMatter is distributed without a verified publisher signature. macOS bundles use a free ad hoc signature and are not notarized; Windows installers are unsigned.
-            Installation instructions for macOS, Windows and Linux: https://github.com/${{ github.repository }}/blob/${{ github.ref_name }}/docs/installation.md
-            Download SHA256SUMS from this release to check file integrity. Checksums do not verify publisher identity.
-            This release remains a draft until all platform jobs and release metadata succeed and the assets are reviewed.
-          releaseAssetNamePattern: DraftMatter_[version]_[platform]_[arch]_[bundle][ext]
-          uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: draftmatter-[platform]-[arch]-[bundle]
+        run: npm run desktop:build -- ${{ matrix.args }} --config src-tauri/tauri.release.conf.json
 
       - name: Verify the ad hoc app inside the release DMG
-        if: matrix.platform == 'macos-latest'
+        if: runner.os == 'macOS'
         shell: bash
-        run: bash scripts/verify-release-dmg.sh "src-tauri/target/${{ matrix.target }}/release/bundle/dmg"
+        run: bash scripts/verify-release-dmg.sh "src-tauri/target/${{ matrix.target }}/release/bundle/dmg" "${{ matrix.target }}"
 
       - name: Verify Windows installer signatures and MSI executable inventory
-        if: matrix.platform == 'windows-latest'
+        if: runner.os == 'Windows'
         shell: pwsh
-        run: ./scripts/verify-release-windows.ps1 -BundleRoot "src-tauri/target/${{ matrix.target }}/release/bundle"
+        run: ./scripts/verify-release-windows.ps1 -BundleRoot "src-tauri/target/${{ matrix.target }}/release/bundle" -Target "${{ matrix.target }}"
 
-      - name: Verify executables inside Debian and AppImage packages
-        if: matrix.platform == 'ubuntu-22.04'
+      - name: Apply Debian prerelease ordering and verify Debian and AppImage packages
+        if: runner.os == 'Linux'
         shell: bash
-        run: bash scripts/verify-release-linux.sh "src-tauri/target/${{ matrix.target }}/release/bundle"
+        run: |
+          bundle="src-tauri/target/${{ matrix.target }}/release/bundle"
+          bash scripts/version-debian-package.sh "$bundle/deb"
+          bash scripts/verify-release-linux.sh "$bundle" "${{ matrix.target }}"
 
       - name: Keep the generated WiX manifest after a Windows packaging failure
         if: failure() && matrix.platform == 'windows-latest'
@@ -211,6 +225,16 @@ jobs:
           name: draftmatter-wix-manifest-${{ matrix.target }}
           path: src-tauri/target/${{ matrix.target }}/release/wix/x64/main.wxs
           if-no-files-found: ignore
+
+      - name: Collect verified installable packages under their download names
+        run: node scripts/prepare-desktop-release.mjs stage-installers ${{ matrix.target }} release-installers
+
+      - name: Upload checked installers
+        uses: actions/upload-artifact@v6
+        with:
+          name: draftmatter-installers-${{ matrix.target }}
+          path: release-installers/
+          if-no-files-found: error
 
       - name: Upload platform compliance inventory
         uses: actions/upload-artifact@v6
@@ -231,28 +255,28 @@ jobs:
           if-no-files-found: error
 
   release-metadata:
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     needs: [build, cli]
     runs-on: ubuntu-22.04
-    env:
-      GH_REPO: ${{ github.repository }}
-      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
-
+        with:
+          ref: ${{ github.sha }}
       - uses: actions/setup-node@v6
         with:
           node-version-file: '.node-version'
-
       - uses: actions/download-artifact@v7
         with:
           pattern: 'draftmatter-{cli,*-compliance,*-agent-host}'
-          path: release-assets
-
-      - name: Prepare checksums over the actual installer and metadata filenames
-        run: |
-          gh release download "$GITHUB_REF_NAME" --pattern 'DraftMatter_*' --dir release-installers
-          node scripts/prepare-release-metadata.mjs release-assets release-installers release-metadata
-
-      - name: Attach verified release metadata
-        run: gh release upload "$GITHUB_REF_NAME" release-metadata/* --clobber
+          path: release-extras
+      - uses: actions/download-artifact@v7
+        with:
+          pattern: draftmatter-installers-*
+          merge-multiple: true
+          path: release-installers
+      - name: Verify completeness and checksum the actual release files
+        run: node scripts/prepare-release-metadata.mjs release-extras release-installers release-desktop
+      - uses: actions/upload-artifact@v6
+        with:
+          name: draftmatter-desktop-release
+          path: release-desktop/
+          if-no-files-found: error

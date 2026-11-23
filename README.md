@@ -203,7 +203,7 @@ npm run compliance:check
 npm run release:verify
 ```
 
-Production desktop installers are built from version tags as draft GitHub releases for Windows x64, Linux x64, and both macOS architectures, without paid publisher signing or Apple notarization. Manual workflow runs upload candidate artifacts. See the [installation instructions](./docs/installation.md) for downloads and OS prompts, and the [release gate](./docs/release-compliance.md) for publication checks.
+Use `npm run release:all` to prepare the next server and desktop alpha from one commit. Review the installers and publish the combined GitHub release once. See the [release procedure](./docs/server-releases.md#publish-desktop-and-server-together) and [desktop checks](./docs/release-compliance.md).
 
 ## Project documentation
 

@@ -4,10 +4,11 @@ import { execFileSync } from 'node:child_process'
 import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
+import { desktopInstallerNames } from '../../scripts/prepare-desktop-release.mjs'
 import {
   assertServerReleaseUnused, createServerManifest, prepareServerAssets, resolveServerReleaseVersion,
   serverDeploymentPaths, serverReleaseIdentity, testedImageRecord,
-  verifyPublishedServerImage,
+  verifyDesktopAssets, verifyPublishedServerImage,
 } from '../../scripts/prepare-server-release.mjs'
 
 const commit = 'a'.repeat(40)
@@ -77,6 +78,77 @@ describe('immutable server release publication boundary', () => {
       { ...image, Architecture: 'arm64' }, { ...image, Id: 'sha256:truncated' },
       { ...image, Config: { Labels: { ...image.Config.Labels, 'org.opencontainers.image.revision': 'c'.repeat(40) } } },
     ]) expect(() => testedImageRecord('web', commit, changed)).toThrow('tested')
+  })
+
+  it('requires the desktop artifact to match the release version, commit and complete checksum inventory', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'draftmatter-desktop-publish-'))
+    const installers = desktopInstallerNames(identity.version)
+    const [installer] = installers
+    const manifest = { version: identity.version, commit, installers }
+    const files = { 'desktop-release.json': JSON.stringify(manifest), ...Object.fromEntries(installers.map((name) => [name, `installer ${name}`])) }
+    const sums = Object.entries(files).map(([name, content]) => `${digest(content)}  ${name}\n`).join('')
+    try {
+      for (const [name, content] of Object.entries(files)) await writeFile(join(dir, name), content)
+      await writeFile(join(dir, 'SHA256SUMS-desktop'), sums)
+      await expect(verifyDesktopAssets(dir, identity)).resolves.toBeUndefined()
+      await expect(verifyDesktopAssets(dir, { ...identity, commit: 'b'.repeat(40) })).rejects.toThrow('source revision')
+      await expect(verifyDesktopAssets(dir, { ...identity, version: '0.1.0-alpha.2' })).rejects.toThrow()
+      await writeFile(join(dir, 'desktop-release.json'), JSON.stringify({ ...manifest, installers: installers.slice(1) }))
+      await expect(verifyDesktopAssets(dir, identity)).rejects.toThrow('every expected installer')
+      await writeFile(join(dir, 'desktop-release.json'), files['desktop-release.json'])
+      await rm(join(dir, installer))
+      await expect(verifyDesktopAssets(dir, identity)).rejects.toThrow('every expected installer')
+      await writeFile(join(dir, installer), 'changed')
+      await expect(verifyDesktopAssets(dir, identity)).rejects.toThrow('Checksum mismatch')
+      await writeFile(join(dir, installer), files[installer])
+      await writeFile(join(dir, 'unchecked'), 'extra')
+      await expect(verifyDesktopAssets(dir, identity)).rejects.toThrow('covered')
+      await writeFile(join(dir, 'SHA256SUMS'), 'server checksum collision')
+      await expect(verifyDesktopAssets(dir, identity)).rejects.toThrow('distinct')
+    } finally { await rm(dir, { recursive: true, force: true }) }
+  })
+
+  it.skipIf(process.platform === 'win32')('leaves a joint release in draft and publishes server-only after a successful upload', async () => {
+    const workflow = await readFile(new URL('../../.github/workflows/server-release.yml', import.meta.url), 'utf8')
+    const script = workflow.split('name: Attach all release assets and report publication status\n        run: |\n')[1]
+      .split('\n      - name:')[0].replace(/^          /gm, '')
+    const dir = await mkdtemp(join(tmpdir(), 'draftmatter-publish-step-'))
+    const summary = join(dir, 'summary'), calls = join(dir, 'calls')
+    const env = { ...process.env, RUNNER_TEMP: dir, GITHUB_STEP_SUMMARY: summary, RELEASE_VERSION: identity.version,
+      GITHUB_SHA: commit, GITHUB_SERVER_URL: 'https://github.com', GITHUB_REPOSITORY: identity.repository }
+    const simulated = [
+      'set -eu -o pipefail',
+      'git() { printf "server-v0.1.0-alpha.0"; }',
+      'gh() {',
+      '  printf "%s\\n" "$*" >> "$RUNNER_TEMP/calls"',
+      '  if [[ "$1 $2" == "release create" ]]; then',
+      '    [[ "$FAIL_UPLOAD" == false ]] || return 1',
+      '    printf "https://github.com/VEZY/DraftMatter/releases/tag/untagged-fixture\\n"',
+      '  fi',
+      '}',
+      script,
+    ].join('\n')
+    try {
+      await mkdir(join(dir, 'server-release'))
+      await mkdir(join(dir, 'desktop-release'))
+      await writeFile(join(dir, 'desktop-release', 'desktop-release.json'), '{}')
+      for (const joint of [false, true]) {
+        await writeFile(calls, '')
+        await writeFile(summary, '')
+        execFileSync('bash', ['-c', simulated], { env: { ...env, INCLUDE_DESKTOP: String(joint), FAIL_UPLOAD: 'false' } })
+        const log = await readFile(calls, 'utf8'), result = await readFile(summary, 'utf8')
+        expect(log).toContain('server-release/SHA256SUMS')
+        expect(log.includes('desktop-release/desktop-release.json')).toBe(joint)
+        expect(log.includes('git/refs')).toBe(joint)
+        expect(log.includes('--draft=false')).toBe(!joint)
+        expect(result).toContain(joint ? '/releases/edit/untagged-fixture' : 'Published')
+        await writeFile(calls, '')
+        await writeFile(summary, '')
+        expect(() => execFileSync('bash', ['-c', simulated], { env: { ...env, INCLUDE_DESKTOP: String(joint), FAIL_UPLOAD: 'true' } })).toThrow()
+        expect(await readFile(calls, 'utf8')).not.toContain('--draft=false')
+        expect(await readFile(summary, 'utf8')).toBe('')
+      }
+    } finally { await rm(dir, { recursive: true, force: true }) }
   })
 
   it('refuses private runtime assets and symlinks even when accidentally committed under a deployment directory', () => {

@@ -2,16 +2,18 @@
 
 ## Supported local targets
 
-The portability workflow type-checks, tests, and packages debug bundles for these Tauri targets from locked dependencies. The tag-driven `desktop-release.yml` workflow produces production release bundles:
+The desktop release workflow packages DraftMatter and its native helpers for:
 
 - Windows x64 (`x86_64-pc-windows-msvc`)
+- Windows ARM64 (`aarch64-pc-windows-msvc`)
 - Linux x64 (`x86_64-unknown-linux-gnu`)
+- Linux ARM64 (`aarch64-unknown-linux-gnu`)
 - macOS Apple Silicon (`aarch64-apple-darwin`)
 - macOS Intel (`x86_64-apple-darwin`)
 
 The web application remains a browser-safe fallback on all three operating-system families. It does not receive desktop host commands.
 
-The same portability matrix builds and process-tests the Node.js 20+ CLI.
+The portability workflow also builds and process-tests the standalone CLI.
 The CLI package includes clean export, the JSON agent interface, the stdio MCP
 server, the canonical skill, and the thin Codex plugin. Each desktop bundle
 contains a target-native `draftmatter-mcp` standalone sidecar and
@@ -69,22 +71,26 @@ verified publisher or satisfy Gatekeeper. CI requires the Windows MSI and NSIS
 installers to both report `NotSigned` via Authenticode. Linux packages do not require a
 publisher certificate. No Apple or Windows certificate secrets are needed.
 
-Manual workflow runs upload candidate artifacts. Pushing a matching
-`v<package-version>` tag builds all four targets into a **draft** GitHub release.
+Use `npm run release:all` to prepare the desktop installers and the server
+from one commit in a single draft release. The public download catalogue reads
+published releases, including alphas. [Combined release procedure](server-releases.md#publish-desktop-and-server-together)
+
+Manual desktop-only workflow runs upload candidate artifacts. Pushing a matching
+`v<package-version>` tag builds a desktop-only **draft** GitHub release.
 The release notes disclose the signing policy and link to the versioned
 [installation instructions](installation.md) for macOS, Windows, and Linux.
 
 Before publishing the draft:
 
 1. Require successful tests, locked-dependency audit, platform builds and compliance jobs.
-2. Check that the metadata job attached `SHA256SUMS`, per-target CycloneDX SBOMs, third-party notices, execution hosts and the standalone CLI.
-3. Verify downloaded installers against `SHA256SUMS` and smoke-test installation and launch on each supported target, including the OS prompts described in the installation guide.
+2. Check the desktop checksum file, per-target CycloneDX SBOMs, third-party notices, execution hosts and the standalone CLI.
+3. Verify downloaded installers against `SHA256SUMS-desktop` (combined release) or `SHA256SUMS` (desktop-only release) and smoke-test installation and launch on each supported target, including the OS prompts described in the installation guide.
 4. Review the draft assets and notes manually, retaining the exact source revision and locked dependencies used by the build.
 
 `npm run release:verify` prevents a tag from drifting from `package.json`,
-`package-lock.json`, `Cargo.toml`, or `tauri.conf.json`. The metadata job downloads
-the actual installers from the draft and hashes their final download bytes and
-filenames. Checksums detect corruption; they do not authenticate the publisher.
+`package-lock.json`, `Cargo.toml`, or `tauri.conf.json`. The metadata job hashes
+the final installer bytes under the names used for download. Checksums detect
+corruption; they do not authenticate the publisher.
 A failed job leaves at most an incomplete unpublished draft. Publish only after
 all jobs succeed and manual review is complete; CI never publishes automatically.
 

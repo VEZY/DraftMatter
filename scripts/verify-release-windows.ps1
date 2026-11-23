@@ -1,4 +1,4 @@
-param([Parameter(Mandatory)][string]$BundleRoot)
+param([Parameter(Mandatory)][string]$BundleRoot, [string]$Target)
 $ErrorActionPreference = 'Stop'
 
 function Test-MsiExecutables([string]$Path) {
@@ -23,10 +23,9 @@ function Test-MsiExecutables([string]$Path) {
     }
 }
 
-foreach ($format in @(
-    @{ Directory = 'nsis'; Pattern = '*-setup.exe' },
-    @{ Directory = 'msi'; Pattern = '*.msi' }
-)) {
+$formats = @(@{ Directory = 'nsis'; Pattern = '*-setup.exe' })
+if ($Target -ne 'aarch64-pc-windows-msvc') { $formats += @{ Directory = 'msi'; Pattern = '*.msi' } }
+foreach ($format in $formats) {
     $directory = Join-Path $BundleRoot $format.Directory
     $installers = @(Get-ChildItem -LiteralPath $directory -Filter $format.Pattern -File)
     if ($installers.Count -ne 1) {
@@ -40,5 +39,20 @@ foreach ($format in @(
     Write-Output "$($installer.Name): NotSigned"
     if ($format.Directory -eq 'msi') {
         Test-MsiExecutables $installer.FullName
+        if ($Target) {
+            $engine = New-Object -ComObject WindowsInstaller.Installer
+            $db = $engine.OpenDatabase($installer.FullName, 0)
+            $view = $db.OpenView('SELECT `Value` FROM `Property` WHERE `Property`=''ProductVersion''')
+            $view.Execute()
+            $installedVersion = $view.Fetch().StringData(1)
+            $expected = (Get-Content src-tauri/tauri.release.conf.json -Raw | ConvertFrom-Json).bundle.windows.wix.version
+            if ($installedVersion -ne $expected) { throw "Unexpected MSI ProductVersion $installedVersion instead of $expected." }
+        }
+    } elseif ($Target) {
+        $destination = Join-Path $env:RUNNER_TEMP 'dm-smoke-install'
+        $setup = Start-Process $installer.FullName -ArgumentList "/S /D=$destination" -Wait -PassThru
+        if ($setup.ExitCode -ne 0) { throw "NSIS installation failed with exit code $($setup.ExitCode)." }
+        node scripts/verify-installed-desktop.mjs $destination $Target
+        if ($LASTEXITCODE -ne 0) { throw 'Installed desktop binaries failed verification.' }
     }
 }

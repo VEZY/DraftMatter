@@ -1,40 +1,50 @@
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { copyFile, mkdir, readFile, readdir, writeFile } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { checkVersion, desktopInstallerNames, installers as platformInstallers } from './prepare-desktop-release.mjs'
 
 const [artifactDir, installerDir, metadataDir] = process.argv.slice(2)
 if (!metadataDir) throw new Error('Usage: prepare-release-metadata.mjs <workflow-artifacts> <release-installers> <output>')
-const { version } = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'))
-const targets = ['x86_64-unknown-linux-gnu', 'x86_64-pc-windows-msvc', 'aarch64-apple-darwin', 'x86_64-apple-darwin']
+const version = checkVersion(process.env.DESKTOP_RELEASE_VERSION || JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version)
+const commit = process.env.GITHUB_SHA
+if (!/^[a-f0-9]{40}$/.test(commit ?? '')) throw new Error('Expected the source commit of this build.')
+const targets = Object.keys(platformInstallers)
 
-// These files come from the draft release itself, where Tauri has already applied its naming pattern.
 const installers = await readdir(installerDir)
-for (const suffix of ['linux_amd64_deb.deb', 'linux_amd64_appimage.AppImage', 'windows_x64_nsis.exe', 'windows_x64_msi.msi', 'darwin_x64_dmg.dmg', 'darwin_aarch64_dmg.dmg']) {
-  const name = `DraftMatter_${version}_${suffix}`
-  if (!installers.includes(name)) throw new Error(`Missing installer in the draft release: ${name}`)
+const expectedInstallers = desktopInstallerNames(version)
+const appArchives = ['x64', 'aarch64'].map((arch) => `DraftMatter_${version}_darwin_${arch}_app.app.tar.gz`)
+const expectedFiles = [...expectedInstallers, ...appArchives]
+for (const name of expectedFiles) {
+  if (!installers.includes(name)) throw new Error(`Missing installer in the candidate: ${name}`)
 }
-const files = new Map(installers.map((name) => [name, join(installerDir, name)]))
+if (installers.length !== expectedFiles.length) throw new Error('Unexpected installer in the candidate.')
+const files = new Map()
 await mkdir(metadataDir)
 
-async function stage(artifact, sourceName, releaseName) {
+async function stageFile(source, releaseName) {
   if (files.has(releaseName)) throw new Error(`Duplicate release asset: ${releaseName}`)
+  if (!(await stat(source)).size) throw new Error(`Empty release asset: ${releaseName}`)
   const destination = join(metadataDir, releaseName)
-  await copyFile(join(artifactDir, artifact, sourceName), destination)
+  await copyFile(source, destination)
   files.set(releaseName, destination)
 }
+for (const name of installers) await stageFile(join(installerDir, name), name)
 
 for (const target of targets) {
   const inventory = `draftmatter-${target}-compliance`
   for (const name of ['THIRD_PARTY_NOTICES.md', 'sbom.cdx.json']) {
-    await stage(inventory, name, `${inventory}-${name}`)
+    await stageFile(join(artifactDir, inventory, name), `${inventory}-${name}`)
   }
   const artifact = `draftmatter-${target}-agent-host`
   const host = target.includes('windows') ? 'draftmatter-agent-host.exe' : 'draftmatter-agent-host'
-  await stage(artifact, host, `${artifact}-${host}`)
+  await stageFile(join(artifactDir, artifact, host), `${artifact}-${host}`)
 }
 const cli = `draftmatter-${version}.tgz`
-await stage('draftmatter-cli', cli, cli)
+await stageFile(join(artifactDir, 'draftmatter-cli', cli), cli)
+const manifest = 'desktop-release.json'
+await writeFile(join(metadataDir, manifest), JSON.stringify({ version, commit, installers: expectedInstallers }, null, 2) + '\n')
+files.set(manifest, join(metadataDir, manifest))
 
 const checksums = []
 for (const name of [...files.keys()].sort()) {
@@ -42,4 +52,4 @@ for (const name of [...files.keys()].sort()) {
   for await (const chunk of createReadStream(files.get(name))) hash.update(chunk)
   checksums.push(`${hash.digest('hex')}  ${name}\n`)
 }
-await writeFile(join(metadataDir, 'SHA256SUMS'), checksums.join(''), 'utf8')
+await writeFile(join(metadataDir, 'SHA256SUMS-desktop'), checksums.join(''), 'utf8')

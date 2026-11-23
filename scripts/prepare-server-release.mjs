@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
-import { appendFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
+import { createReadStream } from 'node:fs'
+import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { dirname, join, resolve } from 'node:path'
 import { tmpdir } from 'node:os'
 import { pathToFileURL } from 'node:url'
+import { desktopInstallerNames } from './prepare-desktop-release.mjs'
 
 class ServerReleaseError extends Error {}
 
@@ -93,7 +95,36 @@ export function serverDeploymentPaths(treeEntries) {
   }).sort((left, right) => left.path.localeCompare(right.path))
 }
 
-export async function prepareServerAssets({ directory, output, identity, images }) {
+export async function verifyDesktopAssets(directory, identity) {
+  const checksumFile = 'SHA256SUMS-desktop'
+  const entries = await readdir(directory, { withFileTypes: true })
+  if (entries.some((file) => !file.isFile() || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(file.name) ||
+      ['server-release.json', 'SHA256SUMS', `draftmatter-server-${identity.version}.tar.gz`].includes(file.name))) {
+    throw new ServerReleaseError('Desktop assets must be regular files with distinct desktop filenames.')
+  }
+  const expected = new Set(entries.map((file) => file.name))
+  if (!expected.delete(checksumFile) || !expected.has('desktop-release.json')) throw new ServerReleaseError('The desktop release is missing its manifest or checksums.')
+  const manifest = JSON.parse(await readFile(join(directory, 'desktop-release.json'), 'utf8'))
+  if (manifest.version !== identity.version || manifest.commit !== identity.commit) {
+    throw new ServerReleaseError('The desktop artifact belongs to another version or source revision.')
+  }
+  const required = desktopInstallerNames(identity.version)
+  if (!Array.isArray(manifest.installers) || manifest.installers.length !== required.length ||
+      !required.every((name) => manifest.installers.includes(name) && expected.has(name))) {
+    throw new ServerReleaseError('The desktop release must include every expected installer in its manifest and files.')
+  }
+  const list = await readFile(join(directory, checksumFile), 'utf8')
+  for (const line of list.trimEnd().split(/\r?\n/)) {
+    const entry = /^([a-f0-9]{64})  (.+)$/.exec(line)
+    if (!entry || !expected.delete(entry[2])) throw new ServerReleaseError('Unexpected or duplicate desktop checksum entry.')
+    const hash = createHash('sha256')
+    for await (const chunk of createReadStream(join(directory, entry[2]))) hash.update(chunk)
+    if (hash.digest('hex') !== entry[1]) throw new ServerReleaseError(`Checksum mismatch for ${entry[2]}.`)
+  }
+  if (expected.size) throw new ServerReleaseError('Every desktop release asset must be covered by its checksums.')
+}
+
+export async function prepareServerAssets({ directory, output, identity, images, includeDesktop = false }) {
   const root = resolve(directory)
   if (command('git', ['rev-parse', `${identity.commit}^{commit}`], root) !== identity.commit) throw new ServerReleaseError('The release commit is not available in this checkout.')
   const entries = command('git', ['ls-tree', '-r', '-z', '--full-tree', identity.commit], root).split('\0').filter(Boolean).map((entry) => {
@@ -126,7 +157,10 @@ export async function prepareServerAssets({ directory, output, identity, images 
     await writeFile(join(output, 'server-release.json'), manifestBytes, { flag: 'wx' })
     const checksums = `${sha256(Buffer.from(manifestBytes))}  server-release.json\n${sha256(await readFile(archivePath))}  ${archiveName}\n`
     await writeFile(join(output, 'SHA256SUMS'), checksums, { flag: 'wx' })
-    const notes = `DraftMatter server ${identity.version}\n\nSource: https://github.com/${identity.repository}/commit/${identity.commit}\nPlatform: linux/amd64\n\nDownload the deployment archive, server-release.json and SHA256SUMS, verify the checksums, then follow docs/server-releases.md in the archive. The images in server-release.json are immutable digests promoted from the exact tested images. No DraftMatter compilation is required on the VPS. Configure the three GHCR packages as public before using anonymous docker pull.\n\nThis is a server release, separate from desktop installers. It contains code and deployment templates, never manuscripts, user data, runtime environments or secrets.\n`
+    const desktopNotes = includeDesktop
+      ? `## Desktop\n\nChoose the installer for your operating system and processor. Verify it against SHA256SUMS-desktop. The macOS builds use ad hoc signatures and Windows installers are unsigned. [Installation instructions](https://github.com/${identity.repository}/blob/${identity.commit}/docs/installation.md).\n\n`
+      : ''
+    const notes = `Source: https://github.com/${identity.repository}/commit/${identity.commit}\n\n${desktopNotes}## Server (Linux amd64)\n\nDownload the deployment archive, server-release.json and SHA256SUMS, verify the checksums, then follow docs/server-releases.md in the archive. The images in server-release.json are immutable digests promoted from the exact tested images. Configure the three GHCR packages as public before using anonymous docker pull.\n`
     await writeFile(join(output, 'server-release-notes.md'), notes, { flag: 'wx' })
     return { manifest, archiveName, files: selected.map(({ path }) => path) }
   } finally { await rm(staging, { recursive: true, force: true }) }
@@ -212,6 +246,9 @@ async function main() {
     await assertServerReleaseUnused(identity, { token: process.env.GH_TOKEN, actor: process.env.GITHUB_ACTOR, registry: false })
     if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `version=${identity.version}\n`)
     console.log(`Server release preflight passed: ${identity.tag}, ${identity.commit}.`)
+  } else if (mode === 'verify-desktop-assets') {
+    await verifyDesktopAssets(fileOrDirectory, identity)
+    console.log(`Verified the desktop assets for ${identity.version} from ${identity.commit}.`)
   } else if (mode === 'export-tested-images') {
     await mkdir(fileOrDirectory, { recursive: true })
     const images = Object.fromEntries(serverImageKinds.map((kind) => [kind, testedImageRecord(kind, identity.commit, inspect(`draftmatter-${kind}:${identity.commit}`))]))
@@ -239,9 +276,9 @@ async function main() {
       })
       images[kind] = `${repository}@${digest}`
     }
-    await prepareServerAssets({ directory: process.cwd(), output, identity, images })
+    await prepareServerAssets({ directory: process.cwd(), output, identity, images, includeDesktop: process.env.INCLUDE_DESKTOP === 'true' })
     console.log(`Prepared server release assets for ${identity.tag}; no runtime secrets or research data were included.`)
-  } else throw new ServerReleaseError('Use preflight, export-tested-images <directory>, verify-tested-images <metadata>, or publish-images <metadata> <output-directory>.')
+  } else throw new ServerReleaseError('Use preflight, verify-desktop-assets <directory>, export-tested-images <directory>, verify-tested-images <metadata>, or publish-images <metadata> <output-directory>.')
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

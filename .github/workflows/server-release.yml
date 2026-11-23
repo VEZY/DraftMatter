@@ -7,6 +7,10 @@ on:
         description: Leave blank for the next alpha, or enter an explicit server version
         type: string
         required: false
+      include_desktop:
+        description: Include desktop installers and prepare a joint draft for review
+        type: boolean
+        default: false
 
 concurrency:
   # Serialize all versions, including the collision check and final publication.
@@ -45,19 +49,34 @@ jobs:
     with:
       export-server-images: true
       server-release-version: ${{ needs.preflight.outputs.version }}
+      tested-image-retention-days: ${{ inputs.include_desktop && 7 || 1 }}
+    permissions:
+      contents: read
+
+  desktop:
+    if: inputs.include_desktop
+    needs: preflight
+    uses: ./.github/workflows/desktop-release.yml
+    with:
+      version: ${{ needs.preflight.outputs.version }}
     permissions:
       contents: read
 
   publish:
-    needs: [preflight, verify]
+    needs: [preflight, verify, desktop]
+    if: >-
+      !cancelled() && needs.preflight.result == 'success' && needs.verify.result == 'success' &&
+      ((inputs.include_desktop && needs.desktop.result == 'success') ||
+       (!inputs.include_desktop && needs.desktop.result == 'skipped'))
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 40
     permissions:
       contents: write
       packages: write
     env:
       RELEASE_VERSION: ${{ needs.preflight.outputs.version }}
       RELEASE_COMMIT: ${{ github.sha }}
+      INCLUDE_DESKTOP: ${{ inputs.include_desktop }}
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     steps:
       - uses: actions/checkout@v7
@@ -76,6 +95,15 @@ jobs:
         run: |
           gzip -dc "$RUNNER_TEMP/server-images/images.tar.gz" | docker load
           node scripts/prepare-server-release.mjs verify-tested-images "$RUNNER_TEMP/server-images/tested-images.json"
+      - name: Download the verified desktop packages from this run
+        if: inputs.include_desktop
+        uses: actions/download-artifact@v7
+        with:
+          name: draftmatter-desktop-release
+          path: ${{ runner.temp }}/desktop-release
+      - name: Check desktop version, source revision and downloaded bytes before publication
+        if: inputs.include_desktop
+        run: node scripts/prepare-server-release.mjs verify-desktop-assets "$RUNNER_TEMP/desktop-release"
       - name: Authenticate publication with the scoped workflow token
         run: |
           registry_config="$RUNNER_TEMP/draftmatter-registry-auth"
@@ -84,7 +112,7 @@ jobs:
           printf '%s' "$GH_TOKEN" | DOCKER_CONFIG="$registry_config" docker login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
       - name: Recheck collisions, promote tested images and prepare public assets
         run: node scripts/prepare-server-release.mjs publish-images "$RUNNER_TEMP/server-images/tested-images.json" "$RUNNER_TEMP/server-release"
-      - name: Publish the complete server release after all assets exist
+      - name: Attach all release assets and report publication status
         run: |
           tag="server-v$RELEASE_VERSION"
           previous=$(git describe --tags --match 'server-v[0-9]*' --abbrev=0 --always "$GITHUB_SHA")
@@ -93,17 +121,31 @@ jobs:
             printf '\n[Changes since %s](%s/%s/compare/%s...%s)\n' \
               "$previous" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$previous" "$tag" >> "$notes"
           fi
-          gh release create "$tag" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" \
-            --title "DraftMatter server $RELEASE_VERSION" --notes-file "$notes" \
-            --draft --prerelease
-          gh release upload "$tag" --repo "$GITHUB_REPOSITORY" \
+          title="DraftMatter server $RELEASE_VERSION"
+          assets=(
             "$RUNNER_TEMP/server-release/server-release.json" \
             "$RUNNER_TEMP/server-release/draftmatter-server-$RELEASE_VERSION.tar.gz" \
-            "$RUNNER_TEMP/server-release/SHA256SUMS"
-          gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
-          printf 'Published [%s](%s/%s/releases/tag/%s) from [%s](%s/%s/commit/%s).\n' \
-            "$tag" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$tag" "$GITHUB_SHA" \
-            "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+            "$RUNNER_TEMP/server-release/SHA256SUMS")
+          if [[ "$INCLUDE_DESKTOP" == true ]]; then
+            assets+=("$RUNNER_TEMP/desktop-release/"*)
+            title="DraftMatter $RELEASE_VERSION"
+            # Reserve this number while the draft awaits review. Automatic
+            # version selection and VPS releases use the server-v tag series.
+            gh api --method POST "repos/$GITHUB_REPOSITORY/git/refs" \
+              -f ref="refs/tags/$tag" -f sha="$GITHUB_SHA" > /dev/null
+          fi
+          draft_url=$(gh release create "$tag" "${assets[@]}" --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" --title "$title" --notes-file "$notes" --draft --prerelease)
+          if [[ "$INCLUDE_DESKTOP" == true ]]; then
+            edit_url=${draft_url/\/releases\/tag\//\/releases\/edit\/}
+            printf 'Prepared [desktop and server draft %s](%s) from [%s](%s/%s/commit/%s). Review the installers and choose **Publish release** to make all downloads available together.\n' \
+              "$tag" "$edit_url" "$GITHUB_SHA" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          else
+            gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false
+            printf 'Published [%s](%s/%s/releases/tag/%s) from [%s](%s/%s/commit/%s).\n' \
+              "$tag" "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$tag" "$GITHUB_SHA" \
+              "$GITHUB_SERVER_URL" "$GITHUB_REPOSITORY" "$GITHUB_SHA" >> "$GITHUB_STEP_SUMMARY"
+          fi
       - name: Remove temporary registry authentication
         if: always()
         run: rm -f "$RUNNER_TEMP/draftmatter-registry-auth/config.json"
