@@ -31,10 +31,16 @@ test.describe('DM-P4-05 markup filtering and navigation', () => {
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     }, source)
     await page.goto('/draft')
-    const review = page.getByRole('complementary', { name: 'Manuscript comments' })
     await page.getByRole('button', { name: 'Review options', exact: true }).click()
-    await expect(page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('button', { name: 'Margin notes', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('button', { name: 'In text', exact: true }).click()
+    const options = page.getByRole('dialog', { name: 'Review options', exact: true })
+    const views = options.getByRole('group', { name: 'Manuscript view' })
+    await expect(views.getByRole('button')).toHaveText(['Margin notes', 'In text', 'Original text', 'Final preview'])
+    await expect(views.getByRole('button', { pressed: true })).toHaveText('Margin notes')
+    await expect(options.getByRole('combobox')).toHaveCount(1)
+    for (const name of ['Original text', 'Final preview', 'In text']) {
+      await views.getByRole('button', { name, exact: true }).click()
+      await expect(views.getByRole('button', { pressed: true })).toHaveText(name)
+    }
   })
 
   test('keeps the manuscript marks, author filter, rail selection, and navigation aligned', async ({ page }) => {
@@ -44,7 +50,7 @@ test.describe('DM-P4-05 markup filtering and navigation', () => {
 
     await expect(marks).toHaveCount(2)
     await expect(manuscript.locator('.dm-review-proposal')).toHaveCount(2)
-    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByLabel('Review author').selectOption('dm-alice')
+    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('combobox', { name: 'Filter changes and comments by author' }).selectOption('dm-alice')
     await expect(marks).toHaveCount(1)
     await expect(manuscript.locator('.dm-review-proposal')).toHaveText('revised alpha phrase')
     await expect(marks.first()).toHaveAttribute('data-review-anchor', 'dm-alpha')
@@ -56,7 +62,7 @@ test.describe('DM-P4-05 markup filtering and navigation', () => {
     await page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('button', { name: 'In text', exact: true }).click()
     await expect(page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('button', { name: 'In text', exact: true })).toHaveAttribute('aria-pressed', 'true')
 
-    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByLabel('Review author').selectOption('dm-marcus')
+    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('combobox', { name: 'Filter changes and comments by author' }).selectOption('dm-marcus')
     await expect(marks).toHaveCount(1)
     await expect(marks.first()).toHaveAttribute('data-review-anchor', 'dm-beta')
     await marks.first().click()
@@ -64,11 +70,22 @@ test.describe('DM-P4-05 markup filtering and navigation', () => {
     await expect(marks.first()).toHaveClass(/dm-review-active/)
 
     await page.getByRole('button', { name: 'Review options', exact: true }).click()
-    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByLabel('Review author').selectOption('all')
+    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('combobox', { name: 'Filter changes and comments by author' }).selectOption('all')
     await expect(marks).toHaveCount(2)
     await review.getByRole('button', { name: 'Next review item' }).click()
     await expect(review.locator('#review-item-dm-change-alpha .proposal-option')).toHaveClass(/selected/)
     await expect(manuscript.locator('.dm-review-change[data-review-anchor="dm-alpha"]')).toHaveClass(/dm-review-active/)
+  })
+
+  test('starts with all authors when opening another manuscript', async ({ page }) => {
+    const filter = page.getByRole('combobox', { name: 'Filter changes and comments by author' })
+    await filter.selectOption('dm-alice')
+    await page.getByLabel('Open portable manuscript').setInputFiles({
+      name: 'another-paper.qmd', mimeType: 'text/markdown',
+      buffer: Buffer.from(source.replace('# Review navigation', '# Another paper')),
+    })
+    await expect(page.getByRole('article', { name: 'Editable manuscript' })).toContainText('Another paper')
+    await expect(filter).toHaveValue('all')
   })
 })
 

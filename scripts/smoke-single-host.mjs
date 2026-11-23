@@ -355,7 +355,11 @@ export async function collaborationBundle() {
   const temporary = mkdtempSync(join(tmpdir(), 'draftmatter-smoke-client-'))
   try {
     const entry = join(temporary, 'client.mjs')
-    writeFileSync(entry, `export { HocuspocusProvider } from ${JSON.stringify(fileURLToPath(import.meta.resolve('@hocuspocus/provider')))};\nexport * as Y from ${JSON.stringify(fileURLToPath(import.meta.resolve('yjs')))};\n`)
+    writeFileSync(entry, [
+      `export { HocuspocusProvider } from ${JSON.stringify(fileURLToPath(import.meta.resolve('@hocuspocus/provider')))}`,
+      `export * as Y from ${JSON.stringify(fileURLToPath(import.meta.resolve('yjs')))}`,
+      `export { collaborationSocketCredential } from ${JSON.stringify(join(repository, 'src/sharedEditor/collaborationProtocol.ts'))}`,
+    ].join('\n'))
     const result = await build({ configFile: false, root: repository, logLevel: 'error', build: {
       write: false, target: 'es2022', minify: false, lib: { entry, name: 'DmSmoke', formats: ['iife'] },
     } })
@@ -397,7 +401,7 @@ async function documentPeer(browser, settings, bundle, token, workspaceId, proje
       await new Promise((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error('Authenticated WebSocket synchronization timed out')), 20_000)
         const provider = new window.DmSmoke.HocuspocusProvider({
-          url: websocketUrl, name, token, document,
+          url: websocketUrl, name, token: window.DmSmoke.collaborationSocketCredential(token), document,
           onSynced: ({ state }) => { if (state) { clearTimeout(timeout); resolve() } },
           onAuthenticationFailed: () => { clearTimeout(timeout); reject(new Error('Authenticated WebSocket was rejected')) },
         })

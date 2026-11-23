@@ -33,6 +33,7 @@ test.describe('DM-P4-04 atomic local rebase', () => {
     const review = page.getByRole('complementary', { name: 'Manuscript comments' })
     await review.getByRole('button', { name: /Marcus Chen/ }).click()
     await review.getByRole('button', { name: 'Accept', exact: true }).click()
+    await expect(review.locator('#review-item-dm-i02')).toHaveCount(0)
     await expect(review.locator('#review-item-dm-i01')).toContainText('Needs rebase')
 
     await review.locator('#review-item-dm-i01 .proposal-option').evaluate((button: HTMLButtonElement) => button.click())
@@ -46,9 +47,9 @@ test.describe('DM-P4-04 atomic local rebase', () => {
     await form.getByRole('button', { name: 'Create rebased proposal' }).click()
 
     await expect(review.getByText('leaf area declined by 16%')).toBeVisible()
-    await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toContain('data-status="applied"')
+    await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toContain('data-rebased-from="dm-i01"')
     const portable = await page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')
-    expect(portable).toContain('data-status="applied"')
+    expect(portable).not.toContain('#dm-i02 .dm-change')
     expect(portable).toContain('data-status="rebased"')
     expect(portable).toContain('data-action="rebased"')
     expect(portable).toContain('data-rebased-from="dm-i01"')
@@ -56,7 +57,7 @@ test.describe('DM-P4-04 atomic local rebase', () => {
     expect(portable).toContain('leaf expansion slowed')
 
     await page.getByRole('button', { name: 'Review options', exact: true }).click()
-    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByLabel('Review display and preview').selectOption('final')
+    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('button', { name: 'Final preview', exact: true }).click()
     await expect(page.getByRole('article', { name: 'Editable manuscript' })).toContainText('The leaf area declined by 16%.')
   })
 })

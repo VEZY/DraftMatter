@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url'
 import { HocuspocusProvider } from '@hocuspocus/provider'
 import * as Y from 'yjs'
 import { AuthenticatedWorkspaceService } from '../src/collaboration/workspaceService'
+import { collaborationSocketCredential } from '../src/sharedEditor/collaborationProtocol'
 import { PROJECT_RESOURCES_ROOT, publishProjectResources, sharedImage } from '../src/sharedEditor/projectResources'
 import * as transport from '../services/collaboration/hocuspocusServer'
 import { FileCollaborationStore } from '../services/collaboration/fileStore'
@@ -257,7 +258,7 @@ async function transportProcess() {
       clients[index] = document
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => reject(new Error(`Client ${index} did not sync.`)), 60_000)
-        providers[index] = new HocuspocusProvider({ url: configuration.url, name: documentName, token: configuration.tokens[index], document, WebSocketPolyfill: WebSocket, onSynced: ({ state }) => { if (state) { clearTimeout(timeout); resolve() } }, onAuthenticationFailed: ({ reason }) => { clearTimeout(timeout); reject(new Error(reason)) } } as ConstructorParameters<typeof HocuspocusProvider>[0])
+        providers[index] = new HocuspocusProvider({ url: configuration.url, name: documentName, token: collaborationSocketCredential(configuration.tokens[index]), document, WebSocketPolyfill: WebSocket, onSynced: ({ state }) => { if (state) { clearTimeout(timeout); resolve() } }, onAuthenticationFailed: ({ reason }) => { clearTimeout(timeout); reject(new Error(reason)) } } as ConstructorParameters<typeof HocuspocusProvider>[0])
       })
       providers[index].awareness?.setLocalState({ draftmatter: { userId: `user${index}`, name: `Researcher ${index}`, color: '#617f73' }, user: { id: `user${index}`, name: `Researcher ${index}`, color: '#617f73' } })
     }))

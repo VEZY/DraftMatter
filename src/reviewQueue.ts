@@ -93,3 +93,14 @@ export function currentReviewChange(queue: ReviewQueueItem[], activeId?: string)
   return queue.find((item, index) => index >= start && isPendingReviewChange(item))
     ?? queue.find(isPendingReviewChange)
 }
+
+/** The reviewed item may have disappeared and its overlapping alternatives may now need a rebase. */
+export function nextChangeAfterDecision(before: ReviewQueueItem[], after: ReviewQueueItem[], decidedId: string) {
+  const pending = new Map(after.filter(isPendingReviewChange).map((item) => [item.id, item]))
+  const start = before.findIndex((item) => item.id === decidedId) + 1
+  for (const item of before.slice(start)) {
+    const next = pending.get(item.id)
+    if (next) return next
+  }
+  return currentReviewChange(after)
+}

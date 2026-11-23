@@ -4,6 +4,7 @@ import type { HocuspocusProvider } from '@hocuspocus/provider'
 import * as Y from 'yjs'
 import { HocuspocusCollaborationClient, type CollaborationClientOptions } from './hocuspocusClient'
 import { CollaborativeDocument } from './collaboration'
+import { collaborationSocketCredential } from './collaborationProtocol'
 
 type Configuration = ConstructorParameters<typeof HocuspocusProvider>[0]
 const { providers } = vi.hoisted(() => ({ providers: [] as Array<{
@@ -36,6 +37,21 @@ function opening(extra: Partial<CollaborationClientOptions> = {}) {
 }
 
 describe('collaborative room readiness', () => {
+  it('wraps freshly obtained access tokens for the socket and explains a legacy server denial', async () => {
+    const token = vi.fn().mockResolvedValueOnce('first-token').mockResolvedValueOnce('refreshed-token')
+    const f = opening({ token })
+    const rejected = expect(f.pending).rejects.toThrow('app and collaboration server are up to date')
+    await vi.waitFor(() => expect(providers).toHaveLength(1))
+    const { configuration } = providers[0]
+    expect(configuration.name).toBe('workspace:paper')
+    if (typeof configuration.token !== 'function') throw new Error('Expected renewable socket credentials.')
+    expect(await configuration.token()).toBe(collaborationSocketCredential('first-token'))
+    expect(await configuration.token()).toBe(collaborationSocketCredential('refreshed-token'))
+    configuration.onAuthenticationFailed!({ reason: 'permission-denied' })
+    await rejected
+    expect(f.onStatus).not.toHaveBeenCalledWith('connected')
+  })
+
   it('requires the room handshake before reporting connected, including after transport reconnects', async () => {
     const f = opening()
     await vi.waitFor(() => expect(providers).toHaveLength(1))

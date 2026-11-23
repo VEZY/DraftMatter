@@ -20,6 +20,7 @@ import type { CollaborationProjectLaunch } from './collaboration/sessionContext'
 import { Icon } from './Icon'
 import {
   HocuspocusCollaborationClient,
+  workingReviewSource,
   type ActiveCollaborator,
   type CollaborationCheckpoint,
   type CollaborationClientStatus,
@@ -569,16 +570,17 @@ export function CollaborationDialog({
     try {
       if (prepareCheckpointSource) {
         const current = client.createCheckpoint()
-        const prepared = prepareCheckpointSource(current.source)
-        if (prepared !== current.source) {
+        const working = workingReviewSource(current.source)
+        const prepared = prepareCheckpointSource(working)
+        if (prepared !== working) {
           const canonical = client.publishPortableSource(prepared)
           onRemoteSource(canonical)
         }
       }
       const next = client.createCheckpoint()
       await onCheckpoint(next)
-      checkpointedSourceRef.current = next.source
-      updateCheckpointState(false)
+      checkpointedSourceRef.current = workingReviewSource(next.source)
+      updateCheckpointState(client.collaboration.revisionToken() !== next.revision)
     } catch (error) {
       setDetail(error instanceof Error ? error.message : String(error))
     } finally {

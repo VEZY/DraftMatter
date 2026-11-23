@@ -1,5 +1,27 @@
 import { expect, test } from '@playwright/test'
 import { showWritingTools } from './writing-tools'
+import { selectRenderedTextWithMouse } from './rendered-selection'
+
+test('accepting a tracked edit in the example abstract leaves ordinary editable text and can be undone', async ({ page }) => {
+  await page.goto('/demo')
+  const abstract = page.locator('.ProseMirror p').filter({ hasText: 'We created a complete' })
+  await page.getByRole('button', { name: 'Turn on track changes' }).click()
+  await selectRenderedTextWithMouse(page, abstract, 'synthetic')
+  await page.keyboard.type('simulated')
+  const card = page.locator('[data-review-balloon]').filter({ hasText: 'imulated' })
+  await expect(card).toBeVisible()
+  await card.locator('.proposal-option').click()
+  await card.getByRole('button', { name: 'Accept', exact: true }).click()
+  await expect(abstract).toContainText('a complete, simulated drought-phenotyping study')
+  await expect(abstract.locator('.dm-review-change, .dm-review-proposal, .dm-review-wording')).toHaveCount(0)
+  await expect(card).toHaveCount(0)
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect(card).toHaveCount(1)
+  await expect(abstract).toContainText('synthetic')
+  await page.keyboard.press('ControlOrMeta+Shift+z')
+  await expect(card).toHaveCount(0)
+  await expect(abstract).toContainText('a complete, simulated drought-phenotyping study')
+})
 
 test('the anonymous example supports editing and citations without reading, replacing or uploading a private draft', async ({ page, baseURL }) => {
   test.setTimeout(90_000)

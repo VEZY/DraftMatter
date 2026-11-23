@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import identicalReviewSource from '../fixtures/portable/25-review-identical.qmd?raw'
 import { parseReviewMarkup } from '../reviewMarkup'
 import { CollaborativeDocument, syncCollaborativeDocuments } from './collaboration'
@@ -17,6 +17,25 @@ function peers() {
 }
 
 describe('deterministic collaboration checkpoint', () => {
+  it('reads the shared text a bounded number of times when publishing a paper with many anchors', () => {
+    const manuscript = 'Plant models predict responses to drought across several environments.\n\n'.repeat(1200)
+    const document = CollaborativeDocument.fromPortableSource(manuscript)
+    try {
+      const view = document.reviewText()
+      document.putAuthor({ id: 'author', name: 'Author' })
+      for (let i = 0; i < 100; i++) {
+        const anchorId = 'range-' + i
+        document.putAnchor({ id: anchorId, start: document.relativePosition(i * 720, view), end: document.relativePosition(i * 720 + 5, view) })
+        document.putProposal({ id: 'suggestion-' + i, anchorId, authorId: 'author', status: 'open', kind: 'replace', proposal: 'Study' })
+      }
+      const read = vi.spyOn(document.text, 'toDelta')
+      const checkpoint = createCollaborationCheckpoint(document)
+      document.reconcilePortableSource(checkpoint.source.replace('predict responses', 'describe responses'))
+      expect(document.source).toContain('describe responses')
+      expect(document.snapshot().anchors).toHaveLength(100)
+      expect(read.mock.calls.length).toBeLessThan(12)
+    } finally { document.destroy() }
+  })
   it('produces byte-identical portable Markdown on converged clients', () => {
     const { left, right } = peers()
     left.putThread({

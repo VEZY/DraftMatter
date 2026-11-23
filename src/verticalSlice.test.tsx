@@ -82,7 +82,7 @@ describe('rendered Phase 0 vertical slice', () => {
     expect(normalizedText(reviewFooter.querySelector('span'))).toBe('1 of 3')
 
     expect(container.querySelector('.review-panel-header')).toBeNull()
-    expect(container.querySelector('[aria-label="Review author"]')).toBeNull()
+    expect(container.querySelector('.review-display-options-popover')).toBeNull()
     expect(container.querySelector('.comment-quote')).toBeNull()
 
     await click(buttonWithText(container, 'View source'))
@@ -96,8 +96,9 @@ describe('rendered Phase 0 vertical slice', () => {
     await click(container.querySelectorAll('.proposal-option')[1])
     await click(buttonWithText(container.querySelector('.review-actions')!, 'Accept'))
 
-    expect(normalizedText(container.querySelectorAll('.proposal-option')[1])).toContain('Accepted')
-    expect(normalizedText(container.querySelectorAll('.proposal-option')[0])).toContain('Needs rebase')
+    expect(container.querySelector('#review-item-dm-c02')).toBeNull()
+    expect(normalizedText(container.querySelector('#review-item-dm-c01'))).toContain('Needs rebase')
+    expect(normalizedText(container.querySelector('article.manuscript'))).toContain('lowered leaf expansion during the treatment period')
 
     await click(buttonWithText(container, 'View source'))
     await click(buttonWithText(container.querySelector('.source-tabs')!, 'Clean final'))

@@ -4,6 +4,9 @@ import { decodeJwt } from 'jose'
 import * as Y from 'yjs'
 import type { ProjectAuthorizationService, WorkspaceRole } from '../../src/collaboration/workspaceService'
 import { parseReviewMarkup } from '../../src/reviewMarkup'
+import { documentReviewText } from '../../src/sharedEditor/collaboration'
+import { hasReviewTextAttributes } from '../../src/sharedEditor/reviewText'
+import { collaborationUpgradeMessage, socketAccessToken } from '../../src/sharedEditor/collaborationProtocol'
 import { PROJECT_RESOURCES_ROOT, projectResourcesDiagnostic } from '../../src/sharedEditor/projectResources'
 import { CollaborationStoreError, type CollaborationProjectScope } from './fileStore'
 import type { CollaborationPersistence } from './persistence'
@@ -100,10 +103,16 @@ class ValidationReadCache {
 
 const readCaches = new WeakMap<Y.Doc, ValidationReadCache>()
 
+function manuscriptRuns(text: Y.Text) {
+  const runs = text.toDelta() as { insert: unknown; attributes?: Record<string, unknown> }[]
+  if (runs.some((run) => typeof run.insert !== 'string')) throw new Error('Expected manuscript text.')
+  return runs
+}
+
 function rootFingerprint(document: Y.Doc, name: string) {
   const type = name === ROOTS.document ? document.getText(name)
     : name === ROOTS.prosemirror ? document.getXmlFragment(name) : document.getMap(name)
-  const compute = () => JSON.stringify(canonical(type.toJSON()))
+  const compute = () => JSON.stringify(canonical(type instanceof Y.Text ? manuscriptRuns(type) : type.toJSON()))
   return readCaches.get(document)?.read(name, type, 'fingerprint', compute) ?? compute()
 }
 
@@ -120,19 +129,21 @@ function resourcesDiagnostic(document: Y.Doc) {
 
 function reservedReviewMarkup(document: Y.Doc) {
   const text = document.getText(ROOTS.document)
-  const compute = (fast: boolean) => {
-    const source = text.toString()
-    // Necessary literals in the current grammar: portableSource's anchorPattern
-    // requires .dm-anchor; reviewMarkup's section classes require
-    // .draftmatter-reviews. Presence always falls back to the complete parser,
-    // including literal/fenced contexts. Scan the full resulting source so
-    // markers assembled by separate or concurrent edits cannot evade this.
+  const cache = readCaches.get(document)
+  const containsMarkup = (source: string, fast: boolean) => {
     if (fast && !source.includes('.dm-anchor') && !source.includes('.draftmatter-reviews')) return false
     const review = parseReviewMarkup(source)
     return review.sectionStart !== undefined || review.anchors.length > 0
   }
-  const cache = readCaches.get(document)
-  return cache ? cache.read(ROOTS.document, text, 'review-markup', () => compute(true)) : compute(false)
+  const inspectText = () => {
+    const runs = manuscriptRuns(text)
+    if (containsMarkup(text.toString(), Boolean(cache))) return 'reserved'
+    return runs.some((run) => hasReviewTextAttributes(run.attributes)) ? 'reviewed' : 'clear'
+  }
+  const state = cache ? cache.read(ROOTS.document, text, 'review-markup', inspectText) : inspectText()
+  // A decision alone can change which runs are visible. Only the raw text check
+  // can be cached solely by the manuscript root.
+  return state === 'reserved' || (state === 'reviewed' && containsMarkup(documentReviewText(document).source, Boolean(cache)))
 }
 
 function unknownRoots(document: Y.Doc) {
@@ -368,17 +379,18 @@ function validDecision(value: unknown, key: string, userId: string) {
     && typeof decision.changeId === 'string'
     && SAFE_ID.test(decision.changeId)
     && typeof decision.action === 'string'
-    && ['accepted', 'rejected', 'rebased'].includes(decision.action)
+    && ['accepted', 'rejected', 'rebased', 'reopened'].includes(decision.action)
     && (decision.timestamp === undefined || (typeof decision.timestamp === 'string' && decision.timestamp.length <= 100))
     && typeof decision.baseRevision === 'string'
     && decision.baseRevision.length > 0
     && decision.baseRevision.length <= 16_384
     && (decision.resolves === undefined || (Array.isArray(decision.resolves)
-      && decision.resolves.length >= 2
+      && decision.resolves.length >= 1
       && decision.resolves.length <= 100
       && new Set(decision.resolves).size === decision.resolves.length
       && decision.resolves.every((id) => typeof id === 'string' && SAFE_ID.test(id))))
-    && Object.keys(decision).every((field) => ['id', 'changeId', 'authorId', 'action', 'timestamp', 'baseRevision', 'resolves'].includes(field))
+    && (decision.materialized === undefined || (decision.materialized === true && decision.action === 'accepted'))
+    && Object.keys(decision).every((field) => ['id', 'changeId', 'authorId', 'action', 'timestamp', 'baseRevision', 'resolves', 'materialized'].includes(field))
 }
 
 function validExistingProposal(before: unknown, after: unknown, hasNewDecision: boolean, userId: string, decided: boolean) {
@@ -484,8 +496,34 @@ function activeDecisionStatuses(decisions: Map<string, unknown>, changeId: strin
   return new Set(matching.flatMap(([id, value]) => {
     if (resolved.has(id)) return []
     const action = (value as Record<string, unknown>).action
-    return [action === 'rebased' ? 'needs-rebase' : String(action)]
+    return [action === 'rebased' ? 'needs-rebase' : action === 'reopened' ? 'open' : String(action)]
   }))
+}
+
+// A reconnect may deliver several legitimate undo/redo events in one update.
+// Validate their dependency order without assuming Y.Map iteration order.
+function decisionHistoryIsAcyclic(decisions: Map<string, unknown>, added: Set<string>) {
+  const children = new Map<string, string[]>()
+  const remaining = new Map<string, number>()
+  const ready: string[] = []
+  for (const id of added) {
+    const parents = ((decisions.get(id) as { resolves?: string[] }).resolves ?? []).filter((parent) => added.has(parent))
+    if (!parents.length) ready.push(id)
+    else remaining.set(id, parents.length)
+    for (const parent of parents) {
+      const siblings = children.get(parent)
+      if (siblings) siblings.push(id)
+      else children.set(parent, [id])
+    }
+  }
+  for (let index = 0; index < ready.length; index++) {
+    for (const child of children.get(ready[index]) ?? []) {
+      const count = remaining.get(child)! - 1
+      if (!count) ready.push(child)
+      remaining.set(child, count)
+    }
+  }
+  return ready.length === added.size
 }
 
 function commenterMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
@@ -577,6 +615,8 @@ function editorMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
     newDecisionIds.add(key)
   }
 
+  if (!decisionHistoryIsAcyclic(afterDecisions, newDecisionIds)) return false
+
   const beforeProposals = mapSnapshot(before, ROOTS.proposals)
   const afterProposals = mapSnapshot(after, ROOTS.proposals)
   const decidedChanges = new Set([...afterDecisions.values()].map((decision) => (decision as Record<string, unknown>).changeId))
@@ -590,27 +630,38 @@ function editorMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
       if (!validProposal(next, key, userId) || (next as Record<string, unknown>).status !== 'open') return false
       newProposalIds.add(key)
     } else {
-      if (!validExistingProposal(previous, next, hasNewDecision, userId, decidedChanges.has(key))) return false
+      const decisions = decidedChanges.has(key) ? activeDecisionStatuses(afterDecisions, key) : undefined
+      const decided = Boolean(decisions && !(decisions.size === 1 && decisions.has('open')))
+      if (!validExistingProposal(previous, next, hasNewDecision, userId, decided)) return false
       if (!same((previous as Record<string, unknown>).status, (next as Record<string, unknown>).status)) changedProposalStatusIds.add(key)
     }
   }
 
+  const supersededBefore = new Set([...beforeDecisions.values()].flatMap((decision) => (decision as { resolves?: string[] }).resolves ?? []))
+  const supersededAfter = new Set([...afterDecisions.values()].flatMap((decision) => (decision as { resolves?: string[] }).resolves ?? []))
   for (const [decisionId, decision] of afterDecisions) {
     const record = decision as Record<string, unknown>
     if (!afterProposals.has(String(record.changeId))) return false
     if (!newDecisionIds.has(decisionId)) continue
     if (!afterAuthors.has(userId)) return false
     const proposal = afterProposals.get(String(record.changeId)) as Record<string, unknown>
-    const expectedStatus = record.action === 'rebased' ? 'needs-rebase' : record.action
+    const expectedStatus = record.action === 'rebased' ? 'needs-rebase' : record.action === 'reopened' ? 'open' : record.action
     const activeStatuses = activeDecisionStatuses(afterDecisions, String(record.changeId))
-    if (activeStatuses.size < 2 && proposal.status !== expectedStatus) return false
-    if (activeStatuses.size >= 2 && proposal.status !== 'decision-conflict' && !activeStatuses.has(String(proposal.status))) return false
+    if (!supersededAfter.has(decisionId)) {
+      if (activeStatuses.size < 2 && proposal.status !== expectedStatus
+        && !(record.action === 'reopened' && proposal.status === 'needs-rebase')) return false
+      if (activeStatuses.size >= 2 && proposal.status !== 'decision-conflict' && !activeStatuses.has(String(proposal.status))) return false
+    }
+    if (record.action === 'reopened' && !Array.isArray(record.resolves)) return false
     if (Array.isArray(record.resolves)) {
       const resolved = record.resolves.map((id) => afterDecisions.get(String(id)) as Record<string, unknown> | undefined)
-      if (resolved.some((candidate) => !candidate
-        || candidate.changeId !== record.changeId
-        || Array.isArray(candidate.resolves))) return false
-      if (new Set(resolved.map((candidate) => candidate!.action)).size < 2) return false
+      if (record.resolves.includes(decisionId) || record.resolves.some((id) => supersededBefore.has(String(id))) || resolved.some((candidate) => !candidate || candidate.changeId !== record.changeId)) return false
+      if (record.action === 'reopened') {
+        const original = resolved[0]!
+        if (resolved.length !== 1 || original.authorId !== userId || !['accepted', 'rejected'].includes(String(original.action))) return false
+      } else if (!resolved.every((candidate) => candidate!.action === 'reopened')) {
+        if (resolved.length < 2 || new Set(resolved.map((candidate) => candidate!.action)).size < 2) return false
+      }
     }
   }
 
@@ -967,7 +1018,9 @@ export function createDraftMatterHocuspocusServer(options: DraftMatterHocuspocus
   }
 
   const snapshotIdFactory = options.snapshotIdFactory ?? (() => crypto.randomUUID())
-  const authorizeConnection = async (token: string, scope: CollaborationProjectScope, connectionConfig: { readOnly: boolean }) => {
+  const authorizeConnection = async (credential: string, scope: CollaborationProjectScope, connectionConfig: { readOnly: boolean }) => {
+    const token = socketAccessToken(credential)
+    if (token === undefined) throw new CollaborationTransportError(4406, collaborationUpgradeMessage)
     const access = await options.authorization.authorizeProject(token, scope.workspaceId, scope.projectId, 'read')
     let readOnly = access.role === 'viewer'
     if (!readOnly) {

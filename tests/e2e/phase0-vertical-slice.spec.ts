@@ -69,9 +69,9 @@ test.describe('DM-P0-06 rendered vertical slice', () => {
     await page.getByRole('button', { name: 'Close source inspector' }).click()
     await reviewPanel.locator('#review-item-dm-c02').click()
     await reviewPanel.getByRole('button', { name: 'Accept' }).click()
-    await expect(reviewPanel.locator('#review-item-dm-c02')).toContainText('Accepted')
+    await expect(reviewPanel.locator('#review-item-dm-c02')).toHaveCount(0)
+    await expect(manuscript).toContainText('lowered leaf expansion during the treatment period')
     await expect(reviewPanel.locator('#review-item-dm-c01')).toContainText('Needs rebase')
-    await expect(reviewPanel.locator('#review-item-dm-c02 time')).toHaveAttribute('title', /^Updated /)
     await expect(reviewPanel.locator('#review-item-dm-c01 time')).toHaveAttribute('title', /^Updated /)
 
     await page.getByRole('button', { name: /View source/ }).click()

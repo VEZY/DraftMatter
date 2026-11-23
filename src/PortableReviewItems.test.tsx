@@ -73,7 +73,7 @@ describe('portable review panel items', () => {
     container.remove()
   })
 
-  it('renders imported alternatives and records an attributed atomic decision', async () => {
+  it('folds the accepted alternative into the manuscript and keeps the overlapping suggestion for rebase', async () => {
     expect(container.querySelectorAll('.proposal-option')).toHaveLength(2)
     const cards = [...container.querySelectorAll<HTMLElement>('[data-review-balloon-anchor]')]
     expect(cards).toHaveLength(2)
@@ -85,15 +85,9 @@ describe('portable review panel items', () => {
     await click(button(container, 'Accept'))
 
     const parsed = parseReviewMarkup(latestSource)
-    expect(parsed.changes.map((change) => [change.id, change.status])).toEqual([
-      ['dm-i01', 'needs-rebase'],
-      ['dm-i02', 'accepted'],
-    ])
-    expect(parsed.authors).toContainEqual(expect.objectContaining({ id: 'dm-local-author', name: 'Remi Vezy' }))
-    expect(parsed.decisions).toEqual([expect.objectContaining({ changeId: 'dm-i02', authorId: 'dm-local-author', action: 'accepted' })])
-    expect(parsed.changes.find((change) => change.id === 'dm-i02')?.updatedAt).toBe(parsed.decisions[0].timestamp)
-    expect(parsed.changes.find((change) => change.id === 'dm-i01')?.updatedAt).toBe(parsed.decisions[0].timestamp)
-    expect(container.querySelector('#review-item-dm-i02 time')?.getAttribute('title')).toMatch(/^Updated /)
+    expect(parsed.changes.map((change) => [change.id, change.status])).toEqual([['dm-i01', 'needs-rebase']])
+    expect(projectPortableReviewSource(latestSource, { view: 'original' }).source).toContain('The leaf expansion slowed.')
+    expect(container.querySelector('#review-item-dm-i02')).toBeNull()
     expect(notices.at(-1)).toContain('overlapping alternative')
   })
 
@@ -102,11 +96,9 @@ describe('portable review panel items', () => {
     await click(card.querySelector('.proposal-option')!)
     await click(button(card, 'Reject'))
     const parsed = parseReviewMarkup(latestSource)
-    expect(parsed.changes.map((change) => [change.id, change.status])).toEqual([
-      ['dm-i01', 'open'],
-      ['dm-i02', 'rejected'],
-    ])
-    expect(parsed.decisions).toEqual([expect.objectContaining({ changeId: 'dm-i02', authorId: 'dm-local-author', action: 'rejected' })])
+    expect(parsed.changes.map((change) => [change.id, change.status])).toEqual([['dm-i01', 'open']])
+    expect(projectPortableReviewSource(latestSource, { view: 'original' }).source).toContain('The leaf area declined.')
+    expect(container.querySelector('#review-item-dm-i02')).toBeNull()
   })
 
   it('explains and resolves incompatible offline decisions from the live review rail', async () => {
@@ -141,8 +133,8 @@ describe('portable review panel items', () => {
     await click(button(container.querySelector('.review-decision-conflict')!, 'Keep rejected'))
 
     expect(leftBinding.conflicts()).toEqual([])
-    expect(parseReviewMarkup(latestSource).changes.find((change) => change.id === 'dm-i01')?.status).toBe('rejected')
-    expect(parseReviewMarkup(latestSource).decisions.find((decision) => decision.attributes['data-resolves'])).toMatchObject({ action: 'rejected' })
+    expect(parseReviewMarkup(latestSource).changes.map((change) => change.id)).not.toContain('dm-i01')
+    expect(projectPortableReviewSource(latestSource, { view: 'original' }).source).toContain('The leaf area declined.')
     expect(notices.at(-1)).toContain('Concurrent decisions resolved')
     expect(container.querySelector('.review-decision-conflict')).toBeNull()
   })
@@ -161,11 +153,8 @@ describe('portable review panel items', () => {
     await click(button(container.querySelector('#review-item-dm-i01')!, 'Accept'))
 
     const parsed = parseReviewMarkup(latestSource)
-    expect(parsed.changes.map((change) => [change.id, change.status])).toEqual([
-      ['dm-i01', 'accepted'],
-      ['dm-i02', 'needs-rebase'],
-    ])
-    expect(parsed.decisions).toEqual([expect.objectContaining({ changeId: 'dm-i01', authorId: 'dm-local-author' })])
+    expect(parsed.changes.map((change) => [change.id, change.status])).toEqual([['dm-i02', 'needs-rebase']])
+    expect(projectPortableReviewSource(latestSource, { view: 'original' }).source).toContain('The leaf area declined by 18%.')
     expect(notices.at(-1)).toContain('Suggestion accepted')
   })
 
@@ -183,17 +172,16 @@ describe('portable review panel items', () => {
     const parsed = parseReviewMarkup(latestSource)
     expect(parsed.changes.map((change) => [change.id, change.status])).toEqual([
       ['dm-i01', 'rebased'],
-      ['dm-i02', 'applied'],
       [expect.stringMatching(/^dm-change-/), 'open'],
     ])
-    expect(parsed.decisions.map((decision) => decision.action)).toEqual(['accepted', 'rebased'])
+    expect(parsed.decisions.map((decision) => decision.action)).toEqual(['rebased'])
     expect(parsed.changes.at(-1)?.attributes['data-rebased-from']).toBe('dm-i01')
     expect(container.querySelectorAll('.proposal-option')).toHaveLength(1)
     const original = projectPortableReviewSource(latestSource, { view: 'original' })
     expect(original.source).toContain('The leaf expansion slowed.')
     const final = projectPortableReviewSource(latestSource, { view: 'final' })
     expect(final.source).toContain('The leaf area declined by 16%.')
-    expect(notices.at(-1)).toContain('accepted decision')
+    expect(notices.at(-1)).toBe('Revised suggestion ready for review')
   })
 
   it('filters the portable queue by author without changing source records', async () => {

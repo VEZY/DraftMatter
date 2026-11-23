@@ -1,60 +1,27 @@
-import { randomBytes } from 'node:crypto'
-import { mkdtemp, rm } from 'node:fs/promises'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { expect, test, type Page } from '@playwright/test'
-import { AuthenticatedWorkspaceService } from '../../src/collaboration/workspaceService'
-import { CollaborativeDocument } from '../../src/sharedEditor/collaboration'
-import { FileCollaborationStore } from '../../services/collaboration/fileStore'
-import { createDraftMatterHocuspocusServer } from '../../services/collaboration/hocuspocusServer'
+import { expect, test, type Locator, type Page } from '@playwright/test'
+import { startSharedManuscript } from './shared-manuscript'
 import { selectRenderedTextWithMouse } from './rendered-selection'
+
+function manuscriptText(paragraph: Locator) {
+  return paragraph.evaluate((element) => {
+    const copy = element.cloneNode(true) as HTMLElement
+    copy.querySelectorAll('.ProseMirror-yjs-cursor').forEach((cursor) => cursor.remove())
+    return copy.textContent
+  })
+}
 
 test('two collaborators see one amended replacement and stay at the passage under review', async ({ browser, baseURL }, testInfo) => {
   test.setTimeout(60_000)
-  const root = await mkdtemp(join(tmpdir(), 'draftmatter-browser-review-'))
-  const authorization = new AuthenticatedWorkspaceService({ secret: randomBytes(32) })
-  const owner = await authorization.createSessionForVerifiedIdentity({ userId: 'alice', sessionId: 'alice-browser' })
-  const editor = await authorization.createSessionForVerifiedIdentity({ userId: 'bea', sessionId: 'bea-browser' })
-  const workspace = await authorization.createWorkspace(owner, { id: 'forest', name: 'Field study' })
-  await authorization.createProject(owner, 'forest', { id: 'water', name: 'Water in the canopy' })
-  const invitation = await authorization.createInvitation(owner, 'forest', { role: 'editor' })
-  await authorization.acceptInvitation(editor, invitation.token)
-  const viewer = await authorization.createSessionForVerifiedIdentity({ userId: 'sam', sessionId: 'sam-browser' })
-  const readOnlyInvite = await authorization.createInvitation(owner, 'forest', { role: 'viewer' })
-  await authorization.acceptInvitation(viewer, readOnlyInvite.token)
-
   const source = [
     '# Water in the canopy', ...Array.from({ length: 24 }, (_, index) =>
       `## Plot ${index + 1}\n\nAt this site, the team recorded water loss from leaves throughout the season.`),
     '## Results', 'The canopy retained more water under shade.', '## Interpretation',
     'The measurements reflect the balance between interception and evaporation.',
   ].join('\n\n') + '\n'
-  const persistence = new FileCollaborationStore({ root })
-  const document = CollaborativeDocument.fromPortableSource(source)
-  await persistence.createSnapshot({ workspaceId: 'forest', projectId: 'water' }, 'seed', document.encodeUpdate())
-  document.destroy()
-  const server = createDraftMatterHocuspocusServer({ address: '127.0.0.1', port: 0, authorization, persistence })
-  const authorContext = await browser.newContext({ baseURL })
-  const readerContext = await browser.newContext({ baseURL })
+  const shared = await startSharedManuscript(browser, baseURL!, source)
   try {
-    await server.listen()
-    const serviceUrl = server.webSocketURL.replace(/^ws:/, 'http:')
-    const author = await authorContext.newPage()
-    const reader = await readerContext.newPage()
-    async function open(page: Page, token: string, userId: string, displayName: string) {
-      const projects = await authorization.listProjects(token, 'forest')
-      const workspaces = [{ ...workspace, role: projects[0].role }]
-      const launch = { serviceUrl, token, profile: { userId, displayName }, workspaceId: 'forest', projectId: 'water', projects, workspaces }
-      await page.addInitScript((value) => Object.assign(window, { sharedReviewLaunch: value }), launch)
-      await page.route('**/api/workspaces/forest/projects', (route) => route.fulfill({ json: { projects } }))
-      // The separate collaboration gateway is the only WebSocket under test.
-      // Ignore Vite reloads so local source edits cannot remount an active editor.
-      await page.routeWebSocket((url) => url.host === new URL(baseURL!).host, () => {})
-      await page.goto('/tests/e2e/fixtures/shared-review.html')
-      await expect(page.locator('.collaboration-toggle.connected')).toBeVisible()
-    }
-    await open(author, owner, 'alice', 'Alice Green')
-    await open(reader, editor, 'bea', 'Bea Stone')
+    const author = await shared.open('owner')
+    const reader = await shared.open('editor')
     const readerActions = reader.getByRole('group', { name: 'Review tracked changes' })
     await expect(readerActions).toBeHidden()
     await author.getByRole('button', { name: 'Turn on track changes' }).click()
@@ -111,31 +78,57 @@ test('two collaborators see one amended replacement and stay at the passage unde
     await expect(interpretation(reader).locator('button.dm-review-proposal')).toHaveText('transpiration and')
     await expect(interpretation(reader)).toContainText('evaporation')
 
-    const observer = await readerContext.newPage()
-    await open(observer, viewer, 'sam', 'Sam Lee')
+    const observer = await shared.open('viewer')
     await expect(observer.locator(`[data-review-balloon="${proposalId}"]`)).toContainText('slightly less')
     await expect(observer.getByRole('button', { name: /^(Accept|Reject) and go to next change$/ })).toHaveCount(0)
 
     const toolbar = reader.locator('.topbar')
-    await toolbar.getByRole('button', { name: 'Accept and go to next change' }).click()
     const insertionId = await interpretation(author).getByRole('textbox', { name: 'Edit suggested wording' }).getAttribute('data-proposal-id')
-    await expect(reader.locator(`[data-review-balloon="${proposalId}"]`)).toContainText(/accepted/i)
+    expect(insertionId).toBeTruthy()
+    await toolbar.getByRole('button', { name: 'Accept and go to next change' }).click()
+    await expect(reader.locator(`[data-review-balloon="${proposalId}"]`)).toHaveCount(0)
+    await expect(readerPassage).toHaveText('The canopy retained slightly less water under shade.')
     await expect(interpretation(reader)).toBeInViewport()
+    await reader.getByRole('button', { name: 'Review options', exact: true }).click()
+    const viewOptions = reader.getByRole('dialog', { name: 'Review options' })
+    await viewOptions.getByRole('button', { name: 'Final preview' }).click()
+    await expect(interpretation(reader)).toContainText('transpiration and evaporation')
+    await expect(interpretation(author).getByRole('textbox', { name: 'Edit suggested wording' })).toHaveValue('transpiration and ')
+    await viewOptions.getByRole('button', { name: 'In text', exact: true }).click()
+    await viewOptions.getByRole('button', { name: 'Close review options' }).click()
     await toolbar.getByRole('button', { name: 'Reject and go to next change' }).click()
-    for (const page of [author, reader]) {
-      await expect(page.locator(`[data-review-balloon="${proposalId}"]`)).toContainText(/accepted/i)
-      await expect(page.locator(`[data-review-balloon="${insertionId}"]`)).toContainText(/rejected/i)
+    for (const page of [author, reader, observer]) {
+      await expect(page.locator(`[data-review-balloon="${proposalId}"]`)).toHaveCount(0)
+      await expect(page.locator(`[data-review-balloon="${insertionId}"]`)).toHaveCount(0)
       await expect(page.getByRole('group', { name: 'Review tracked changes' })).toBeHidden()
-      await page.getByRole('button', { name: 'Review options', exact: true }).click()
-      await page.getByLabel('Review display and preview').selectOption('final')
-      await page.getByRole('button', { name: 'Close review options' }).click()
       await expect(passage(page)).toHaveText('The canopy retained slightly less water under shade.')
       await expect(passage(page).locator('.dm-review-wording, button.dm-review-proposal')).toHaveCount(0)
       await expect(interpretation(page)).toHaveText('The measurements reflect the balance between interception and evaporation.')
     }
+    await author.getByRole('button', { name: 'Turn off track changes' }).click()
+    const firstIntro = author.locator('.ProseMirror p').first()
+    await selectRenderedTextWithMouse(author, firstIntro, 'leaves')
+    await author.keyboard.type('stems')
+    await expect(reader.locator('.ProseMirror p').first()).toContainText('water loss from stems')
+    await reader.bringToFront()
+    await reader.keyboard.press('ControlOrMeta+z')
+    await expect(observer.locator(`[data-review-balloon="${insertionId}"]`)).toContainText('transpiration')
+    await reader.keyboard.press('ControlOrMeta+z')
+    await expect(observer.locator(`[data-review-balloon="${proposalId}"]`)).toContainText('slightly less')
+    await expect(readerPassage).toContainText('more')
+    await reader.keyboard.press('ControlOrMeta+Shift+z')
+    await reader.keyboard.press('ControlOrMeta+Shift+z')
+    await expect(authorPassage).toHaveText('The canopy retained slightly less water under shade.')
+    await author.bringToFront()
+    await selectRenderedTextWithMouse(author, authorPassage, 'slightly less')
+    await author.keyboard.type('much less')
+    await expect.poll(() => manuscriptText(readerPassage)).toBe('The canopy retained much less water under shade.')
+    const lateReader = await shared.open('viewer')
+    await expect.poll(() => manuscriptText(passage(lateReader))).toBe('The canopy retained much less water under shade.')
+    await expect(interpretation(lateReader)).toHaveText('The measurements reflect the balance between interception and evaporation.')
+    await expect(lateReader.locator('.ProseMirror p').first()).toContainText('water loss from stems')
+    await expect(lateReader.locator('[data-review-balloon]')).toHaveCount(0)
   } finally {
-    await Promise.all([authorContext.close(), readerContext.close()])
-    await server.destroy()
-    await rm(root, { recursive: true, force: true })
+    await shared.close()
   }
 })

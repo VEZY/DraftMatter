@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import * as Y from 'yjs'
 import { parseReviewMarkup } from '../../src/reviewMarkup'
-import { CollaborativeDocument } from '../../src/sharedEditor/collaboration'
+import { CollaborativeDocument, type CollaborativeDecision } from '../../src/sharedEditor/collaboration'
 import { PROJECT_RESOURCES_ROOT, sharedImage } from '../../src/sharedEditor/projectResources'
 import {
   CollaborationUpdateValidator,
@@ -182,6 +182,42 @@ describe('incremental and reconstruction validation equivalence', () => {
       expect(documents.step(updateFrom(documents.reference, (candidate) => candidate.getMap(PROJECT_RESOURCES_ROOT).set('citation:spoof', { kind: 'citation', record: { citekey: 'other' } })), 'owner')).toBe('review-record-invalid')
       expect(documents.step(updateFrom(documents.reference, (candidate) => candidate.getMap('draftmatter:authors').set('owner', { id: 'owner', name: 'Forged owner' })), 'editor')).toBe('review-record-invalid')
       expect(documents.step(updateFrom(documents.reference, (candidate) => candidate.getText(TEXT).insert(0, 'Still valid ')), 'editor')).toBeNull()
+    } finally { documents.destroy(); initial.destroy() }
+  })
+
+  it.each(['accepted', 'rejected'] as const)('validates the decision author and append-only history when undoing and redoing %s', (action) => {
+    const initial = seed()
+    initial.putAuthor({ id: 'owner', name: 'Project Owner' })
+    const documents = pair(initial.encodeUpdate())
+    const decision = { id: 'first', changeId: 'proposal', authorId: 'editor', action, baseRevision: 'initial' }
+    const undo = { ...decision, id: 'undo', action: 'reopened', baseRevision: 'after-first', resolves: [decision.id] }
+    const redo = { ...decision, id: 'redo', baseRevision: 'after-undo', resolves: [undo.id] }
+    function update(record: CollaborativeDecision) {
+      return updateFrom(documents.reference, (candidate) => {
+        const proposals = candidate.getMap<Record<string, unknown>>('draftmatter:proposals')
+        proposals.set('proposal', { ...proposals.get('proposal'), status: record.action === 'reopened' ? 'open' : record.action })
+        candidate.getMap('draftmatter:decisions').set(record.id, record)
+      })
+    }
+    try {
+      expect(documents.step(update(decision), 'editor')).toBeNull()
+      const formatting = updateFrom(documents.reference, (candidate) => candidate.getText(TEXT).format(0, 2, { bold: true }))
+      expect(documents.step(formatting, 'commenter', 'editor')).toBe('protected-state-changed')
+      expect(documents.step(update(undo), 'commenter', 'editor')).toBe('protected-state-changed')
+      expect(documents.step(update(undo), 'owner')).toBe('review-record-invalid')
+      expect(documents.step(update({ ...undo, authorId: 'owner' }), 'owner')).toBe('review-record-invalid')
+      expect(documents.step(update(undo), 'editor')).toBeNull()
+      expect(documents.step(update(redo), 'editor')).toBeNull()
+      expect(documents.step(update({ ...undo, id: 'stale-undo' }), 'editor')).toBe('review-record-invalid')
+      expect(documents.incremental.getMap('draftmatter:decisions').toJSON()).toEqual({ first: decision, undo, redo })
+      expect(documents.incremental.getMap('draftmatter:proposals').get('proposal')).toMatchObject({ status: action })
+      // Reconnecting clients may submit the whole decision chain in one update.
+      const offline = pair(initial.encodeUpdate())
+      try {
+        const batch = Y.encodeStateAsUpdate(documents.reference, Y.encodeStateVector(initial.doc))
+        expect(offline.step(batch, 'editor')).toBeNull()
+        expect(offline.incremental.getMap('draftmatter:decisions').toJSON()).toEqual({ first: decision, undo, redo })
+      } finally { offline.destroy() }
     } finally { documents.destroy(); initial.destroy() }
   })
 

@@ -1,10 +1,11 @@
 import { buildReviewConflictGraph } from '../reviewConflicts'
 import { parseReviewMarkup, type ReviewMarkupDocument } from '../reviewMarkup'
-import { decideReviewChange, decideReviewChanges, ensureReviewAuthor } from '../reviewOperations'
+import { decideReviewChange, decideReviewChanges, ensureReviewAuthor, materializeResolvedSuggestions } from '../reviewOperations'
 import type { LocalAuthorIdentity } from '../userSettings'
 import { CollaborativeDocument, type CollaborativeProposal } from './collaboration'
-import { projectCollaborationPortableSource } from './collaborationCheckpoint'
+import { createCollaborationCheckpoint, projectCollaborationPortableSource } from './collaborationCheckpoint'
 import {
+  activeDecisions,
   beginReviewDecision,
   prepareReviewDecision,
   prepareReviewDecisionConflictResolution,
@@ -25,6 +26,17 @@ export interface CollaborativeReviewDecisionRequest {
 export interface CollaborativeReviewDecisionResult {
   source: string
   decidedChangeIds: string[]
+  decisionIds: Record<string, string>
+  rebasedChangeIds: string[]
+}
+
+export interface ReviewDecisionUndo {
+  decisionId: string
+  changeId: string
+  action: 'accepted' | 'rejected'
+  previousStatus: string
+  wording?: string
+  visibleWording: string
   rebasedChangeIds: string[]
 }
 
@@ -37,19 +49,23 @@ export function decidePortableSuggestion(
 ) {
   let source: string
   let rebasedChangeIds: string[]
+  let undo: ReviewDecisionUndo | undefined
   if (collaborativeReview) {
     const result = collaborativeReview.decide({ changeIds: [changeId], action, author })
     source = result.source
     rebasedChangeIds = result.rebasedChangeIds
+    const original = document.changes.find((change) => change.id === changeId)
+    undo = { changeId, decisionId: result.decisionIds[changeId], action, rebasedChangeIds,
+      previousStatus: original?.status ?? 'open', wording: original?.proposal, visibleWording: collaborativeReview.visibleWording(changeId) }
   } else {
     const withAuthor = ensureReviewAuthor(document, author).document
     const result = decideReviewChange(withAuthor, { changeId, action, authorId: author.id })
-    source = result.document.source
+    source = materializeResolvedSuggestions(result.document)
     rebasedChangeIds = result.rebasedChangeIds
   }
   const count = rebasedChangeIds.length
   const overlap = count === 1 ? '1 overlapping alternative needs rebase' : `${count} overlapping alternatives need rebase`
-  return { source, message: `Suggestion ${action}${count ? ` · ${overlap}` : ''}` }
+  return { source, undo, message: `Suggestion ${action}${count ? ` · ${overlap}` : ''}` }
 }
 
 export interface CollaborativeReviewConflictResolutionRequest {
@@ -101,6 +117,18 @@ export class CollaborativeReviewBinding {
     private readonly document: CollaborativeDocument,
     private readonly onLocalSource?: (source: string) => void,
   ) {}
+
+  visibleWording(changeId: string) { return this.document.reviewText().visibleWording(changeId) }
+
+  overlappingAcceptance(changeId: string, authorId: string): ReviewDecisionUndo | undefined {
+    const view = this.document.reviewText()
+    if (!view.overlappingAcceptances.has(changeId)) return
+    const snapshot = this.document.snapshot()
+    const active = activeDecisions(snapshot, changeId)
+    if (active.length !== 1 || active[0].authorId !== authorId || active[0].action !== 'accepted') return
+    return { changeId, action: 'accepted', decisionId: active[0].id, previousStatus: 'needs-rebase',
+      wording: snapshot.proposals.find((item) => item.id === changeId)?.proposal, visibleWording: view.visibleWording(changeId), rebasedChangeIds: [] }
+  }
 
   conflicts(): ReviewDecisionConflict[] {
     return reviewDecisionConflicts(this.document.snapshot())
@@ -156,15 +184,56 @@ export class CollaborativeReviewBinding {
     const proposals = changedProposals(this.document.snapshot().proposals, statuses)
 
     this.document.doc.transact(() => {
-      prepared.forEach((decision) => this.document.putDecision(decision))
+      for (const decision of prepared) {
+        if (decision.action === 'accepted') {
+          this.document.materializeAcceptance(decision.changeId, decision.id)
+          this.document.putDecision({ ...decision, materialized: true })
+        } else this.document.putDecision(decision)
+      }
       proposals.forEach((proposal) => this.document.putProposal(proposal))
     }, COLLABORATIVE_REVIEW_ORIGIN)
 
     return {
       source: this.finish(),
+      decisionIds,
       decidedChangeIds: result.decidedChangeIds,
       rebasedChangeIds: result.rebasedChangeIds,
     }
+  }
+
+  // Changing an earlier decision is itself attributed. Deleting an audit entry
+  // would also discard another peer's evidence when disconnected edits converge.
+  repeatOrUndoDecision(entry: ReviewDecisionUndo, author: LocalAuthorIdentity, redo: boolean) {
+    const snapshot = this.document.snapshot()
+    const active = activeDecisions(snapshot, entry.changeId)
+    if (active.length !== 1 || active[0].id !== entry.decisionId || active[0].authorId !== author.id
+      || active[0].action !== (redo ? 'reopened' : entry.action)
+      || this.visibleWording(entry.changeId) !== entry.visibleWording
+      || (redo && snapshot.proposals.find((item) => item.id === entry.changeId)?.proposal !== entry.wording)) {
+      throw new Error('This decision changed in another session. Review its current wording.')
+    }
+    const previousStatus = this.document.reviewText().overlappingAcceptances.has(entry.changeId) ? 'needs-rebase' : entry.previousStatus
+    const statuses = new Map<string, string>([[entry.changeId, redo ? entry.action : previousStatus]])
+    if (entry.rebasedChangeIds.length) {
+      const review = parseReviewMarkup(createCollaborationCheckpoint(this.document, { allowDecisionConflicts: true }).source)
+      const graph = buildReviewConflictGraph({ ...review, changes: review.changes.map((change) => ({ ...change, status: 'open' })) })
+      for (const id of entry.rebasedChangeIds) {
+        const current = snapshot.proposals.find((proposal) => proposal.id === id)?.status
+        if (redo && current === 'open') statuses.set(id, 'needs-rebase')
+        if (!redo && current === 'needs-rebase' && !graph.edges.some((edge) => {
+          const other = edge.leftChangeId === id ? edge.rightChangeId : edge.rightChangeId === id ? edge.leftChangeId : undefined
+          return other && other !== entry.changeId && snapshot.proposals.some((proposal) => proposal.id === other && proposal.status === 'accepted')
+        })) statuses.set(id, 'open')
+      }
+    }
+    const decisionId = generatedDecisionId()
+    const decision = { id: decisionId, changeId: entry.changeId, authorId: author.id, action: redo ? entry.action : 'reopened',
+      baseRevision: this.document.revisionToken(), timestamp: new Date().toISOString(), resolves: [entry.decisionId] }
+    this.document.doc.transact(() => {
+      this.document.putDecision(decision)
+      changedProposals(snapshot.proposals, statuses).forEach((proposal) => this.document.putProposal(proposal))
+    }, COLLABORATIVE_REVIEW_ORIGIN)
+    return { source: this.finish(), entry: { ...entry, decisionId, visibleWording: this.visibleWording(entry.changeId) } }
   }
 
   resolveConflict(request: CollaborativeReviewConflictResolutionRequest): CollaborativeReviewConflictResolutionResult {
@@ -216,7 +285,10 @@ export class CollaborativeReviewBinding {
     const proposals = changedProposals(this.document.snapshot().proposals, statuses)
 
     this.document.doc.transact(() => {
-      this.document.putDecision(decision)
+      if (decision.action === 'accepted') {
+        this.document.materializeAcceptance(decision.changeId, decision.id)
+        this.document.putDecision({ ...decision, materialized: true })
+      } else this.document.putDecision(decision)
       proposals.forEach((proposal) => this.document.putProposal(proposal))
     }, COLLABORATIVE_REVIEW_ORIGIN)
 

@@ -34,7 +34,7 @@ export class TransactionalReviewError extends Error {
   }
 }
 
-function activeDecisions(snapshot: CollaborationSnapshot, changeId: string) {
+export function activeDecisions(snapshot: CollaborationSnapshot, changeId: string) {
   const matching = snapshot.decisions.filter((decision) => decision.changeId === changeId)
   const resolved = new Set(matching.flatMap((decision) => decision.resolves ?? []))
   return matching.filter((decision) => !resolved.has(decision.id))
@@ -67,12 +67,14 @@ export function reviewDecisionConflicts(snapshot: CollaborationSnapshot): Review
 export function proposalDecisionState(snapshot: CollaborationSnapshot, changeId: string): ProposalDecisionState {
   const proposal = snapshot.proposals.find((candidate) => candidate.id === changeId)
   if (!proposal) throw new TransactionalReviewError('proposal-missing', `Proposal ${changeId} was not found.`)
-  if (reviewDecisionConflicts(snapshot).some((conflict) => conflict.changeId === changeId)) return 'decision-conflict'
   const decisions = activeDecisions(snapshot, changeId)
-  const action = transactionalActions(decisions)[0]
+  const actions = transactionalActions(decisions)
+  if (actions.length > 1) return 'decision-conflict'
+  const action = actions[0]
   if (action === 'accepted') return 'accepted'
   if (action === 'rejected') return 'rejected'
   if (action === 'rebased') return 'needs-rebase'
+  if (decisions.some((decision) => decision.action === 'reopened')) return proposal.status === 'needs-rebase' ? 'needs-rebase' : 'open'
   if (proposal.status === 'accepted' || proposal.status === 'rejected' || proposal.status === 'needs-rebase') return proposal.status
   return 'open'
 }
@@ -104,7 +106,7 @@ export function prepareReviewDecision(document: CollaborativeDocument, request: 
   const duplicate = validateDecision(document, request)
   if (duplicate) return duplicate
   const active = activeDecisions(document.snapshot(), request.changeId)
-  if (active.length > 0) {
+  if (active.some((decision) => decision.action !== 'reopened')) {
     throw new TransactionalReviewError('decision-exists', `Proposal ${request.changeId} already has a decision. Resolve or rebase it explicitly.`)
   }
   const decision: CollaborativeDecision = {
@@ -114,6 +116,7 @@ export function prepareReviewDecision(document: CollaborativeDocument, request: 
     action: request.action,
     baseRevision: request.baseRevision,
     ...(request.timestamp ? { timestamp: request.timestamp } : {}),
+    ...(active.length ? { resolves: active.map((item) => item.id) } : {}),
   }
   return decision
 }

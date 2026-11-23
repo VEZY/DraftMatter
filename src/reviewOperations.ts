@@ -13,6 +13,7 @@ import {
 import { parseLosslessPortableSource } from './portableSource'
 import { buildReviewConflictGraph, conflictingChangeIds } from './reviewConflicts'
 import { projectPortableAcceptedBase } from './reviewProjector'
+export { materializeResolvedSuggestions } from './reviewProjector'
 import { reanchorPortableReviews } from './reviewReanchor'
 
 export interface ReviewAuthorIdentity {
@@ -696,7 +697,8 @@ export function decideReviewChange(
   if (!document.authors.some((author) => author.id === request.authorId)) {
     throw new ReviewOperationError('review-author-missing', `Review author ${request.authorId} was not found.`)
   }
-  const previous = document.decisions.find((decision) => decision.changeId === request.changeId)
+  const superseded = new Set(document.decisions.flatMap((decision) => decision.attributes['data-resolves']?.split(',') ?? []))
+  const previous = document.decisions.find((decision) => decision.changeId === request.changeId && decision.action !== 'reopened' && !superseded.has(decision.id))
   if (previous) {
     if (previous.action !== request.action) {
       throw new ReviewOperationError('review-decision-conflict', `Review change ${request.changeId} already has a ${previous.action} decision.`)

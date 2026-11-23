@@ -9104,8 +9104,7 @@ textarea:focus,
 }
 
 .review-display-options-popover button,
-.review-display-options-popover button:hover,
-.review-display-options-popover .tracked-changes-display-options button.active {
+.review-display-options-popover button:hover {
   background: #fff;
   border: 1px solid transparent;
   border-radius: 6px;
@@ -9116,21 +9115,29 @@ textarea:focus,
   min-height: 30px;
 }
 
-.review-display-options-popover .tracked-changes-display-options button:hover,
-.review-display-options-popover .tracked-changes-display-options button.active {
+.review-display-options-popover .tracked-changes-display-options button:hover {
   border-color: #d1d6de;
   color: #343d4a;
 }
 
+.review-display-options-popover .tracked-changes-display-options button[aria-pressed="true"] {
+  background: #eaf1eb;
+  border-color: #a8beae;
+  color: #304d3b;
+}
+
 .review-display-options-popover > label {
+  border-top: 1px solid #e1e4e9;
   display: grid;
   gap: 6px;
   margin-top: 12px;
+  padding-top: 12px;
 }
 
 .review-display-options-popover > label > span {
-  color: #79818e;
-  font-size: 11px;
+  color: inherit;
+  font-size: 12px;
+  font-weight: 600;
 }
 
 .review-display-options-popover select {

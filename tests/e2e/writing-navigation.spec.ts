@@ -99,7 +99,7 @@ test('groups writing actions in the toolbar and moves change tracking into the h
   await header.getByRole('button', { name: 'Turn off track changes', exact: true }).click()
   await expect(header.getByRole('button', { name: 'Turn on track changes', exact: true })).toHaveAttribute('aria-pressed', 'false')
   await header.getByRole('button', { name: 'Review options', exact: true }).click()
-  await expect(page.getByRole('dialog', { name: 'Review options', exact: true })).toContainText('Changes display')
+  await expect(page.getByRole('dialog', { name: 'Review options', exact: true })).toContainText('Manuscript view')
   await page.keyboard.press('Escape')
 
   // Hidden writing tools become fully legible on keyboard focus as well as hover.

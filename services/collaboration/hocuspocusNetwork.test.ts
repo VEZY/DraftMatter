@@ -7,6 +7,7 @@ import * as Y from 'yjs'
 import { AuthenticatedWorkspaceService } from '../../src/collaboration/workspaceService'
 import { createReviewChange, createReviewThread } from '../../src/reviewOperations'
 import { CollaborativeDocument } from '../../src/sharedEditor/collaboration'
+import { collaborationSocketCredential } from '../../src/sharedEditor/collaborationProtocol'
 import { createCollaborationCheckpoint } from '../../src/sharedEditor/collaborationCheckpoint'
 import { CollaborativeReviewBinding } from '../../src/sharedEditor/collaborativeReview'
 import { PROJECT_RESOURCES_ROOT, publishProjectResources, readProjectResources, sharedImage } from '../../src/sharedEditor/projectResources'
@@ -40,7 +41,7 @@ function provider(url: string, name: string, token: string, document: Y.Doc) {
   const configuration = {
     url,
     name,
-    token,
+    token: collaborationSocketCredential(token),
     document,
     WebSocketPolyfill: WebSocket,
     onSynced: ({ state }) => { if (state) syncedResolve() },

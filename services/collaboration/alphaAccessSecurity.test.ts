@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import type { Pool } from 'pg'
 import { beforeAll, describe, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
+import { collaborationSocketCredential } from '../../src/sharedEditor/collaborationProtocol'
 import { FileCollaborationStore } from './fileStore'
 import { createDraftMatterHocuspocusServer } from './hocuspocusServer'
 import { createCollaborationHttpApi } from './httpApi'
@@ -84,7 +85,7 @@ describe('closed alpha authorization boundary', () => {
       await server.listen()
       provider = new HocuspocusProvider({
         url: server.webSocketURL, name: 'private-workspace:paper', document,
-        token: await token(), WebSocketPolyfill: WebSocket,
+        token: collaborationSocketCredential(await token()), WebSocketPolyfill: WebSocket,
         onAuthenticationFailed: (failure) => { rejected(failure); provider?.disconnect() },
       } as ConstructorParameters<typeof HocuspocusProvider>[0])
       const deadline = Date.now() + 4_000
@@ -97,7 +98,7 @@ describe('closed alpha authorization boundary', () => {
       // by refreshing with a newly signed token lacking the approval role.
       const renew = server.configuration.onTokenSync!
       await expect(renew({
-        token: await token(), documentName: 'private-workspace:paper', connectionConfig: { readOnly: false },
+        token: collaborationSocketCredential(await token()), documentName: 'private-workspace:paper', connectionConfig: { readOnly: false },
         context: { userId: 'previously-approved-account', sessionId: 'previous-session' },
       } as Parameters<typeof renew>[0])).rejects.toMatchObject({ code: 'alpha_access_pending' })
       expect(query).not.toHaveBeenCalled()

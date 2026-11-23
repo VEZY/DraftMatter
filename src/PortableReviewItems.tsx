@@ -6,6 +6,7 @@ import {
   createReviewChange,
   createReviewThread,
   ensureReviewAuthor,
+  materializeResolvedSuggestions,
   rebaseReviewChange,
   setReviewThreadStatus,
 } from './reviewOperations'
@@ -59,6 +60,7 @@ export function PortableReviewItems({
   composerAnchorTop,
   showFooter = true,
   collaborativeReview,
+  onDecide,
   onApply,
   canComment = true,
   canSuggest = true,
@@ -78,6 +80,7 @@ export function PortableReviewItems({
   composerAnchorTop?: number
   showFooter?: boolean
   collaborativeReview?: CollaborativeReviewBinding | null
+  onDecide?: (changeId: string, action: 'accepted' | 'rejected') => void
   onApply: (source: string, message: string) => void
   canComment?: boolean
   canSuggest?: boolean
@@ -199,6 +202,7 @@ export function PortableReviewItems({
 
   const decide = (changeId: string, action: 'accepted' | 'rejected') => {
     if (!canDecide) return
+    if (onDecide) return onDecide(changeId, action)
     try {
       const result = decidePortableSuggestion(document, changeId, action, localAuthor, collaborativeReview)
       apply(result.source, result.message)
@@ -221,7 +225,7 @@ export function PortableReviewItems({
         : resolvePortableReviewDecisionConflict(source, request)
       const outcome = action === 'accepted' ? 'accepted' : action === 'rejected' ? 'rejected' : 'marked for rebase'
       apply(
-        result.source,
+        materializeResolvedSuggestions(parseReviewMarkup(result.source)),
         `Concurrent decisions resolved · suggestion ${outcome}${result.rebasedChangeIds.length ? ` · ${result.rebasedChangeIds.length} overlapping alternative${result.rebasedChangeIds.length === 1 ? '' : 's'} need rebase` : ''}`,
       )
     } catch (error) {
@@ -271,7 +275,7 @@ export function PortableReviewItems({
       setRebaseChangeId(undefined)
       setRebaseQuote('')
       setRebaseProposal('')
-      apply(result.document.source, `Suggestion rebased onto the accepted manuscript · ${result.appliedChangeIds.length} accepted decision${result.appliedChangeIds.length === 1 ? '' : 's'} folded into the portable base`)
+      apply(result.document.source, 'Revised suggestion ready for review')
     } catch (error) {
       fail(error)
     }
@@ -353,6 +357,8 @@ export function PortableReviewItems({
           const change = document.changes.find((candidate) => candidate.id === item.id)!
           const recovery = recoveryByAnchor.get(item.anchorId)
           const decisionConflict = decisionConflictByChange.get(item.id)
+          const overlappingAcceptance = active && canDecide && change.status === 'decision-conflict' && !decisionConflict
+            ? collaborativeReview?.overlappingAcceptance(item.id, localAuthor.id) : undefined
           return (
             <div className={`conflict-card portable-review-card ${active ? 'active' : ''}`} id={`review-item-${item.id}`} data-review-balloon={item.id} data-review-balloon-anchor={item.anchorId} key={item.id}>
               <div className="conflict-heading"><Icon name="branch" size={16} /><span>{item.conflictId ? 'Overlapping suggestion' : item.kind === 'unplaced-change' ? 'Unplaced suggestion' : 'Suggestion'}</span></div>
@@ -371,7 +377,7 @@ export function PortableReviewItems({
                   <div className="review-actions"><button className="accept" onClick={() => { setRebaseChangeId(item.id); setRebaseQuote(selectedTarget?.quote ?? ''); setRebaseProposal(change.proposal ?? '') }}><Icon name="branch" size={15} /> Rebase suggestion</button><button className="reject" onClick={() => decide(item.id, 'rejected')}><Icon name="x" size={15} /> Reject alternative</button></div>
                   {rebaseChangeId === item.id && (
                     <div className="review-rebase-form" ref={rebaseRef} role="group" aria-label="Rebase suggestion">
-                      <p>Anchor the revised proposal to text in the accepted manuscript. Accepted decisions are folded into the portable base once; their audit records remain.</p>
+                      <p>Copy the passage this suggestion refers to from the current manuscript.</p>
                       <label><span>Text in accepted manuscript</span><input value={rebaseQuote} onChange={(event) => setRebaseQuote(event.target.value)} placeholder="Select text in Final preview or paste it here" /></label>
                       {change.changeKind !== 'delete' && <label><span>Revised proposal</span><textarea value={rebaseProposal} onChange={(event) => setRebaseProposal(event.target.value)} rows={3} /></label>}
                       <div><button onClick={() => setRebaseChangeId(undefined)}>Cancel</button><button className="primary-button" onClick={() => rebase(item.id)}>Create rebased proposal</button></div>
@@ -385,6 +391,15 @@ export function PortableReviewItems({
                   {canDecide
                     ? <div className="review-actions"><button className="accept" onClick={() => resolveDecisionConflict(item.id, 'accepted')}><Icon name="check" size={14} /> Keep accepted</button><button className="reject" onClick={() => resolveDecisionConflict(item.id, 'rejected')}><Icon name="x" size={14} /> Keep rejected</button><button className="rebase" onClick={() => resolveDecisionConflict(item.id, 'rebased')}><Icon name="branch" size={14} /> Require rebase</button></div>
                     : <p>An owner or editor must choose the recorded outcome before the next checkpoint.</p>}
+                </div>
+              )}
+              {active && change.status === 'decision-conflict' && !decisionConflict && collaborativeReview && (
+                <div className="review-decision-conflict" role="group" aria-label="Overlapping acceptances">
+                  <p>Two overlapping suggestions were accepted. A reviewer can withdraw their acceptance to keep the other wording.</p>
+                  {overlappingAcceptance && <button onClick={() => {
+                    try { apply(collaborativeReview.repeatOrUndoDecision(overlappingAcceptance, localAuthor, false).source, 'Acceptance withdrawn') }
+                    catch (error) { fail(error) }
+                  }}>Withdraw my acceptance</button>}
                 </div>
               )}
               {canDecide && active && item.kind === 'unplaced-change' && recovery && (

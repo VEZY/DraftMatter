@@ -17,6 +17,10 @@ The service always creates the in-app notification first. When managed email del
 
 Failed calls retain only a generic bounded error, release their lease, and retry after 5, 10, 20, 40 minutes and then bounded intervals up to one day. After eight attempts the row is discarded from automatic delivery while the in-app notification remains available. Investigate provider credentials, HTTPS reachability, suppression/bounce policy, and recipient consent before manually requeueing. Never paste provider responses or recipient addresses into public logs or metrics.
 
+## Upgrading shared editing
+
+The tracked-change undo format uses live editing protocol 2. Deploy the web app and collaboration service together, then ask collaborators to reload the web app or install a compatible desktop release before reopening shared papers. Existing rooms keep their names and data. If a rollback to a protocol 1 server is necessary after edits have resumed, first preserve the current data and use a verified pre-upgrade backup in an isolated restore. A protocol 1 editor can show both wordings of a resolved change when it reads newer room data. Account for edits made since that backup before switching users over.
+
 ## Backup and restore drill
 
 Run this at least quarterly and after changing PostgreSQL, object storage, encryption, retention, or the service image.

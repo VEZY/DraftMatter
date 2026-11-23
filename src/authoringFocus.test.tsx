@@ -59,7 +59,7 @@ describe('focused authoring workspace', () => {
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Review options"]')!.click())
     expect(container.querySelector('.topbar .tracking-controls [role="dialog"][aria-label="Review options"]')).not.toBeNull()
     expect(container.querySelector('.format-toolbar [aria-label="Review options"]')).toBeNull()
-    expect(container.querySelector('.review-margin [aria-label="Review author"]')).toBeNull()
+    expect(container.querySelector('.review-display-options-popover label')?.textContent).toContain('Filter changes and comments by author')
   })
 
   it('enters a manuscript-only focus mode and leaves it with Escape', async () => {

@@ -8,6 +8,7 @@ import { parseReviewMarkup } from '../../src/reviewMarkup'
 import { appendReviewThreadMessage, createReviewChange, createReviewThread } from '../../src/reviewOperations'
 import { PROJECT_RESOURCES_ROOT, sharedImage } from '../../src/sharedEditor/projectResources'
 import { CollaborativeDocument } from '../../src/sharedEditor/collaboration'
+import { collaborationSocketCredential } from '../../src/sharedEditor/collaborationProtocol'
 import { CollaborativeReviewBinding } from '../../src/sharedEditor/collaborativeReview'
 import { FileCollaborationStore } from './fileStore'
 import {
@@ -368,7 +369,7 @@ describe('authenticated Hocuspocus transport', () => {
     const configuration = server.configuration
     const connectionConfig = { readOnly: false, isAuthenticated: false }
     const context = await configuration.onAuthenticate!({
-      token: owner,
+      token: collaborationSocketCredential(owner),
       documentName: 'forest:paper',
       connectionConfig,
     } as Parameters<NonNullable<typeof configuration.onAuthenticate>>[0])
@@ -403,9 +404,9 @@ describe('authenticated Hocuspocus transport', () => {
     const server = createDraftMatterHocuspocusServer({ authorization, persistence })
     const authenticate = server.configuration.onAuthenticate!
     const viewerConfig = { readOnly: false, isAuthenticated: false }
-    await authenticate({ token: viewer, documentName: 'forest:paper', connectionConfig: viewerConfig } as Parameters<typeof authenticate>[0])
+    await authenticate({ token: collaborationSocketCredential(viewer), documentName: 'forest:paper', connectionConfig: viewerConfig } as Parameters<typeof authenticate>[0])
     expect(viewerConfig.readOnly).toBe(true)
-    await expect(authenticate({ token: outsider, documentName: 'forest:paper', connectionConfig: { readOnly: false, isAuthenticated: false } } as Parameters<typeof authenticate>[0])).rejects.toMatchObject({ code: 'not-found' })
+    await expect(authenticate({ token: collaborationSocketCredential(outsider), documentName: 'forest:paper', connectionConfig: { readOnly: false, isAuthenticated: false } } as Parameters<typeof authenticate>[0])).rejects.toMatchObject({ code: 'not-found' })
     await server.destroy()
   })
 })

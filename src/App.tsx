@@ -16,7 +16,7 @@ import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords,
 import { desktopHost, projectAssetHash, normaliseHostFailure, resolveMainDocument, type AgentIntegrationStatus, type CodeFormatterStatus, type DocumentRecoverySnapshot, type JuliaEnvironment, type ProjectExecutionPreferences, type ProjectSnapshot, type RecoveryVersionOptions, type SavedDocumentVersionMetadata, type ZoteroAttachment } from './desktopHost'
 import type { AssistantConnectionsStatus } from './desktopHost'
 import { AssistantConnectionsDialog } from './AssistantConnectionsDialog'
-import { parsePortableDocument, parseReviewMarkup } from './sharedEditor'
+import { parsePortableDocument, parseReviewMarkup, workingReviewSource } from './sharedEditor'
 import { sourceHash } from './document'
 import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
@@ -32,7 +32,8 @@ import { useRecoveryAutosave } from './useRecoveryAutosave'
 import { DEFAULT_MANUSCRIPT_SEARCH_SETTINGS, type ManuscriptSearchSettings, type ManuscriptSearchState } from './manuscriptSearch'
 import { ExampleTour } from './ExampleTour'
 import { ManuscriptTextEditor } from './ManuscriptTextEditor'
-import { StructuredManuscriptEditor, type StructuredManuscriptEditorHandle, type StructuredOutlineItem, type StructuredReviewSelection } from './StructuredManuscriptEditor'
+import { ReviewableManuscriptEditor } from './ReviewableManuscriptEditor'
+import { type StructuredManuscriptEditorHandle, type StructuredOutlineItem, type StructuredReviewSelection } from './StructuredManuscriptEditor'
 import { parseStructuredManuscript, structuredCitationClusters } from './structuredManuscript'
 import { semanticManuscriptObjects } from './semanticObjects'
 import { referenceIntegrityDiagnostics } from './referenceIntegrity'
@@ -73,7 +74,7 @@ import { PortableReviewItems } from './PortableReviewItems'
 import { AlignedReviewRail } from './AlignedReviewRail'
 import { SelectionCommentButton } from './SelectionCommentButton'
 import { ProjectChecksDialog, ProjectDiagnostics, prioritizeProjectDiagnostics, type ProjectCheckAction } from './ProjectDiagnostics'
-import { buildReviewQueue, currentReviewChange } from './reviewQueue'
+import { buildReviewQueue, currentReviewChange, nextChangeAfterDecision } from './reviewQueue'
 import { decidePortableSuggestion } from './sharedEditor/collaborativeReview'
 import { projectPortableReviewSource } from './reviewProjector'
 import { renderReviewReport } from './reviewExport'
@@ -138,6 +139,12 @@ const PRIMARY_EXECUTION_CELL = 'fig-canopy'
 const LEGACY_SAMPLE_CODE = 'weeks = [0, 2, 4, 6, 8, 10, 12]\ncontrol = [0, 8, 21, 39, 58, 76, 91]\ndrought = [0, 7, 19, 33, 47, 60, 72]\nplot_response(weeks, control, drought)'
 const COMPLETE_EXAMPLE_FILENAME = 'complete-example.qmd'
 const COMPLETE_EXAMPLE_PROJECT_NAME = 'Complete example paper'
+const MANUSCRIPT_VIEWS = [
+  { mode: 'simple', label: 'Margin notes', icon: 'message', title: 'Show suggestions in the margin' },
+  { mode: 'all', label: 'In text', icon: 'document', title: 'Show additions and deletions in the text' },
+  { mode: 'original', label: 'Original text', icon: 'history', title: 'Preview the manuscript before pending changes' },
+  { mode: 'final', label: 'Final preview', icon: 'eye', title: 'Preview the manuscript with pending changes accepted' },
+] as const
 const completeExampleBibliography = parseBibliographyFile('references.json', completeExampleReferences, 'project-file')
 const completeExampleCitations = completeExampleBibliography.records.map((record) => ({
   ...record,
@@ -441,11 +448,10 @@ function getInitialDraft(): DraftState {
   }
 }
 
-function getInitialDraftState(): DraftState {
+function getInitialDraftState(source: string | null): DraftState {
   const draft = getInitialDraft()
-  const source = localStorage.getItem(STRUCTURED_SOURCE_KEY)
   const structuredMode = localStorage.getItem(STRUCTURED_MODE_KEY) === 'true'
-  return structuredMode && source ? parsePortableDocument(upgradeSampleIntroduction(source), draft).draft : seedSampleIntroduction(draft)
+  return structuredMode && source ? parsePortableDocument(source, draft).draft : seedSampleIntroduction(draft)
 }
 
 function getInitialZoteroVersion(): ZoteroVersionStamp {
@@ -643,8 +649,9 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   const collaborativeInitialSource = collaborationLaunch
     ? collaborationLaunch.bootstrapSource ?? emptyCollaborativeSource(collaborativeProject?.name ?? 'Untitled draft')
     : null
+  const browserInitialSource = useMemo(() => browserDocumentLaunch && workingReviewSource(browserDocumentLaunch.source), [browserDocumentLaunch])
   const routeInitialSource = collaborativeInitialSource
-    ?? browserDocumentLaunch?.source
+    ?? browserInitialSource
     ?? (initialExperience === 'browser-new' ? EMPTY_BROWSER_DRAFT_SOURCE : null)
   const initialProjectMeta = useMemo(() => collaborationLaunch ? {
     filename: `${collaborationLaunch.projectId}.qmd`,
@@ -662,9 +669,14 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     citationStyle: 'draftmatter-author-date' as CitationStyleId,
     citationLocale: 'en-US' as CitationLocale,
   } : getInitialProjectMeta(), [browserDocumentLaunch, collaborationLaunch, collaborativeProject?.name, initialExperience])
+  const savedInitialSource = useMemo(() => {
+    if (routeInitialSource !== null) return null
+    const saved = localStorage.getItem(STRUCTURED_SOURCE_KEY)
+    return saved && workingReviewSource(upgradeSampleIntroduction(saved))
+  }, [routeInitialSource])
   const initialDraftState = useMemo(() => routeInitialSource
     ? parsePortableDocument(routeInitialSource, initialDraft).draft
-    : getInitialDraftState(), [routeInitialSource])
+    : getInitialDraftState(savedInitialSource), [routeInitialSource, savedInitialSource])
   const [userSettings, setUserSettings] = useState(() => readUserSettings(localStorage))
   const {
     draft,
@@ -678,7 +690,8 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   } = useDraftHistory(initialDraftState)
   const [markupView, setMarkupView] = useState<MarkupView>('simple')
   const [suggestionMode, setSuggestionMode] = useState(false)
-  const [reviewAuthorFilter, setReviewAuthorFilter] = useState('all')
+  const [selectedReviewAuthor, setSelectedReviewAuthor] = useState<{ id: string; name: string }>()
+  const reviewAuthorFilter = selectedReviewAuthor?.id ?? 'all'
   const [activeReviewId, setActiveReviewId] = useState<string>()
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [reviewOptionsOpen, setReviewOptionsOpen] = useState(false)
@@ -881,12 +894,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   const [selectedEnvironmentLanguage, setSelectedEnvironmentLanguage] = useState<ExecutionLanguage>('python')
   const [selectedKernelNames, setSelectedKernelNames] = useState<Partial<Record<ExecutionLanguage, string>>>({})
   const [selectedEnvironmentPaths, setSelectedEnvironmentPaths] = useState<Partial<Record<ExecutionLanguage, string>>>({})
-  const [manuscriptSource, setManuscriptSource] = useState(() => {
-    if (routeInitialSource) return routeInitialSource
-    const saved = localStorage.getItem(STRUCTURED_SOURCE_KEY)
-    if (saved) return upgradeSampleIntroduction(saved)
-    return reviewedProjection(initialDraftState)
-  })
+  const [manuscriptSource, setManuscriptSource] = useState(() => routeInitialSource ?? savedInitialSource ?? reviewedProjection(initialDraftState))
   const [structuredMode, setStructuredMode] = useState(true)
   const [structuredOutline, setStructuredOutline] = useState<StructuredOutlineItem[]>([])
   const [activeOutlineId, setActiveOutlineId] = useState<string>()
@@ -1780,8 +1788,9 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
           preserveDesktopConflict(`${current.path} changed outside DraftMatter while you were editing.`)
           return
         }
-        const parsed = parsePortableDocument(document.content, initialDraft)
-        replaceManuscriptSource(document.content)
+        const openedSource = workingReviewSource(document.content)
+        const parsed = parsePortableDocument(openedSource, initialDraft)
+        replaceManuscriptSource(openedSource)
         resetDraftHistory(parsed.draft)
         resetDraftRevision()
         replaceDesktopSession({ ...current, hash: document.hash, savedRevision: 0 })
@@ -2003,16 +2012,20 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
         if (event.key === 'Escape') closeManuscriptPicker()
         return
       }
-      const target = event.target as HTMLElement | null
-      const nativeTextField = target?.tagName === 'INPUT' || target?.isContentEditable
+      const target = event.target instanceof HTMLElement ? event.target : null
+      const nativeTextField = target?.closest('input, textarea, select, [contenteditable="true"], [role="dialog"]')
       const modifier = event.metaKey || event.ctrlKey
-      if (manuscriptFileActive && modifier && !nativeTextField && event.key.toLowerCase() === 'z') {
-        event.preventDefault()
-        if (event.shiftKey) redoDraft()
-        else undoDraft()
-      } else if (manuscriptFileActive && modifier && !nativeTextField && event.key.toLowerCase() === 'y') {
-        event.preventDefault()
-        redoDraft()
+      const key = event.key.toLowerCase()
+      if (manuscriptFileActive && modifier && !event.altKey && !nativeTextField && !event.defaultPrevented && (key === 'z' || key === 'y')) {
+        const redo = key === 'y' || event.shiftKey
+        if (structuredMode) {
+          const editor = structuredEditorRef.current
+          if (redo ? editor?.redo() : editor?.undo()) event.preventDefault()
+        } else {
+          event.preventDefault()
+          if (redo) redoDraft()
+          else undoDraft()
+        }
       }
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === 'p') {
         event.preventDefault()
@@ -2092,6 +2105,10 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   const executionProjection = useMemo(() => cleanExecutionProjection(manuscriptSource), [manuscriptSource])
   const executionSource = executionProjection.ok ? executionProjection.source : manuscriptSource
   const reviewDocument = useMemo(() => parseReviewMarkup(manuscriptSource), [manuscriptSource])
+  // Keep the chosen reviewer available after their last suggestion is resolved.
+  const reviewAuthorOptions = selectedReviewAuthor && !reviewDocument.authors.some((author) => author.id === selectedReviewAuthor.id)
+    ? [...reviewDocument.authors, selectedReviewAuthor]
+    : reviewDocument.authors
   const allReviewQueue = useMemo(() => buildReviewQueue(reviewDocument), [reviewDocument])
   const reviewQueue = useMemo(() => reviewAuthorFilter === 'all'
     ? allReviewQueue
@@ -2217,11 +2234,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     }
   }, [runtimeInventory, selectedKernelNames])
 
-  useEffect(() => {
-    if (reviewAuthorFilter !== 'all' && !reviewDocument.authors.some((author) => author.id === reviewAuthorFilter)) {
-      setReviewAuthorFilter('all')
-    }
-  }, [reviewAuthorFilter, reviewDocument.authors])
+  useLayoutEffect(() => { setSelectedReviewAuthor(undefined) }, [recoveryDocumentIdentity])
 
   useLayoutEffect(() => {
     const editor = editorAreaRef.current
@@ -2442,8 +2455,9 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     }
     const referencedImages = new Set(publicationAssetPaths(checkpoint.source))
     const checkpointImages = sharedResources.images.filter((image) => referencedImages.has(image.path))
-    const parsed = parsePortableDocument(checkpoint.source, initialDraft)
-    replaceManuscriptSource(checkpoint.source)
+    const working = workingReviewSource(checkpoint.source)
+    const parsed = parsePortableDocument(working, initialDraft)
+    replaceManuscriptSource(working)
     setDiagnostics(parsed.diagnostics)
     if (!desktopHost.available || !desktopSessionRef.current) {
       if (checkpointImages.length || sharedResources.citations.length) {
@@ -3950,6 +3964,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
 
   const applyPortableReviewSource = (source: string, message: string) => {
     const nextSource = collaborativeEditorBinding?.publishPortableSource?.(source) ?? source
+    if (!collaborativeEditorBinding) structuredEditorRef.current?.applyLocalReviewSource(manuscriptSourceRef.current, nextSource)
     const parsed = parsePortableDocument(nextSource, initialDraft)
     replaceManuscriptSource(nextSource)
     markDraftChanged()
@@ -3962,22 +3977,25 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   const decideSuggestion = (changeId: string, action: 'accepted' | 'rejected', advance = false) => {
     if (!canDecideReview || !manuscriptFileActive || sourceEditing) return
     try {
+      structuredEditorRef.current?.flushReviewEdits()
       const document = reviewDocument.source === manuscriptSourceRef.current
         ? reviewDocument : parseReviewMarkup(manuscriptSourceRef.current)
-      if (document.changes.find((change) => change.id === changeId)?.status !== 'open') {
+      const status = document.changes.find((change) => change.id === changeId)?.status
+      if (status !== 'open' && !(status === 'needs-rebase' && action === 'rejected')) {
         setToast('This suggestion has already changed. Review the current wording.')
         return
       }
       const result = decidePortableSuggestion(document, changeId, action, activeReviewAuthor, collaborativeEditorBinding?.review)
       const source = applyPortableReviewSource(result.source, result.message)
+      if (result.undo) structuredEditorRef.current?.recordSharedDecision(result.undo)
       if (!advance) return
 
       // Accepting one alternative can also put other changes into needs-rebase.
       const queue = buildReviewQueue(parseReviewMarkup(source), {
         authorIds: reviewAuthorFilter === 'all' ? undefined : [reviewAuthorFilter],
       })
-      const next = currentReviewChange(queue, changeId)
-      setActiveReviewId(next?.id ?? changeId)
+      const next = nextChangeAfterDecision(reviewQueue, queue, changeId)
+      setActiveReviewId(next?.id)
       showReviewPanel()
       if (markupView === 'original' || markupView === 'final') setMarkupView('all')
       if (next) {
@@ -4276,12 +4294,9 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     setRightPanelOpen(true)
   }
 
-  const setTrackedChangesDisplay = (display: 'simple' | 'all') => {
+  const setTrackedChangesDisplay = (display: MarkupView) => {
     setMarkupView(display)
     if (display === 'simple') showReviewPanel()
-    setToast(display === 'all'
-      ? 'Changes displayed in text · additions and deletions are visible in the manuscript'
-      : 'Changes displayed in the margin · select a change in the manuscript to see its details')
   }
 
   const toggleTrackChanges = () => {
@@ -4362,7 +4377,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       return
     }
 
-    const source = await file.text()
+    const source = workingReviewSource(await file.text())
     const parsed = parsePortableDocument(source, initialDraft)
     const nextName = file.name.replace(/\.(qmd|md)$/i, '')
     const cacheResult = readCitationCache(localStorage, `browser:${file.name}`)
@@ -4502,7 +4517,8 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       desktopHost.readExecutionManifests(project.root).catch(() => []),
     ])
     const displayName = mainPath.split('/').at(-1) ?? mainPath
-    const parsed = parsePortableDocument(document.content, { ...initialDraft, title: displayName })
+    const openedSource = workingReviewSource(document.content)
+    const parsed = parsePortableDocument(openedSource, { ...initialDraft, title: displayName })
     const manifestResults = manifestSnapshots.map((snapshot) => ({ snapshot, ...parseExecutionManifest(snapshot.content) }))
     const validManifests = manifestResults.flatMap(({ manifest }) => manifest ? [manifest] : [])
     const executionTracker = await ExecutionFreshnessTracker.create(parsed.executableCells, validManifests)
@@ -4604,7 +4620,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     replaceDesktopSession({ root: project.root, path: mainPath, hash: document.hash, savedRevision: 0 })
     setDesktopProject(project)
     setAwaitingDesktopLaunch(false)
-    replaceManuscriptSource(document.content)
+    replaceManuscriptSource(openedSource)
     setStructuredMode(true)
     resetDraftHistory(openedDraft)
     setFilename(displayName)
@@ -4628,7 +4644,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       localStorage.setItem(LAST_PROJECT_ROOT_KEY, project.root)
       rememberLocalProject(localStorage, project)
     }
-    writeRecoverySnapshot(openedDraft, displayName, document.content, undefined, undefined,
+    writeRecoverySnapshot(openedDraft, displayName, openedSource, undefined, undefined,
       { kind: 'desktop', projectRoot: project.root, documentPath: mainPath })
     if (announce) {
       const sourceCount = projectBibliography.records.length
@@ -5238,9 +5254,11 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
         throw new Error('The manuscript changed while preserving its versions. Your current text has been kept; try restoring again.')
       }
       replaceBuiltInProject(null)
-      replaceManuscriptSource(snapshot.source)
+      const restoredSource = workingReviewSource(snapshot.source)
+      const restoredDraft = restoredSource === snapshot.source ? snapshot.draft : parsePortableDocument(restoredSource, snapshot.draft).draft
+      replaceManuscriptSource(restoredSource)
       setStructuredMode(true)
-      commitDraftHistory(snapshot.draft)
+      commitDraftHistory(restoredDraft)
       if (identity.kind === 'desktop') {
         setCurrentRevision(draftRevisionRef.current + 1)
         if (!desktopSaveBlockedRef.current) setSaveState('saving')
@@ -5250,9 +5268,9 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       setDiagnostics([{ code: 'recovery-restored', level: 'info', message: `Recovered the local version saved ${new Date(snapshot.savedAt).toLocaleString()}.` }])
       let versionProblem = ''
       if (identity.kind === 'desktop') {
-        try { await archiveRecoverySource(identity, snapshot.source, { kind: 'restored', restoredFromId: snapshot.id }) }
+        try { await archiveRecoverySource(identity, restoredSource, { kind: 'restored', restoredFromId: snapshot.id }) }
         catch (error) { versionProblem = `The draft was restored, but its new saved-version entry could not be recorded: ${readableError(error)}` }
-      } else if (!writeRecoverySnapshot(snapshot.draft, filename, snapshot.source, new Date().toISOString(), snapshot.id, identity,
+      } else if (!writeRecoverySnapshot(restoredDraft, filename, restoredSource, new Date().toISOString(), snapshot.id, identity,
         { kind: 'restored', restoredFromId: snapshot.id })) {
         versionProblem = 'The draft was restored. Its original version and your previous draft are preserved, but local storage could not record another version.'
       }
@@ -6260,13 +6278,24 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
             <div className="review-display-options-wrap">
               <button aria-label="Review options" aria-haspopup="dialog" aria-expanded={reviewOptionsOpen} onClick={() => setReviewOptionsOpen((open) => !open)}><Icon name="chevronDown" size={13} /></button>
               {reviewOptionsOpen && <div className="review-display-options review-display-options-popover popover" role="dialog" aria-label="Review options">
-                <div className="review-display-options-heading"><strong>Changes display</strong><button className="icon-button" aria-label="Close review options" onClick={() => setReviewOptionsOpen(false)}><Icon name="close" size={14} /></button></div>
-                <div className="tracked-changes-display-options" role="group" aria-label="Display tracked changes">
-                  <button type="button" className={markupView === 'simple' ? 'active' : ''} aria-pressed={markupView === 'simple'} onClick={() => setTrackedChangesDisplay('simple')}><Icon name="message" size={14} /><span>Margin notes</span></button>
-                  <button type="button" className={markupView === 'all' ? 'active' : ''} aria-pressed={markupView === 'all'} onClick={() => setTrackedChangesDisplay('all')}><Icon name="document" size={14} /><span>In text</span></button>
+                <div className="review-display-options-heading"><strong>Manuscript view</strong><button className="icon-button" aria-label="Close review options" onClick={() => setReviewOptionsOpen(false)}><Icon name="close" size={14} /></button></div>
+                <div className="tracked-changes-display-options" role="group" aria-label="Manuscript view">
+                  {MANUSCRIPT_VIEWS.map(({ mode, label, icon, title }) => (
+                    <button key={mode} type="button" title={title} aria-pressed={markupView === mode} onClick={() => setTrackedChangesDisplay(mode)}>
+                      <Icon name={icon} size={14} /><span>{label}</span>
+                    </button>
+                  ))}
                 </div>
-                <label><span>Preview</span><select value={markupView} onChange={(event) => setMarkupView(event.target.value as MarkupView)} aria-label="Review display and preview"><option value="simple">Changes in margin</option><option value="all">Inline additions &amp; deletions</option><option value="original">Original</option><option value="final">Final preview</option></select></label>
-                <label><span>Author</span><select value={reviewAuthorFilter} onChange={(event) => setReviewAuthorFilter(event.target.value)} aria-label="Review author"><option value="all">All authors</option>{reviewDocument.authors.map((author) => <option value={author.id} key={author.id}>{author.name}</option>)}</select></label>
+                <label>
+                  <span>Filter changes and comments by author</span>
+                  <select value={reviewAuthorFilter} onChange={(event) => {
+                    const author = reviewAuthorOptions.find(({ id }) => id === event.target.value)
+                    setSelectedReviewAuthor(author && { id: author.id, name: author.name })
+                  }}>
+                    <option value="all">All authors</option>
+                    {reviewAuthorOptions.map((author) => <option key={author.id} value={author.id}>{author.name}</option>)}
+                  </select>
+                </label>
               </div>}
             </div>
             </div>
@@ -6616,10 +6645,11 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
                 <PublicationBylineView byline={publicationByline} />
               </>
             )}
-            <StructuredManuscriptEditor
+            <ReviewableManuscriptEditor
               key={desktopSession ? JSON.stringify([desktopSession.root, desktopSession.path]) : 'portable'}
               ref={structuredEditorRef}
-              source={structuredEditorSource}
+              source={manuscriptSource}
+              previewSource={structuredReviewProjection ? structuredEditorSource : undefined}
               onChange={updateStructuredManuscript}
               publicationByline={publicationByline}
               onDiagnostics={setDiagnostics}
@@ -6656,7 +6686,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
               activeReviewId={activeReviewId}
               activeReviewAnchorId={activeReviewAnchorId}
               collaboration={collaborativeEditorBinding}
-              readOnly={Boolean(structuredReviewProjection) || !canEditManuscript}
+              readOnly={!canEditManuscript}
               resolveAssetUrl={(path) => sharedResources.images.some((image) => image.path === path)
                 ? (() => { const image = sharedResources.images.find((item) => item.path === path)!; return `data:${image.mimeType};base64,${image.base64}` })()
                 : browserProjectImages.some((image) => image.path === path)
@@ -7081,6 +7111,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
                 onComposeChange={setCommentComposerOpen}
                 collaborativeReview={collaborativeEditorBinding?.review}
                 onApply={applyPortableReviewSource}
+                onDecide={decideSuggestion}
                 canComment={canCommentReview}
                 canSuggest={canSuggestReview}
                 canDecide={canDecideReview}

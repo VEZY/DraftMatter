@@ -289,11 +289,11 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(manuscript.locator('.dm-review-thread')).toHaveClass(/dm-review-active/)
 
     await page.getByRole('button', { name: 'Review options', exact: true }).click()
-    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByLabel('Review display and preview').selectOption('original')
+    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('button', { name: 'Original text', exact: true }).click()
     await expect(manuscript.getByText('Original preview')).toBeVisible()
     await expect(page.getByRole('textbox', { name: 'Rendered manuscript editor' })).toHaveAttribute('contenteditable', 'false')
     await expect(manuscript.locator('.dm-review-thread')).toHaveCount(0)
-    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByLabel('Review display and preview').selectOption('all')
+    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('button', { name: 'In text', exact: true }).click()
     await expect(page.getByRole('textbox', { name: 'Rendered manuscript editor' })).toHaveAttribute('contenteditable', 'true')
     await expect(manuscript.locator('.dm-review-thread')).toContainText('A uniquely selected review sentence.')
 
@@ -308,14 +308,15 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(suggestion).toContainText('carefully')
     await suggestion.click()
     await reviewPanel.getByRole('button', { name: 'Accept' }).click()
-    await expect(reviewPanel.getByText('Accepted')).toBeVisible()
-    await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toMatch(/\.dm-change\b[^}]*data-status="accepted"/)
+    await expect(suggestion).toHaveCount(0)
+    await expect(renderedEditor.getByText('A carefully revised suggestion sentence.', { exact: true })).toBeVisible()
+    await expect.poll(async () => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).not.toMatch(/\.dm-change\b/)
 
     await page.getByRole('button', { name: 'Review options', exact: true }).click()
-    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByLabel('Review display and preview').selectOption('final')
+    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('button', { name: 'Final preview', exact: true }).click()
     await expect(manuscript.getByText('Final preview')).toBeVisible()
     await expect(manuscript.getByText('A carefully revised suggestion sentence.', { exact: true })).toBeVisible()
-    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByLabel('Review display and preview').selectOption('all')
+    await page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('button', { name: 'In text', exact: true }).click()
 
     await page.getByRole('complementary', { name: 'Manuscript outline' }).getByRole('button', { name: /Add section/ }).click()
     const insertion = page.getByRole('dialog', { name: 'Add section' })

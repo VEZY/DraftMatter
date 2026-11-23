@@ -206,7 +206,7 @@ describe('collaboration dialog', () => {
     const publishPortableSource = vi.fn((source: string) => { current = source; return source })
     vi.spyOn(HocuspocusCollaborationClient, 'connect').mockImplementation(async (options) => {
       options.onPortableSource?.(`${original}\nA remote update.`)
-      return { publishPortableSource, createCheckpoint, destroy: vi.fn(), flushRecovery: vi.fn(async () => true), editorBinding: { document: {}, awareness: {} } } as unknown as HocuspocusCollaborationClient
+      return { publishPortableSource, createCheckpoint, collaboration: { revisionToken: () => 'r1' }, destroy: vi.fn(), flushRecovery: vi.fn(async () => true), editorBinding: { document: {}, awareness: {} } } as unknown as HocuspocusCollaborationClient
     })
     const prepareCheckpointSource = vi.fn(() => prepared)
     const onRemoteSource = vi.fn()
@@ -424,7 +424,7 @@ describe('collaboration dialog', () => {
     const connect = vi.spyOn(HocuspocusCollaborationClient, 'connect').mockImplementation(async (options) => {
       options.onStatus?.('connected')
       options.onCollaborators?.([{ clientId: 7, userId: 'dm-a01', name: 'Remi Vezy', color: '#617f73' }])
-      return { publishPortableSource, createCheckpoint, destroy, editorBinding } as unknown as HocuspocusCollaborationClient
+      return { publishPortableSource, createCheckpoint, collaboration: { revisionToken: () => 'checkpoint-revision' }, destroy, editorBinding } as unknown as HocuspocusCollaborationClient
     })
     const onClose = vi.fn()
     const onStatus = vi.fn()

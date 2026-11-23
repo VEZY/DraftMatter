@@ -6,6 +6,8 @@ import {
   removeAwarenessStates,
 } from 'y-protocols/awareness'
 import { parseReviewMarkup, type ReviewAnchorContext, type ReviewMarkupDocument, type ReviewThreadMessage } from '../reviewMarkup'
+import { proposalDecisionState } from './reviewDecisions'
+import { ReviewText } from './reviewText'
 
 const COLLECTION_NAMES = {
   anchors: 'draftmatter:anchors',
@@ -70,6 +72,7 @@ export interface CollaborativeDecision {
   action: string
   timestamp?: string
   baseRevision?: string
+  materialized?: true
   resolves?: string[]
 }
 
@@ -161,20 +164,6 @@ function portableManuscriptView(source: string, review: ReviewMarkupDocument) {
   }
 }
 
-function reconcileText(text: Y.Text, next: string) {
-  const current = text.toString()
-  if (current === next) return
-  let prefix = 0
-  const shared = Math.min(current.length, next.length)
-  while (prefix < shared && current[prefix] === next[prefix]) prefix += 1
-  let suffix = 0
-  while (suffix < shared - prefix && current[current.length - 1 - suffix] === next[next.length - 1 - suffix]) suffix += 1
-  const deleteLength = current.length - prefix - suffix
-  const insertion = next.slice(prefix, next.length - suffix)
-  if (deleteLength > 0) text.delete(prefix, deleteLength)
-  if (insertion) text.insert(prefix, insertion)
-}
-
 function upsertMap<T extends { id: string }>(map: Y.Map<T>, records: T[]) {
   for (const record of records) {
     const next = portableValue(record)
@@ -220,6 +209,43 @@ function mergedThreadMessages(thread: CollaborativeThread, stored: Collaborative
   return sortedThreadMessages([...byId.values()]).map(({ id: _id, threadId: _threadId, ...message }) => message)
 }
 
+export function documentReviewText(doc: Y.Doc): ReviewText {
+  const proposals = doc.getMap<CollaborativeProposal>(COLLECTION_NAMES.proposals)
+  const decisions = doc.getMap<CollaborativeDecision>(COLLECTION_NAMES.decisions)
+  const states = new Map<string, boolean>()
+  const snapshot: CollaborationSnapshot = { source: '', anchors: [], threads: [], authors: [], proposals: [...proposals.values()], decisions: [...decisions.values()] }
+  const selectedRuns = new Map<string, string>()
+  const superseded = new Set(snapshot.decisions.flatMap((decision) => decision.resolves ?? []))
+  for (const active of snapshot.decisions.filter((decision) => decision.action === 'accepted' && !superseded.has(decision.id))) {
+    // Redo selects the run of the original acceptance. A fresh acceptance
+    // after amending a reopened proposal creates a new run of its own.
+    let decision: CollaborativeDecision | undefined = active
+    const visited = new Set<string>()
+    while (decision && !decision.materialized && decision.resolves?.length === 1 && !visited.has(decision.id)) {
+      visited.add(decision.id)
+      decision = decisions.get(decision.resolves[0])
+    }
+    if (decision?.materialized && (!selectedRuns.has(active.changeId) || decision.id < selectedRuns.get(active.changeId)!)) selectedRuns.set(active.changeId, decision.id)
+  }
+  const isAccepted = (id: string) => {
+    if (!states.has(id)) states.set(id, snapshot.proposals.some((proposal) => proposal.id === id) && proposalDecisionState(snapshot, id) === 'accepted')
+    return states.get(id)!
+  }
+  const overlapping = new Set<string>()
+  const acceptedPoints = new Map<string, string>()
+  const anchors = doc.getMap<CollaborativeAnchor>(COLLECTION_NAMES.anchors)
+  for (const id of selectedRuns.keys()) {
+    const proposal = proposals.get(id)
+    if (proposal?.kind !== 'insert' || !isAccepted(id)) continue
+    const anchor = anchors.get(proposal.anchorId)
+    if (!anchor) continue
+    const other = acceptedPoints.get(anchor.start)
+    if (other) { overlapping.add(other); overlapping.add(id) }
+    else acceptedPoints.set(anchor.start, id)
+  }
+  return new ReviewText(doc.getText(DOCUMENT_NAME), isAccepted, selectedRuns, overlapping)
+}
+
 export class CollaborativeDocument {
   readonly doc: Y.Doc
   readonly awareness: Awareness
@@ -258,14 +284,26 @@ export class CollaborativeDocument {
     const manuscript = portableManuscriptView(source, review)
     this.doc.transact(() => {
       this.meta.set('schemaVersion', 1)
-      reconcileText(this.text, manuscript.source)
+      const represented = this.reviewText().represented
+      for (const decision of this.decisions.values()) if (decision.materialized) represented.add(decision.changeId)
+      for (const legacy of this.proposals.values()) {
+        if (legacy.status === 'accepted' && !represented.has(legacy.id) && !review.changes.some((change) => change.id === legacy.id)) {
+          this.materializeAcceptance(legacy.id, String(this.doc.clientID), true)
+        }
+      }
+      this.reviewText().reconcile(manuscript.source)
+      const written = this.reviewText()
       const authors = review.authors.map((author) => ({ id: author.id, name: author.name }))
       const anchors = review.ranges.filter((candidate) => candidate.complete).map<CollaborativeAnchor>((range) => {
         const record = [...review.changes, ...review.threads].find((candidate) => candidate.anchorId === range.anchorId)
+        const existing = this.anchors.get(range.anchorId)
+        const position = existing && this.resolveAnchor(range.anchorId, written)
+        const start = manuscript.offset(range.start)
+        const end = manuscript.offset(range.end)
         return {
           id: range.anchorId,
-          start: this.relativePosition(manuscript.offset(range.start)),
-          end: this.relativePosition(manuscript.offset(range.end)),
+          start: existing && position?.start === start ? existing.start : this.relativePosition(start, written),
+          end: existing && position?.end === end ? existing.end : this.relativePosition(end, written),
           ...(record?.anchorContext ? { context: record.anchorContext } : {}),
         }
       })
@@ -291,7 +329,7 @@ export class CollaborativeDocument {
         authorId: thread.authorId,
         status: thread.status,
         messages: [],
-        ...(thread.anchorContext ? { context: thread.anchorContext } : {}),
+        ...(this.threads.get(thread.id)?.context || thread.anchorContext ? { context: this.threads.get(thread.id)?.context ?? thread.anchorContext } : {}),
       }))
       const threadMessages = review.threads.flatMap((thread) => storedThreadMessages({
         id: thread.id,
@@ -318,12 +356,24 @@ export class CollaborativeDocument {
       upsertMap(this.threads, threads)
       upsertMap(this.threadMessages, threadMessages)
       upsertMap(this.threadStatuses, threadStatuses)
-      upsertMap(this.decisions, decisions)
+      upsertMap(this.decisions, decisions.filter((decision) => !this.decisions.has(decision.id)))
     }, origin)
   }
 
   get source() {
-    return this.text.toString()
+    return this.reviewText().source
+  }
+
+  reviewText() { return documentReviewText(this.doc) }
+
+  materializeAcceptance(id: string, token: string, legacy = false) {
+    const proposal = this.proposals.get(id)
+    if (!proposal) return
+    const view = this.reviewText()
+    const range = this.resolveAnchor(proposal.anchorId, view)
+    if (!range) throw new Error('The suggestion no longer has a valid manuscript location.')
+    view.accept(id, token, range.start, range.end, proposal.kind === 'delete' ? '' : proposal.proposal ?? '')
+    if (legacy && range.start === range.end) view.markLegacyInsertion(id, range.start)
   }
 
   get schemaVersion() {
@@ -331,12 +381,12 @@ export class CollaborativeDocument {
   }
 
   edit(start: number, end: number, replacement: string, origin: unknown = 'local-edit') {
-    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end > this.text.length) {
+    const view = this.reviewText()
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end < start || end > view.source.length) {
       throw new Error('Collaborative edit range is outside the document.')
     }
     this.doc.transact(() => {
-      if (end > start) this.text.delete(start, end - start)
-      if (replacement) this.text.insert(start, replacement)
+      view.edit(start, end, replacement)
     }, origin)
   }
 
@@ -372,18 +422,18 @@ export class CollaborativeDocument {
     this.decisions.set(safeId(decision.id, 'Decision ID'), portableValue(decision))
   }
 
-  relativePosition(index: number) {
-    if (!Number.isSafeInteger(index) || index < 0 || index > this.text.length) throw new Error('Anchor position is outside the document.')
-    return bytesToHex(Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(this.text, index)))
+  relativePosition(index: number, view = this.reviewText()) {
+    if (!Number.isSafeInteger(index) || index < 0 || index > view.source.length) throw new Error('Anchor position is outside the document.')
+    return bytesToHex(Y.encodeRelativePosition(Y.createRelativePositionFromTypeIndex(this.text, view.rawOffset(index))))
   }
 
-  resolveAnchor(anchorId: string) {
+  resolveAnchor(anchorId: string, view = this.reviewText()) {
     const anchor = this.anchors.get(anchorId)
     if (!anchor) return null
     const start = Y.createAbsolutePositionFromRelativePosition(Y.decodeRelativePosition(hexToBytes(anchor.start)), this.doc)
     const end = Y.createAbsolutePositionFromRelativePosition(Y.decodeRelativePosition(hexToBytes(anchor.end)), this.doc)
     if (!start || !end || start.type !== this.text || end.type !== this.text) return null
-    return { start: start.index, end: end.index }
+    return { start: view.visibleOffset(start.index), end: view.visibleOffset(end.index) }
   }
 
   snapshot(): CollaborationSnapshot {

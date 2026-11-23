@@ -1,4 +1,5 @@
 import { sourceHash } from '../document'
+import { materializeResolvedSuggestions } from '../reviewProjector'
 import { parseReviewMarkup, reviewLiteralFence, type ReviewAnchorContext } from '../reviewMarkup'
 import type {
   CollaborationSnapshot,
@@ -94,7 +95,7 @@ function fallbackContext(source: string, start: number, end: number): ReviewAnch
   }
 }
 
-function materializeMissingAnchors(document: CollaborativeDocument, snapshot: CollaborationSnapshot) {
+function materializeMissingAnchors(document: CollaborativeDocument, snapshot: CollaborationSnapshot, view: ReturnType<CollaborativeDocument['reviewText']>) {
   const source = sourceWithoutReviewSection(snapshot.source)
   const parsed = parseReviewMarkup(source)
   const complete = new Set(parsed.ranges.filter((range) => range.complete).map((range) => range.anchorId))
@@ -107,7 +108,7 @@ function materializeMissingAnchors(document: CollaborativeDocument, snapshot: Co
   }
 
   for (const anchor of snapshot.anchors) {
-    const range = document.resolveAnchor(anchor.id)
+    const range = document.resolveAnchor(anchor.id, view)
     if (!range || range.start < 0 || range.end < range.start || range.end > source.length) {
       throw new CollaborationCheckpointError('anchor-unresolved', `Collaboration anchor ${anchor.id} no longer resolves in the manuscript.`)
     }
@@ -158,10 +159,20 @@ export function createCollaborationCheckpoint(document: CollaborativeDocument, o
     throw new CollaborationCheckpointError('decision-conflict', `Resolve concurrent decisions for ${conflicts.map((conflict) => conflict.changeId).join(', ')} before checkpointing.`)
   }
   assertReferences(snapshot)
-  const materialized = materializeMissingAnchors(document, snapshot)
+  const view = document.reviewText()
+  if (view.overlappingAcceptances.size && !options.allowDecisionConflicts) {
+    throw new CollaborationCheckpointError('decision-conflict', 'Withdraw an overlapping acceptance before checkpointing.')
+  }
+  const materialized = materializeMissingAnchors(document, snapshot, view)
+  const represented = view.represented
+  for (const decision of snapshot.decisions) if (decision.materialized) represented.add(decision.changeId)
   const records = [
     ...snapshot.authors.map((author) => authorRecord(author.id, author.name)),
-    ...snapshot.proposals.map((proposal) => proposalRecord(proposal, proposalDecisionState(snapshot, proposal.id), materialized.contexts.get(proposal.anchorId))),
+    ...snapshot.proposals.map((proposal) => {
+      const state = view.overlappingAcceptances.has(proposal.id) ? 'decision-conflict' : proposalDecisionState(snapshot, proposal.id)
+      const applied = state === 'accepted' && (proposal.status === 'applied' || represented.has(proposal.id))
+      return proposalRecord(proposal, applied ? 'applied' : state, materialized.contexts.get(proposal.anchorId))
+    }),
     ...snapshot.threads.map((thread) => threadRecord(thread, materialized.contexts.get(thread.anchorId))),
     ...snapshot.decisions.map(decisionRecord),
   ]
@@ -178,5 +189,23 @@ export function createCollaborationCheckpoint(document: CollaborativeDocument, o
 }
 
 export function projectCollaborationPortableSource(document: CollaborativeDocument) {
-  return createCollaborationCheckpoint(document, { allowDecisionConflicts: true }).source
+  return workingReviewSource(createCollaborationCheckpoint(document, { allowDecisionConflicts: true }).source)
+}
+
+export function workingReviewSource(source: string) {
+  if (!source.includes('.dm-change')) return source
+  const audit = parseReviewMarkup(source)
+  if (audit.schema !== '1' || audit.diagnostics.some((diagnostic) => diagnostic.level === 'error')) return source
+  // Reopened suggestions are editable again; their superseded decisions
+  // remain in the immutable audit and must not lock the working copy.
+  const reopenings = audit.decisions.filter((decision) => decision.action === 'reopened')
+  if (!reopenings.length) return materializeResolvedSuggestions(audit)
+  const retired = new Set(audit.decisions.flatMap((decision) => decision.attributes['data-resolves']?.split(',') ?? []))
+  const pending = new Set(audit.changes.filter((change) => change.status === 'open' || change.status === 'needs-rebase').map((change) => change.id))
+  const reopened = new Set(reopenings.filter((decision) => pending.has(decision.changeId) && !retired.has(decision.id)).map((decision) => decision.changeId))
+  if (!reopened.size) return materializeResolvedSuggestions(audit)
+  for (const record of audit.decisions.filter((decision) => reopened.has(decision.changeId)).reverse()) {
+    source = source.slice(0, record.start) + source.slice(record.end)
+  }
+  return materializeResolvedSuggestions(parseReviewMarkup(source))
 }

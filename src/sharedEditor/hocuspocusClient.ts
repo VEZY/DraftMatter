@@ -16,6 +16,7 @@ import {
   type CollaborativeEditorBinding,
 } from './prosemirrorCollaboration'
 import { COLLABORATIVE_REVIEW_ORIGIN, CollaborativeReviewBinding } from './collaborativeReview'
+import { collaborationSocketCredential } from './collaborationProtocol'
 
 export type CollaborationClientStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
 
@@ -174,7 +175,7 @@ export class HocuspocusCollaborationClient {
     const providerOptions = {
       url,
       name,
-      token: options.token,
+      token: async () => collaborationSocketCredential(typeof options.token === 'function' ? await options.token() : options.token),
       document: collaboration.doc,
       awareness: collaboration.awareness,
       flushDelay: 120,
@@ -187,7 +188,9 @@ export class HocuspocusCollaborationClient {
         } else options.onStatus?.('connecting')
       },
       onAuthenticationFailed: ({ reason }: { reason: string }) => {
-        const message = reason || 'Collaboration authentication failed.'
+        const message = !reason || reason === 'permission-denied'
+          ? 'Shared editing was denied. Check your sign-in, project access, and that the app and collaboration server are up to date.'
+          : reason
         roomSynced = false
         options.onStatus?.('error', message)
         rejectSync(new Error(message))
@@ -269,7 +272,6 @@ export class HocuspocusCollaborationClient {
 
   createCheckpoint(): CollaborationCheckpoint {
     const checkpoint = createCollaborationCheckpoint(this.collaboration)
-    this.lastPortableSource = checkpoint.source
     return checkpoint
   }
 

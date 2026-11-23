@@ -1,4 +1,4 @@
-import { parseReviewMarkup, type ReviewChange } from './reviewMarkup'
+import { parseReviewMarkup, updateReviewRecordAnchorContext, type ReviewChange, type ReviewMarkupDocument } from './reviewMarkup'
 import { buildReviewConflictGraph } from './reviewConflicts'
 import type { DocumentDiagnostic } from './types'
 
@@ -89,6 +89,71 @@ function applyPatches(source: string, patches: Patch[]) {
     projected = `${projected.slice(0, patch.start)}${patch.replacement}${projected.slice(patch.end)}`
   }
   return projected
+}
+
+/** Fold decided suggestions into editable Markdown, retaining all unrelated portable records. */
+export function materializeResolvedSuggestions(document: ReviewMarkupDocument): string {
+  const decided = document.changes.filter((change) => change.status === 'accepted' || change.status === 'rejected' || change.status === 'applied')
+  if (!decided.length || document.schema !== '1' || document.diagnostics.some((diagnostic) => diagnostic.level === 'error')) return document.source
+  const ids = new Set(decided.map((change) => change.id))
+  const retiredAnchors = new Set(decided.map((change) => change.anchorId))
+  for (const record of [...document.changes.filter((change) => !ids.has(change.id)), ...document.threads]) retiredAnchors.delete(record.anchorId)
+  for (const record of document.unknownRecords) retiredAnchors.delete(record.attributes['data-anchor'])
+  const byAnchor = new Map<string, typeof document.anchors>()
+  for (const anchor of document.anchors) byAnchor.set(anchor.anchorId, [...(byAnchor.get(anchor.anchorId) ?? []), anchor])
+
+  const replacements: Patch[] = []
+  const movedAnchors = new Set<string>()
+  for (const change of decided.filter((change) => change.status === 'accepted')) {
+    const markers = byAnchor.get(change.anchorId) ?? []
+    const patch = patchForChange(change, byAnchor)
+    // Preserve malformed or conflicting legacy records for recovery rather than guessing a base.
+    if ('code' in patch || (markers.length !== 1 && markers.length !== 2) || patch.end < patch.start ||
+      replacements.some((other) => patch.start < other.end && other.start < patch.end)) return document.source
+    const retained = document.anchors.filter((anchor) => !retiredAnchors.has(anchor.anchorId) && anchor.start >= patch.start && anchor.end <= patch.end)
+    for (const anchor of retained) movedAnchors.add(anchor.anchorId)
+    // Comments and overlapping alternatives may share this range, or have an endpoint inside it.
+    // Keep their markers attached to the new wording, even when the accepted edit deletes it.
+    const before = retained.filter((anchor) => anchor.edge === 'start' || (anchor.edge === 'point' && anchor.affinity === 'before'))
+    const after = retained.filter((anchor) => !before.includes(anchor))
+    replacements.push({ ...patch, replacement: before.map((anchor) => anchor.raw).join('') + patch.replacement + after.map((anchor) => anchor.raw).join('') })
+  }
+
+  const edits: Patch[] = [...replacements]
+  for (const anchor of document.anchors) {
+    if (retiredAnchors.has(anchor.anchorId) && !replacements.some((patch) => anchor.start >= patch.start && anchor.end <= patch.end)) {
+      edits.push({ start: anchor.start, end: anchor.end, replacement: '' })
+    }
+  }
+  const retiredRecords = [...decided, ...document.decisions.filter((decision) => ids.has(decision.changeId))]
+  const { sectionStart, sectionEnd } = document
+  const remove = (span: { start: number; end: number }): Patch => ({ start: span.start, end: span.end, replacement: '' })
+  if (sectionStart !== undefined && sectionEnd !== undefined && document.changes.length === decided.length &&
+    !document.threads.length && !document.unknownRecords.length && document.decisions.every((decision) => ids.has(decision.changeId))) {
+    const emptySection = applyPatches(document.source.slice(sectionStart, sectionEnd), [...document.authors, ...retiredRecords]
+      .map((record) => ({ start: record.start - sectionStart, end: record.end - sectionStart, replacement: '' })))
+    if (/^(:{5,})[ \t]+\{\.draftmatter-reviews \.hidden data-schema="1"\}\s+\1\s*$/.test(emptySection)) {
+      const spacer = sectionEnd === document.source.length ? document.source.slice(0, sectionStart).match(/(\r\n|\n|\r)\1$/)?.[1] : undefined
+      edits.push(remove({ start: sectionStart - (spacer?.length ?? 0), end: sectionEnd }))
+    } else edits.push(...retiredRecords.map(remove))
+  } else edits.push(...retiredRecords.map(remove))
+
+  const source = applyPatches(document.source, edits)
+  if (!replacements.length || !document.threads.length) return source
+  for (const range of document.ranges) {
+    if (replacements.some((patch) => range.start <= patch.start && patch.end <= range.end)) movedAnchors.add(range.anchorId)
+  }
+  let updated = parseReviewMarkup(source)
+  const stripMarkers = (value: string) => value.replace(/\[\]\{[^}\r\n]*\.dm-anchor\b[^}\r\n]*\}/g, '')
+  for (const thread of document.threads.filter((thread) => thread.anchorContext && movedAnchors.has(thread.anchorId))) {
+    const range = updated.ranges.find((range) => range.anchorId === thread.anchorId && range.complete)
+    if (range) updated = updateReviewRecordAnchorContext(updated, thread.id, {
+      quote: stripMarkers(updated.source.slice(range.start, range.end)),
+      prefix: stripMarkers(updated.source.slice(0, range.start)).slice(-64),
+      suffix: stripMarkers(updated.source.slice(range.end, updated.sectionStart)).slice(0, 64),
+    })
+  }
+  return updated.source
 }
 
 export function projectPortableReviewSource(source: string, options: ReviewProjectionOptions): ReviewProjectionResult {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import identicalSource from './fixtures/portable/25-review-identical.qmd?raw'
 import { parseReviewMarkup } from './reviewMarkup'
-import { buildReviewQueue, currentReviewChange, navigateReviewQueue, type ReviewQueueItem } from './reviewQueue'
+import { buildReviewQueue, currentReviewChange, navigateReviewQueue, nextChangeAfterDecision, type ReviewQueueItem } from './reviewQueue'
 import { createReviewThread, decideReviewChange } from './reviewOperations'
 
 describe('review queue and navigation', () => {
@@ -63,6 +63,17 @@ describe('review queue and navigation', () => {
     expect(currentReviewChange(queue, last.id)?.id).toBe(last.id)
     expect(currentReviewChange(queue, 'unplaced')?.id).toBe(first.id)
     expect(currentReviewChange(queue.filter((item) => item.authorId === last.authorId), first.id)?.id).toBe(last.id)
+  })
+
+  it('continues past a removed change and its blocked alternatives before wrapping', () => {
+    const [first, chosen] = buildReviewQueue(parseReviewMarkup(identicalSource))
+    const blocked = { ...chosen, id: 'alternative' }
+    const last = { ...chosen, id: 'last' }
+    const before = [first, chosen, blocked, last]
+    const after = [first, { ...blocked, status: 'needs-rebase' }, last]
+    expect(nextChangeAfterDecision(before, after, chosen.id)).toBe(last)
+    expect(nextChangeAfterDecision(after, [first], last.id)).toBe(first)
+    expect(nextChangeAfterDecision(before, [], chosen.id)).toBeUndefined()
   })
 
   it('re-evaluates overlapping suggestions after each decision', () => {

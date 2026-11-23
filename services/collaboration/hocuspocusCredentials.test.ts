@@ -2,10 +2,12 @@ import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { HocuspocusProvider } from '@hocuspocus/provider'
+import { Server } from '@hocuspocus/server'
 import { jwtVerify, SignJWT } from 'jose'
 import { describe, expect, it, vi } from 'vitest'
 import * as Y from 'yjs'
 import type { ProjectAuthorizationService } from '../../src/collaboration/workspaceService'
+import { collaborationSocketCredential, collaborationUpgradeMessage } from '../../src/sharedEditor/collaborationProtocol'
 import { FileCollaborationStore } from './fileStore'
 import { createDraftMatterHocuspocusServer } from './hocuspocusServer'
 
@@ -43,7 +45,7 @@ async function fixture(options: { maxSocketConnections?: number } = {}) {
   const tokens = vi.fn<() => Promise<string>>()
   const provider = new HocuspocusProvider({
     url: server.webSocketURL, name: 'forest:paper', document,
-    token: tokens, WebSocketPolyfill: WebSocket, onClose: closed,
+    token: async () => collaborationSocketCredential(await tokens()), WebSocketPolyfill: WebSocket, onClose: closed,
   } as ConstructorParameters<typeof HocuspocusProvider>[0])
   provider.disconnect()
   const connections = () => server.hocuspocus.documents.get('forest:paper')?.getConnections() ?? []
@@ -63,6 +65,56 @@ async function fixture(options: { maxSocketConnections?: number } = {}) {
 }
 
 describe('live collaboration credential expiration', () => {
+  it('refuses incompatible peers in both directions before loading or synchronizing the room', async () => {
+    const test = await fixture()
+    const token = await test.issue(8_000)
+    const loadLegacyRoom = vi.fn(async () => null)
+    // Legacy servers pass the entire socket credential to their normal JWT verifier.
+    const legacy = new Server({
+      port: 0, address: '127.0.0.1', quiet: true, stopOnSignals: false,
+      onAuthenticate: async ({ token }) => test.authorize(token, 'forest', 'paper', 'read'),
+      onLoadDocument: loadLegacyRoom,
+    })
+    async function refused(url: string, credential: string, reason: string) {
+      const document = new Y.Doc()
+      const denied = vi.fn()
+      const provider = new HocuspocusProvider({
+        url, name: 'forest:paper', document, token: credential, WebSocketPolyfill: WebSocket,
+        onAuthenticationFailed: denied,
+      } as ConstructorParameters<typeof HocuspocusProvider>[0])
+      try {
+        await waitFor(() => denied.mock.calls.length > 0, 'Expected an incompatible peer to be refused.')
+        expect(denied).toHaveBeenCalledWith({ reason })
+        expect(provider.isSynced).toBe(false)
+        expect(document.getText('draftmatter:document').length).toBe(0)
+      } finally { provider.destroy(); document.destroy() }
+    }
+    try {
+      await refused(test.server.webSocketURL, token, collaborationUpgradeMessage)
+      expect(test.authorize).not.toHaveBeenCalled()
+      expect(test.server.hocuspocus.documents.size).toBe(0)
+      await legacy.listen()
+      await refused(legacy.webSocketURL, collaborationSocketCredential(token), 'permission-denied')
+      expect(loadLegacyRoom).not.toHaveBeenCalled()
+      expect(legacy.hocuspocus.documents.size).toBe(0)
+    } finally { await legacy.destroy(); await test.cleanup() }
+  })
+
+  it('closes a synchronized room if a renewal provides a valid credential in an incompatible format', async () => {
+    const test = await fixture()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      const token = await test.issue(8_000)
+      test.tokens.mockResolvedValue(token)
+      await test.connect()
+      test.provider.configuration.token = token
+      await test.provider.sendToken()
+      await waitFor(() => test.closed.mock.calls.length > 0, 'The incompatible renewal kept the room open.')
+      expect(test.closed.mock.calls.some(([payload]) => payload.event.reason === collaborationUpgradeMessage)).toBe(true)
+      expect(test.connections()).toHaveLength(0)
+    } finally { errors.mockRestore(); await test.cleanup() }
+  })
+
   it.each([true, false])('disconnects idle readers at expiry when refresh is ignored=%s, including replayed tokens', async (ignoreRefresh) => {
     const test = await fixture()
     try {
@@ -114,7 +166,7 @@ describe('live collaboration credential expiration', () => {
       const document = new Y.Doc(), closed = vi.fn()
       const provider = new HocuspocusProvider({
         url: test.server.webSocketURL, name: 'forest:paper', document,
-        token, WebSocketPolyfill: WebSocket, onClose: closed,
+        token: collaborationSocketCredential(token), WebSocketPolyfill: WebSocket, onClose: closed,
       } as ConstructorParameters<typeof HocuspocusProvider>[0])
       const result = { provider, document, closed }
       extra.push(result)

@@ -32,6 +32,7 @@ export {
 export {
   createCollaborationCheckpoint,
   projectCollaborationPortableSource,
+  workingReviewSource,
   CollaborationCheckpointError,
   type CollaborationCheckpoint,
 } from './collaborationCheckpoint'

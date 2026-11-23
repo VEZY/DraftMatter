@@ -66,9 +66,9 @@ DraftMatter does not replace your languages, IDE, Git client, or project structu
 
 - Turn on Track changes for grouped insertions, deletions, paste, and replacements.
 - Add point or range comments, reply in threads, resolve and reopen discussions, and keep attribution.
-- Accept or reject suggestions in sequence from the top bar, or decide on an individual suggestion in the margin. Decisions retain their author and timestamp.
+- Accept or reject suggestions in sequence from the top bar or individually in the margin. Each decision leaves editable text in the paper and removes the suggestion. Undo restores it for review.
 - Preserve overlapping alternatives and surface decision conflicts instead of silently choosing a last writer.
-- Switch between simple review, all markup, original, and clean final views.
+- Choose Margin notes, In text, Original text, or Final preview. Filter by author to review one contributor’s suggestions and comments at a time.
 - Re-anchor review items after external edits and place ambiguous items manually.
 - Export a standalone review report or deterministic original/final source from the app or CLI.
 

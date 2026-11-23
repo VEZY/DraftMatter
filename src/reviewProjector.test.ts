@@ -5,9 +5,54 @@ import crossingSource from './fixtures/portable/27-review-crossing.qmd?raw'
 import aliceFinalGolden from './fixtures/golden/review-identical.alice-final.md?raw'
 import originalGolden from './fixtures/golden/review-identical.original.md?raw'
 import { parseReviewMarkup } from './reviewMarkup'
-import { projectPortableAcceptedBase, projectPortableReviewSource } from './reviewProjector'
+import { materializeResolvedSuggestions, projectPortableAcceptedBase, projectPortableReviewSource } from './reviewProjector'
+import { createReviewChange, createReviewThread, decideReviewChange } from './reviewOperations'
 
 describe('portable review projector', () => {
+  const author = { id: 'dm-author', name: 'Ada' }
+  it.each([
+    ['insert', '', 'very ', 'The very old trees.'],
+    ['delete', 'old ', undefined, 'The trees.'],
+    ['replace', 'old', 'tall', 'The tall trees.'],
+    ['format', 'old', '**old**', 'The **old** trees.'],
+    ['structural', 'The old trees.', '## The old trees.', '## The old trees.'],
+  ] as const)('commits %s decisions to editable Markdown and forgets the resolved suggestion', (kind, quote, proposal, expected) => {
+    const text = '# Study\r\n\r\nThe old trees.\r\n'
+    const start = text.indexOf(quote || 'old')
+    const pending = createReviewChange(text, { kind, start, end: start + quote.length, proposal, author })
+    for (const action of ['accepted', 'rejected'] as const) {
+      const decided = decideReviewChange(pending.document, { changeId: pending.change.id, action, authorId: author.id })
+      const clean = materializeResolvedSuggestions(decided.document)
+      expect(clean.trimEnd()).toBe((action === 'accepted' ? text.replace('The old trees.', expected) : text).trimEnd())
+      expect(parseReviewMarkup(clean)).toMatchObject({ anchors: [], changes: [], decisions: [] })
+      expect(materializeResolvedSuggestions(parseReviewMarkup(clean))).toBe(clean)
+    }
+  })
+
+  it('retains a comment inside a replaced passage and preserves a separate pending suggestion', () => {
+    const base = '# Paper\n\nThe old trees retained water.\n'
+    const start = base.indexOf('old trees')
+    const replace = createReviewChange(base, { kind: 'replace', start, end: start + 9, proposal: 'canopy', author })
+    const commentAt = replace.document.source.indexOf('trees')
+    const withComment = createReviewThread(replace.document.source, { author, start: commentAt, end: commentAt + 5, message: 'Check the description.' })
+    const independentAt = withComment.document.source.indexOf('water')
+    const independent = createReviewChange(withComment.document.source, { kind: 'replace', start: independentAt, end: independentAt + 5, proposal: 'rain', author })
+    const decided = decideReviewChange(independent.document, { changeId: replace.change.id, action: 'accepted', authorId: author.id })
+    const clean = materializeResolvedSuggestions(decided.document)
+    const remaining = parseReviewMarkup(clean)
+    expect(remaining.diagnostics.filter((d) => d.level === 'error')).toEqual([])
+    expect(remaining.changes.map((c) => c.id)).toEqual([independent.change.id])
+    expect(remaining.threads[0]).toMatchObject({ id: withComment.thread.id, messages: ['Check the description.'], anchorContext: { quote: 'canopy' } })
+    expect(projectPortableReviewSource(clean, { view: 'original' }).source).toContain('The canopy retained water.')
+    expect(projectPortableReviewSource(clean, { view: 'final' }).source).toContain('The canopy retained rain.')
+  })
+
+  it('keeps ambiguous or unsupported legacy review records available for inspection', () => {
+    const ambiguous = identicalSource.replaceAll('data-status="open"', 'data-status="accepted"')
+    for (const source of [ambiguous, ambiguous.replace('data-schema="1"', 'data-schema="2"'), ambiguous.replace('data-edge="start"', 'data-edge="unknown"')]) {
+      expect(materializeResolvedSuggestions(parseReviewMarkup(source))).toBe(source)
+    }
+  })
   it('matches the clean Original golden without leaking review structures', () => {
     const result = projectPortableReviewSource(identicalSource, { view: 'original' })
 

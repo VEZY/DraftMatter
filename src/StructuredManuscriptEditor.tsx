@@ -7,7 +7,7 @@ import { julia } from '@codemirror/legacy-modes/mode/julia'
 import { python } from '@codemirror/legacy-modes/mode/python'
 import { r } from '@codemirror/legacy-modes/mode/r'
 import { setBlockType, toggleMark, wrapIn } from 'prosemirror-commands'
-import { closeHistory, history, redo as historyRedo, undo as historyUndo } from 'prosemirror-history'
+import { closeHistory, history, isHistoryTransaction, redo as historyRedo, undo as historyUndo } from 'prosemirror-history'
 import { keymap } from 'prosemirror-keymap'
 import { wrapInList } from 'prosemirror-schema-list'
 import { Fragment, Slice, type Mark as ProseMirrorMark, type Node as ProseMirrorNode } from 'prosemirror-model'
@@ -15,7 +15,7 @@ import { EditorState, NodeSelection, TextSelection, type Command, type Transacti
 import { tableEditing } from 'prosemirror-tables'
 import { Decoration, DecorationSet, EditorView, type MarkView, type NodeView } from 'prosemirror-view'
 import { baseKeymap } from 'prosemirror-commands'
-import { redoCommand as collaborativeRedo, undoCommand as collaborativeUndo, ySyncPluginKey } from 'y-prosemirror'
+import { redoCommand as collaborativeRedo, undoCommand as collaborativeUndo, ySyncPluginKey, yUndoPluginKey } from 'y-prosemirror'
 import { serializeCitationCluster } from './citation'
 import { formatCrossReferenceTarget, isCrossReferenceTarget } from './crossReference'
 import { parseRetainedPublishedValues } from './publishedValues'
@@ -23,6 +23,9 @@ import { inferPublishedValueLanguage } from './publishedValueHints'
 import { renderEquation } from './equationRenderer'
 import { manuscriptSchema } from './manuscriptSchema'
 import { amendReviewProposal, parseReviewMarkup } from './reviewMarkup'
+import type { UndoManager } from 'yjs'
+import type { ReviewDecisionUndo } from './sharedEditor/collaborativeReview'
+import { ReviewSourceStep, reviewSourceTransaction } from './reviewHistory'
 import { reviewProposalText } from './reviewPresentation'
 import { manuscriptView, reanchorPortableReviews } from './reviewReanchor'
 import { createReviewChange } from './reviewOperations'
@@ -229,6 +232,9 @@ export interface StructuredManuscriptEditorHandle {
   wrapBlockquote: () => boolean
   wrapBulletList: () => boolean
   wrapOrderedList: () => boolean
+  recordSharedDecision: (entry: ReviewDecisionUndo) => void
+  applyLocalReviewSource: (before: string, after: string) => void
+  flushReviewEdits: () => void
   undo: () => boolean
   redo: () => boolean
   updateCodeCellSource: (cellId: string, source: string) => boolean
@@ -3550,26 +3556,25 @@ function tableNodeView(
 }
 
 function editorState(document: ProseMirrorNode, collaboration?: CollaborativeEditorBinding | null, search?: ManuscriptSearchOptions) {
-  const editingPlugins = collaboration
+  const base = collaboration
     ? createCollaborativeProseMirrorState({
         document: collaboration.document,
         schema: manuscriptSchema,
         initialDocument: document,
         awareness: collaboration.awareness,
-      }).state.plugins
-    : [
-        history(),
-        keymap({
+      }).state
+    : EditorState.create({
+        schema: manuscriptSchema,
+        doc: document,
+        plugins: [history(), keymap({
           'Mod-z': historyUndo,
           'Mod-y': historyRedo,
           'Shift-Mod-z': historyRedo,
-        }),
-      ]
-  return EditorState.create({
-    schema: manuscriptSchema,
-    ...(collaboration ? {} : { doc: document }),
+        })],
+      })
+  return base.reconfigure({
     plugins: [
-      ...editingPlugins,
+      ...base.plugins,
       createManuscriptSearchPlugin(search),
       keymap({
         'Mod-b': toggleMark(manuscriptSchema.marks.strong),
@@ -3647,8 +3652,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const suggestionAuthorRef = useRef(suggestionAuthor)
   const onSuggestionCaptureRef = useRef(onSuggestionCapture)
   const onCopyReferenceRef = useRef(onCopyReference)
+  // Ordinary shared text edits have Yjs inverses. Review decisions instead
+  // append an attributed reversal, ordered between the same native undo groups.
+  const sharedHistory = useRef<{ undo: { entry: ReviewDecisionUndo; depth: number }[]; redo: { entry: ReviewDecisionUndo; depth: number }[] }>({ undo: [], redo: [] })
   const pendingWording = useRef<{ id: string; base: string; value: string; timer: number } | undefined>(undefined)
-  const pendingSuggestionRef = useRef<{ acceptedSource: string; draftSource: string; timeout: number } | undefined>(undefined)
+  const pendingSuggestionRef = useRef<{ acceptedState: EditorState; acceptedSource: string; draftSource: string; timeout: number } | undefined>(undefined)
   const reviewSelectionSignatureRef = useRef('')
   const draggedBlockIdRef = useRef<string | undefined>(undefined)
   const resolveAssetUrlRef = useRef(resolveAssetUrl)
@@ -3772,6 +3780,13 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     emitReviewSelection(view)
   }
 
+  const applyLocalReviewSource = (view: EditorView, before: string, after: string) => {
+    const parsed = parseStructuredManuscript(after)
+    view.dispatch(reviewSourceTransaction(view.state, parsed.document, before, after)
+      .setMeta('dm-external-review-source', true))
+    view.dispatch(closeHistory(view.state.tr))
+  }
+
   const syncWordingFields = (view: EditorView) => {
     for (const field of view.dom.querySelectorAll<HTMLTextAreaElement>('textarea[data-proposal-id]')) {
       if (pendingWording.current?.id === field.dataset.proposalId) continue
@@ -3780,8 +3795,12 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     }
   }
 
-  const publishSharedReview = (view: EditorView, source: string) => {
+  const publishSharedReview = (view: EditorView, source: string, historyOperation = false) => {
     const canonical = collaborationRef.current?.publishPortableSource?.(source) ?? source
+    if (!historyOperation && collaborationRef.current) {
+      sharedHistory.current.redo = []
+      yUndoPluginKey.getState(view.state)?.undoManager.clear(false, true)
+    }
     replaceEditorSource(view, canonical)
     syncWordingFields(view)
     onChangeRef.current(canonical)
@@ -3868,7 +3887,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         replaceEditorSource(view, acceptedSource)
         return
       }
-      replaceEditorSource(view, captured.document.source)
+      applyLocalReviewSource(view, acceptedSource, captured.document.source)
       publishSourceChange(captured.document.source)
       const labels: Record<string, string> = {
         insert: 'Insertion captured as one portable suggestion',
@@ -3893,15 +3912,16 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     if (!pending) return
     window.clearTimeout(pending.timeout)
     pendingSuggestionRef.current = undefined
+    view.updateState(pending.acceptedState)
     captureSuggestion(view, pending.acceptedSource, pending.draftSource, 'text')
   }
 
-  const queueSuggestion = (view: EditorView, draftSource: string) => {
+  const queueSuggestion = (view: EditorView, acceptedState: EditorState, draftSource: string) => {
     const current = pendingSuggestionRef.current
     if (current) window.clearTimeout(current.timeout)
     const acceptedSource = current?.acceptedSource ?? sourceRef.current
     const timeout = window.setTimeout(() => finishPendingSuggestion(view), 450)
-    pendingSuggestionRef.current = { acceptedSource, draftSource, timeout }
+    pendingSuggestionRef.current = { acceptedState: current?.acceptedState ?? acceptedState, acceptedSource, draftSource, timeout }
   }
 
   const run = (command: Command) => {
@@ -3910,6 +3930,35 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     const result = command(view.state, view.dispatch, view)
     if (result) view.focus()
     return result
+  }
+
+  const performHistory = (redo: boolean) => {
+    const view = viewRef.current
+    if (!view || readOnlyRef.current) return false
+    finishPendingSuggestion(view)
+    flushWording()
+    const shared = collaborationRef.current
+    if (!shared) return run(redo ? historyRedo : historyUndo)
+    const manager = yUndoPluginKey.getState(view.state)!.undoManager as UndoManager
+    const entries = redo ? sharedHistory.current.redo : sharedHistory.current.undo
+    const pending = entries.at(-1)
+    if (shared.review && pending && (redo ? manager.redoStack : manager.undoStack).length <= pending.depth) {
+      try {
+        const result = shared.review.repeatOrUndoDecision(pending.entry, suggestionAuthorRef.current, redo)
+        publishSharedReview(view, result.source, true)
+        entries.pop()
+        const opposite = redo ? sharedHistory.current.undo : sharedHistory.current.redo
+        opposite.push({ entry: result.entry, depth: (redo ? manager.undoStack : manager.redoStack).length })
+        manager.stopCapturing()
+        view.focus()
+      } catch (error) {
+        // A peer may already have reviewed the reopened suggestion.
+        entries.pop()
+        onSuggestionCaptureRef.current?.(error instanceof Error ? error.message : 'The review decision changed.', true)
+      }
+      return true
+    }
+    return run(redo ? collaborativeRedo : collaborativeUndo)
   }
 
   const moveBlock = (
@@ -4010,8 +4059,25 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     wrapBlockquote: () => run(wrapIn(manuscriptSchema.nodes.blockquote, { id: randomId('quote') })),
     wrapBulletList: () => run(wrapInList(manuscriptSchema.nodes.bullet_list, { id: randomId('list') })),
     wrapOrderedList: () => run(wrapInList(manuscriptSchema.nodes.ordered_list, { id: randomId('list'), order: 1 })),
-    undo: () => run(collaborationRef.current ? collaborativeUndo : historyUndo),
-    redo: () => run(collaborationRef.current ? collaborativeRedo : historyRedo),
+    recordSharedDecision: (entry) => {
+      const view = viewRef.current
+      if (!view || !collaborationRef.current?.review) return
+      const manager = yUndoPluginKey.getState(view.state)!.undoManager as UndoManager
+      manager.stopCapturing()
+      manager.clear(false, true)
+      sharedHistory.current.redo = []
+      sharedHistory.current.undo.push({ entry, depth: manager.undoStack.length })
+    },
+    applyLocalReviewSource: (before, after) => {
+      const view = viewRef.current
+      if (view && !collaborationRef.current && before !== after) applyLocalReviewSource(view, before, after)
+    },
+    flushReviewEdits: () => {
+      flushWording()
+      if (viewRef.current) finishPendingSuggestion(viewRef.current)
+    },
+    undo: () => performHistory(false),
+    redo: () => performHistory(true),
     updateCodeCellSource: (cellId, code) => {
       const view = viewRef.current
       if (!view || readOnlyRef.current) return false
@@ -4565,6 +4631,14 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         },
       },
       handleKeyDown: (editorView, event) => {
+        const key = event.key.toLowerCase()
+        if ((event.metaKey || event.ctrlKey) && !event.altKey && (key === 'z' || key === 'y')) {
+          // Handle shortcuts while a card is active using the same command as
+          // toolbar clicks. Embedded text fields keep their own native history.
+          if (event.target instanceof Element && event.target.closest('input,textarea,.cm-editor')) return false
+          if (readOnlyRef.current) return true
+          return performHistory(key === 'y' || event.shiftKey)
+        }
         if (!shouldRequestStructuredCommands(editorView.state, event, readOnlyRef.current)) return false
         if (!onCommandRequestRef.current) return false
         onCommandRequestRef.current()
@@ -4639,7 +4713,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         const collaborativeOrigin = Boolean(collaborationMeta?.isChangeOrigin)
         const collaborativeUndoRedo = Boolean(collaborationMeta?.isUndoRedoOperation)
         const requestedSuggestionIntent = transaction.getMeta('dm-suggestion-intent') as ReviewSuggestionIntent | undefined
+        const reviewStep = transaction.steps.find((step) => step instanceof ReviewSourceStep)
         const suggestionIntent: ReviewSuggestionIntent | undefined = transaction.docChanged
+          && !reviewStep && !isHistoryTransaction(transaction)
           && suggestionModeRef.current
           && !collaborativeOrigin
           && !transaction.getMeta('dm-presentation-only')
@@ -4664,13 +4740,25 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
             if (pending.view === view) pending.position = transaction.mapping.map(pending.position, 1)
           }
         }
-        const next = view.state.apply(transaction)
+        const previous = view.state
+        const next = previous.apply(transaction)
+        if (reviewStep instanceof ReviewSourceStep) {
+          const parsed = parseStructuredManuscript(reviewStep.after)
+          metadataRef.current = metadataForEditor(parsed)
+          sourceRef.current = loadedSourceRef.current = reviewStep.after
+          reviewDecorationRef.current = reviewDecorationIndex(reviewStep.after)
+          onDiagnosticsRef.current?.(parsed.diagnostics)
+        }
         view.updateState(next)
         if (transaction.getMeta(manuscriptSearchKey) && !transaction.docChanged) return
         refreshSemanticPresentation(view)
         refreshFootnotePresentation(view)
         emitReviewSelection(view)
         onOutlineRef.current?.(outlineFor(next.doc))
+        if (reviewStep instanceof ReviewSourceStep) {
+          if (!transaction.getMeta('dm-external-review-source')) publishSourceChange(reviewStep.after)
+          return
+        }
         if (transaction.docChanged && !transaction.getMeta('dm-presentation-only') && metadataRef.current) {
           const serialized = serializeEditorDocument(next.doc, metadataRef.current)
           if (collaborativeOrigin && !collaborativeUndoRedo) {
@@ -4679,10 +4767,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
             return
           }
           if (suggestionIntent === 'text') {
-            queueSuggestion(view, serialized)
+            queueSuggestion(view, previous, serialized)
             return
           }
           if (suggestionIntent) {
+            view.updateState(previous)
             captureSuggestion(view, sourceRef.current, serialized, suggestionIntent)
             return
           }
@@ -4693,6 +4782,12 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       },
     })
     viewRef.current = view
+    const manager = collaborationRef.current ? yUndoPluginKey.getState(view.state)!.undoManager as UndoManager : undefined
+    sharedHistory.current = { undo: [], redo: [] }
+    const discardReviewRedo = () => {
+      if (manager && !manager.undoing && !manager.redoing) sharedHistory.current.redo = []
+    }
+    manager?.on('stack-item-added', discardReviewRedo)
     refreshSemanticPresentation(view)
     refreshFootnotePresentation(view)
     emitReviewSelection(view)
@@ -4700,6 +4795,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       for (const pending of pendingFigureImportsRef.current) {
         if (pending.view === view) { pending.cancelled = true; pendingFigureImportsRef.current.delete(pending) }
       }
+      manager?.off('stack-item-added', discardReviewRedo)
       flushWording()
       host.removeAttribute('aria-busy')
       if (pendingSuggestionRef.current) window.clearTimeout(pendingSuggestionRef.current.timeout)
