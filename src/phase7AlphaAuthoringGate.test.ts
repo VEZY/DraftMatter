@@ -3,8 +3,9 @@
 import { cpSync, mkdtempSync, readFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it } from 'vitest'
-import { NodeAgentProjectStore } from './agentProjectStore'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import { AgentProjectStoreError, NodeAgentProjectStore } from './agentProjectStore'
+import { opaqueAgentReference } from './agentSelectors'
 import { createDraftMatterAgentService } from './agentService'
 import { assertDraftMatterAiProjectEnabled } from './agentProjectEnablement'
 import { renderDocxExport } from './docxExport'
@@ -104,6 +105,38 @@ describe('DM-P7-GATE alpha authoring workflow', () => {
         },
       })
     } finally {
+      await service.close()
+    }
+  })
+
+  it('distinguishes a busy project from a deleted retained figure', async () => {
+    const projectRoot = mkdtempSync(join(tmpdir(), 'draftmatter-alpha-figure-'))
+    temporaryRoots.push(projectRoot)
+    cpSync(fixtureRoot, projectRoot, { recursive: true })
+    const store = await NodeAgentProjectStore.open(projectRoot)
+    const service = createDraftMatterAgentService(store)
+    const figure = 'figures/julia-model.svg'
+    const request = {
+      protocolVersion: '1.0', domain: 'computation', action: 'inspect',
+      reference: opaqueAgentReference('cell', 'cell-julia-figure'),
+    } as const
+    const read = store.readBytes.bind(store)
+    const reader = vi.spyOn(store, 'readBytes').mockImplementation(async (path) => {
+      if (path === figure) throw new AgentProjectStoreError('project-busy', 'Another client is writing the project.')
+      return read(path)
+    })
+    try {
+      expect(await service.execute(request)).toMatchObject({
+        ok: false, error: { code: 'project-busy', retryable: true },
+      })
+      reader.mockImplementation(read)
+      rmSync(join(projectRoot, figure))
+      expect(await service.execute(request)).toMatchObject({
+        ok: true,
+        result: { cells: [{ freshness: { status: 'output-missing', current: false } }] },
+      })
+    } finally {
+      reader.mockRestore()
       await service.close()
     }
   })

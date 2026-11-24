@@ -43,15 +43,20 @@ describe('prebuilt server release consumption', () => {
     expect(() => readServerRelease(path)).toThrow('bounded regular file')
   })
 
-  it('creates a private release environment once and preserves existing deployment secrets', () => {
+  it('creates a release environment once and preserves existing deployment secrets', () => {
     const directory = folder(), output = join(directory, 'release.env'), runtime = join(directory, 'runtime.env')
     writeFileSync(runtime, 'POSTGRES_PASSWORD="keep-me"\n', { mode: 0o600 })
     writeServerReleaseEnvironment(release(), output)
-    expect(statSync(output).mode & 0o777).toBe(0o600)
     expect(readFileSync(output, 'utf8')).toBe(serverReleaseEnvironment(release()))
     expect(() => writeServerReleaseEnvironment(release(), output)).toThrow('already exists')
     expect(() => writeServerReleaseEnvironment(release(), runtime)).toThrow('already exists')
     expect(readFileSync(runtime, 'utf8')).toBe('POSTGRES_PASSWORD="keep-me"\n')
+  })
+
+  it.skipIf(process.platform === 'win32')('enforces POSIX mode bits on the release file and its parent directory', () => {
+    const directory = folder(), output = join(directory, 'release.env')
+    writeServerReleaseEnvironment(release(), output)
+    expect(statSync(output).mode & 0o777).toBe(0o600)
     chmodSync(directory, 0o755)
     expect(() => writeServerReleaseEnvironment(release(), join(directory, 'another.env'))).toThrow('private directory')
   })
@@ -67,7 +72,7 @@ describe('prebuilt server release consumption', () => {
     expect(source).not.toContain('  proxy:')
   })
 
-  it('bootstraps only the official digest through Docker and never sources release environment files', () => {
+  it.skipIf(process.platform === 'win32')('bootstraps only the official digest through Docker and never sources release environment files', () => {
     const directory = folder(), bin = join(directory, 'bin'), runtime = join(directory, 'runtime'), manifest = join(directory, 'server-release.json'), log = join(directory, 'docker-args.txt')
     const mkdir = spawnSync('mkdir', ['-p', bin, runtime]); expect(mkdir.status).toBe(0)
     writeFileSync(manifest, JSON.stringify(release(), null, 2) + '\n')

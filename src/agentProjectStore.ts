@@ -52,6 +52,12 @@ export class AgentProjectStoreError extends Error {
   }
 }
 
+export function isMissingProjectFile(error: unknown) {
+  if (error instanceof AgentProjectStoreError) return error.code === 'project-missing' && typeof error.details?.path === 'string'
+  const code = (error as NodeJS.ErrnoException | undefined)?.code
+  return code === 'ENOENT' || code === 'ENOTDIR'
+}
+
 function inside(root: string, candidate: string) {
   const path = relative(root, candidate)
   return path === '' || (!path.startsWith(`..${sep}`) && path !== '..' && !isAbsolute(path))
@@ -80,6 +86,7 @@ async function fileRevision(content: string) {
 
 export class NodeAgentProjectStore implements AgentProjectStore {
   readonly root: string
+  private pendingOperation = Promise.resolve()
 
   private constructor(
     root: string,
@@ -140,8 +147,9 @@ export class NodeAgentProjectStore implements AgentProjectStore {
     let canonical: string
     try {
       canonical = await realpath(target.candidate)
-    } catch {
-      throw new AgentProjectStoreError('project-missing', `Project file “${target.normalized}” was not found.`)
+    } catch (error) {
+      if (!isMissingProjectFile(error)) throw error
+      throw new AgentProjectStoreError('project-missing', `Project file “${target.normalized}” was not found.`, { path: target.normalized })
     }
     if (!inside(this.root, canonical)) {
       throw new AgentProjectStoreError('path-symlink-escape', `Project file “${target.normalized}” resolves outside the selected project.`)
@@ -150,8 +158,14 @@ export class NodeAgentProjectStore implements AgentProjectStore {
   }
 
   private async locked<T>(action: () => Promise<T>): Promise<T> {
-    await this.assertRootIdentity()
+    // Parallel validation reads on one store would otherwise compete for the
+    // same OS lock. Other stores and processes still use the on-disk protocol.
+    const previous = this.pendingOperation
+    let release!: () => void
+    this.pendingOperation = new Promise<void>((resolve) => { release = resolve })
+    await previous
     try {
+      await this.assertRootIdentity()
       return await withProjectWriteLock(this.root, async () => {
         await this.assertRootIdentity()
         await recoverProjectTransactions(this.root)
@@ -160,7 +174,7 @@ export class NodeAgentProjectStore implements AgentProjectStore {
     } catch (error) {
       if (error instanceof ProjectTransactionError) throw new AgentProjectStoreError(error.code, error.message)
       throw error
-    }
+    } finally { release() }
   }
 
   private async readTextUnlocked(path: string) {

@@ -1,7 +1,6 @@
 import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import { createServer, request as httpRequest, type ClientRequest, type ServerResponse } from 'node:http'
-import { createConnection } from 'node:net'
 import { setTimeout as delay } from 'node:timers/promises'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { PROJECT_FILE_CHUNK_BYTES, type ProjectFileScope, type ProjectFileUpload } from '../../src/collaboration/projectFiles'
@@ -65,6 +64,8 @@ async function fixture(options: { timeoutMs?: number; downloadBytes?: Uint8Array
   })
   const responses: ServerResponse[] = []
   const server = createServer((request, response) => {
+    // Keep the real socket's write buffer full until the test releases it.
+    if (request.headers['x-test-cork-response'] === '1') response.cork()
     responses.push(response)
     void handleNodeHttpRequest(request, response, api, 64 * 1024, { filePartTimeoutMs: options.timeoutMs ?? 5_000 })
   })
@@ -101,14 +102,10 @@ async function fixture(options: { timeoutMs?: number; downloadBytes?: Uint8Array
     return { request: request!, result }
   }
   const slowDownload = async (token: string, path = downloadPath) => {
-    const socket = createConnection({ host: '127.0.0.1', port })
-    socket.on('error', () => undefined)
-    cleanups.push(() => { socket.destroy() })
-    await once(socket, 'connect')
-    // Keep the receive window full: no application reads or implicit HTTP draining.
-    socket.pause()
-    socket.write(`GET ${path} HTTP/1.1\r\nHost: localhost\r\nAuthorization: Bearer ${token}\r\nConnection: close\r\n\r\n`)
-    return socket
+    const index = responses.length
+    const client = start({ token, path, method: 'GET', headers: { 'x-test-cork-response': '1' } })
+    await eventually(() => responses[index]?.writableNeedDrain === true)
+    return { ...client, response: responses[index] }
   }
   return { start, slowDownload, api, getUpload, putPart, readPart, readPreview, authorizeProject, responses }
 }
@@ -151,35 +148,36 @@ describe('Node project file transport admission', () => {
   })
 
   it('holds download admission until bytes finish or the slow reader closes the connection', async () => {
-    const { start, slowDownload, readPart, responses } = await fixture({ downloadBytes: new Uint8Array(PROJECT_FILE_CHUNK_BYTES).fill(19) })
+    const { start, slowDownload, readPart } = await fixture({ downloadBytes: new Uint8Array(PROJECT_FILE_CHUNK_BYTES).fill(19) })
     const first = await slowDownload('alice.old')
     const second = await slowDownload('alice.new')
-    await eventually(() => readPart.mock.calls.length === 2 && responses.length === 2 && responses.every((response) => response.writableLength > 0 && !response.writableFinished))
     expect((await start({ token: 'alice.third', method: 'GET', path: downloadPath }).result).status).toBe(429)
     expect(readPart).toHaveBeenCalledTimes(2)
-    first.destroy()
-    await eventually(() => responses[0].destroyed)
-    await delay(20)
+    first.response.uncork()
+    const finished = await first.result
+    expect(finished.status).toBe(200)
+    expect(finished.body.length).toBe(PROJECT_FILE_CHUNK_BYTES)
     const accepted = await start({ token: 'alice.next', method: 'GET', path: downloadPath }).result
     expect(accepted.status).toBe(200)
     expect(accepted.body.length).toBe(PROJECT_FILE_CHUNK_BYTES)
-    second.destroy()
+    second.response.uncork()
+    expect((await second.result).status).toBe(200)
   })
 
   it('shares preview admission with parts and holds it for slow PDF readers', async () => {
-    const { start, slowDownload, readPreview, readPart, responses } = await fixture({ downloadBytes: new Uint8Array(PROJECT_FILE_CHUNK_BYTES * 4).fill(19) })
+    const { start, slowDownload, readPreview, readPart } = await fixture({ downloadBytes: new Uint8Array(PROJECT_FILE_CHUNK_BYTES * 4).fill(19) })
     const first = await slowDownload('alice.old', previewPath)
     const second = await slowDownload('alice.new', previewPath.replace('/files/', '/f%69les/'))
-    await eventually(() => readPreview.mock.calls.length === 2 && responses.length === 2 && responses.every((response) => response.writableLength > 0 && !response.writableFinished))
     expect((await start({ token: 'alice.third', method: 'GET', path: previewPath }).result).status).toBe(429)
     expect((await start({ token: 'alice.fourth', method: 'GET', path: downloadPath }).result).status).toBe(429)
     expect(readPreview).toHaveBeenCalledTimes(2)
     expect(readPart).not.toHaveBeenCalled()
-    first.destroy()
-    await eventually(() => responses[0].destroyed)
-    await delay(20)
+    const closed = once(first.response, 'close')
+    first.request.destroy()
+    await closed
     expect((await start({ token: 'alice.next', method: 'GET', path: previewPath }).result).status).toBe(200)
-    second.destroy()
+    second.response.uncork()
+    expect((await second.result).status).toBe(200)
   })
 
   it('authenticates previews before storage and enforces their absolute transfer deadline', async () => {

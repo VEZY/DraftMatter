@@ -1,12 +1,17 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
 import { once } from 'node:events'
-import { mkdtemp, mkdir, readFile, readdir, rm, symlink, truncate, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rename, rm, symlink, truncate, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
-import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { NodeAgentProjectStore } from './agentProjectStore'
 import { withProjectWriteLock } from './projectTransactions'
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const fs = await importOriginal<typeof import('node:fs/promises')>()
+  return { ...fs, rename: vi.fn(fs.rename) }
+})
 
 const children = new Set<ChildProcessWithoutNullStreams>()
 let root: string
@@ -153,6 +158,36 @@ describe('durable project transactions across clients', () => {
     expect(await readdir(transaction)).toEqual(['manifest.json'])
   })
 
+  it.each([
+    { description: 'temporary', denials: 2 },
+    { description: 'persistent', denials: Infinity },
+  ])('handles $description sharing violations while publishing a ready lock claim', async ({ denials }) => {
+    const locks = join(root, '.draftmatter', 'write-locks')
+    const filesystem = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    const sharingError = Object.assign(new Error('Simulated Windows sharing violation'), { code: 'EPERM' })
+    let attempts = 0
+    const action = vi.fn(async () => 'entered')
+    vi.mocked(rename).mockImplementation(async (source, target) => {
+      if (dirname(String(target)) === locks && !JSON.parse(await readFile(source, 'utf8')).choosing) {
+        if (++attempts <= denials) throw sharingError
+      }
+      await filesystem.rename(source, target)
+    })
+    try {
+      const operation = withProjectWriteLock(root, action)
+      if (denials === Infinity) {
+        await expect(operation).rejects.toBe(sharingError)
+        expect(attempts).toBeGreaterThan(1)
+        expect(action).not.toHaveBeenCalled()
+      } else {
+        await expect(operation).resolves.toBe('entered')
+        expect(attempts).toBe(denials + 1)
+        expect(action).toHaveBeenCalledOnce()
+      }
+      expect(await readdir(locks)).toEqual([])
+    } finally { vi.mocked(rename).mockReset() }
+  })
+
   it('serializes same-process independent callers without requiring a shared store instance', async () => {
     let active = 0, maximum = 0
     await Promise.all(Array.from({ length: 10 }, () => withProjectWriteLock(root, async () => {
@@ -160,5 +195,25 @@ describe('durable project transactions across clients', () => {
       await new Promise((resolve) => setTimeout(resolve, 3)); active--
     })))
     expect(maximum).toBe(1)
+  })
+
+  it('queues parallel reads on one store without competing disk claims or blocking after a failed read', async () => {
+    const store = await NodeAgentProjectStore.open(root)
+    const locks = join(store.root, '.draftmatter', 'write-locks')
+    const filesystem = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises')
+    let maxClaims = 0
+    vi.mocked(rename).mockImplementation(async (source, target) => {
+      await filesystem.rename(source, target)
+      if (dirname(String(target)) === locks) {
+        const claims = (await readdir(locks)).filter((name) => name.endsWith('.json'))
+        maxClaims = Math.max(maxClaims, claims.length)
+      }
+    })
+    try {
+      const results = await Promise.allSettled(['missing.svg', ...Array<string>(10).fill('paper.qmd')].map((path) => store.readBytes(path)))
+      expect(results[0]).toMatchObject({ status: 'rejected', reason: { code: 'project-missing' } })
+      expect(results.slice(1).every((result) => result.status === 'fulfilled')).toBe(true)
+      expect(maxClaims).toBe(1)
+    } finally { vi.mocked(rename).mockReset() }
   })
 })

@@ -21,6 +21,7 @@ import {
 } from './agentProtocol'
 import {
   AgentProjectStoreError,
+  isMissingProjectFile,
   type AgentProjectSnapshot,
   type AgentProjectStore,
   type AgentProjectWrite,
@@ -664,7 +665,7 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
     try {
       return await store.readText(path)
     } catch (error) {
-      if (error instanceof AgentProjectStoreError && error.code === 'project-missing') return undefined
+      if (isMissingProjectFile(error)) return undefined
       throw error
     }
   }
@@ -763,11 +764,12 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
         reason: 'A declared input changed after the latest successful execution.',
         manifest,
       }
-    } catch {
+    } catch (error) {
+      if (!isMissingProjectFile(error)) throw error
       return {
         status: 'stale' as const,
         current: false,
-        reason: 'A declared input is missing or unreadable.',
+        reason: 'A declared input is missing.',
         manifest,
       }
     }
@@ -782,11 +784,12 @@ export function createDraftMatterAgentService(store: AgentProjectStore, options:
             manifest,
           }
         }
-      } catch {
+      } catch (error) {
+        if (!isMissingProjectFile(error)) throw error
         return {
           status: 'output-missing' as const,
           current: false,
-          reason: `Retained artifact ${artifact.path} is missing or unreadable.`,
+          reason: `Retained artifact ${artifact.path} is missing.`,
           manifest,
         }
       }

@@ -82,6 +82,20 @@ export async function atomicTransactionWrite(path: string, bytes: Uint8Array | s
   finally { await rm(temporary, { force: true }) }
 }
 
+// Windows may briefly deny replacement or removal while another client is reading
+// a claim. Retry only idempotent coordination I/O, never the protected action.
+async function retryClaimIO<T>(operation: () => Promise<T>): Promise<T> {
+  const delays = [10, 20, 40, 80, 160, 320]
+  for (let attempt = 0; ; attempt++) {
+    try { return await operation() }
+    catch (error) {
+      const code = (error as NodeJS.ErrnoException).code
+      if (attempt >= delays.length || (code !== 'EPERM' && code !== 'EACCES' && code !== 'EBUSY')) throw error
+      await new Promise((resolve) => setTimeout(resolve, delays[attempt]))
+    }
+  }
+}
+
 interface Claim { schemaVersion: 1; pid: number; nonce: string; choosing: boolean; ticket: number }
 function alive(pid: number) {
   try { process.kill(pid, 0); return true } catch (error) { return (error as NodeJS.ErrnoException).code !== 'ESRCH' }
@@ -93,7 +107,8 @@ export async function withProjectWriteLock<T>(root: string, action: () => Promis
   const claimPath = join(locks, `${process.pid}-${nonce}.json`)
   const claim: Claim = { schemaVersion: 1, pid: process.pid, nonce, choosing: true, ticket: 0 }
   const started = Date.now()
-  const readClaims = async () => {
+  const publishClaim = () => retryClaimIO(() => atomicTransactionWrite(claimPath, JSON.stringify(claim)))
+  const readClaims = () => retryClaimIO(async () => {
     const claims: Claim[] = []
     let count = 0
     for await (const entry of await opendir(locks)) {
@@ -105,27 +120,34 @@ export async function withProjectWriteLock<T>(root: string, action: () => Promis
       if (!alive(Number(match[1]))) { await rm(path, { force: true }); continue }
       let record: Claim
       try { record = JSON.parse((await boundedBytes(path, 4096)).toString()) as Claim }
-      catch (error) { if (missing(error)) continue; throw new ProjectTransactionError('transaction-failed', 'A live project lock is invalid; close other DraftMatter clients and retry.') }
+      catch (error) {
+        if (missing(error)) continue
+        if (error instanceof SyntaxError) throw new ProjectTransactionError('transaction-failed', 'A live project lock is invalid; close other DraftMatter clients and retry.')
+        throw error
+      }
       if (record.schemaVersion !== 1 || record.pid !== Number(match[1]) || record.nonce !== match[2] || typeof record.choosing !== 'boolean' || !Number.isSafeInteger(record.ticket) || record.ticket < 0) {
         throw new ProjectTransactionError('transaction-failed', 'The project lock metadata is invalid; it has been preserved for inspection.')
       }
       claims.push(record)
     }
     return claims
-  }
-  await atomicTransactionWrite(claimPath, JSON.stringify(claim))
+  })
   try {
+    await publishClaim()
     claim.ticket = 1 + Math.max(0, ...(await readClaims()).map((record) => record.ticket))
     if (!Number.isSafeInteger(claim.ticket)) throw new ProjectTransactionError('transaction-failed', 'The project lock ticket range is exhausted.')
     claim.choosing = false
-    await atomicTransactionWrite(claimPath, JSON.stringify(claim))
+    await publishClaim()
     while (true) {
       const blocked = (await readClaims()).some((other) => other.nonce !== nonce && (other.choosing || (other.ticket > 0 && (other.ticket < claim.ticket || (other.ticket === claim.ticket && other.nonce < nonce)))))
       if (!blocked) return await action()
       if (Date.now() - started >= LOCK_TIMEOUT_MS) throw new ProjectTransactionError('project-busy', 'Another DraftMatter client is writing this project. Wait for it to finish, or close that client and retry. No files were overwritten.')
       await new Promise((resolve) => setTimeout(resolve, 20))
     }
-  } finally { await rm(claimPath, { force: true }); await syncDirectory(locks) }
+  } finally {
+    await retryClaimIO(() => rm(claimPath, { force: true }))
+    await syncDirectory(locks)
+  }
 }
 
 interface TransactionFile { target: string; backup: string | null; beforeHash: string | null; afterHash: string | null }

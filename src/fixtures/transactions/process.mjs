@@ -1,7 +1,7 @@
 // Child-process fixture shared by Vitest and native Rust integration tests.
 import { createServer } from 'vite'
 import { createInterface } from 'node:readline'
-import { resolve } from 'node:path'
+import { basename, resolve } from 'node:path'
 import filesystem from 'node:fs/promises'
 import { syncBuiltinESMExports } from 'node:module'
 const [root, mode] = process.argv.slice(2)
@@ -13,8 +13,8 @@ if (mode === 'hold-recovery' || mode === 'hold-committed' || mode === 'fail-comm
   const rename = filesystem.rename
   filesystem.rename = async (...args) => {
     await rename(...args)
-    if (mode === 'hold-recovery' && String(args[1]).endsWith('/references.json')) await hold()
-    if ((mode === 'hold-committed' || mode === 'fail-committed') && String(args[1]).endsWith('/manifest.json')) {
+    if (mode === 'hold-recovery' && basename(args[1]) === 'references.json') await hold()
+    if ((mode === 'hold-committed' || mode === 'fail-committed') && basename(args[1]) === 'manifest.json') {
       if (JSON.parse(await filesystem.readFile(args[1], 'utf8')).state === 'committed') { if (mode === 'fail-committed') throw new Error('Injected failure after commit marker rename'); await hold() }
     }
   }

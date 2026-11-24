@@ -4,9 +4,9 @@ import { join } from 'node:path'
 import { describe, expect, it, vi } from 'vitest'
 import { inspectAssistantConnection, inspectAssistantConnections, planAssistantConnection } from './assistantIntegration'
 
-async function fixture() {
+async function fixture(bundleDirectory = 'DraftMatter.app') {
   const homeDir = await mkdtemp(join(tmpdir(), 'draftmatter-assistants-'))
-  const bundledCommand = join(homeDir, 'DraftMatter.app', 'draftmatter-mcp')
+  const bundledCommand = join(homeDir, bundleDirectory, 'draftmatter-mcp')
   await mkdir(join(homeDir, '.codex'), { recursive: true })
   await writeFile(join(homeDir, '.codex', 'config.toml'), 'sandbox_mode = "workspace-write"\n')
   await writeFile(join(homeDir, '.claude.json'), `${JSON.stringify({
@@ -62,7 +62,8 @@ describe('device-wide assistant connections', () => {
   })
 
   it('updates a moved Codex launch command after Codex inserts its own server inside the markers', async () => {
-    const options = await fixture()
+    // Exercise TOML backslash escaping on every runner.
+    const options = await fixture('Applications\\DraftMatter')
     await planAssistantConnection({ ...options, client: 'codex', operation: 'install', apply: true })
     const path = join(options.homeDir, '.codex', 'config.toml')
     const original = (await readFile(path, 'utf8')).replace('# draftmatter-assistant:end',
@@ -72,9 +73,11 @@ describe('device-wide assistant connections', () => {
     const moved = { ...options, bundledCommand: options.bundledCommand + '-moved' }
     const result = await planAssistantConnection({ ...moved, client: 'codex', operation: 'update', apply: true })
     expect(result.statusAfter).toMatchObject({ connected: true })
-    expect(await readFile(path, 'utf8')).toBe(original.replace(options.bundledCommand, moved.bundledCommand))
+    const updated = original.replace(JSON.stringify(options.bundledCommand), JSON.stringify(moved.bundledCommand))
+    expect(updated).not.toBe(original)
+    expect(await readFile(path, 'utf8')).toBe(updated)
     await planAssistantConnection({ ...moved, client: 'codex', operation: 'repair', apply: true })
-    expect(await readFile(path, 'utf8')).toBe(original.replace(options.bundledCommand, moved.bundledCommand))
+    expect(await readFile(path, 'utf8')).toBe(updated)
   })
 
   it('uses the Codex plugin when plugin management is available', async () => {

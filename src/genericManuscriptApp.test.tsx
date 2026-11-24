@@ -26,8 +26,8 @@ Keep this opaque block exactly.
 :::
 `
 
-async function flush(delay = 0) {
-  await act(async () => { await new Promise((resolve) => setTimeout(resolve, delay)) })
+async function flush() {
+  await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
 }
 
 function browserRecoveries(filename: string) {
@@ -60,7 +60,7 @@ describe('generic portable manuscript app workflow', () => {
     const file = { name: 'real-paper.qmd', size: source.length, text: vi.fn().mockResolvedValue(source) } as unknown as File
     Object.defineProperty(input, 'files', { configurable: true, value: [file] })
     await act(async () => input.dispatchEvent(new Event('change', { bubbles: true })))
-    await flush(420)
+    await vi.waitFor(() => expect(browserRecoveries('real-paper.qmd')[0]?.source).toBe(source), { timeout: 3_000 })
 
     expect(container.querySelector('.structured-manuscript-editor')).not.toBeNull()
     expect(container.querySelector('.structured-manuscript-editor h1')?.textContent).toBe('A real portable paper')
@@ -68,7 +68,6 @@ describe('generic portable manuscript app workflow', () => {
     expect(container.querySelector('.structured-citation')?.textContent).toBe('(real2026)')
     expect(container.querySelector('.structured-code-editor .cm-content')?.textContent).toBe('println("before")')
     expect(container.textContent).not.toContain('Keep this opaque block exactly')
-    expect(browserRecoveries('real-paper.qmd')[0]?.source).toBe(source)
     expect(browserRecoveries('real-paper.qmd')[0]?.source).not.toContain('Drought acclimation reshapes canopy development')
 
     expect(container.querySelector('.structured-code-editor .cm-content')?.getAttribute('contenteditable')).toBe('false')
@@ -86,8 +85,7 @@ describe('generic portable manuscript app workflow', () => {
     const confirmCitation = [...container.querySelectorAll<HTMLButtonElement>('button')]
       .find((button) => button.textContent?.includes('Insert selected · 1'))
     await act(async () => confirmCitation?.click())
-    await flush(450)
-    expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('[@martin2023]')
+    await vi.waitFor(() => expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('[@martin2023]'), { timeout: 3_000 })
     expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('println("before")')
     expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('::: {.future-extension}\nKeep this opaque block exactly.\n:::')
     expect(localStorage.getItem('draftmatter.structured-mode.v1')).toBe('true')
@@ -101,8 +99,7 @@ describe('generic portable manuscript app workflow', () => {
       inputSetter?.call(locator, 'p. 18')
       locator.dispatchEvent(new Event('input', { bubbles: true }))
     })
-    await flush(450)
-    expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('[@martin2023, p. 18]')
+    await vi.waitFor(() => expect(localStorage.getItem('draftmatter.structured-source.v1')).toContain('[@martin2023, p. 18]'), { timeout: 3_000 })
 
     await act(async () => root.unmount())
     container.remove()
