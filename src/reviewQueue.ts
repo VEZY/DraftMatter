@@ -61,7 +61,9 @@ export function buildReviewQueue(document: ReviewMarkupDocument, filters: Review
       authorName: authorNames.get(record.authorId) ?? record.authorId,
       status: record.status,
       ...(range ? { start: range.start, end: range.end } : {}),
-      excerpt: range ? plainExcerpt(document.source, range.start, range.end) : record.anchorContext?.quote ?? 'Review location unavailable',
+      excerpt: record.queueKind === 'change' && record.changeKind === 'insert' && range
+        ? record.proposal?.trim() || 'Insertion'
+        : range ? plainExcerpt(document.source, range.start, range.end) : record.anchorContext?.quote ?? 'Review location unavailable',
       ...(record.queueKind === 'change' && conflictByChange.has(record.id) ? { conflictId: conflictByChange.get(record.id) } : {}),
     }]
   }).sort((left, right) =>

@@ -116,6 +116,7 @@ export class CollaborativeReviewBinding {
   constructor(
     private readonly document: CollaborativeDocument,
     private readonly onLocalSource?: (source: string) => void,
+    private readonly flushPendingUpdates?: () => void,
   ) {}
 
   visibleWording(changeId: string) { return this.document.reviewText().visibleWording(changeId) }
@@ -134,6 +135,20 @@ export class CollaborativeReviewBinding {
     return reviewDecisionConflicts(this.document.snapshot())
   }
 
+  private transactDecision(apply: () => void) {
+    // The server validates amendments only while their proposal is still open.
+    // Send its last wording and the subsequent immutable decision in wire order.
+    this.flushPendingUpdates?.()
+    const source = this.document.doc.transact(() => {
+      apply()
+      const next = projectCollaborationPortableSource(this.document)
+      this.onLocalSource?.(next)
+      return next
+    }, COLLABORATIVE_REVIEW_ORIGIN)
+    this.flushPendingUpdates?.()
+    return source
+  }
+
   private ensureAuthor(author: LocalAuthorIdentity) {
     const next = normalizedAuthor(author)
     if (!next.name || new TextEncoder().encode(next.name).byteLength > 240 || /[\u0000-\u001f\u007f]/.test(next.name)) {
@@ -146,12 +161,6 @@ export class CollaborativeReviewBinding {
     if (!existing) {
       this.document.doc.transact(() => this.document.putAuthor(next), COLLABORATIVE_REVIEW_ORIGIN)
     }
-  }
-
-  private finish() {
-    const source = projectCollaborationPortableSource(this.document)
-    this.onLocalSource?.(source)
-    return source
   }
 
   decide(request: CollaborativeReviewDecisionRequest): CollaborativeReviewDecisionResult {
@@ -183,7 +192,7 @@ export class CollaborativeReviewBinding {
     const statuses = new Map(result.document.changes.map((change) => [change.id, change.status]))
     const proposals = changedProposals(this.document.snapshot().proposals, statuses)
 
-    this.document.doc.transact(() => {
+    const source = this.transactDecision(() => {
       for (const decision of prepared) {
         if (decision.action === 'accepted') {
           this.document.materializeAcceptance(decision.changeId, decision.id)
@@ -191,10 +200,10 @@ export class CollaborativeReviewBinding {
         } else this.document.putDecision(decision)
       }
       proposals.forEach((proposal) => this.document.putProposal(proposal))
-    }, COLLABORATIVE_REVIEW_ORIGIN)
+    })
 
     return {
-      source: this.finish(),
+      source,
       decisionIds,
       decidedChangeIds: result.decidedChangeIds,
       rebasedChangeIds: result.rebasedChangeIds,
@@ -229,11 +238,11 @@ export class CollaborativeReviewBinding {
     const decisionId = generatedDecisionId()
     const decision = { id: decisionId, changeId: entry.changeId, authorId: author.id, action: redo ? entry.action : 'reopened',
       baseRevision: this.document.revisionToken(), timestamp: new Date().toISOString(), resolves: [entry.decisionId] }
-    this.document.doc.transact(() => {
+    const source = this.transactDecision(() => {
       this.document.putDecision(decision)
       changedProposals(snapshot.proposals, statuses).forEach((proposal) => this.document.putProposal(proposal))
-    }, COLLABORATIVE_REVIEW_ORIGIN)
-    return { source: this.finish(), entry: { ...entry, decisionId, visibleWording: this.visibleWording(entry.changeId) } }
+    })
+    return { source, entry: { ...entry, decisionId, visibleWording: this.visibleWording(entry.changeId) } }
   }
 
   resolveConflict(request: CollaborativeReviewConflictResolutionRequest): CollaborativeReviewConflictResolutionResult {
@@ -284,15 +293,15 @@ export class CollaborativeReviewBinding {
     }
     const proposals = changedProposals(this.document.snapshot().proposals, statuses)
 
-    this.document.doc.transact(() => {
+    const source = this.transactDecision(() => {
       if (decision.action === 'accepted') {
         this.document.materializeAcceptance(decision.changeId, decision.id)
         this.document.putDecision({ ...decision, materialized: true })
       } else this.document.putDecision(decision)
       proposals.forEach((proposal) => this.document.putProposal(proposal))
-    }, COLLABORATIVE_REVIEW_ORIGIN)
+    })
 
-    return { source: this.finish(), changeId: request.changeId, status, rebasedChangeIds }
+    return { source, changeId: request.changeId, status, rebasedChangeIds }
   }
 }
 

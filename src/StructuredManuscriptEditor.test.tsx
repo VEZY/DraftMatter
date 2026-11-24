@@ -2,7 +2,7 @@
 
 import { act, createRef } from 'react'
 import { createRoot } from 'react-dom/client'
-import { EditorState, NodeSelection } from 'prosemirror-state'
+import { EditorState, NodeSelection, TextSelection } from 'prosemirror-state'
 import { CellSelection } from 'prosemirror-tables'
 import { EditorView } from 'prosemirror-view'
 import type { Node as ProseMirrorNode } from 'prosemirror-model'
@@ -304,6 +304,96 @@ describe('full structured manuscript editor', () => {
     await act(async () => { editor.current?.setSearch('') })
     expect(container.querySelector('.manuscript-find-external-match')).toBeNull()
     expect(changed).not.toHaveBeenCalled()
+  })
+
+  it('marks each pending keystroke before serialization and undoes the grouped insertion', async () => {
+    const manuscript = '# Findings\n\nOne object.\n'
+    const editor = createRef<StructuredManuscriptEditorHandle>()
+    const changed = vi.fn()
+    const setProps = vi.spyOn(EditorView.prototype, 'setProps')
+    await act(async () => root.render(<StructuredManuscriptEditor source={manuscript} ref={editor} onChange={changed} suggestionMode />))
+    const view = setProps.mock.contexts[0] as EditorView
+    const text = view.dom.querySelector('p')!.firstChild!
+    const pos = view.posAtDOM(text, 'One object'.length)
+    const serialize = vi.spyOn(structuredManuscriptModule, 'serializeStructuredManuscript')
+    await act(async () => view.dispatch(view.state.tr.insertText('s', pos)))
+    expect(view.dom.querySelector('.dm-review-insertion')?.textContent).toBe('s')
+    await act(async () => view.dispatch(view.state.tr.insertText('!', pos + 1)))
+    expect(view.dom.querySelector('.dm-review-insertion')?.textContent).toBe('s!')
+    expect(serialize).not.toHaveBeenCalled()
+    expect(changed).not.toHaveBeenCalled()
+
+    // Undo also flushes the pending typing group. Redo must recover one portable suggestion.
+    await act(async () => { expect(editor.current!.undo()).toBe(true) })
+    expect(changed.mock.lastCall?.[0]).toBe(manuscript)
+    expect(view.dom.querySelector('.dm-review-insertion')).toBeNull()
+    await act(async () => { expect(editor.current!.redo()).toBe(true) })
+    expect(changed.mock.lastCall?.[0].match(/\.dm-change\b/g)).toHaveLength(1)
+    expect(view.dom.querySelector('.dm-review-proposal')?.textContent).toBe('s!')
+  })
+
+  it('inserts at the collapsed browser caret when typing arrives ahead of selectionchange', async () => {
+    const setProps = vi.spyOn(EditorView.prototype, 'setProps')
+    await act(async () => root.render(<StructuredManuscriptEditor source={'One object.\n'} onChange={vi.fn()} suggestionMode />))
+    const view = setProps.mock.contexts[0] as EditorView
+    const text = view.dom.querySelector('p')!.firstChild!
+    const end = view.posAtDOM(text, 10)
+    view.focus()
+    await act(async () => view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, end - 6, end))))
+    view.dom.ownerDocument.getSelection()!.collapse(text, 10)
+    await act(async () => {
+      view.dom.dispatchEvent(new InputEvent('beforeinput', { bubbles: true, inputType: 'insertText', data: 's' }))
+      view.dispatch(view.state.tr.insertText('s'))
+    })
+    expect(view.dom.querySelector('p')?.textContent).toBe('One objects.')
+    expect(view.dom.querySelector('.dm-review-insertion')?.textContent).toBe('s')
+    expect(view.dom.querySelector('.dm-review-kind-delete')).toBeNull()
+  })
+
+  it('keeps the caret in a newly selected paragraph when the previous suggestion is saved', async () => {
+    const changed = vi.fn()
+    const setProps = vi.spyOn(EditorView.prototype, 'setProps')
+    await act(async () => root.render(<StructuredManuscriptEditor source={'One object.\n\nNext passage.\n'} onChange={changed} suggestionMode />))
+    const view = setProps.mock.contexts[0] as EditorView
+    const paragraphs = view.dom.querySelectorAll('p')
+    const insertion = view.posAtDOM(paragraphs[0].firstChild!, 'One object'.length)
+    await act(async () => {
+      view.focus()
+      view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, insertion)))
+      view.dispatch(view.state.tr.insertText('s'))
+    })
+    const move = view.posAtDOM(paragraphs[1].firstChild!, 'Next'.length)
+    await act(async () => view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, move))))
+    expect(changed).toHaveBeenCalledTimes(1)
+    expect(view.hasFocus()).toBe(true)
+    expect(view.state.selection.$from.parent.textContent).toBe('Next passage.')
+    expect(view.state.selection.$from.parentOffset).toBe(4)
+    expect(view.dom.querySelector('textarea[data-proposal-id]')).toBeNull()
+  })
+
+  it('keeps the current spelling visible during an IME composition until it can become one suggestion', async () => {
+    const manuscript = 'Un objet.\n'
+    const changed = vi.fn()
+    const setProps = vi.spyOn(EditorView.prototype, 'setProps')
+    await act(async () => root.render(<StructuredManuscriptEditor source={manuscript} onChange={changed} suggestionMode />))
+    const view = setProps.mock.contexts[0] as EditorView
+    const pos = view.posAtDOM(view.dom.querySelector('p')!.firstChild!, 3)
+    const composing = vi.spyOn(view, 'composing', 'get').mockReturnValue(true)
+    vi.useFakeTimers()
+    try {
+      await act(async () => view.dispatch(view.state.tr.insertText('e', pos, pos + 5)))
+      expect(view.dom.querySelector('.dm-review-insertion')?.textContent).toBe('e')
+      expect(view.dom.querySelector('.dm-review-kind-delete')?.textContent).toBe('objet')
+      await act(async () => { vi.advanceTimersByTime(500) })
+      expect(changed).not.toHaveBeenCalled()
+      await act(async () => view.dispatch(view.state.tr.insertText('é', pos, pos + 1)))
+      composing.mockReturnValue(false)
+      await act(async () => { vi.advanceTimersByTime(500) })
+      expect(changed).toHaveBeenCalledTimes(1)
+      expect(view.dom.querySelector('.dm-review-proposal')?.textContent).toBe('é')
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('does not publish collaboration updates or review suggestions when searching and navigating', async () => {

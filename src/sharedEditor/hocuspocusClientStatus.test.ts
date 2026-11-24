@@ -5,6 +5,9 @@ import * as Y from 'yjs'
 import { HocuspocusCollaborationClient, type CollaborationClientOptions } from './hocuspocusClient'
 import { CollaborativeDocument } from './collaboration'
 import { collaborationSocketCredential } from './collaborationProtocol'
+import { createReviewChange } from '../reviewOperations'
+import { parseStructuredManuscript } from '../structuredManuscript'
+import { COLLABORATIVE_PROSEMIRROR_ROOT, reconcileCollaborativeProseMirrorDocument } from './prosemirrorCollaboration'
 
 type Configuration = ConstructorParameters<typeof HocuspocusProvider>[0]
 const { providers } = vi.hoisted(() => ({ providers: [] as Array<{
@@ -15,6 +18,7 @@ vi.mock('@hocuspocus/provider', () => ({
     hasUnsyncedChanges = true
     socketOpen = true
     disconnect = vi.fn()
+    flushPendingUpdates = vi.fn()
     destroy = vi.fn()
     constructor(readonly configuration: Configuration) { providers.push(this) }
   },
@@ -37,6 +41,31 @@ function opening(extra: Partial<CollaborationClientOptions> = {}) {
 }
 
 describe('collaborative room readiness', () => {
+  it.each([true, false])('delivers the decision and accepted text in one wire update (editor initialized: %s)', async (initialized) => {
+    const source = 'We recorded one mark.\n'
+    const author = { id: 'alice', name: 'Alice' }
+    const offset = source.indexOf('.')
+    const inserted = createReviewChange(source, { start: offset, end: offset, kind: 'insert', proposal: 'er', author })
+    const f = opening({ bootstrapSource: inserted.document.source })
+    await vi.waitFor(() => expect(providers).toHaveLength(1))
+    providers[0].configuration.onStatus!({ status: 'connected' as never })
+    providers[0].configuration.onSynced!({ state: true })
+    const { editorBinding: binding } = await f.pending
+    if (initialized) reconcileCollaborativeProseMirrorDocument(binding, parseStructuredManuscript(source).document)
+    const peer = new Y.Doc()
+    try {
+      Y.applyUpdate(peer, Y.encodeStateAsUpdate(binding.document))
+      const intermediate: { decisions: number; richText: string }[] = []
+      binding.document.on('update', (update: Uint8Array) => {
+        Y.applyUpdate(peer, update)
+        intermediate.push({ decisions: peer.getMap('draftmatter:decisions').size, richText: peer.getXmlFragment(COLLABORATIVE_PROSEMIRROR_ROOT).toString() })
+      })
+      const result = binding.review!.decide({ changeIds: [inserted.change.id], action: 'accepted', author })
+      expect(result.source.trim()).toBe('We recorded one marker.')
+      expect(intermediate).toEqual([{ decisions: 1, richText: initialized ? expect.stringContaining('We recorded one marker.') : '' }])
+    } finally { peer.destroy() }
+  })
+
   it('wraps freshly obtained access tokens for the socket and explains a legacy server denial', async () => {
     const token = vi.fn().mockResolvedValueOnce('first-token').mockResolvedValueOnce('refreshed-token')
     const f = opening({ token })

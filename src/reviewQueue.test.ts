@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest'
 import identicalSource from './fixtures/portable/25-review-identical.qmd?raw'
 import { parseReviewMarkup } from './reviewMarkup'
 import { buildReviewQueue, currentReviewChange, navigateReviewQueue, nextChangeAfterDecision, type ReviewQueueItem } from './reviewQueue'
-import { createReviewThread, decideReviewChange } from './reviewOperations'
+import { createReviewChange, createReviewThread, decideReviewChange } from './reviewOperations'
 
 describe('review queue and navigation', () => {
   it('orders review items by manuscript location and carries conflict identity', () => {
@@ -12,6 +12,16 @@ describe('review queue and navigation', () => {
     expect(queue.map((item) => item.id)).toEqual(['dm-i01', 'dm-i02'])
     expect(queue.every((item) => item.kind === 'change' && item.excerpt.includes('leaf area declined'))).toBe(true)
     expect(queue.map((item) => item.conflictId)).toEqual(['conflict:dm-i01+dm-i02', 'conflict:dm-i01+dm-i02'])
+  })
+
+  it('describes a point insertion using the inserted wording in the review toolbar', () => {
+    const base = 'Publication object.\n'
+    const point = base.indexOf('.')
+    const { document } = createReviewChange(base, {
+      start: point, end: point, kind: 'insert', proposal: 's',
+      author: { id: 'dm-reviewer', name: 'Reviewer' },
+    })
+    expect(buildReviewQueue(document)[0].excerpt).toBe('s')
   })
 
   it('filters by author, status, and kind without losing unplaced records', () => {

@@ -355,6 +355,8 @@ export function PortableReviewItems({
         const active = item.id === activeId
         if (item.kind === 'change' || item.kind === 'unplaced-change') {
           const change = document.changes.find((candidate) => candidate.id === item.id)!
+          const locationDetail = item.kind === 'unplaced-change' ? 'Location needs attention'
+            : change.changeKind === 'insert' ? undefined : item.excerpt
           const recovery = recoveryByAnchor.get(item.anchorId)
           const decisionConflict = decisionConflictByChange.get(item.id)
           const overlappingAcceptance = active && canDecide && change.status === 'decision-conflict' && !decisionConflict
@@ -364,9 +366,9 @@ export function PortableReviewItems({
               <div className="conflict-heading"><Icon name="branch" size={16} /><span>{item.conflictId ? 'Overlapping suggestion' : item.kind === 'unplaced-change' ? 'Unplaced suggestion' : 'Suggestion'}</span></div>
               <button className={`proposal-option ${active ? 'selected' : ''}`} onClick={() => activate(item.id)}>
                 <span className="avatar avatar-blue avatar-small">{initials(item.authorName)}</span>
-                <span className="proposal-author"><strong>{item.authorName}</strong><small><ReviewTimestamp value={change.updatedAt ?? change.createdAt} verb={change.updatedAt ? 'Updated' : 'Created'} fallback={item.kind === 'unplaced-change' ? 'Location needs attention' : item.excerpt} detail={item.kind === 'unplaced-change' ? 'Location needs attention' : item.excerpt} /></small></span>
+                <span className="proposal-author"><strong>{item.authorName}</strong><small><ReviewTimestamp value={change.updatedAt ?? change.createdAt} verb={change.updatedAt ? 'Updated' : 'Created'} fallback={locationDetail ?? ''} detail={locationDetail} /></small></span>
                 <span className={`status-pill status-${item.status}`}>{statusLabel(item.status)}</span>
-                <span className="proposal-copy"><del>{change.anchorContext?.quote || item.excerpt}</del>{change.proposal !== undefined && <ins>{reviewProposalText(change.proposal)}</ins>}</span>
+                <span className="proposal-copy">{change.changeKind !== 'insert' && <del>{change.anchorContext?.quote || item.excerpt}</del>}{change.proposal !== undefined && <ins>{reviewProposalText(change.proposal)}</ins>}</span>
               </button>
               {change.rationale && <div className="proposal-rationale">“{change.rationale}”</div>}
               {canDecide && active && change.status === 'open' && item.kind !== 'unplaced-change' && (

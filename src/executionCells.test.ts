@@ -83,6 +83,17 @@ describe('AST-based executable-cell extraction', () => {
 describe('reusing executable-cell analysis', () => {
   afterEach(() => vi.restoreAllMocks())
 
+  it('avoids parsing a manuscript whose only fences are in its trailing review records', () => {
+    const parse = vi.spyOn(Object.getPrototypeOf(unified), 'parse')
+    const reviewed = '# Observations\n\nA result.\n\n::::: {.draftmatter-reviews}\n```text\ns\n```\n:::::\n'
+    expect(extractExecutableCells(reviewed).cells).toEqual([])
+    expect(parse).not.toHaveBeenCalled()
+
+    const withCellAfter = reviewed + '\n```{python #after-notes}\nprint(1)\n```\n'
+    expect(extractExecutableCells(withCellAfter).cells.map((cell) => cell.id)).toEqual(['after-notes'])
+    expect(parse).toHaveBeenCalledTimes(1)
+  })
+
   it('parses unchanged source once and invalidates syntax and positions when the source changes', () => {
     const parse = vi.spyOn(Object.getPrototypeOf(unified), 'parse')
     const source = '> ```{python #cache-position .execute output="table"}\n> print(1)\n> ```'

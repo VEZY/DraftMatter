@@ -1,4 +1,5 @@
 import { expect, test, type Locator, type Page } from '@playwright/test'
+import { createDecoder, readVarString, readVarUint } from 'lib0/decoding'
 import { startSharedManuscript } from './shared-manuscript'
 import { selectRenderedTextWithMouse } from './rendered-selection'
 
@@ -82,6 +83,11 @@ test('two collaborators see one amended replacement and stay at the passage unde
     await expect(observer.locator(`[data-review-balloon="${proposalId}"]`)).toContainText('slightly less')
     await expect(observer.getByRole('button', { name: /^(Accept|Reject) and go to next change$/ })).toHaveCount(0)
 
+    // The inserted words also serve as the anchor for a reader in margin view.
+    await expect(interpretation(observer).locator('.dm-review-insertion')).toHaveText('transpiration and')
+    await expect(interpretation(observer).locator('.dm-review-point')).toHaveCount(0)
+    expect(await interpretation(observer).locator('.dm-review-insertion').textContent()).toBe('transpiration and ')
+
     const toolbar = reader.locator('.topbar')
     const insertionId = await interpretation(author).getByRole('textbox', { name: 'Edit suggested wording' }).getAttribute('data-proposal-id')
     expect(insertionId).toBeTruthy()
@@ -128,6 +134,50 @@ test('two collaborators see one amended replacement and stay at the passage unde
     await expect(interpretation(lateReader)).toHaveText('The measurements reflect the balance between interception and evaporation.')
     await expect(lateReader.locator('.ProseMirror p').first()).toContainText('water loss from stems')
     await expect(lateReader.locator('[data-review-balloon]')).toHaveCount(0)
+  } finally {
+    await shared.close()
+  }
+})
+
+test('accepting immediately after typing includes the latest shared wording', async ({ browser, baseURL }) => {
+  const shared = await startSharedManuscript(browser, baseURL!, '# Measurements\n\nWe recorded one mark.\n')
+  try {
+    const owner = await shared.open('owner')
+    let watchingDecision = false
+    let viewerUpdates = 0
+    const peer = await shared.open('viewer', (page) => page.on('websocket', (socket) => {
+      socket.on('framesent', ({ payload }) => {
+        if (!watchingDecision || !Buffer.isBuffer(payload)) return
+        const decoder = createDecoder(payload)
+        readVarString(decoder) // Hocuspocus document routing key
+        if (readVarUint(decoder) === 0 && readVarUint(decoder) === 2) viewerUpdates++ // incremental Yjs sync update
+      })
+    }))
+    await owner.bringToFront()
+    await owner.getByRole('button', { name: 'Turn on track changes' }).click()
+    const passage = (page: Page) => page.locator('.ProseMirror p').filter({ hasText: 'We recorded one mark' })
+    await selectRenderedTextWithMouse(owner, passage(owner), 'mark')
+    await owner.keyboard.press('ArrowRight')
+    await owner.keyboard.type('e')
+    const field = passage(owner).getByRole('textbox', { name: 'Edit suggested wording' })
+    await expect(field).toHaveValue('e')
+    const accept = owner.getByRole('button', { name: 'Accept and go to next change' })
+    await expect(accept).toBeVisible()
+    await expect(passage(peer).locator('.dm-review-insertion')).toHaveText('e')
+    watchingDecision = true
+    // Take the normal toolbar action before the amendment's idle timer can publish.
+    await accept.evaluate((button) => {
+      document.addEventListener('input', () => queueMicrotask(() => (button as HTMLButtonElement).click()), { once: true })
+    })
+    await field.press('r')
+    await expect.poll(() => manuscriptText(passage(owner))).toBe('We recorded one marker.')
+    await expect.poll(() => manuscriptText(passage(peer))).toBe('We recorded one marker.')
+    await expect(owner.locator('[data-review-balloon]')).toHaveCount(0)
+    await expect(peer.locator('[data-review-balloon]')).toHaveCount(0)
+    const latePeer = await shared.open('viewer')
+    await expect(passage(latePeer)).toHaveText('We recorded one marker.')
+    await expect(latePeer.locator('[data-review-balloon]')).toHaveCount(0)
+    expect(viewerUpdates).toBe(0)
   } finally {
     await shared.close()
   }

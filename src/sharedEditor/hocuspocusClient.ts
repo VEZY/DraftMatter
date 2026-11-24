@@ -12,11 +12,14 @@ import {
   type CollaborationCheckpoint,
 } from './collaborationCheckpoint'
 import {
+  COLLABORATIVE_PROSEMIRROR_ROOT,
+  reconcileCollaborativeProseMirrorDocument,
   setCollaborativeEditorPresence,
   type CollaborativeEditorBinding,
 } from './prosemirrorCollaboration'
 import { COLLABORATIVE_REVIEW_ORIGIN, CollaborativeReviewBinding } from './collaborativeReview'
 import { collaborationSocketCredential } from './collaborationProtocol'
+import { parseStructuredManuscript } from '../structuredManuscript'
 
 export type CollaborationClientStatus = 'connecting' | 'connected' | 'disconnected' | 'error'
 
@@ -119,7 +122,18 @@ export class HocuspocusCollaborationClient {
       awareness: collaboration.awareness,
       user: { id: options.presence.userId, name: options.presence.name, color: options.presence.color ?? '#617f73' },
       publishPortableSource: (source) => this.publishPortableSource(source),
-      review: new CollaborativeReviewBinding(collaboration, (source) => { this.lastPortableSource = source }),
+      review: new CollaborativeReviewBinding(
+        collaboration,
+        (source) => {
+          // The deciding writer publishes the editor text and the review decision atomically.
+          // Otherwise every peer can independently insert the same accepted wording into Yjs.
+          if (collaboration.doc.getXmlFragment(COLLABORATIVE_PROSEMIRROR_ROOT).length) {
+            reconcileCollaborativeProseMirrorDocument(this.editorBinding, parseStructuredManuscript(source).document)
+          }
+          this.lastPortableSource = source
+        },
+        () => provider.flushPendingUpdates(),
+      ),
     }
     this.provider = provider
     this.stopUpdate = collaboration.onPortableUpdate((origin) => {

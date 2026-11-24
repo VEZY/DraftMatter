@@ -176,10 +176,13 @@ export function extractExecutableCells(source: string): ExecutableCellResult {
 
 function parseExecutableCells(source: string): ExecutableCellResult {
   // Only a fenced block can carry a Markdown language and executable attributes.
-  if (!source.includes('```') && !source.includes('~~~')) return { cells: [], diagnostics: [] }
-  const tree = unified().use(remarkParse).parse(source) as Root
+  const firstFence = source.search(/`{3}|~{3}/)
+  if (firstFence < 0) return { cells: [], diagnostics: [] }
   const excluded = excludedDivRanges(source)
   const diagnostics: DocumentDiagnostic[] = []
+  // Portable review records contain literal fences even in a prose-only manuscript.
+  if (excluded.some((range) => range.start <= firstFence && range.end === source.length)) return { cells: [], diagnostics: [] }
+  const tree = unified().use(remarkParse).parse(source) as Root
   const ids = new Map<string, number>()
   const cells = codeNodes(tree).flatMap<ExecutableCell>((node) => {
     const startOffset = node.position?.start.offset

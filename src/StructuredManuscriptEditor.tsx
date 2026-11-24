@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react'
+import { forwardRef, startTransition, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react'
 import { defaultKeymap, history as codeHistory, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { defaultHighlightStyle, StreamLanguage, syntaxHighlighting } from '@codemirror/language'
 import { Compartment, EditorState as CodeMirrorState } from '@codemirror/state'
@@ -15,6 +15,7 @@ import { EditorState, NodeSelection, TextSelection, type Command, type Transacti
 import { tableEditing } from 'prosemirror-tables'
 import { Decoration, DecorationSet, EditorView, type MarkView, type NodeView } from 'prosemirror-view'
 import { baseKeymap } from 'prosemirror-commands'
+import { Mapping } from 'prosemirror-transform'
 import { redoCommand as collaborativeRedo, undoCommand as collaborativeUndo, ySyncPluginKey, yUndoPluginKey } from 'y-prosemirror'
 import { serializeCitationCluster } from './citation'
 import { formatCrossReferenceTarget, isCrossReferenceTarget } from './crossReference'
@@ -30,7 +31,7 @@ import { reviewProposalText } from './reviewPresentation'
 import { manuscriptView, reanchorPortableReviews } from './reviewReanchor'
 import { createReviewChange } from './reviewOperations'
 import { captureReviewSuggestion, reviewTransformationDiff, type ReviewSuggestionIntent } from './reviewSuggestionCapture'
-import { parseStructuredManuscript, serializeStructuredManuscript, type StructuredManuscriptMetadata } from './structuredManuscript'
+import { parseStructuredManuscript, serializeStructuredManuscript, type StructuredManuscript, type StructuredManuscriptMetadata } from './structuredManuscript'
 import type { ExecutionFreshnessStatus } from './executionFreshness'
 import { extractExecutableCells, type ExecutionLanguage } from './executionCells'
 import type { CitationItem, DocumentDiagnostic, MarkupView } from './types'
@@ -438,6 +439,14 @@ function selectedReviewText(view: EditorView, source?: string, metadata?: Struct
   return { quote, occurrence }
 }
 
+function syncCollapsedCaret(view: EditorView, native: Selection | null) {
+  if (!native?.isCollapsed || !native.focusNode || !view.dom.contains(native.focusNode)) return false
+  const position = view.posAtDOM(native.focusNode, native.focusOffset)
+  if (!view.state.doc.resolve(position).parent.inlineContent) return false
+  view.dispatch(view.state.tr.setSelection(TextSelection.create(view.state.doc, position)))
+  return true
+}
+
 function semanticReviewTarget(view: EditorView, event: MouseEvent, source?: string, metadata?: StructuredManuscriptMetadata): StructuredReviewSelection | null {
   const selected = selectedReviewText(view, source, metadata)
   if (selected) return selected
@@ -480,7 +489,7 @@ interface ReviewDecorationIndex {
   anchors: Map<string, { start?: number; end?: number; points: number[] }>
 }
 
-function reviewDecorationIndex(source: string): ReviewDecorationIndex {
+function reviewDecorationIndex(source: string, document?: ProseMirrorNode): ReviewDecorationIndex {
   const parsed = parseReviewMarkup(source)
   const records = new Map<string, ReviewDecorationRecord[]>()
   for (const record of [
@@ -489,7 +498,9 @@ function reviewDecorationIndex(source: string): ReviewDecorationIndex {
   ]) records.set(record.anchorId, [...(records.get(record.anchorId) ?? []), record])
   const anchors = new Map<string, { start?: number; end?: number; points: number[] }>()
   let removed = 0
-  parseStructuredManuscript(source).document.descendants((node, position) => {
+  if (!records.size) return { records, anchors }
+  const anchoredDocument = document ?? parseStructuredManuscript(source).document
+  anchoredDocument.descendants((node, position) => {
     if (node.type !== manuscriptSchema.nodes.review_anchor) return true
     const anchorId = String(node.attrs.anchorId)
     const anchor = anchors.get(anchorId) ?? { points: [] }
@@ -534,6 +545,27 @@ function sharedTrackDiff(view: EditorView, transaction: Transaction, metadata: S
   return reviewTransformationDiff(accepted, draft, intent)
 }
 
+function pendingTextDecorations(accepted: ProseMirrorNode, draft: ProseMirrorNode, markupView: MarkupView) {
+  if (markupView === 'original' || markupView === 'final') return []
+  const start = accepted.content.findDiffStart(draft.content)
+  if (start === null) return []
+  const end = accepted.content.findDiffEnd(draft.content)!
+  // Repeated letters can make the common prefix and suffix overlap.
+  const overlap = Math.max(0, start - Math.min(end.a, end.b))
+  const oldEnd = end.a + overlap
+  const newEnd = end.b + overlap
+  const preview: Decoration[] = []
+  if (newEnd > start) preview.push(Decoration.inline(start, newEnd, { class: 'dm-review-insertion dm-review-pending' }))
+  const removed = accepted.textBetween(start, oldEnd, ' ')
+  if (removed) preview.push(Decoration.widget(start, () => {
+    const deletion = globalThis.document.createElement('span')
+    deletion.className = `dm-review-change dm-review-kind-delete dm-review-${markupView}`
+    deletion.textContent = removed
+    return deletion
+  }, { side: -1, key: `dm-pending-deletion-${markupView}-${removed}` }))
+  return preview
+}
+
 function reviewDecorations(
   document: ProseMirrorNode,
   index: ReviewDecorationIndex,
@@ -542,9 +574,9 @@ function reviewDecorations(
   activeReviewId?: string,
   activeAnchorId?: string,
   onAnchorSelect?: (anchorId: string, reviewId?: string) => void,
-  editing?: { authorId: string; amend: (id: string, value: string) => void; flush: () => void },
+  editing?: { authorId: string; onlyId?: string; history?: (redo: boolean) => boolean; amend: (id: string, value: string) => void; flush: () => void },
 ) {
-  if (markupView === 'original' || markupView === 'final') return DecorationSet.empty
+  if (!index.records.size || markupView === 'original' || markupView === 'final') return DecorationSet.empty
   const documentAnchors = new Map<string, { start?: number; end?: number; points: number[] }>()
   document.descendants((node, position) => {
     if (node.type !== manuscriptSchema.nodes.review_anchor) return true
@@ -575,7 +607,10 @@ function reviewDecorations(
     if (anchor.start !== undefined && anchor.end !== undefined && anchor.start < anchor.end) {
       decorations.push(Decoration.inline(anchor.start, anchor.end, { class: classes, 'data-review-anchor': anchorId }))
     }
-    for (const position of anchor.points) decorations.push(Decoration.widget(position, () => {
+    const isInsertion = record.kind === 'change' && record.changeKind === 'insert'
+    // The inserted wording itself is the interactive anchor, even for a single letter.
+    const pointPositions = isInsertion && record.proposal ? [] : anchor.points
+    for (const position of pointPositions) decorations.push(Decoration.widget(position, () => {
       const marker = globalThis.document.createElement('button')
       marker.type = 'button'
       marker.className = `dm-review-point ${classes}`
@@ -619,14 +654,13 @@ function reviewDecorations(
         return marker
       }, { key: `dm-review-margin-${anchorId}-${marginPosition}-${visibleThreads.map((thread) => `${thread.id}:${thread.status}`).join(',')}-${active ? 'active' : 'idle'}`, side: -1 }))
     }
-    const proposal = record.proposal === undefined ? '' : reviewProposalText(record.proposal)
     const proposalPosition = anchor.end ?? anchor.points[0]
-    const ownWording = editing && editing.authorId === record.authorId && record.status === 'open'
+    const ownWording = editing && (!editing.onlyId || record.id === editing.onlyId) && editing.authorId === record.authorId && record.status === 'open'
       && (record.changeKind === 'insert' || record.changeKind === 'replace') && record.proposal !== undefined
     if (ownWording && proposalPosition !== undefined) {
       decorations.push(Decoration.widget(proposalPosition, (view, getPos) => {
         const wrapper = globalThis.document.createElement('span')
-        wrapper.className = 'dm-review-proposal dm-review-open'
+        wrapper.className = `dm-review-proposal dm-review-open${isInsertion ? ' dm-review-insertion' : ''}`
         wrapper.contentEditable = 'false'
         wrapper.dataset.reviewAnchor = anchorId
         const field = globalThis.document.createElement('textarea')
@@ -642,7 +676,14 @@ function reviewDecorations(
         field.addEventListener('compositionend', () => editing.amend(record.id, field.value))
         field.addEventListener('blur', editing.flush)
         field.addEventListener('keydown', (event) => {
-          if (event.isComposing || field.selectionStart !== field.selectionEnd) return
+          if (event.isComposing) return
+          const key = event.key.toLowerCase()
+          if (editing.history && (event.metaKey || event.ctrlKey) && !event.altKey && (key === 'z' || key === 'y')) {
+            event.preventDefault()
+            editing.history(key === 'y' || event.shiftKey)
+            return
+          }
+          if (field.selectionStart !== field.selectionEnd) return
           if (event.key !== 'Escape' && !(event.key === 'ArrowRight' && field.selectionEnd === field.value.length)
             && !(event.key === 'ArrowLeft' && field.selectionStart === 0)) return
           const pos = getPos()
@@ -654,11 +695,15 @@ function reviewDecorations(
         wrapper.append(field)
         return wrapper
       }, { key: `dm-edit-wording-${record.id}`, side: 2, stopEvent: () => true, ignoreSelection: true }))
-    } else if (markupView === 'all' && record.kind === 'change' && record.changeKind !== 'delete' && proposal && proposalPosition !== undefined) {
+    } else if ((markupView === 'all' || isInsertion) && record.kind === 'change' && record.changeKind !== 'delete' && record.proposal && proposalPosition !== undefined) {
+      const source = record.proposal
+      const label = reviewProposalText(source)
+      // A space before or after inserted wording also belongs to the manuscript.
+      const proposal = isInsertion ? source.replace(source.trim(), () => label || source.trim()) : label
       decorations.push(Decoration.widget(proposalPosition, () => {
         const marker = globalThis.document.createElement('button')
         marker.type = 'button'
-        marker.className = `dm-review-proposal dm-review-${record.status}${active ? ' dm-review-active' : ''}`
+        marker.className = `dm-review-proposal dm-review-${record.status}${isInsertion ? ' dm-review-insertion' : ''}${active ? ' dm-review-active' : ''}`
         marker.dataset.reviewAnchor = anchorId
         marker.setAttribute('aria-label', `Open ${record.changeKind ?? 'text'} suggestion: ${proposal}`)
         marker.textContent = proposal
@@ -3657,7 +3702,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   // append an attributed reversal, ordered between the same native undo groups.
   const sharedHistory = useRef<{ undo: { entry: ReviewDecisionUndo; depth: number }[]; redo: { entry: ReviewDecisionUndo; depth: number }[] }>({ undo: [], redo: [] })
   const pendingWording = useRef<{ id: string; base: string; value: string; timer: number } | undefined>(undefined)
-  const pendingSuggestionRef = useRef<{ acceptedState: EditorState; acceptedSource: string; draftSource: string; timeout: number } | undefined>(undefined)
+  const localWordingId = useRef<string | undefined>(undefined)
+  const pendingSuggestionRef = useRef<{ acceptedState: EditorState; acceptedSource: string; draft: EditorState; mapping: Mapping; timeout: number } | undefined>(undefined)
   const reviewSelectionSignatureRef = useRef('')
   const draggedBlockIdRef = useRef<string | undefined>(undefined)
   const resolveAssetUrlRef = useRef(resolveAssetUrl)
@@ -3766,7 +3812,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     const parsed = parseStructuredManuscript(nextSource)
     loadedSourceRef.current = nextSource
     sourceRef.current = nextSource
-    reviewDecorationRef.current = reviewDecorationIndex(nextSource)
+    reviewDecorationRef.current = reviewDecorationIndex(nextSource, parsed.document)
     metadataRef.current = metadataForEditor(parsed)
     onDiagnosticsRef.current?.(parsed.diagnostics)
     onOutlineRef.current?.(outlineFor(parsed.document))
@@ -3784,7 +3830,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const applyLocalReviewSource = (view: EditorView, before: string, after: string) => {
     const parsed = parseStructuredManuscript(after)
     view.dispatch(reviewSourceTransaction(view.state, parsed.document, before, after)
-      .setMeta('dm-external-review-source', true))
+      .setMeta('dm-parsed-review-source', parsed))
     view.dispatch(closeHistory(view.state.tr))
   }
 
@@ -3818,7 +3864,12 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       const current = document.changes.find((change) => change.id === pending.id)
       if (current?.proposal === pending.value) return
       if (current?.proposal !== pending.base) throw Error('The suggestion changed in another session. Review its latest wording.')
-      publishSharedReview(view, amendReviewProposal(document, pending.id, suggestionAuthorRef.current.id, pending.value))
+      const next = amendReviewProposal(document, pending.id, suggestionAuthorRef.current.id, pending.value)
+      if (collaborationRef.current) publishSharedReview(view, next)
+      else {
+        applyLocalReviewSource(view, sourceRef.current, next)
+        publishSourceChange(next)
+      }
     } catch (error) {
       syncWordingFields(view)
       onSuggestionCaptureRef.current?.(error instanceof Error ? error.message : 'The suggestion could not be updated.', true)
@@ -3881,6 +3932,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     acceptedSource: string,
     draftSource: string,
     intent: ReviewSuggestionIntent,
+    continueTyping = false,
   ) => {
     try {
       const captured = captureReviewSuggestion(acceptedSource, draftSource, suggestionAuthorRef.current, intent)
@@ -3888,7 +3940,13 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         replaceEditorSource(view, acceptedSource)
         return
       }
+      if (continueTyping) localWordingId.current = captured.change.id
       applyLocalReviewSource(view, acceptedSource, captured.document.source)
+      if (continueTyping) {
+        const field = view.dom.querySelector<HTMLTextAreaElement>(`textarea[data-proposal-id="${semanticDomSelector(captured.change.id)}"]`)
+        field?.focus({ preventScroll: true })
+        field?.setSelectionRange(field.value.length, field.value.length)
+      }
       publishSourceChange(captured.document.source)
       const labels: Record<string, string> = {
         insert: 'Insertion captured as one portable suggestion',
@@ -3908,21 +3966,37 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     }
   }
 
-  const finishPendingSuggestion = (view: EditorView) => {
+  const finishPendingSuggestion = (view: EditorView, continueTyping = false) => {
     const pending = pendingSuggestionRef.current
     if (!pending) return
     window.clearTimeout(pending.timeout)
     pendingSuggestionRef.current = undefined
-    view.updateState(pending.acceptedState)
-    captureSuggestion(view, pending.acceptedSource, pending.draftSource, 'text')
+    const { acceptedState, draft } = pending
+    const caretMoved = !view.state.selection.eq(draft.selection)
+    const keepTyping = continueTyping && view.hasFocus() && !caretMoved && draft.selection.empty
+    const restored = caretMoved ? acceptedState.apply(acceptedState.tr.setSelection(
+      view.state.selection.map(acceptedState.doc, pending.mapping.invert()),
+    )) : acceptedState
+    view.updateState(restored)
+    if (draft.doc.eq(acceptedState.doc) || readOnlyRef.current) return
+    const draftSource = serializeEditorDocument(draft.doc, metadataRef.current!)
+    captureSuggestion(view, pending.acceptedSource, draftSource, 'text', keepTyping)
   }
 
-  const queueSuggestion = (view: EditorView, acceptedState: EditorState, draftSource: string) => {
+  const queueSuggestion = (view: EditorView, acceptedState: EditorState, draft: EditorState, edit: Transaction) => {
     const current = pendingSuggestionRef.current
     if (current) window.clearTimeout(current.timeout)
     const acceptedSource = current?.acceptedSource ?? sourceRef.current
-    const timeout = window.setTimeout(() => finishPendingSuggestion(view), 450)
-    pendingSuggestionRef.current = { acceptedState: current?.acceptedState ?? acceptedState, acceptedSource, draftSource, timeout }
+    const commitWhenIdle = () => {
+      // Keep the native IME composition alive, including pauses when selecting a candidate.
+      if (view.composing && pendingSuggestionRef.current) {
+        pendingSuggestionRef.current.timeout = window.setTimeout(commitWhenIdle, 450)
+      } else finishPendingSuggestion(view, true)
+    }
+    const timeout = window.setTimeout(commitWhenIdle, 450)
+    const mapping = current?.mapping ?? new Mapping()
+    mapping.appendMapping(edit.mapping)
+    pendingSuggestionRef.current = { acceptedState: current?.acceptedState ?? acceptedState, acceptedSource, draft, mapping, timeout }
   }
 
   const run = (command: Command) => {
@@ -4533,6 +4607,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         class: 'structured-editor-content',
       },
       decorations: (state) => DecorationSet.create(state.doc, [
+        ...(pendingSuggestionRef.current?.draft.doc === state.doc
+          && (!reviewAuthorIdRef.current || reviewAuthorIdRef.current === suggestionAuthorRef.current.id)
+          ? pendingTextDecorations(pendingSuggestionRef.current.acceptedState.doc, state.doc, markupViewRef.current) : []),
         ...publicationBylineDecorations(state.doc, publicationBylineRef.current),
         ...reviewDecorations(
           state.doc,
@@ -4542,8 +4619,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           activeReviewIdRef.current,
           activeReviewAnchorIdRef.current,
           (anchorId, reviewId) => onReviewAnchorSelectRef.current?.(anchorId, reviewId),
-          collaborationRef.current && suggestionModeRef.current && !readOnlyRef.current
-            ? { authorId: suggestionAuthorRef.current.id, amend: amendWording, flush: flushWording } : undefined,
+          (collaborationRef.current || localWordingId.current) && suggestionModeRef.current && !readOnlyRef.current
+            ? { authorId: suggestionAuthorRef.current.id, amend: amendWording, flush: flushWording,
+                onlyId: collaborationRef.current ? undefined : localWordingId.current,
+                history: collaborationRef.current ? undefined : performHistory }
+            : undefined,
         ).find(),
         ...blockHandleDecorations(state.doc, readOnlyRef.current, (sourceId, direction) => {
           moveBlockByKeyboard(viewRef.current ?? view, sourceId, direction)
@@ -4571,17 +4651,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
             performHistory(event.inputType === 'historyRedo')
             return true
           }
-          if (!collaborationRef.current || !suggestionModeRef.current || editorView.state.selection.empty
+          if (!suggestionModeRef.current || editorView.state.selection.empty
             || event.inputType !== 'insertText' || event.isComposing) return false
           // Typing can arrive before selectionchange after an arrow key collapses a selection.
           // Use the browser's insertion point before the DOM mutation becomes a suggestion.
-          const native = editorView.dom.ownerDocument.getSelection()
-          if (native?.isCollapsed && native.focusNode && editorView.dom.contains(native.focusNode)) {
-            const pos = editorView.posAtDOM(native.focusNode, native.focusOffset)
-            if (editorView.state.doc.resolve(pos).parent.inlineContent) {
-              editorView.dispatch(editorView.state.tr.setSelection(TextSelection.create(editorView.state.doc, pos)))
-            }
-          }
+          syncCollapsedCaret(editorView, editorView.dom.ownerDocument.getSelection())
           return false
         },
         focus: (editorView) => {
@@ -4663,6 +4737,18 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           // An empty Redo must still consume Shift-Mod-z. A later keymap can
           // otherwise match Mod-z and undo the most recent ordinary edit.
           return true
+        }
+        // Keep the visual caret and the model in step when an immediate letter follows
+        // a horizontal arrow. A selectionchange event may only arrive after that letter.
+        if (suggestionModeRef.current && editorView.state.selection instanceof TextSelection
+          && !event.isComposing && !event.shiftKey && !event.altKey && !event.ctrlKey && !event.metaKey
+          && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+          const native = editorView.dom.ownerDocument.getSelection()
+          if (native && !native.isCollapsed && native.modify && editorView.dom.contains(native.anchorNode)
+            && editorView.dom.contains(native.focusNode)) {
+            native.modify('move', event.key === 'ArrowLeft' ? 'left' : 'right', 'character')
+            return syncCollapsedCaret(editorView, native)
+          }
         }
         if (!shouldRequestStructuredCommands(editorView.state, event, readOnlyRef.current)) return false
         if (!onCommandRequestRef.current) return false
@@ -4752,7 +4838,9 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           : undefined
         if (collaborationRef.current && suggestionIntent && metadataRef.current) {
           // Applying even briefly would send proposed prose through ySync as an accepted edit.
-          captureSharedSuggestion(view, transaction, suggestionIntent)
+          // The editor updates the wording widget and the shared document synchronously.
+          // Let React refresh the outline and margin after the browser paints the typed text.
+          startTransition(() => captureSharedSuggestion(view, transaction, suggestionIntent))
           return
         }
         if (pendingSuggestionRef.current && suggestionIntent && suggestionIntent !== 'text') {
@@ -4767,11 +4855,27 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         }
         const previous = view.state
         const next = previous.apply(transaction)
+        if (pendingSuggestionRef.current && transaction.selectionSet && !transaction.docChanged
+          && !previous.selection.eq(next.selection) && !view.composing) {
+          // Changing passage finishes this group before a keystroke at the new location.
+          view.updateState(next)
+          finishPendingSuggestion(view)
+          return
+        }
+        if (suggestionIntent === 'text' && metadataRef.current) {
+          // Render the grouped edit in this transaction. Serialize it and refresh manuscript-wide
+          // presentation once, when it becomes a portable suggestion.
+          queueSuggestion(view, previous, next, transaction)
+          view.updateState(next)
+          emitReviewSelection(view)
+          return
+        }
+        const preparedReview = transaction.getMeta('dm-parsed-review-source') as StructuredManuscript | undefined
         if (reviewStep instanceof ReviewSourceStep) {
-          const parsed = parseStructuredManuscript(reviewStep.after)
+          const parsed = preparedReview ?? parseStructuredManuscript(reviewStep.after)
           metadataRef.current = metadataForEditor(parsed)
           sourceRef.current = loadedSourceRef.current = reviewStep.after
-          reviewDecorationRef.current = reviewDecorationIndex(reviewStep.after)
+          reviewDecorationRef.current = reviewDecorationIndex(reviewStep.after, parsed.document)
           onDiagnosticsRef.current?.(parsed.diagnostics)
         }
         view.updateState(next)
@@ -4781,7 +4885,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         emitReviewSelection(view)
         if (next.doc !== previous.doc) onOutlineRef.current?.(outlineFor(next.doc))
         if (reviewStep instanceof ReviewSourceStep) {
-          if (!transaction.getMeta('dm-external-review-source')) publishSourceChange(reviewStep.after)
+          syncWordingFields(view)
+          if (!preparedReview) publishSourceChange(reviewStep.after)
           return
         }
         if (transaction.docChanged && !transaction.getMeta('dm-presentation-only') && metadataRef.current) {
@@ -4789,10 +4894,6 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           if (collaborativeOrigin && !collaborativeUndoRedo) {
             loadedSourceRef.current = serialized
             sourceRef.current = serialized
-            return
-          }
-          if (suggestionIntent === 'text') {
-            queueSuggestion(view, previous, serialized)
             return
           }
           if (suggestionIntent) {
@@ -4848,7 +4949,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     if (!view) return
     const parsed = parseStructuredManuscript(source)
     loadedSourceRef.current = source
-    reviewDecorationRef.current = reviewDecorationIndex(source)
+    reviewDecorationRef.current = reviewDecorationIndex(source, parsed.document)
     metadataRef.current = metadataForEditor(parsed)
     onDiagnosticsRef.current?.(parsed.diagnostics)
     onOutlineRef.current?.(outlineFor(parsed.document))

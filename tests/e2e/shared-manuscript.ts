@@ -2,7 +2,7 @@ import { randomBytes } from 'node:crypto'
 import { mkdtemp, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { expect, type Browser, type BrowserContext } from '@playwright/test'
+import { expect, type Browser, type BrowserContext, type Page } from '@playwright/test'
 import { AuthenticatedWorkspaceService } from '../../src/collaboration/workspaceService'
 import { CollaborativeDocument } from '../../src/sharedEditor/collaboration'
 import { FileCollaborationStore } from '../../services/collaboration/fileStore'
@@ -42,7 +42,7 @@ export async function startSharedManuscript(browser: Browser, baseURL: string, s
     }
     await server.listen()
     const serviceUrl = server.webSocketURL.replace(/^ws:/, 'http:')
-    async function open(role: keyof typeof accounts) {
+    async function open(role: keyof typeof accounts, observePage?: (page: Page) => void) {
       const token = tokens[role]
       const projects = await authorization.listProjects(token, workspaceId)
       const workspaces = [{ ...workspace, role: projects[0].role }]
@@ -50,6 +50,7 @@ export async function startSharedManuscript(browser: Browser, baseURL: string, s
       const context = await browser.newContext({ baseURL })
       contexts.push(context)
       const page = await context.newPage()
+      observePage?.(page)
       await page.addInitScript((value) => Object.assign(window, { sharedReviewLaunch: value }), launch)
       await page.route('**/api/workspaces/forest/projects', (route) => route.fulfill({ json: { projects } }))
       // Only the authenticated collaboration socket should affect this editing session.

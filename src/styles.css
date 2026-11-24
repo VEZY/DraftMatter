@@ -5451,7 +5451,6 @@ img.ProseMirror-separator { border: 0 !important; display: inline !important; he
 .dm-review-active { background: rgba(91, 145, 112, .22); box-shadow: 0 2px 0 rgba(69, 119, 88, .28); }
 .dm-review-thread.dm-review-active { background: rgba(230, 194, 83, .28); box-shadow: 0 2px 0 rgba(178, 139, 34, .3); }
 .dm-review-proposal { background: rgba(91, 145, 112, .12); border: 0; border-bottom: 1px solid rgba(69, 119, 88, .58); border-radius: 2px; color: #426452; cursor: pointer; font: inherit; margin: 0 2px; padding: 0 2px; text-align: left; text-decoration: none; }
-.dm-review-proposal::before { color: #6f8d7a; content: '+ '; font-family: Inter, ui-sans-serif, sans-serif; font-size: .72em; font-weight: 700; }
 .structured-editor-content textarea.dm-review-wording {
   field-sizing: content;
   min-width: 1ch;
@@ -8452,6 +8451,32 @@ kbd {
   background:
     linear-gradient(179deg, transparent 0 62%, var(--green-highlighter) 64% 92%, transparent 94%);
   border-bottom-color: var(--green-pen);
+}
+
+.structured-editor-content .dm-review-insertion {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: var(--green-pen);
+  margin: 0;
+  padding: 0;
+  text-decoration: underline;
+  text-underline-offset: .14em;
+  white-space: pre-wrap;
+}
+
+.structured-editor-content .dm-review-insertion textarea.dm-review-wording {
+  min-width: 0;
+  vertical-align: top;
+  text-decoration: inherit;
+  text-underline-offset: inherit;
+}
+
+.structured-editor-content .dm-review-insertion textarea.dm-review-wording:focus {
+  box-shadow: none;
+  outline: none !important;
+  caret-color: currentColor;
+  text-decoration-thickness: .12em;
 }
 
 .dm-review-all.dm-review-kind-delete,

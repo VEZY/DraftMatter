@@ -1,4 +1,5 @@
 import { showWritingTools } from './writing-tools'
+import { selectRenderedTextWithMouse } from './rendered-selection'
 import { expect, test } from '@playwright/test'
 
 const source = `# Suggestion capture
@@ -10,6 +11,8 @@ Paste over this sentence.
 Delete this sentence.
 
 Insert after this sentence.
+
+We recorded publication object.
 
 Format this phrase.
 
@@ -25,8 +28,7 @@ async function waitForChangeCount(page: import('@playwright/test').Page, count: 
 }
 
 test.describe('DM-P4-02 rendered suggestion transactions', () => {
-  test.beforeEach(async ({ page, context }) => {
-    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
+  test.beforeEach(async ({ page }) => {
     await page.addInitScript((portableSource) => {
       localStorage.setItem('draftmatter.structured-source.v1', portableSource)
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
@@ -36,7 +38,8 @@ test.describe('DM-P4-02 rendered suggestion transactions', () => {
     await expect(page.getByRole('button', { name: 'Turn off track changes' })).toHaveAttribute('aria-pressed', 'true')
   })
 
-  test('groups typing, paste, deletion, and insertion without changing accepted prose', async ({ page }) => {
+  test('groups typing, paste, deletion, and insertion without changing accepted prose', async ({ page, context }) => {
+    await context.grantPermissions(['clipboard-read', 'clipboard-write'])
     const manuscript = page.getByRole('article', { name: 'Editable manuscript' })
 
     await manuscript.getByText('Replace this sentence.', { exact: true }).selectText()
@@ -70,6 +73,66 @@ test.describe('DM-P4-02 rendered suggestion transactions', () => {
     await expect(manuscript.locator('.dm-review-change').filter({ hasText: 'Delete this sentence.' })).toBeVisible()
     await expect(manuscript.locator('.structured-editor-content p').filter({ hasText: 'Insert after this sentence.' })).toContainText('Insert after this sentence.')
     await expect(page.getByRole('complementary', { name: 'Manuscript comments' }).getByText('A carefully replaced')).toBeVisible()
+  })
+
+  test('marks a suffix on its first painted frame and shows only the added letter in the margin', async ({ page }, testInfo) => {
+    const passage = page.locator('.ProseMirror p').filter({ hasText: 'recorded publication object' })
+    await selectRenderedTextWithMouse(page, passage, 'object')
+    await page.keyboard.press('ArrowRight')
+    await passage.evaluate(() => {
+      document.addEventListener('beforeinput', () => {
+        requestAnimationFrame(() => {
+          const mark = document.querySelector('.ProseMirror .dm-review-insertion')
+          const text = mark?.querySelector('textarea')?.value ?? mark?.textContent
+          document.body.dataset.suffixAtFirstPaint = mark ? `${text}:${getComputedStyle(mark).textDecorationLine}` : 'unmarked'
+        })
+      }, { once: true, capture: true })
+    })
+    await page.keyboard.type('s')
+    await expect(page.locator('body')).toHaveAttribute('data-suffix-at-first-paint', 's:underline')
+
+    const note = page.locator('.review-margin [data-review-balloon]')
+    await expect(note.locator('ins')).toHaveText('s')
+    await expect(note.locator('del')).toHaveCount(0)
+    await expect(note).not.toContainText('Point review')
+    await expect(passage.locator('.dm-review-point')).toHaveCount(0)
+    const marked = passage.locator('.dm-review-proposal.dm-review-insertion')
+    await expect(marked).toBeVisible()
+    expect(await marked.evaluate((element) => getComputedStyle(element, '::before').content)).toBe('none')
+
+    const line = await passage.boundingBox()
+    const card = await note.boundingBox()
+    if (line && card) {
+      const x = Math.floor(Math.min(line.x, card.x)) - 8
+      const y = Math.floor(Math.min(line.y, card.y)) - 8
+      await page.screenshot({ path: testInfo.outputPath('tracked-suffix.png'), clip: {
+        x, y, width: Math.ceil(Math.max(line.x + line.width, card.x + card.width)) - x + 8,
+        height: Math.ceil(Math.max(line.y + line.height, card.y + card.height)) - y + 8,
+      } })
+    }
+    await page.getByRole('button', { name: 'Accept and go to next change' }).click()
+    await expect(passage).toHaveText('We recorded publication objects.')
+    await expect(note).toHaveCount(0)
+  })
+
+  test('continues typing in the same suggestion after a pause, with undo and redo', async ({ page }) => {
+    const passage = page.locator('.ProseMirror p').filter({ hasText: 'recorded publication object' })
+    await selectRenderedTextWithMouse(page, passage, 'object')
+    await page.keyboard.press('ArrowRight')
+    await page.keyboard.type('s')
+    const wording = passage.getByRole('textbox', { name: 'Edit suggested wording' })
+    await expect(wording).toBeFocused()
+    const originalId = await wording.getAttribute('data-proposal-id')
+    await page.keyboard.type('!')
+    const note = page.locator('.review-margin [data-review-balloon]')
+    await expect(note.locator('ins')).toHaveText('s!')
+    await expect(wording).toHaveAttribute('data-proposal-id', originalId!)
+    await page.keyboard.press('ControlOrMeta+z')
+    await expect(note.locator('ins')).toHaveText('s')
+    await page.keyboard.press('ControlOrMeta+Shift+z')
+    await expect(note.locator('ins')).toHaveText('s!')
+    await page.getByRole('button', { name: 'Accept and go to next change' }).click()
+    await expect(passage).toHaveText('We recorded publication objects!.')
   })
 
   test('captures toolbar formatting and block structure without changing accepted prose', async ({ page }) => {
