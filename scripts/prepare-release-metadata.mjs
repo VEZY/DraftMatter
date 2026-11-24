@@ -36,9 +36,6 @@ for (const target of targets) {
   for (const name of ['THIRD_PARTY_NOTICES.md', 'sbom.cdx.json']) {
     await stageFile(join(artifactDir, inventory, name), `${inventory}-${name}`)
   }
-  const artifact = `draftmatter-${target}-agent-host`
-  const host = target.includes('windows') ? 'draftmatter-agent-host.exe' : 'draftmatter-agent-host'
-  await stageFile(join(artifactDir, artifact, host), `${artifact}-${host}`)
 }
 const cli = `draftmatter-${version}.tgz`
 await stageFile(join(artifactDir, 'draftmatter-cli', cli), cli)

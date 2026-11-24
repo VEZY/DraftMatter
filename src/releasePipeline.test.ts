@@ -207,7 +207,7 @@ codesign() {
     expect(workflow).toContain('needs: [build, cli]')
   })
 
-  it('retains all platform files and checksums the bytes using final download names', () => {
+  it('checksums the release downloads without requiring standalone execution hosts', () => {
     const root = mkdtempSync(join(tmpdir(), 'draftmatter-release-assets-'))
     const artifacts = join(root, 'artifacts')
     const installers = join(root, 'installers')
@@ -229,9 +229,6 @@ codesign() {
         for (const filename of ['THIRD_PARTY_NOTICES.md', 'sbom.cdx.json']) {
           addArtifact(join(artifacts, inventory), filename, `${inventory}-${filename}`)
         }
-        const host = `draftmatter-${target}-agent-host`
-        const name = target.includes('windows') ? 'draftmatter-agent-host.exe' : 'draftmatter-agent-host'
-        addArtifact(join(artifacts, host), name, `${host}-${name}`)
       }
       const cli = `draftmatter-${version}.tgz`
       addArtifact(join(artifacts, 'draftmatter-cli'), cli, cli)

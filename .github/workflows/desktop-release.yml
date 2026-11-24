@@ -249,15 +249,6 @@ jobs:
             compliance/sbom.cdx.json
           if-no-files-found: error
 
-      - name: Upload platform local-agent execution host
-        uses: actions/upload-artifact@v6
-        with:
-          name: draftmatter-${{ matrix.target }}-agent-host
-          path: |
-            src-tauri/target/${{ matrix.target }}/release/draftmatter-agent-host
-            src-tauri/target/${{ matrix.target }}/release/draftmatter-agent-host.exe
-          if-no-files-found: error
-
   release-metadata:
     needs: [build, cli]
     runs-on: ubuntu-22.04
@@ -270,7 +261,7 @@ jobs:
           node-version-file: '.node-version'
       - uses: actions/download-artifact@v7
         with:
-          pattern: 'draftmatter-{cli,*-compliance,*-agent-host}'
+          pattern: 'draftmatter-{cli,*-compliance}'
           path: release-extras
       - uses: actions/download-artifact@v7
         with:

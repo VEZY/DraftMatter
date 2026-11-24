@@ -36,9 +36,9 @@ draftmatter review-report paper.qmd -o review-report.md
 Final rendering exits with status 2 and writes no output while a review conflict is unresolved. Use \`draftmatter --help\` for the complete command reference.
 
 The package also contains the canonical \`draftmatter-authoring\` skill and
-Codex plugin under \`integrations/\`. Local MCP computation requires the
-platform \`draftmatter-agent-host\` executable from the matching DraftMatter
-desktop release on PATH or in \`DRAFTMATTER_AGENT_HOST\`.
+Codex plugin under \`integrations/\`. For local MCP computation, use the
+\`draftmatter-agent-host\` executable included in the matching DraftMatter Desktop
+installation. Add its directory to PATH or set \`DRAFTMATTER_AGENT_HOST\` to its full path.
 `, 'utf8'),
       ])
     },

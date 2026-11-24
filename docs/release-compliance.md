@@ -83,7 +83,7 @@ The release notes disclose the signing policy and link to the versioned
 Before publishing the draft:
 
 1. Require successful tests, locked-dependency audit, platform builds and compliance jobs.
-2. Check the desktop checksum file, per-target CycloneDX SBOMs, third-party notices, execution hosts and the standalone CLI.
+2. Check the desktop checksum file, per-target CycloneDX SBOMs, third-party notices and the standalone CLI.
 3. Verify downloaded installers against `SHA256SUMS-desktop` (combined release) or `SHA256SUMS` (desktop-only release) and smoke-test installation and launch on each supported target, including the OS prompts described in the installation guide.
 4. Review the draft assets and notes manually, retaining the exact source revision and locked dependencies used by the build.
 
