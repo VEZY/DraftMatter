@@ -2042,7 +2042,9 @@ mod tests {
         .unwrap();
         let root = Path::new(&result.root);
         assert_eq!(
-            fs::read_to_string(root.join("paper.md")).unwrap(),
+            fs::read_to_string(root.join("paper.md"))
+                .unwrap()
+                .replace("\r\n", "\n"),
             "# A paper\n"
         );
         assert!(root.join("setup.py").is_file());
