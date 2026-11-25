@@ -146,6 +146,13 @@ export class ExecutionFreshnessTracker {
     return this.cells.map((cell) => structuredClone(this.states.get(cell.id)!))
   }
 
+  matchesRetainedResult(cell: ExecutableCell, codeHash: string, runHash: string) {
+    const checked = this.cells.find((candidate) => candidate.id === cell.id)
+    const lastSuccess = this.states.get(cell.id)?.lastSuccessful
+    return checked?.source === cell.source && checked.language === cell.language
+      && this.codeHashes.get(cell.id) === codeHash && (!lastSuccess || lastSuccess.resultHash === runHash)
+  }
+
   cleanRunCertification() {
     return this.certification ? structuredClone(this.certification) : undefined
   }

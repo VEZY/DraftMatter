@@ -4,8 +4,11 @@ import {
   createTrustedKernelExecution,
   EXECUTION_TRUST_ACKNOWLEDGEMENT,
   ExecutionBlockedError,
+  SharedCodeTrust,
+  executableContentChanged,
   type ExecutionTrustHost,
 } from './executionTrust'
+import { extractExecutableCells } from './executionCells'
 
 const request: ExecutionRequest = {
   cellId: 'cell-safe',
@@ -39,6 +42,38 @@ function host(trusted: boolean, available = true): ExecutionTrustHost {
 }
 
 describe('trusted Jupyter execution', () => {
+  it('detects shared executable changes independently of prose and retained results', () => {
+    const cells = (prose: string, code = 'print(5)', attributes = '') =>
+      extractExecutableCells([prose, '~~~python {#producer .execute ' + attributes + '}', code, '~~~'].join('\n')).cells
+    expect(executableContentChanged(cells('Hello'), cells('Hello again'))).toBe(false)
+    expect(executableContentChanged(cells('Hello'), cells('Hello', 'print(6)'))).toBe(true)
+    expect(executableContentChanged(cells('Hello'), cells('Hello', 'print(5)', 'inputs="data.csv"'))).toBe(true)
+  })
+
+  it('requires fresh consent before running remote code, even when a native approval races another edit', async () => {
+    const native = host(true)
+    const guard = new SharedCodeTrust(native)
+    const execution = kernels()
+    const broker = createTrustedKernelExecution(guard, execution)
+    guard.invalidate('/project')
+    await expect(broker.run('/project', request)).rejects.toThrow(/collaborator/)
+    let completeApproval!: () => void
+    const waiting = new Promise<void>((resolve) => { completeApproval = resolve })
+    vi.mocked(native.trustProjectForSession).mockImplementationOnce(async () => {
+      await waiting
+      return { trusted: true, scope: 'session', warning: '' }
+    })
+    const approval = guard.trustProjectForSession('/project', EXECUTION_TRUST_ACKNOWLEDGEMENT)
+    await vi.waitFor(() => expect(native.trustProjectForSession).toHaveBeenCalled())
+    guard.invalidate('/project')
+    completeApproval()
+    expect((await approval).trusted).toBe(false)
+    await expect(broker.run('/project', request)).rejects.toThrow(/collaborator/)
+    expect(execution.execute).not.toHaveBeenCalled()
+    await guard.trustProjectForSession('/project', EXECUTION_TRUST_ACKNOWLEDGEMENT)
+    await broker.run('/project', request)
+    expect(execution.execute).toHaveBeenCalledOnce()
+  })
   it('blocks untrusted project execution before a kernel receives code', async () => {
     const execution = kernels()
     const broker = createTrustedKernelExecution(host(false), execution)

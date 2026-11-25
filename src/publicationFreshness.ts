@@ -27,16 +27,23 @@ export function publicationFreshnessProblem(source: string, cellStates: Executio
  * Certifies the exact publication snapshot, independently of debounced UI state.
  * A status computed for older source bytes is not evidence for a newer export.
  */
-export async function publicationFreshnessSnapshotProblem(source: string, cellStates: ExecutionCellFreshness[]): Promise<string | undefined> {
+export async function publicationFreshnessSnapshotProblem(
+  source: string, cellStates: ExecutionCellFreshness[], scope: 'publication' | 'all-cells' = 'publication',
+): Promise<string | undefined> {
   const snapshot = structuredClone(cellStates)
   const problem = publicationFreshnessProblem(source, snapshot)
   if (problem) return problem
   const values = parseRetainedPublishedValues(source)
-  const names = publishedValueNamesInMarkup(source)
-  const outputs = parseRetainedOutputs(source).outputs.filter((output) => output.markdown.replace(/<!--[\s\S]*?-->/g, '').trim())
+  const allCells = scope === 'all-cells'
+  if (allCells && values.diagnostics.length) return values.diagnostics[0].message
+  const names = allCells ? Object.keys(values.values) : publishedValueNamesInMarkup(source)
+  const outputs = parseRetainedOutputs(source).outputs.filter((output) => allCells || output.markdown.replace(/<!--[\s\S]*?-->/g, '').trim())
   const extracted = extractExecutableCells(source)
   if (extracted.cells.some((cell) => (cell.role === 'figure' || cell.role === 'table') && !outputs.some((output) => output.cellId === cell.id))) {
     return 'Run the cells that produce computed figures and tables before publication; their retained outputs are missing.'
+  }
+  if (allCells && extracted.cells.some((cell) => !isSetupCell(cell) && !outputs.some((output) => output.cellId === cell.id))) {
+    return 'Run all cells again to restore missing computed results.'
   }
   const publishedCellIds = new Set([...names.map((name) => values.values[name].provenance.cellId), ...outputs.map((output) => output.cellId)])
   if (publishedCellIds.size === 0) return undefined

@@ -50,7 +50,7 @@ export function ProgrammingLanguages({ onBack, backLabel = 'Back to DraftMatter'
           <Icon name="info" size={20} />
           <div>
             <h2 id="languages-boundary-title">Execution happens in the desktop app.</h2>
-            <p>The browser lets you inspect code, display saved results, and keep writing and reviewing the paper. To edit or run code, open a local copy in DraftMatter Desktop. Saved figures, tables, and values remain visible to collaborators online.</p>
+            <p>Click a computed value to inspect the calculation behind it. Editors of a shared project can save changes to its code online. To update the values, figures, and tables that collaborators see, run the cells in a trusted local copy in DraftMatter Desktop and sync the manuscript.</p>
           </div>
         </section>
 

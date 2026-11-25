@@ -29,6 +29,8 @@
     "release:verify": "node scripts/verify-release.mjs",
     "release:all": "gh workflow run server-release.yml --repo VEZY/DraftMatter --ref main -f include_desktop=true",
     "release:server": "gh workflow run server-release.yml --repo VEZY/DraftMatter --ref main -f version=",
+    "deploy:server": "python3 -I -B scripts/deploy-server.py",
+    "test:server-upgrade": "python3 -I -B -m unittest discover -s deploy/single-host/tests",
     "test": "vitest run src services website --exclude \"tests/e2e/**\" --maxWorkers=1 --testTimeout=15000",
     "test:alpha": "vitest run src/phase7AlphaDogfood.test.ts src/phase7AlphaAuthoringGate.test.ts --maxWorkers=1 --testTimeout=15000",
     "test:cli": "node scripts/verify-cli.mjs",

@@ -151,7 +151,7 @@ npm run build:website
 
 The GitHub Pages workflow publishes `dist-website` from `main`. In the repository settings, select **GitHub Actions** as the Pages source. The site defaults to the `/DraftMatter/` project path; set `DRAFTMATTER_SITE_BASE=/` when building for a root custom domain.
 
-The alpha call to action deliberately avoids collecting an email until an intake page exists. Add a repository Actions variable named `DRAFTMATTER_ALPHA_SIGNUP_URL` to point **Request alpha access** at a privacy-reviewed signup form. Without it, the site links to GitHub releases and clearly states that no public download is available yet.
+Set the repository Actions variable `DRAFTMATTER_ALPHA_SIGNUP_URL` to point **Request alpha access** at an intake page. By default it opens an email to the project contact. **Download desktop app** opens the public installer catalogue.
 
 ## Explore the complete research project
 
@@ -189,7 +189,7 @@ The installed Linux application and Windows setup also expose `draftmatter`: wit
 
 ## Install DraftMatter
 
-Download desktop installers from [GitHub Releases](https://github.com/VEZY/DraftMatter/releases). Follow the [macOS, Windows and Linux installation guide](./docs/installation.md), including checksum verification and first-launch prompts.
+Choose a desktop installer on the [download page](https://www.draftmatter.eu/#download). GitHub hosts the release files. The [installation guide](./docs/installation.md) covers checksum verification and first-launch prompts.
 
 ## Verification
 

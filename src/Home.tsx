@@ -139,6 +139,11 @@ function HomeFeedback({ localProblem }: { localProblem?: string }) {
   )
 }
 
+function DesktopDownloadLink() {
+  if (desktopHost.available) return null
+  return <a href="https://www.draftmatter.eu/#download" target="_blank" rel="noopener noreferrer"><Icon name="download" size={16} />Download desktop app</a>
+}
+
 function PendingAlphaHome({ onOpenLegal, onOpenLearn }: Pick<HomeProps, 'onOpenLegal' | 'onOpenLearn'>) {
   const session = useCollaborationSession()
   return (
@@ -151,7 +156,7 @@ function PendingAlphaHome({ onOpenLegal, onOpenLearn }: Pick<HomeProps, 'onOpenL
         <HomeFeedback />
         <section className="home-catalogue-heading home-app-heading">
           <div><span className="home-kicker">Closed alpha</span><h1>Awaiting an invitation</h1><p role="status">Your account is awaiting an invitation.{session.registrationEnabled ? ' We’ll email you when access is granted.' : ''}</p>{!session.registrationEnabled && <p>For updates, contact <a href={`mailto:${legalConfiguration.contactEmail}`}>{legalConfiguration.contactEmail}</a>.</p>}</div>
-          <div className="home-app-heading-actions"><button onClick={session.signOut}>Sign out / use another account</button></div>
+          <div className="home-app-heading-actions"><DesktopDownloadLink /><button onClick={session.signOut}>Sign out / use another account</button></div>
         </section>
         {session.orcidAccountUrl && (
           <p className="home-orcid-link">
@@ -243,6 +248,7 @@ function AppHome({
               ? <button className="home-primary" onClick={onOpenLocalPaper}><Icon name="document" size={16} />Open existing paper</button>
               : <button className={hostedBrowser ? undefined : 'home-primary'} onClick={onOpenBrowserDraft}><Icon name="plus" size={16} />New browser draft</button>}
             {!desktopHost.available && !hostedBrowser && <a href="/demo"><Icon name="spark" size={16} />Try it</a>}
+            <DesktopDownloadLink />
             {desktopHost.available && <button onClick={onOpenLocalProject}><Icon name="folder" size={16} />Open project folder</button>}
             {desktopHost.available && <div className="home-paper-create-actions">
               <button onClick={onNewLocalDraft}><Icon name="plus" size={16} />New paper</button>
@@ -403,6 +409,7 @@ function Catalogue({
           <div className="home-app-heading-actions">
             {!desktopHost.available && <a href="/demo" target="_blank" rel="noopener"><Icon name="spark" size={16} />Try the demo</a>}
             <button className="home-primary" onClick={onNewDraft}><Icon name="plus" size={16} />New draft</button>
+            <DesktopDownloadLink />
           </div>
         </section>
 

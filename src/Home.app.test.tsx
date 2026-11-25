@@ -89,6 +89,7 @@ describe('DraftMatter desktop home', () => {
     expect(container.querySelector('h1')?.textContent).toBe('Your papers')
     expect(container.textContent).toContain('Open existing paper')
     expect(container.textContent).toContain('Clone a paper')
+    expect(container.textContent).not.toContain('Download desktop app')
     expect(container.textContent).toContain('Canopy recovery paper')
     expect(container.textContent).toContain('Manage AI connections')
     expect(container.textContent).toContain('Account & collaboration')
@@ -153,6 +154,7 @@ describe('DraftMatter desktop home', () => {
     expect(container.textContent).not.toMatch(/free alpha|alpha is free/i)
     expect(actions.firstElementChild?.textContent).toBe('Try it')
     expect(actions.querySelector<HTMLAnchorElement>('a.home-primary')?.getAttribute('href')).toBe('/demo')
+    expect(actions.querySelector('a[href="https://www.draftmatter.eu/#download"]')?.textContent).toBe('Download desktop app')
     expect(container.textContent).toContain('Register with your email and a password.')
     expect(container.textContent).toContain('we’ll email you when you’re invited')
     expect(container.textContent).toContain('Open the link your colleague sent')
@@ -248,6 +250,7 @@ describe('DraftMatter desktop home', () => {
     const demo = container.querySelector<HTMLAnchorElement>('.home-catalogue-heading a[href="/demo"]')
     expect(demo?.textContent).toBe('Try the demo')
     expect(demo?.target).toBe('_blank')
+    expect(container.querySelector('.home-app-heading-actions a[href="https://www.draftmatter.eu/#download"]')?.textContent).toBe('Download desktop app')
     expect(container.querySelector('#home-setup')).toBeNull()
     expect([...container.querySelectorAll('button')].some((button) => button.textContent === 'Register')).toBe(false)
     const roles = [...container.querySelectorAll<HTMLSelectElement>('select')].find((element) => element.closest('label')?.textContent?.startsWith('Role'))!

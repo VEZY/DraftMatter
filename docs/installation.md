@@ -1,6 +1,6 @@
 # Install DraftMatter
 
-Download from the [official DraftMatter GitHub Releases](https://github.com/VEZY/DraftMatter/releases) page. Choose a published release and an installer for your operating system and processor. If no release is published yet, desktop downloads are not available there yet. Workflow artifacts are test candidates.
+Open [Download DraftMatter](https://www.draftmatter.eu/#download) and choose your operating system and processor. The files are hosted on [GitHub Releases](https://github.com/VEZY/DraftMatter/releases). You can also reach the download page from **Download desktop app** on the web app home.
 
 These downloads do not carry a verified publisher signature. macOS uses a free ad hoc signature and is not notarized; Windows installers are unsigned. First-launch warnings are expected, and managed computers may block installation. The steps below approve only the chosen download; do not disable system-wide security controls.
 

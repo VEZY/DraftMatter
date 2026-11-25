@@ -53,6 +53,9 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Test the VPS upgrade and rollback procedure
+        run: npm run test:server-upgrade
+
       - name: Audit dependencies shipped in the server runtime
         run: npm audit --omit=dev --audit-level=high
 

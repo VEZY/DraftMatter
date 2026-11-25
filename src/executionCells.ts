@@ -8,6 +8,7 @@ export type ExecutionCellRole = 'setup' | 'figure' | 'table' | 'values' | 'ordin
 
 export interface ExecutableCell {
   id: string
+  duplicateId?: boolean
   language: ExecutionLanguage
   source: string
   sourceHash: string
@@ -179,11 +180,12 @@ function parseExecutableCells(source: string): ExecutableCellResult {
   const firstFence = source.search(/`{3}|~{3}/)
   if (firstFence < 0) return { cells: [], diagnostics: [] }
   const excluded = excludedDivRanges(source)
-  const diagnostics: DocumentDiagnostic[] = []
   // Portable review records contain literal fences even in a prose-only manuscript.
   if (excluded.some((range) => range.start <= firstFence && range.end === source.length)) return { cells: [], diagnostics: [] }
   const tree = unified().use(remarkParse).parse(source) as Root
+  const diagnostics: DocumentDiagnostic[] = []
   const ids = new Map<string, number>()
+  const declaredIds: string[] = []
   const cells = codeNodes(tree).flatMap<ExecutableCell>((node) => {
     const startOffset = node.position?.start.offset
     const endOffset = node.position?.end.offset
@@ -197,6 +199,7 @@ function parseExecutableCells(source: string): ExecutableCellResult {
       message: `Executable cell at line ${node.position?.start.line ?? '?'} has an unsafe explicit id and received a generated id.`,
     })
     const baseId = safeExplicitId(info.explicitId) ?? `cell-${info.language}-${sourceHash(`${info.language}\u0000${normalizedSource}`).slice(-12)}`
+    declaredIds.push(baseId.toLowerCase())
     const occurrence = (ids.get(baseId.toLowerCase()) ?? 0) + 1
     ids.set(baseId.toLowerCase(), occurrence)
     const id = occurrence === 1 ? baseId : `${baseId}-${occurrence}`
@@ -220,6 +223,9 @@ function parseExecutableCells(source: string): ExecutableCellResult {
         endLine: node.position!.end.line,
       },
     }]
+  })
+  cells.forEach((cell, index) => {
+    if (ids.get(declaredIds[index])! > 1) cell.duplicateId = true
   })
   return { cells, diagnostics }
 }

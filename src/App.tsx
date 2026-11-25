@@ -63,8 +63,8 @@ import { createDesktopKernelExecutionTransport } from './kernelExecutionTranspor
 import { extractExecutableCells, isPanelManagedCell, isSetupCell, type ExecutableCell, type ExecutionLanguage } from './executionCells'
 import { ExecutionFreshnessTracker, parseExecutionManifest, serializeExecutionManifest, type CleanRunCertification, type ExecutionCellFreshness, type ExecutionManifest } from './executionFreshness'
 import { createKernelExecutionManager, executionEnvironmentFingerprint, executionInputsFingerprint, sha256, type NormalizedExecutionResult } from './kernelExecution'
-import { cleanExecutePortableDocument } from './cleanExecution'
-import { EXECUTION_TRUST_ACKNOWLEDGEMENT, createTrustedKernelExecution, type ExecutionTrustStatus } from './executionTrust'
+import { cleanExecutePortableDocument, runAllSummaryText, type RunAllSummary } from './cleanExecution'
+import { EXECUTION_TRUST_ACKNOWLEDGEMENT, SharedCodeTrust, executableContentChanged, createTrustedKernelExecution, type ExecutionTrustStatus } from './executionTrust'
 import { ExecutionOutputView } from './ExecutionOutputView'
 import { materializeExecutionOutput } from './outputMaterializer'
 import { buildExecutionAvailability, parseRetainedOutputs } from './retainedOutputs'
@@ -105,6 +105,7 @@ import { buildPublicationByline, parsePublicationMetadata, updatePublicationAuth
 import { forgetAuthor, normalizeAuthorProfile, readAuthorBank, rememberAuthors, saveAuthorBank, type RememberedAuthor } from './authorBank'
 import { copyPlainText } from './clipboard'
 import { parseRetainedPublishedValues } from './publishedValues'
+import { computedValueSource } from './publishedValueHints'
 import { publicationFreshnessSnapshotProblem, publicationAssetFreshnessProblem } from './publicationFreshness'
 import { countWords, measurePortableManuscript } from './manuscriptMetrics'
 import { activeOutlineIdAtViewport, keepActiveOutlineItemVisible } from './outlineViewport'
@@ -268,7 +269,8 @@ function publicationAuthorDraft(author: Partial<PublicationAuthor> = {}, sourceI
 
 const kernelSelections: Partial<Record<ExecutionLanguage, JupyterKernelProbe>> = {}
 const kernelExecutionManager = createKernelExecutionManager(createDesktopKernelExecutionTransport(desktopHost, (language) => kernelSelections[language]))
-const kernelExecution = createTrustedKernelExecution(desktopHost, kernelExecutionManager)
+const executionTrust = new SharedCodeTrust(desktopHost)
+const kernelExecution = createTrustedKernelExecution(executionTrust, kernelExecutionManager)
 
 const kernelConsoleLanguages: ExecutionLanguage[] = ['python', 'r', 'julia']
 
@@ -360,13 +362,13 @@ interface DesktopSession {
 }
 
 type ExecutionCommand =
-  | { kind: 'cell'; cellId: string }
+  | { kind: 'cell'; cellId: string; expectedSource?: string }
   | { kind: 'above'; cellId: string }
   | { kind: 'language'; language: ExecutionLanguage }
   | { kind: 'clean-all' }
 
 function executionTargets(command: ExecutionCommand, cells: ExecutableCell[]) {
-  if (command.kind === 'cell') return cells.filter((cell) => cell.id === command.cellId)
+  if (command.kind === 'cell') return cells.filter((cell) => cell.id === command.cellId && (command.expectedSource === undefined || command.expectedSource === cell.source))
   if (command.kind === 'above') {
     const index = cells.findIndex((cell) => cell.id === command.cellId)
     return index < 0 ? [] : cells.slice(0, index)
@@ -701,6 +703,9 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   const [focusMode, setFocusMode] = useState(false)
   const [insertMenuOpen, setInsertMenuOpen] = useState(false)
   const [executionWorkspaceOpen, setExecutionWorkspaceOpen] = useState(false)
+  const [valueSelection, setValueSelection] = useState<{ name: string; anchor: HTMLElement; cellId?: string }>()
+  const [drawerSourceId, setDrawerSourceId] = useState<string>()
+  const valuePanelRef = useRef<HTMLDivElement>(null)
   const [outlineOptionsOpen, setOutlineOptionsOpen] = useState(false)
   const [outlineQuery, setOutlineQuery] = useState('')
   const [outlineMaxDepth, setOutlineMaxDepth] = useState(6)
@@ -752,7 +757,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   const [browserAssetsLoading, setBrowserAssetsLoading] = useState(true)
   const [browserAssetsProblem, setBrowserAssetsProblem] = useState('')
   const figureImportQueueRef = useRef<Promise<unknown>>(Promise.resolve())
-  const figureImportAllowedRef = useRef(false)
+  const manuscriptEditAllowedRef = useRef(false)
   const browserProjectImagesRef = useRef<SharedProjectImage[]>([])
   const browserAssetScopeRef = useRef(browserAssetScope)
   browserAssetScopeRef.current = browserAssetScope
@@ -908,6 +913,8 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   const [executionResults, setExecutionResults] = useState<Record<string, NormalizedExecutionResult>>({})
   const [executionCellStates, setExecutionCellStates] = useState<ExecutionCellFreshness[]>([])
   const [cleanRunCertification, setCleanRunCertification] = useState<CleanRunCertification>()
+  const [lastRunAll, setLastRunAll] = useState<RunAllSummary>()
+  const [verifiedRun, setVerifiedRun] = useState<{ source: string; id: string; problem?: string }>()
   const [executionPlanBusy, setExecutionPlanBusy] = useState(false)
   const [executionActiveCell, setExecutionActiveCell] = useState<string>()
   const [executionDiagnostics, setExecutionDiagnostics] = useState<DocumentDiagnostic[]>([])
@@ -969,7 +976,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   const executionTrackerRootRef = useRef<string | undefined>(undefined)
   const executionSequenceRef = useRef(0)
   const kernelFreshRef = useRef<Record<ExecutionLanguage, boolean>>({ python: true, r: true, julia: true })
-  const executionPlanBusyRef = useRef(false)
+  const executionPlanBusyRef = useRef<symbol | undefined>(undefined)
   const pendingExecutionCommandRef = useRef<ExecutionCommand | undefined>(undefined)
   const pendingConsoleRef = useRef<{ language: ExecutionLanguage; code: string; resolve: (result: NormalizedExecutionResult) => void; reject: (error: Error) => void } | undefined>(undefined)
   const setupActivityIdRef = useRef<string | undefined>(undefined)
@@ -992,7 +999,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   useEffect(() => {
     let cancelled = false
     setProjectExecutionTrust(undefined)
-    if (executionWorkspaceOpen && desktopSession?.root) void desktopHost.executionTrustStatus(desktopSession.root).then((status) => {
+    if (executionWorkspaceOpen && desktopSession?.root) void executionTrust.executionTrustStatus(desktopSession.root).then((status) => {
       if (!cancelled) setProjectExecutionTrust(status)
     }).catch(() => { /* Keep language actions locked if trust cannot be verified. */ })
     return () => { cancelled = true }
@@ -1046,7 +1053,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
 
   const activeCollaborationCapabilities = collaborationRole ? workspaceRoleCapabilities(collaborationRole) : null
   const canEditManuscript = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.edit)
-  figureImportAllowedRef.current = canEditManuscript
+  manuscriptEditAllowedRef.current = canEditManuscript
   const canCommentReview = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.comment)
   const canSuggestReview = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.suggest)
   const canDecideReview = !collaborationSessionActive || Boolean(activeCollaborationCapabilities?.decide)
@@ -1512,15 +1519,15 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   }, [activeZoteroItemKey, citationOpen])
 
   useLayoutEffect(() => {
-    const panel = structuredCitationDetailRef.current
-    const anchor = structuredCitationSelection?.anchor
+    const panel = valueSelection ? valuePanelRef.current : structuredCitationDetailRef.current
+    const anchor = valueSelection?.anchor ?? structuredCitationSelection?.anchor
     const boundary = editorAreaRef.current
     const manuscript = anchor?.closest<HTMLElement>('.manuscript')
-    if (!citationOpen || !panel || !anchor || !boundary || !manuscript) return
+    if ((!valueSelection && !citationOpen) || !panel || !anchor || !boundary || !manuscript) return
 
     let frame: number | undefined
     const place = () => {
-      if (!anchor.isConnected) return
+      if (!anchor.isConnected) { if (valueSelection) setValueSelection(undefined); return }
       const anchorRect = anchor.getBoundingClientRect()
       const boundaryRect = boundary.getBoundingClientRect()
       const manuscriptRect = manuscript.getBoundingClientRect()
@@ -1533,6 +1540,10 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       const visibleRight = (boundaryHasSize ? Math.min(viewportWidth, boundaryRect.right) : viewportWidth) - margin
       const visibleTop = (boundaryHasSize ? Math.max(0, boundaryRect.top) : 0) + margin
       const visibleBottom = (boundaryHasSize ? Math.min(viewportHeight, boundaryRect.bottom) : viewportHeight) - margin
+      if (valueSelection && anchorRect.height && (anchorRect.bottom < visibleTop || anchorRect.top > visibleBottom)) {
+        delete panel.dataset.positioned
+        return
+      }
       const maxWidth = Math.max(0, visibleRight - visibleLeft)
       const maxHeight = Math.max(0, visibleBottom - visibleTop)
 
@@ -1567,12 +1578,36 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     resizeObserver?.observe(panel)
     resizeObserver?.observe(boundary)
     globalThis.addEventListener('resize', schedule)
+    boundary.addEventListener('scroll', schedule, { passive: true })
     return () => {
       if (frame !== undefined) cancelAnimationFrame(frame)
       resizeObserver?.disconnect()
       globalThis.removeEventListener('resize', schedule)
+      boundary.removeEventListener('scroll', schedule)
     }
-  }, [citationOpen, structuredCitationSelection?.id, structuredCitationSelection?.anchor])
+  }, [citationOpen, structuredCitationSelection?.id, structuredCitationSelection?.anchor, valueSelection])
+
+  useEffect(() => {
+    if (!valueSelection) return
+    const closeOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && !valuePanelRef.current?.contains(event.target) && !valueSelection.anchor.contains(event.target)) setValueSelection(undefined)
+    }
+    const escape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || document.querySelector('[aria-labelledby="execution-trust-title"]')) return
+      event.preventDefault()
+      event.stopPropagation()
+      setValueSelection(undefined)
+      valueSelection.anchor.focus({ preventScroll: true })
+    }
+    document.addEventListener('pointerdown', closeOutside)
+    document.addEventListener('keydown', escape, true)
+    return () => {
+      document.removeEventListener('pointerdown', closeOutside)
+      document.removeEventListener('keydown', escape, true)
+    }
+  }, [valueSelection])
+
+  useEffect(() => { setValueSelection(undefined); setDrawerSourceId(undefined) }, [filename, desktopSession?.root, activeCollaborationLaunch, manuscriptFileActive])
 
   useEffect(() => {
     const boundary = editorAreaRef.current
@@ -2141,7 +2176,8 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   const demoCommentThread = reviewDocument.threads.find((thread) => thread.id === 'dm-comment-01')
   const demoReviewAvailable = !collaborationSessionActive && Boolean(demoAliceChange && demoMarcusChange && demoCommentThread)
   const reviewProposalStatus = reviewProposal === 'alice' ? draft.aliceStatus : draft.marcusStatus
-  const executableCells = useMemo(() => extractExecutableCells(executionSource).cells, [executionSource])
+  const executableCellParse = useMemo(() => extractExecutableCells(executionSource), [executionSource])
+  const executableCells = executableCellParse.cells
   const sharedManuscript = Boolean(activeCollaborationLaunch || collaborationSessionActive)
   const executionBoundaryKind = desktopSession
     ? 'desktop'
@@ -2175,7 +2211,24 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   const localFigureImages = useProjectImageUrls(desktopSession?.root, localFigurePaths, localImageRevision)
   const assetResolutionRevision = useMemo(() => ({ browserProjectImages, sharedImages: sharedResources.images, localImages: localFigureImages.urls, builtInProject }), [browserProjectImages, sharedResources.images, localFigureImages.urls, builtInProject])
   const retainedPublishedValueParse = useMemo(() => parseRetainedPublishedValues(manuscriptSource), [manuscriptSource])
-  const retainedPublishedValues = Object.values(retainedPublishedValueParse.values)
+  const retainedPublishedValues = useMemo(() => Object.values(retainedPublishedValueParse.values), [retainedPublishedValueParse])
+  const cellStatuses = useMemo(() => {
+    const statuses: Record<string, ExecutionCellFreshness['status']> = Object.fromEntries(executionCellStates.map((state) => [state.cellId, state.status]))
+    const cells = new Map(executableCells.map((cell) => [cell.id, cell]))
+    for (const { provenance } of retainedPublishedValues) {
+      const { cellId, language, codeHash, runHash } = provenance
+      if (Object.hasOwn(statuses, cellId) && !['current', 'never-run'].includes(statuses[cellId])) continue
+      const cell = cells.get(cellId)
+      statuses[cellId] = cell?.language === language && executionTrackerRef.current?.matchesRetainedResult(cell, codeHash, runHash) ? 'current' : 'stale'
+    }
+    return statuses
+  }, [executionCellStates, executableCells, retainedPublishedValues])
+  const inspectedValue = valueSelection && computedValueSource(valueSelection.name, executableCellParse, retainedPublishedValueParse, valueSelection.cellId)
+  const inspectedCell = inspectedValue?.cell
+  const inspectedCount = valueSelection ? structuredEditorRef.current?.countComputedValueOccurrences(valueSelection.name) ?? 0 : 0
+  const canEditCellSource = canEditManuscript && !structuredReviewProjection && (
+    Boolean(desktopSession) || (executionBoundaryKind !== 'template' && collaborationSessionActive && Boolean(collaborativeEditorBinding) && Boolean(activeCollaborationCapabilities?.edit))
+  )
   const allDiagnostics = [...diagnostics, ...semanticReferenceDiagnostics, ...bibliographyDiagnostics, ...citationLockDiagnostics, ...citationLockHostDiagnostics, ...citationCacheDiagnostics, ...zoteroDiagnostics, ...crossrefDiagnostics, ...cslDiagnostics, ...citationPreferenceDiagnostics, ...executionDiagnostics, ...retainedOutputParse.diagnostics, ...retainedPublishedValueParse.diagnostics]
   const prioritizedDiagnostics = prioritizeProjectDiagnostics(allDiagnostics)
   const selectedKernelForLanguage = (language: ExecutionLanguage, inventory = runtimeInventory) => {
@@ -2316,6 +2369,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     if (!root) return
     let disposed = false
     let running = false
+    let checkedRun: { source: string; id: string; problem?: string } | undefined
     const verifyExecutionFiles = async () => {
       if (running || disposed) return
       const tracker = executionTrackerRef.current
@@ -2349,9 +2403,16 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
             tracker.verifyArtifacts(new Map())
           }
         }
+        const states = tracker.snapshot()
+        const certification = tracker.cleanRunCertification()
+        if (certification && executionProjection.ok && checkedRun?.id !== certification.cleanRunId) {
+          const problem = await publicationFreshnessSnapshotProblem(executionProjection.source, states, 'all-cells')
+          checkedRun = { source: manuscriptSource, id: certification.cleanRunId, problem }
+        }
         if (!disposed && executionTrackerRef.current === tracker) {
           setExecutionCellStates(tracker.snapshot())
           setCleanRunCertification(tracker.cleanRunCertification())
+          setVerifiedRun(certification ? checkedRun : undefined)
         }
       } finally {
         running = false
@@ -2363,7 +2424,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       disposed = true
       window.clearInterval(interval)
     }
-  }, [desktopSession?.root, manuscriptSource])
+  }, [desktopSession?.root, desktopSession?.path, manuscriptSource, cleanRunCertification?.cleanRunId])
 
   const openSourceInspector = () => {
     setSourceTab('reviewed')
@@ -2406,6 +2467,20 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   const applyCollaborativeSource = (remoteSource: string) => {
     setStructuredMode(true)
     if (remoteSource === manuscriptSourceRef.current) return
+    const local = desktopSessionRef.current
+    if (local) {
+      const cells = (source: string) => {
+        const projected = cleanExecutionProjection(source)
+        return extractExecutableCells(projected.ok ? projected.source : source).cells
+      }
+      if (executableContentChanged(cells(manuscriptSourceRef.current), cells(remoteSource))) {
+        executionTrust.invalidate(local.root)
+        forgetProjectTrust(localStorage, local.root)
+        setProjectExecutionTrust(executionTrust.review)
+        pendingExecutionCommandRef.current = undefined
+        setExecutionTrustOpen(false)
+      }
+    }
     const parsed = parsePortableDocument(remoteSource, initialDraft)
     replaceManuscriptSource(remoteSource)
     markDraftChanged()
@@ -2560,23 +2635,25 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     return true
   }
 
-  const savePanelManagedCell = (cellId: string, source: string) => {
-    if (!canEditManuscript || !structuredEditorRef.current?.updateCodeCellSource(cellId, source)) {
-      setToast('The project code source could not be updated')
+  const savePanelManagedCell = (cellId: string, source: string, expectedSource?: string, inline = false) => {
+    if (!canEditCellSource || !structuredEditorRef.current?.updateCodeCellSource(cellId, source, expectedSource)) {
+      if (!inline) setToast('The project code source could not be updated')
       return false
     }
-    setToast(`Project code saved · ${cellId}`)
+    if (!inline) setToast(`Project code saved · ${cellId}`)
     return true
   }
 
   const revealPanelManagedCell = (cellId: string) => {
+    setValueSelection(undefined)
+    setDrawerSourceId(cellId)
     setExecutionWorkspaceOpen(true)
     window.requestAnimationFrame(() => {
       const escaped = globalThis.CSS?.escape ? globalThis.CSS.escape(cellId) : cellId.replace(/["\\]/g, '\\$&')
       const row = document.querySelector<HTMLElement>(`.code-workspace-drawer .execution-cell-row[data-cell-id="${escaped}"]`)
       const source = row?.querySelector<HTMLDetailsElement>('.managed-code-source')
       if (source) source.open = true
-      row?.scrollIntoView({ behavior: motionAwareScrollBehavior(), block: 'center' })
+      row?.scrollIntoView?.({ behavior: motionAwareScrollBehavior(), block: 'center' })
       window.requestAnimationFrame(() => row?.querySelector<HTMLElement>('.cm-content')?.focus())
     })
   }
@@ -2615,7 +2692,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       if (!session && !binding && browserAssetsLoading) throw new Error('Project figures are still loading. Try again in a moment.')
       if (!session && !binding && browserAssetsProblem) throw new Error('Existing project figures could not be restored. Reload before adding figures so saved images are preserved.')
       const prepared = await prepareFigureFiles(files)
-      const unchanged = () => desktopSessionRef.current?.root === session?.root && desktopSessionRef.current?.path === session?.path && browserAssetScopeRef.current === scope && figureCollaborationBindingRef.current === binding && figureImportAllowedRef.current
+      const unchanged = () => desktopSessionRef.current?.root === session?.root && desktopSessionRef.current?.path === session?.path && browserAssetScopeRef.current === scope && figureCollaborationBindingRef.current === binding && manuscriptEditAllowedRef.current
       if (!unchanged()) throw new Error('The project changed before the figures could be added. Drop them into the current manuscript again.')
       const images = prepared.map((file) => file.image)
       // Validate the complete online update before creating any local files.
@@ -2684,7 +2761,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     const session = desktopSessionRef.current
     const binding = figureCollaborationBindingRef.current
     try {
-      if (!figureImportAllowedRef.current) return false
+      if (!manuscriptEditAllowedRef.current) return false
       if (binding && !sharedResources.images.some((image) => image.path === path)) {
         let image = browserProjectImagesRef.current.find((candidate) => candidate.path === path)
         if (!image && session) {
@@ -2692,7 +2769,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
           if (asset) image = sharedImage(path, Uint8Array.from(asset.bytes))
         }
         if (!image) throw new Error('Choose an available project image so it can be shared with the manuscript.')
-        if (!figureImportAllowedRef.current || figureCollaborationBindingRef.current !== binding || desktopSessionRef.current?.root !== session?.root || desktopSessionRef.current?.path !== session?.path) return false
+        if (!manuscriptEditAllowedRef.current || figureCollaborationBindingRef.current !== binding || desktopSessionRef.current?.root !== session?.root || desktopSessionRef.current?.path !== session?.path) return false
         publishProjectResources(binding.document, { images: [image], citations: [] })
         setSharedResources((current) => ({ ...current, images: [...current.images.filter((candidate) => candidate.path !== path), image!] }))
       }
@@ -2851,7 +2928,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     setCheckingEnvironmentLanguage(language)
     openExecutionEnvironment(language)
     try {
-      const trust = await desktopHost.executionTrustStatus(session.root)
+      const trust = await executionTrust.executionTrustStatus(session.root)
       if (desktopSessionRef.current?.root !== session.root) return
       setProjectExecutionTrust(trust)
       if (!trust.trusted) { setToast('Trust this project before checking its language environments.'); return }
@@ -2870,7 +2947,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     const session = desktopSessionRef.current
     if (!session) return
     try {
-      const trust = await desktopHost.executionTrustStatus(session.root)
+      const trust = await executionTrust.executionTrustStatus(session.root)
       if (desktopSessionRef.current?.root !== session.root) return
       setProjectExecutionTrust(trust)
       if (trust.trusted) return
@@ -3010,7 +3087,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     }
     setKernelSetupLanguage(language)
     try {
-      const trust = await desktopHost.executionTrustStatus(session.root)
+      const trust = await executionTrust.executionTrustStatus(session.root)
       if (!trust.trusted) {
         setExecutionTrustPurpose('kernel-setup')
         setExecutionTrustWarning(`${trust.warning} ${language === 'python'
@@ -3108,9 +3185,9 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     if (!session || languages.length === 0 || projectSetupRunningRef.current) return
     pendingExecutionCommandRef.current = command
     try {
-      let trust = await desktopHost.executionTrustStatus(session.root)
-      if (!trust.trusted && trustedProjectRoots(localStorage).has(session.root)) {
-        trust = await desktopHost.trustProjectForSession(session.root, EXECUTION_TRUST_ACKNOWLEDGEMENT)
+      let trust = await executionTrust.executionTrustStatus(session.root)
+      if (!trust.trusted && !executionTrust.needsReview(session.root) && trustedProjectRoots(localStorage).has(session.root)) {
+        trust = await executionTrust.trustProjectForSession(session.root, EXECUTION_TRUST_ACKNOWLEDGEMENT)
       }
       setProjectExecutionTrust(trust)
       if (desktopSessionRef.current?.root !== session.root || desktopSessionRef.current.path !== session.path) {
@@ -3206,9 +3283,10 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     cell: ExecutableCell,
     tracker: ExecutionFreshnessTracker,
     sequence: number,
-    cleanRunId?: string,
+    checkRunContext: () => void,
   ) => {
     const session = desktopSessionRef.current
+    const runToken = executionPlanBusyRef.current
     if (!session) return undefined
 
     const controller = new AbortController()
@@ -3223,18 +3301,15 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     setExecutionDiagnostics((current) => current.filter((diagnostic) => !diagnostic.code.startsWith('execution-run-')))
     setKernelConsoleStatuses((current) => ({ ...current, [cell.language]: current[cell.language] === 'not-started' ? 'starting' : 'busy' }))
     try {
-      const result = await kernelExecution.run(
-        session.root,
-        await executionRequestForCell(cell, session.root),
-        controller.signal,
-      )
-      if (desktopSessionRef.current?.root !== session.root) return undefined
+      const request = await executionRequestForCell(cell, session.root)
+      checkRunContext()
+      const result = await kernelExecution.run(session.root, request, controller.signal)
+      checkRunContext()
       updateKernelConsoleStatus(cell.language, result.status === 'interrupted' ? 'interrupted' : result.status === 'failed' ? 'failed' : 'ready')
       setExecutionResult(result)
       setExecutionResults((current) => ({ ...current, [cell.id]: result }))
-      const manifest = tracker.recordResult(result, sequence, cleanRunId)
+      const manifest = tracker.recordResult(result, sequence)
       syncExecutionTracker(tracker)
-      await persistExecutionManifest(session.root, manifest)
 
       if (result.status === 'succeeded') {
         const currentSource = manuscriptSourceRef.current
@@ -3252,15 +3327,19 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
           commitDraftHistory(nextDraft)
           setDiagnostics(parsed.diagnostics)
           writeRecoverySnapshot(nextDraft, filename, materialized.source)
+          setToast(`${cell.id} completed · run ${result.hashes.result.slice(7, 15)}`)
         } else {
-          if (cell.id === primaryCell?.id) updateDraftHistory({ cellStatus: 'current' })
+          const detail = materialized.diagnostics[0]?.message ?? 'The result could not be saved in the manuscript.'
+          tracker.markStopped(cell.id, 'failed', detail)
+          syncExecutionTracker(tracker)
+          if (cell.id === primaryCell?.id) updateDraftHistory({ cellStatus: 'failed' })
           setExecutionDiagnostics((current) => [
             ...current,
             ...materialized.diagnostics.map((diagnostic) => ({ ...diagnostic, code: `execution-run-${diagnostic.code}` })),
           ])
-          setExecutionProblem(materialized.diagnostics[0]?.message ?? 'The live result could not be materialized into portable source.')
+          setExecutionProblem(detail)
+          setToast('The result could not be saved · previous output retained')
         }
-        setToast(`${cell.id} completed · run ${result.hashes.result.slice(7, 15)}`)
       } else {
         if (cell.id === primaryCell?.id) updateDraftHistory({ cellStatus: result.status })
         const detail = result.errors[0]?.message
@@ -3270,22 +3349,25 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
         if (result.status === 'failed') surfaceCellFailure(cell, result, detail)
         setToast(result.status === 'interrupted' ? 'Execution interrupted · retained output preserved' : 'Execution failed · details opened in Terminal')
       }
+      await persistExecutionManifest(session.root, manifest)
       return result
     } catch (error) {
-      if (desktopSessionRef.current?.root !== session.root) return undefined
+      if (executionPlanBusyRef.current !== runToken || desktopSessionRef.current?.root !== session.root || desktopSessionRef.current.path !== session.path) return undefined
       const interrupted = controller.signal.aborted || (error instanceof DOMException && error.name === 'AbortError')
-      const message = interrupted ? 'The run was interrupted.' : normaliseHostFailure(error).message
+      const message = controller.signal.aborted ? 'The run was interrupted.' : error instanceof DOMException ? error.message : normaliseHostFailure(error).message
       updateKernelConsoleStatus(cell.language, interrupted ? 'interrupted' : 'failed')
-      tracker.markStopped(cell.id, interrupted ? 'interrupted' : 'failed', message)
+      if (tracker.snapshot().some((state) => state.cellId === cell.id)) {
+        tracker.markStopped(cell.id, interrupted ? 'interrupted' : 'failed', message)
+      }
       syncExecutionTracker(tracker)
-      if (cell.id === primaryCell?.id) updateDraftHistory({ cellStatus: interrupted ? 'interrupted' : 'failed' })
+      if (cell.id === primaryCell?.id && manuscriptEditAllowedRef.current) updateDraftHistory({ cellStatus: interrupted ? 'interrupted' : 'failed' })
       setExecutionProblem(message)
       if (!interrupted) surfaceCellFailure(cell, undefined, message)
       setToast(interrupted ? 'Execution interrupted · retained output preserved' : 'Execution failed · details opened in Terminal')
       return undefined
     } finally {
       if (executionAbortRef.current === controller) executionAbortRef.current = null
-      if (executionActiveCellRef.current === cell.id) {
+      if (executionPlanBusyRef.current === runToken && executionActiveCellRef.current === cell.id) {
         executionActiveCellRef.current = undefined
         executionActiveLanguageRef.current = undefined
         setExecutionActiveCell(undefined)
@@ -3295,40 +3377,66 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
 
   const runExecutionCommandTrusted = async (command: ExecutionCommand) => {
     const session = desktopSessionRef.current
-    if (!session || executionPlanBusyRef.current) return
-    const projection = cleanExecutionProjection(manuscriptSourceRef.current)
+    if (!session || executionPlanBusyRef.current || !manuscriptEditAllowedRef.current || executionTrust.needsReview(session.root)) return
+    let checkedSource = manuscriptSourceRef.current
+    const projection = cleanExecutionProjection(checkedSource)
     if (!projection.ok) {
       setExecutionProblem('Execution needs a clean Final projection. Resolve overlapping review alternatives before running code.')
       setToast('Execution blocked · resolve overlapping review alternatives')
       return
     }
     const cells = extractExecutableCells(projection.source).cells
+    const runToken = Symbol()
+    const checkRunContext = () => {
+      if (executionPlanBusyRef.current !== runToken || desktopSessionRef.current?.root !== session.root || desktopSessionRef.current.path !== session.path
+        || !manuscriptEditAllowedRef.current || executionTrust.needsReview(session.root)) {
+        throw new DOMException('The project or its editing permissions changed. Previous outputs were retained.', 'AbortError')
+      }
+      const current = manuscriptSourceRef.current
+      if (current === checkedSource) return
+      const projected = cleanExecutionProjection(current)
+      if (!projected.ok || executableContentChanged(cells, extractExecutableCells(projected.source).cells)) {
+        throw new DOMException('The code changed during execution. Previous outputs were retained.', 'AbortError')
+      }
+      checkedSource = current
+    }
     let targets = executionTargets(command, cells)
     if (targets.length === 0) {
       setToast(command.kind === 'above' ? 'There are no executable cells above this cell' : 'No matching executable cells were found')
       return
     }
-    executionPlanBusyRef.current = true
+    executionPlanBusyRef.current = runToken
     setExecutionPlanBusy(true)
     try {
       const tracker = await ensureExecutionTracker(session.root, cells)
+      checkRunContext()
       if (command.kind === 'clean-all') {
+        setLastRunAll(undefined)
+        setExecutionProblem('')
         const previousStates = tracker.snapshot()
         const existingManifests = previousStates.flatMap((state) => state.lastSuccessful ? [state.lastSuccessful] : state.lastAttempt ? [state.lastAttempt] : [])
         const presentation = Object.fromEntries(cells.map((cell) => [cell.id, executionObjectPresentation(cell)]))
         const cleanLanguages = [...new Set(cells.map((cell) => cell.language))]
         for (const language of cleanLanguages) {
+          tracker.sessionRestarted(language)
           updateKernelConsoleStatus(language, 'starting')
           noteKernelRestart(language)
         }
+        syncExecutionTracker(tracker)
         const outcome = await cleanExecutePortableDocument({
           source: projection.source,
           root: session.root,
           execution: kernelExecution,
           existingManifests,
           presentation,
-          requestFactory: executionRequestForCell,
+          requestFactory: async (cell, root) => {
+            checkRunContext()
+            const request = await executionRequestForCell(cell, root)
+            checkRunContext()
+            return request
+          },
           onLifecycleChange: (states) => {
+            if (executionPlanBusyRef.current !== runToken || desktopSessionRef.current?.root !== session.root || desktopSessionRef.current.path !== session.path) return
             const previous = new Map(previousStates.map((state) => [state.cellId, state]))
             setExecutionCellStates(states.map((state) => ({
               ...previous.get(state.cellId),
@@ -3352,29 +3460,36 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
             }
           },
         })
+        if (executionPlanBusyRef.current !== runToken || desktopSessionRef.current?.root !== session.root || desktopSessionRef.current.path !== session.path) return
+        setLastRunAll(outcome.summary)
+        syncExecutionTracker(tracker)
+        checkRunContext()
         setExecutionResults(Object.fromEntries(outcome.results.map((result) => [result.cellId, result])))
         setExecutionResult(outcome.results.at(-1))
         if (!outcome.ok) {
-          const failedTracker = await ExecutionFreshnessTracker.create(cells, existingManifests)
           for (const result of outcome.results) {
             if (result.status !== 'succeeded') {
-              failedTracker.recordResult(result, cells.findIndex((cell) => cell.id === result.cellId), outcome.cleanRunId)
+              tracker.recordResult(result, cells.findIndex((cell) => cell.id === result.cellId), outcome.cleanRunId)
             }
           }
-          executionTrackerRef.current = failedTracker
-          syncExecutionTracker(failedTracker)
+          const problemCell = outcome.summary.problemCellId
+          if (problemCell && !outcome.results.some((result) => result.cellId === problemCell && result.status !== 'succeeded')) {
+            tracker.markStopped(problemCell, outcome.summary.interrupted ? 'interrupted' : 'failed', outcome.error ?? 'This cell needs attention.')
+          }
+          syncExecutionTracker(tracker)
           setExecutionDiagnostics((current) => [
             ...current.filter((diagnostic) => !diagnostic.code.startsWith('execution-clean-')),
             ...outcome.diagnostics.map((diagnostic) => ({ ...diagnostic, code: `execution-clean-${diagnostic.code}` })),
           ])
-          setExecutionProblem(outcome.error ?? 'The clean run did not complete; existing outputs were retained.')
-          setToast('Clean run incomplete · previous outputs retained')
+          setExecutionProblem(outcome.error ?? 'Run all cells did not complete. Previous outputs were retained.')
+          setToast(`Run all cells: ${runAllSummaryText(outcome.summary)}. Previous outputs retained.`)
           return
         }
 
         for (const language of cleanLanguages) updateKernelConsoleStatus(language, 'ready')
 
-        let materializedSource = manuscriptSourceRef.current
+        const materializationBase = manuscriptSourceRef.current
+        let materializedSource = materializationBase
         for (const result of outcome.results) {
           const materialized = materializeExecutionOutput({ source: materializedSource, cellId: result.cellId, result, presentation: presentation[result.cellId] })
           if (!materialized.ok) {
@@ -3384,20 +3499,25 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
               ...materialized.diagnostics.map((diagnostic) => ({ ...diagnostic, code: `execution-clean-${diagnostic.code}` })),
             ])
             setExecutionProblem(`Output materialization failed for ${result.cellId}; previous outputs were retained.`)
-            setToast('Clean run output could not be materialized · previous outputs retained')
+            setLastRunAll({ ...outcome.summary, problemCellId: result.cellId })
+            setToast('The output could not be applied. Previous outputs retained.')
             return
           }
           materializedSource = materialized.source
         }
 
         const cleanTracker = await ExecutionFreshnessTracker.create(cells, outcome.manifests)
+        checkRunContext()
+        if (manuscriptSourceRef.current !== materializationBase) {
+          setExecutionProblem('The manuscript changed while the results were being prepared. Run all cells again to update its outputs.')
+          return
+        }
         const certification = cleanTracker.certifyCleanRun(outcome.cleanRunId)
         executionTrackerRef.current = cleanTracker
         executionTrackerRootRef.current = session.root
         executionSequenceRef.current = Math.max(executionSequenceRef.current, cells.length)
         syncExecutionTracker(cleanTracker)
         setCleanRunCertification(certification)
-        for (const manifest of outcome.manifests) await persistExecutionManifest(session.root, manifest)
         const parsed = parsePortableDocument(materializedSource, initialDraft)
         const nextDraft = { ...parsed.draft, cellStatus: primaryCell ? 'current' as const : draft.cellStatus }
         replaceManuscriptSource(materializedSource)
@@ -3410,7 +3530,8 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
           if (cells.some((cell) => cell.language === language)) kernelFreshRef.current[language] = false
         }
         writeRecoverySnapshot(nextDraft, filename, materializedSource)
-        setToast(`Clean run certified · ${cells.length} cell${cells.length === 1 ? '' : 's'}`)
+        setToast(`Run all cells: ${runAllSummaryText(outcome.summary)}.`)
+        for (const manifest of outcome.manifests) await persistExecutionManifest(session.root, manifest)
         return
       }
       const requestedLanguages = [...new Set(targets.map((cell) => cell.language))]
@@ -3422,7 +3543,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       for (const [index, cell] of targets.entries()) {
         tracker.markQueued(cell.id)
         syncExecutionTracker(tracker)
-        const result = await executeTrustedCell(cell, tracker, executionSequenceRef.current++)
+        const result = await executeTrustedCell(cell, tracker, executionSequenceRef.current++, checkRunContext)
         if (!result || result.status !== 'succeeded') break
         completed += 1
         if (isSetupCell(cell)) {
@@ -3434,22 +3555,25 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
         setToast(`${targets.length} cells completed in document order`)
       }
     } catch (error) {
-      const message = normaliseHostFailure(error).message
+      if (executionPlanBusyRef.current !== runToken || desktopSessionRef.current?.root !== session.root || desktopSessionRef.current.path !== session.path) return
+      const message = error instanceof DOMException ? error.message : normaliseHostFailure(error).message
       setExecutionProblem(message)
       setToast(message)
     } finally {
-      executionPlanBusyRef.current = false
-      setExecutionPlanBusy(false)
-      executionActiveCellRef.current = undefined
-      executionActiveLanguageRef.current = undefined
-      setExecutionActiveCell(undefined)
+      if (executionPlanBusyRef.current === runToken) {
+        executionPlanBusyRef.current = undefined
+        setExecutionPlanBusy(false)
+        executionActiveCellRef.current = undefined
+        executionActiveLanguageRef.current = undefined
+        setExecutionActiveCell(undefined)
+      }
     }
   }
 
   const requestExecution = async (command: ExecutionCommand) => {
     setCommandOpen(false)
     const session = desktopSessionRef.current
-    if (projectSetupRunningRef.current || executionPlanBusyRef.current) return
+    if (projectSetupRunningRef.current || executionPlanBusyRef.current || !manuscriptEditAllowedRef.current) return
     if (!desktopHost.available || !session) {
       setToast('Code execution is available only in an opened desktop project')
       return
@@ -3475,7 +3599,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       return
     }
     try {
-      const trust = await desktopHost.executionTrustStatus(session.root)
+      const trust = await executionTrust.executionTrustStatus(session.root)
       if (!trust.trusted) {
         pendingExecutionCommandRef.current = command
         setExecutionTrustPurpose('run')
@@ -3547,7 +3671,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       return
     }
     try {
-      const trust = await desktopHost.executionTrustStatus(session.root)
+      const trust = await executionTrust.executionTrustStatus(session.root)
       if (!trust.trusted) {
         setExecutionTrustPurpose('packages')
         setExecutionTrustWarning(trust.warning)
@@ -3620,7 +3744,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     const session = desktopSessionRef.current
     if (!session || juliaPackageBusy) return
     try {
-      const trust = await desktopHost.executionTrustStatus(session.root)
+      const trust = await executionTrust.executionTrustStatus(session.root)
       if (desktopSessionRef.current?.root !== session.root) return
       setProjectExecutionTrust(trust)
       if (!trust.trusted) { await requestProjectExecutionTrust(); return }
@@ -3628,7 +3752,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     } catch (error) { setJuliaPackageProblem(normaliseHostFailure(error).message) }
   }
 
-  const formatCodeCell = async (_cellId: string, language: ExecutionLanguage, code: string) => {
+  const formatCodeCell = async (_cellId: string, language: ExecutionLanguage, code: string, optional = false) => {
     const session = desktopSessionRef.current
     if (!session) {
       setToast('Code formatting is available only in an opened desktop project')
@@ -3636,8 +3760,9 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     }
     if (language !== 'julia' && formatterStatuses[language]?.available === false) return undefined
     try {
-      const trust = await desktopHost.executionTrustStatus(session.root)
+      const trust = await executionTrust.executionTrustStatus(session.root)
       if (!trust.trusted) {
+        if (optional) return undefined
         setExecutionTrustPurpose('format')
         setExecutionTrustWarning(trust.warning)
         setExecutionTrustOpen(true)
@@ -3665,8 +3790,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
           [language]: { language, package: language === 'python' ? 'Ruff' : 'styler', available: false },
         }))
       }
-      setExecutionProblem(message)
-      setToast(message)
+      if (!optional) { setExecutionProblem(message); setToast(message) }
       return undefined
     }
   }
@@ -3685,7 +3809,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     const session = desktopSessionRef.current
     if (!session || !formatterRequest(language).executable) return
     try {
-      const trust = await desktopHost.executionTrustStatus(session.root)
+      const trust = await executionTrust.executionTrustStatus(session.root)
       if (!trust.trusted) return
       const status = await desktopHost.probeCodeFormatter(formatterRequest(language))
       if (desktopSessionRef.current?.root === session.root) {
@@ -3744,7 +3868,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     }
     setFormatterSetupLanguage(language)
     try {
-      const trust = await desktopHost.executionTrustStatus(session.root)
+      const trust = await executionTrust.executionTrustStatus(session.root)
       if (!trust.trusted) {
         setExecutionTrustPurpose('formatter-setup')
         setExecutionTrustWarning(`${trust.warning} DraftMatter will install ${packageName} into the selected ${runtimeName(language)} environment.`)
@@ -3791,7 +3915,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
         throw new Error(`No healthy ${runtimeName(language)} Jupyter kernel is selected.`)
       }
     }
-    const trust = await desktopHost.executionTrustStatus(session.root)
+    const trust = await executionTrust.executionTrustStatus(session.root)
     if (trust.trusted) return executeConsoleTrusted(language, code)
     return new Promise<NormalizedExecutionResult>((resolve, reject) => {
       pendingConsoleRef.current?.reject(new Error('The previous terminal command was cancelled.'))
@@ -3820,7 +3944,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     if (!session || executionTrustBusy) return
     setExecutionTrustBusy(true)
     try {
-      const trust = await desktopHost.trustProjectForSession(session.root, EXECUTION_TRUST_ACKNOWLEDGEMENT)
+      const trust = await executionTrust.trustProjectForSession(session.root, EXECUTION_TRUST_ACKNOWLEDGEMENT)
       if (!trust.trusted) throw new Error('The project was not trusted for execution.')
       if (desktopSessionRef.current?.root !== session.root || desktopSessionRef.current.path !== session.path) {
         pendingSetupLanguagesRef.current = []
@@ -3925,7 +4049,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     if (!session) return
     const language = requestedLanguage ?? executionActiveLanguageRef.current ?? primaryCell?.language ?? 'python'
     try {
-      const trust = await desktopHost.executionTrustStatus(session.root)
+      const trust = await executionTrust.executionTrustStatus(session.root)
       if (!trust.trusted) {
         setToast('Run a cell and trust this project before restarting its execution environment')
         return
@@ -4410,12 +4534,14 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     executionTrackerRef.current = executionTracker
     executionTrackerRootRef.current = `browser:${file.name}`
     executionSequenceRef.current = 0
-    executionPlanBusyRef.current = false
+    executionPlanBusyRef.current = undefined
     pendingExecutionCommandRef.current = undefined
     executionActiveCellRef.current = undefined
     executionActiveLanguageRef.current = undefined
     setExecutionResult(undefined)
     setExecutionResults({})
+    setLastRunAll(undefined)
+    setVerifiedRun(undefined)
     setExecutionCellStates(executionTracker.snapshot())
     setCleanRunCertification(undefined)
     setExecutionPlanBusy(false)
@@ -4590,12 +4716,14 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     executionTrackerRef.current = executionTracker
     executionTrackerRootRef.current = project.root
     executionSequenceRef.current = Math.max(0, ...validManifests.map((manifest) => manifest.sequence + 1))
-    executionPlanBusyRef.current = false
+    executionPlanBusyRef.current = undefined
     pendingExecutionCommandRef.current = undefined
     executionActiveCellRef.current = undefined
     executionActiveLanguageRef.current = undefined
     setExecutionResult(undefined)
     setExecutionResults({})
+    setLastRunAll(undefined)
+    setVerifiedRun(undefined)
     setExecutionCellStates(executionTracker.snapshot())
     setCleanRunCertification(executionTracker.cleanRunCertification())
     setExecutionPlanBusy(false)
@@ -4900,7 +5028,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     try {
       const [status, trust, connections] = await Promise.all([
         desktopHost.agentIntegrationStatus(desktopSession.root),
-        desktopHost.executionTrustStatus(desktopSession.root),
+        executionTrust.executionTrustStatus(desktopSession.root),
         desktopHost.assistantConnectionsStatus(),
       ])
       setAgentIntegrationStatus(status)
@@ -4931,7 +5059,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       await desktopHost.initializeAiIntegration(desktopSession.root)
       const [status, trust] = await Promise.all([
         desktopHost.agentIntegrationStatus(desktopSession.root),
-        desktopHost.executionTrustStatus(desktopSession.root),
+        executionTrust.executionTrustStatus(desktopSession.root),
       ])
       setAgentIntegrationStatus(status)
       setAgentIntegrationTrust(trust)
@@ -5632,6 +5760,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   }
 
   const openStructuredCitationDetails = (id: string, items: CitationItem[], anchor: HTMLElement) => {
+    setValueSelection(undefined)
     setStructuredCitationSelection({ id, items, anchor })
     setCitationEditKey(items[0]?.citekey ?? '')
     setCitationOpen(true)
@@ -5788,7 +5917,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
           const preparedBefore = syncPreparedSource()
           const before = new TextEncoder().encode(preparedBefore)
           const token = `live-text:${(await projectAssetHash(before)).slice(7)}`
-          if (expectedVersionId !== token || observed !== manuscriptSourceRef.current || session.root !== desktopSessionRef.current?.root || session.path !== desktopSessionRef.current?.path || binding !== figureCollaborationBindingRef.current || !figureImportAllowedRef.current || preparedBefore !== syncPreparedSource()) throw new Error('The online manuscript changed. Refresh the conflict before choosing a version.')
+          if (expectedVersionId !== token || observed !== manuscriptSourceRef.current || session.root !== desktopSessionRef.current?.root || session.path !== desktopSessionRef.current?.path || binding !== figureCollaborationBindingRef.current || !manuscriptEditAllowedRef.current || preparedBefore !== syncPreparedSource()) throw new Error('The online manuscript changed. Refresh the conflict before choosing a version.')
           const requested = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
           const records = readProjectResources(binding.document).citations
           const prefix = '../'.repeat(Math.max(0, session.path.split('/').length - 1))
@@ -5804,12 +5933,12 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       if (path.startsWith('sync-conflicts/') || /\.conflict-(?:local|online)-[a-f0-9]+(?:\.|$)/i.test(path)) return
       const binding = figureCollaborationBindingRef.current
       const session = desktopSessionRef.current
-      if (!binding || !figureImportAllowedRef.current) throw new Error('Reconnect with editing access before sharing updated previews.')
+      if (!binding || !manuscriptEditAllowedRef.current) throw new Error('Reconnect with editing access before sharing updated previews.')
       const proposedPreview = path === DEFAULT_ACQUISITION_BIBLIOGRAPHY ? await canonicalizeSyncPreview(path, bytes) : undefined
       const observed = (await syncPreviewFiles()).find((file) => file.path === path)
       const observedHash = observed ? await projectAssetHash(observed.bytes) : null
       const stillCurrent = (await syncPreviewFiles()).find((file) => file.path === path)
-      if (!figureImportAllowedRef.current || session?.root !== desktopSessionRef.current?.root || session?.path !== desktopSessionRef.current?.path || observedHash !== expectedHash || binding !== figureCollaborationBindingRef.current || (observed ? !stillCurrent || observed.bytes.length !== stillCurrent.bytes.length || !observed.bytes.every((value, index) => value === stillCurrent.bytes[index]) : Boolean(stillCurrent))) throw new Error('The shared preview or editing access changed during synchronization. Both copies are preserved; refresh before resolving it.')
+      if (!manuscriptEditAllowedRef.current || session?.root !== desktopSessionRef.current?.root || session?.path !== desktopSessionRef.current?.path || observedHash !== expectedHash || binding !== figureCollaborationBindingRef.current || (observed ? !stillCurrent || observed.bytes.length !== stillCurrent.bytes.length || !observed.bytes.every((value, index) => value === stillCurrent.bytes[index]) : Boolean(stillCurrent))) throw new Error('The shared preview or editing access changed during synchronization. Both copies are preserved; refresh before resolving it.')
       if (path === DEFAULT_ACQUISITION_BIBLIOGRAPHY) {
         const parsed = parseBibliographyFile(path, new TextDecoder('utf-8', { fatal: true }).decode(bytes), 'project-file')
         if (parsed.diagnostics.some((diagnostic) => diagnostic.level === 'error')) throw new Error('The reference file needs repair before its metadata can be shared.')
@@ -6058,8 +6187,8 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     ? executionBoundaryKind === 'template'
       ? 'Template'
       : executionBoundaryKind === 'shared-desktop'
-        ? 'Copy first'
-        : 'View only'
+        ? 'Local copy required to run'
+        : canEditCellSource ? 'Edit shared code' : 'View only'
     : executableCells.length === 0
       ? 'Choose a language'
       : executionSummaryStatus === 'current'
@@ -6079,6 +6208,44 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
         : saveState === 'error'
           ? 'Save paused'
           : desktopSession ? 'Saved to project' : collaborationSessionActive ? 'Online collaboration connected' : 'Saved locally in this browser'
+  const runAllButton = desktopSession && executableCells.length > 0 && (
+    <button type="button" title="Start fresh sessions and run every code cell to update computed values, figures, and tables."
+      disabled={executionPlanBusy || !canEditManuscript} onClick={() => void requestExecution({ kind: 'clean-all' })}>
+      <Icon name="play" size={13} />Run all cells
+    </button>
+  )
+  const currentRunEvidence = !executionPlanBusy && cleanRunCertification && verifiedRun?.source === manuscriptSource
+    && verifiedRun.id === cleanRunCertification.cleanRunId ? verifiedRun : undefined
+  const runAllFeedback = (lastRunAll || currentRunEvidence) && <div className="run-all-feedback" role="status">
+    {lastRunAll && <span>Last run · {runAllSummaryText(lastRunAll)}</span>}
+    {lastRunAll?.problemCellId && <button type="button" onClick={() => {
+      setExportOpen(false)
+      revealPanelManagedCell(lastRunAll.problemCellId!)
+    }}>Go to cell {lastRunAll.problemCellId}</button>}
+    {currentRunEvidence && <span>{currentRunEvidence.problem ?? 'All results are up to date.'}</span>}
+  </div>
+  const renderManagedEditor = (cell: ExecutableCell, inline = false) => (
+    <ManagedCodeCellEditor key={cell.id} cell={cell} inline={inline} focusOnOpen={inline} initiallyOpen={cell.role === 'setup'}
+      readOnly={!canEditCellSource}
+      readOnlyMessage={!desktopSession ? executionBoundaryKind === 'template' ? 'Template source · make a project copy to edit' : sharedManuscript ? 'Shared source · read only' : 'Portable source · view only in browser' : undefined}
+      sourceNote={!desktopSession && (inline || sharedManuscript) ? 'Open in the desktop app to update the result.' : undefined}
+      onSave={(id, next, previous) => savePanelManagedCell(id, next, previous, inline)}
+      onRun={desktopSession && canEditCellSource ? async (id, savedSource) => {
+        const projection = cleanExecutionProjection(manuscriptSourceRef.current)
+        if (!projection.ok || !extractExecutableCells(projection.source).cells.some((candidate) => candidate.id === id && candidate.source === savedSource)) {
+          setToast('The calculation changed. Review its saved source before running.')
+          return
+        }
+        await requestExecution({ kind: 'cell', cellId: id, expectedSource: savedSource })
+      } : undefined}
+      runDisabled={executionPlanBusy}
+      formatOnSave={Boolean(desktopSession && (cell.language === 'julia'
+        ? juliaEnvironment?.packages.some((entry) => entry.name === 'JuliaFormatter') !== false
+        : formatterStatuses[cell.language]?.available !== false))}
+      onFormat={desktopSession && canEditCellSource ? (id, code, automatic) => formatCodeCell(id, cell.language, code, automatic) : undefined}
+    />
+  )
+
   const renderExecutionCellRow = (cell: ExecutableCell) => {
     const index = executableCells.findIndex((candidate) => candidate.id === cell.id)
     const state = executionCellStates.find((candidate) => candidate.cellId === cell.id)
@@ -6096,23 +6263,15 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
           <small>{desktopSession ? state?.reason ?? view?.message ?? 'Ready for an explicit run.' : executionBoundaryKind === 'template' ? 'Make a project copy to establish a new execution state.' : executionBoundaryKind === 'shared-desktop' ? 'Create a local project copy to establish desktop execution state.' : 'Execution status is available in a local DraftMatter desktop project.'}</small>
         </div>
         <div className="execution-cell-actions">
+          {!managed && drawerSourceId !== cell.id && <button type="button" onClick={() => revealPanelManagedCell(cell.id)}>{canEditCellSource ? 'Edit source' : 'View source'}</button>}
           {desktopSession ? <>
-            {index > 0 && <button className="subtle" onClick={() => void requestExecution({ kind: 'above', cellId: cell.id })} disabled={executionPlanBusy}>Run above</button>}
+            {index > 0 && <button className="subtle" onClick={() => void requestExecution({ kind: 'above', cellId: cell.id })} disabled={executionPlanBusy || !canEditManuscript}>Run above</button>}
             {executionActiveCell === cell.id
               ? <button onClick={() => void interruptExecution(cell.language)}><Icon name="close" size={13} /> Interrupt</button>
-              : <button className="run-button" onClick={() => void requestExecution({ kind: 'cell', cellId: cell.id })} disabled={executionPlanBusy}><Icon name="play" size={13} /> Run</button>}
-          </> : <span className="execution-cell-view-only"><Icon name="eye" size={13} /> {executionBoundaryKind === 'template' ? 'Template · copy to run' : executionBoundaryKind === 'shared-desktop' ? 'Local copy required' : executionBoundaryKind === 'shared-browser' ? 'Online · view only' : 'Browser view only'}</span>}
+              : <button className="run-button" onClick={() => void requestExecution({ kind: 'cell', cellId: cell.id })} disabled={executionPlanBusy || !canEditManuscript}><Icon name="play" size={13} /> Run</button>}
+          </> : <span className="execution-cell-view-only"><Icon name="eye" size={13} /> {executionBoundaryKind === 'template' ? 'Template · copy to run' : executionBoundaryKind === 'shared-desktop' ? 'Local copy required' : executionBoundaryKind === 'shared-browser' ? 'Run on desktop' : 'Browser view only'}</span>}
         </div>
-        {managed && (
-          <ManagedCodeCellEditor
-            cell={cell}
-            readOnly={!canEditManuscript || !desktopSession}
-            readOnlyMessage={!desktopSession ? executionBoundaryKind === 'template' ? 'Template source · make a project copy to edit' : executionBoundaryKind === 'shared-desktop' ? 'Shared source · create a local project copy to edit' : 'Portable source · view only in browser' : undefined}
-            initiallyOpen={cell.role === 'setup'}
-            onSave={savePanelManagedCell}
-            onFormat={(cellId, source) => formatCodeCell(cellId, cell.language, source)}
-          />
-        )}
+        {(managed || drawerSourceId === cell.id) && renderManagedEditor(cell)}
         {view?.provenance.length ? <p className="execution-cell-provenance">{view.provenance.join(' · ')}</p> : null}
         {result && (
           <div className="structured-live-result" aria-label={`Latest execution result for ${cell.id}`}>
@@ -6246,10 +6405,10 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
           <div className="topbar-primary-workspaces">
             {structuredMode && <button
               data-tooltip={`Code & computation · ${codeWorkspaceState}`} className={`topbar-code-workspace compact-tool ${executionWorkspaceOpen ? 'active' : ''} ${desktopSession ? '' : 'browser-view-only'}`.trim()}
-              aria-label={desktopSession ? 'Open Code and computation' : executionBoundaryKind === 'template' ? 'Open example code and project copy options' : executionBoundaryKind === 'shared-desktop' ? 'Open shared code and local project copy options' : 'Open browser view-only code and desktop instructions'}
+              aria-label={desktopSession ? 'Open Code and computation' : executionBoundaryKind === 'template' ? 'Open example code and project copy options' : executionBoundaryKind === 'shared-desktop' ? 'Open shared code and local project copy options' : executionBoundaryKind === 'shared-browser' ? 'Open shared code and desktop instructions' : 'Open browser view-only code and desktop instructions'}
               aria-expanded={executionWorkspaceOpen}
               onClick={() => setExecutionWorkspaceOpen(true)}
-              title={desktopSession ? 'Open Code & computation' : executionBoundaryKind === 'template' ? 'Example code · make a project copy to execute' : executionBoundaryKind === 'shared-desktop' ? 'Shared code · create a local project copy to execute' : 'Code is view-only in the browser · open for desktop instructions'}
+              title={desktopSession ? 'Open Code & computation' : executionBoundaryKind === 'template' ? 'Example code · make a project copy to execute' : sharedManuscript ? 'Shared code · run in a local desktop project' : 'Code is view-only in the browser · open for desktop instructions'}
             >
               <Icon name="code" size={15} />
               <span className="visually-hidden">Code &amp; computation · {codeWorkspaceState}</span>
@@ -6315,6 +6474,8 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
             {exportOpen && (
               <div className="popover export-menu">
                 <span className="export-menu-heading">Publish</span>
+                {runAllButton}
+                {runAllFeedback}
                 <label className="export-freshness-policy"><input type="checkbox" checked={requireFreshPublication} onChange={(event) => setRequireFreshPublication(event.target.checked)} /><span><strong>Require current computed results</strong><small>Block publication when a computed value, figure, or table is missing or stale</small></span></label>
                 <button onClick={openSubmissionPreparation}><span><strong>Journal submission…</strong><small>Check and package manuscript files</small></span><Icon name="arrowRight" /></button>
                 <button onClick={() => exportPublication('html')}><span><strong>Web page</strong><small>Clean, styled, and self-contained</small></span><Icon name="arrowRight" /></button>
@@ -6592,8 +6753,8 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('cross-reference') }}><Icon name="link" size={15} /><span><strong>Cross-reference</strong><small>Figure, table, equation, or section</small></span></button>
                 <div className="toolbar-reproducibility-heading">Reproducibility</div>
                 <button onClick={() => { setInsertMenuOpen(false); openInsertBlock('published-value') }}><span className="toolbar-symbol" aria-hidden="true">123</span><span><strong>Computed value</strong><small>Statistic or model result in text</small></span></button>
-                <button disabled={!desktopSession} title={!desktopSession ? 'Code is view-only in the browser. Open this project in DraftMatter desktop to add a computation.' : undefined} onClick={() => { setInsertMenuOpen(false); openInsertBlock('figure-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible figure</strong><small>{desktopSession ? 'Visible code block and retained figure' : 'DraftMatter desktop required'}</small></span></button>
-                <button disabled={!desktopSession} title={!desktopSession ? 'Code is view-only in the browser. Open this project in DraftMatter desktop to add a computation.' : undefined} onClick={() => { setInsertMenuOpen(false); openInsertBlock('table-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible table</strong><small>{desktopSession ? 'Visible code block and retained table' : 'DraftMatter desktop required'}</small></span></button>
+                <button disabled={!desktopSession} title={!desktopSession ? 'Open this project in DraftMatter Desktop to add a computation.' : undefined} onClick={() => { setInsertMenuOpen(false); openInsertBlock('figure-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible figure</strong><small>{desktopSession ? 'Visible code block and retained figure' : 'DraftMatter desktop required'}</small></span></button>
+                <button disabled={!desktopSession} title={!desktopSession ? 'Open this project in DraftMatter Desktop to add a computation.' : undefined} onClick={() => { setInsertMenuOpen(false); openInsertBlock('table-cell') }}><Icon name="spark" size={15} /><span><strong>Reproducible table</strong><small>{desktopSession ? 'Visible code block and retained table' : 'DraftMatter desktop required'}</small></span></button>
               </div>}
             </div>
             <span className="toolbar-divider" />
@@ -6667,6 +6828,12 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
               searchRegions={documentSearchRegions}
               onInspectRaw={openSourceInspector}
               onCitationSelect={openStructuredCitationDetails}
+              onComputedValueSelect={(name, anchor, action) => {
+                const resolved = computedValueSource(name, executableCellParse, retainedPublishedValueParse)
+                setCitationOpen(false)
+                if (action === 'source' && resolved.cell) revealPanelManagedCell(resolved.cell.id)
+                else setValueSelection({ name, anchor, cellId: resolved.cell?.id })
+              }}
               onReviewSelectionChange={setStructuredReviewSelection}
               onReviewContextMenu={canCommentReview ? openReviewContextMenu : undefined}
               onReviewAnchorSelect={selectReviewAnchor}
@@ -6679,8 +6846,8 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
               onFigureImportError={setToast}
               assetResolutionRevision={assetResolutionRevision}
               citationLabels={structuredCitationLabels}
-              codeCellStatuses={Object.fromEntries(executionCellStates.map((state) => [state.cellId, state.status] as const))}
-              codeCellActionsEnabled={Boolean(desktopSession) && !executionPlanBusy}
+              codeCellStatuses={cellStatuses}
+              codeCellActionsEnabled={Boolean(desktopSession) && canEditManuscript && !executionPlanBusy}
               codeCellBrowserViewOnly={!desktopSession}
               codeCellViewOnlyLabel={executionBoundaryKind === 'template' ? 'Example · copy to run' : executionBoundaryKind === 'shared-desktop' ? 'Local copy required' : executionBoundaryKind === 'shared-browser' ? 'Online · view only' : 'Browser view only'}
               codeCellViewOnlySummary={executionBoundaryKind === 'template' ? 'Template code is inspectable here · Make a project copy to edit or run it' : executionBoundaryKind === 'shared-desktop' ? 'Create a local project copy to edit or run this code' : executionBoundaryKind === 'shared-browser' ? 'Code is inspectable online · Open a local desktop copy to run it' : 'Code is view-only in this browser · Open the project in DraftMatter desktop to run it'}
@@ -6706,6 +6873,19 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
                   ? completeExampleAssetUrls[path] ?? path
                   : path === 'figures/generated/fig-canopy.svg' ? '/fixtures/canopy-response.svg' : path}
             />
+            {valueSelection && inspectedValue && (
+              <div className="popover structured-citation-detail computed-value-detail" role="dialog" aria-label={`Computed value ${valueSelection.name}`} ref={valuePanelRef}>
+                <header>
+                  <div className="computed-value-heading">
+                    <strong>{valueSelection.name}</strong>
+                    <small>{inspectedCell && `${runtimeName(inspectedCell.language)} · `}{inspectedCount} {inspectedCount === 1 ? 'occurrence' : 'occurrences'}</small>
+                  </div>
+                  {inspectedCell && <button type="button" className="icon-button subtle" aria-label="Go to source" title="Go to source" onClick={() => revealPanelManagedCell(inspectedCell.id)}><Icon name="code" size={15} /></button>}
+                  <button type="button" className="icon-button subtle" aria-label="Close computed value" title="Close" onClick={() => { setValueSelection(undefined); valueSelection.anchor.focus({ preventScroll: true }) }}><Icon name="close" size={14} /></button>
+                </header>
+                {inspectedCell ? renderManagedEditor(inspectedCell, true) : <p role="status">{inspectedValue.message}</p>}
+              </div>
+            )}
             {citationOpen && structuredCitationSelection && (
               <div className="citation-detail popover structured-citation-detail" ref={structuredCitationDetailRef}>
                 <div className="citation-detail-top">
@@ -6934,8 +7114,8 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
                   ? <>{executableCells.length ? `${executableCells.length} cell${executableCells.length === 1 ? '' : 's'} · ${cellStatusLabel(executionSummaryStatus)} ·` : 'Set up a language or add a computation.'} Check a language environment, then add an optional shared setup or inspect your calculations.</>
                   : executionBoundaryKind === 'template'
                     ? <>{executableCells.length} example code cell{executableCells.length === 1 ? '' : 's'} · retained outputs are view-only until you make a project copy.</>
-                    : executionBoundaryKind === 'shared-desktop'
-                      ? <>{executableCells.length} shared code cell{executableCells.length === 1 ? '' : 's'} · create a local project copy to enable desktop execution.</>
+                    : sharedManuscript
+                      ? <>{executableCells.length} shared code cell{executableCells.length === 1 ? '' : 's'} · {canEditCellSource ? 'edit source here' : 'view source here'} and run it in a local desktop project.</>
                       : <>{executableCells.length ? `${executableCells.length} portable code cell${executableCells.length === 1 ? '' : 's'} · view only.` : 'No portable code cells.'} Execution requires a local DraftMatter desktop project.</>}
                 </p></div>
                 <button className="icon-button" onClick={() => setExecutionWorkspaceOpen(false)} aria-label="Close Code and computation"><Icon name="close" /></button>
@@ -6951,7 +7131,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
                     <small>DraftMatter desktop is already open. Choose a permanent folder or a temporary working copy, then trust that local project when you first run code. The online manuscript remains available for writing, comments, and review.</small>
                   </div> : executionBoundaryKind === 'shared-browser' ? <div>
                     <strong>Run code from a local DraftMatter desktop project</strong>
-                    <small>For safety, the online editor does not start a terminal, package manager, or language runtime. Writing, editing, comments, and review remain available here. A collaborator using a trusted desktop copy can run code and update retained outputs for everyone online.</small>
+                    <small>Project editors can save changes to shared code. A collaborator using a trusted desktop copy can run code and update retained outputs for everyone online.</small>
                   </div> : <div>
                     <strong>Open this portable manuscript as a DraftMatter desktop project</strong>
                     <small>The browser can edit and review the document, but it cannot start a terminal, package manager, or language runtime. Create or open a local desktop project before trusting and running its code.</small>
@@ -7042,22 +7222,22 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
                   computedValueSource={panelManagedCells.some((cell) => cell.role === 'values') ? panelManagedCells.filter((cell) => cell.role === 'values').map(renderExecutionCellRow) : undefined}
                   manuscriptSource={manuscriptCodeCells.length ? manuscriptCodeCells.map(renderExecutionCellRow) : undefined}
                   runControls={executableCells.length ? <>
-                    {[...new Set(executableCells.map((cell) => cell.language))].map((language) => <button key={language} onClick={() => void requestExecution({ kind: 'language', language })} disabled={executionPlanBusy}><Icon name="play" size={12} />Run {runtimeName(language)}</button>)}
-                    <button onClick={() => void requestExecution({ kind: 'clean-all' })} disabled={executionPlanBusy}><Icon name="history" size={13} />Clean run</button>
+                    {[...new Set(executableCells.map((cell) => cell.language))].map((language) => <button key={language} onClick={() => void requestExecution({ kind: 'language', language })} disabled={executionPlanBusy || !canEditManuscript}><Icon name="play" size={12} />Run {runtimeName(language)}</button>)}
+                    {runAllButton}
                   </> : undefined}
                   notices={executionProblem ? <p className="computation-language-problem" role="alert">{executionProblem}</p> : undefined}
                 /> : (
                 <div className="execution-cell-list">
-                  {panelManagedCells.length > 0 && <div className="execution-cell-group"><strong>Project code</strong><small>{desktopSession ? 'Setup and computed value calculations run with the document but are never displayed on the manuscript page.' : executionBoundaryKind === 'template' ? 'Example setup and computed value source · available after making a project copy.' : 'View-only setup and computed value source retained in the portable manuscript.'}</small></div>}
+                  {panelManagedCells.length > 0 && <div className="execution-cell-group"><strong>Project code</strong><small>{canEditCellSource ? 'Source changes are shared with every collaborator.' : 'Open a cell to read its setup or computed value source.'}</small></div>}
                   {panelManagedCells.map(renderExecutionCellRow)}
-                  {manuscriptCodeCells.length > 0 && <div className="execution-cell-group"><strong>Manuscript code blocks</strong><small>{desktopSession ? 'These figure, table, and ordinary code blocks remain visible and editable in the manuscript.' : executionBoundaryKind === 'template' ? 'View-only template code and retained outputs. Make a project copy to edit or run them.' : executionBoundaryKind === 'shared-desktop' ? 'View-only until this shared manuscript has a local project copy.' : 'View-only code and retained outputs. Open a local project in DraftMatter desktop to edit or run them.'}</small></div>}
+                  {manuscriptCodeCells.length > 0 && <div className="execution-cell-group"><strong>Manuscript code blocks</strong><small>Figure, table, and other code blocks appear in the manuscript.</small></div>}
                   {manuscriptCodeCells.map(renderExecutionCellRow)}
                   {executableCells.length === 0 && <div className="execution-cell-empty"><strong>No computations yet</strong><small>{desktopSession ? 'Choose Insert → Computed value, Reproducible figure, or Reproducible table to add a calculation. Shared setup is optional.' : 'Code authoring and execution become available when this manuscript is opened as a DraftMatter desktop project.'}</small></div>}
                 </div>
                 )}
-                {cleanRunCertification && <p className="clean-run-certification"><Icon name="check" size={13} /> Clean run certified · {cleanRunCertification.resultHashes.length} outputs from one ordered run</p>}
+                {runAllFeedback}
               </div>
-              <footer className="code-workspace-footer"><span><Icon name={desktopSession ? 'document' : 'eye'} size={13} /> {desktopSession ? 'Source is saved in the portable project document' : executionBoundaryKind === 'template' ? 'Built-in example · execution requires your own project copy' : executionBoundaryKind === 'shared-desktop' ? 'Shared online source · local project not created yet' : 'Portable code and retained outputs · view only in browser'}</span><button onClick={() => setExecutionWorkspaceOpen(false)}>Done</button></footer>
+              <footer className="code-workspace-footer"><span><Icon name={desktopSession ? 'document' : 'eye'} size={13} /> {desktopSession ? 'Source is saved in the portable project document' : executionBoundaryKind === 'template' ? 'Built-in example · execution requires your own project copy' : sharedManuscript ? 'Shared manuscript · run code in DraftMatter Desktop' : 'Portable code and retained outputs · view only in browser'}</span><button onClick={() => setExecutionWorkspaceOpen(false)}>Done</button></footer>
             </aside>
           </div>
         )}

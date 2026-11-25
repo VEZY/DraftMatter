@@ -150,6 +150,10 @@ describe('publication freshness for an exact export snapshot', () => {
     await expect(publicationFreshnessSnapshotProblem(output(record), states)).resolves.toBeUndefined()
     await expect(publicationFreshnessSnapshotProblem(output({ ...record, provenance: { ...record.provenance, codeHash: `sha256:${'c'.repeat(64)}` } }), states)).resolves.toContain('provenance')
     await expect(publicationFreshnessSnapshotProblem(output(record).replace('mean_height = 12.4', 'mean_height = 20.0'), states)).resolves.toContain('code')
+    const unused = output({ ...record, provenance: { ...record.provenance, codeHash: `sha256:${'d'.repeat(64)}` } }).replace('{{mean_height}}', '')
+    await expect(publicationFreshnessSnapshotProblem(unused, states)).resolves.toBeUndefined()
+    await expect(publicationFreshnessSnapshotProblem(unused, states, 'all-cells')).resolves.toContain('provenance')
+    await expect(publicationFreshnessSnapshotProblem(cell, states, 'all-cells')).resolves.toContain('missing computed results')
   })
   it('blocks a result after its upstream dependency was rerun even if both code hashes still match', async () => {
     const source = `${previousCell}\n${plotCell}\n${figureOutput}`

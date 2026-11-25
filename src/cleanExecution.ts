@@ -28,7 +28,23 @@ export interface CleanExecutionOptions {
   onLifecycleChange?: (states: LifecycleCellState[]) => void
 }
 
+export interface RunAllSummary {
+  succeeded: number
+  failed: number
+  interrupted: number
+  skipped: number
+  problemCellId?: string
+}
+
+export function runAllSummaryText(summary: RunAllSummary) {
+  const counts = [`${summary.succeeded} succeeded`, `${summary.failed} failed`]
+  if (summary.interrupted) counts.push(`${summary.interrupted} interrupted`)
+  counts.push(`${summary.skipped} skipped`)
+  return counts.join(' · ')
+}
+
 export interface CleanExecutionOutcome {
+  summary: RunAllSummary
   ok: boolean
   source: string
   cleanRunId: string
@@ -71,6 +87,7 @@ export async function cleanExecutePortableDocument(options: CleanExecutionOption
   const base = {
     source: options.source,
     cleanRunId,
+    summary: { succeeded: 0, failed: 0, interrupted: 0, skipped: extracted.cells.length },
     results: [] as NormalizedExecutionResult[],
     manifests: [...(options.existingManifests ?? [])],
     states: tracker.snapshot(),
@@ -83,7 +100,7 @@ export async function cleanExecutePortableDocument(options: CleanExecutionOption
       ok: false,
       report: { requested: [], completed: [], certified: false },
       diagnostics: [...extracted.diagnostics, ...retainedBefore.diagnostics],
-      error: 'Executable-cell diagnostics must be resolved before a clean run.',
+      error: blockingDiagnostics[0].message,
     }
   }
   if (extracted.cells.length === 0) {
@@ -120,7 +137,18 @@ export async function cleanExecutePortableDocument(options: CleanExecutionOption
     unsubscribe?.()
   }
 
-  const results = lifecycle.snapshot().flatMap((state) => state.result ? [state.result] : [])
+  const attempts = lifecycle.snapshot()
+  const results = attempts.flatMap((state) => state.result ? [state.result] : [])
+  const failed = attempts.filter((state) => state.status === 'failed')
+  const interrupted = attempts.filter((state) => state.status === 'interrupted')
+  const problem = failed[0] ?? interrupted[0]
+  const summary: RunAllSummary = {
+    succeeded: report.completed.length,
+    failed: failed.length,
+    interrupted: interrupted.length,
+    skipped: attempts.length - report.completed.length - failed.length - interrupted.length,
+    ...(problem && { problemCellId: problem.cellId }),
+  }
   const attemptManifests = results.map((result) => {
     const sequence = extracted.cells.findIndex((cell) => cell.id === result.cellId)
     return tracker.recordResult(result, sequence, cleanRunId)
@@ -130,11 +158,13 @@ export async function cleanExecutePortableDocument(options: CleanExecutionOption
     && results.every((result) => result.status === 'succeeded')
 
   if (!runSucceeded) {
-    const message = executionError ?? 'The clean run did not complete; existing outputs were retained.'
+    const message = problem?.result?.errors[0]?.message ?? problem?.message ?? executionError
+      ?? (problem?.status === 'interrupted' ? 'Execution was interrupted.' : 'The run did not complete.')
     return {
       ...base,
       ok: false,
       report,
+      summary,
       results,
       states: tracker.snapshot(),
       diagnostics: [...extracted.diagnostics, ...retainedBefore.diagnostics, errorDiagnostic('clean-run-incomplete', message)],
@@ -159,10 +189,11 @@ export async function cleanExecutePortableDocument(options: CleanExecutionOption
         ...base,
         ok: false,
         report: { ...report, certified: false },
+        summary: { ...summary, problemCellId: result.cellId },
         results,
         states: tracker.snapshot(),
         diagnostics: [...extracted.diagnostics, ...retainedBefore.diagnostics, ...materializationDiagnostics],
-        error: `Output materialization failed for ${result.cellId}; existing outputs were retained.`,
+        error: materialized.diagnostics[0]?.message ?? `The result of ${result.cellId} could not be added to the manuscript.`,
       }
     }
     nextSource = materialized.source
@@ -171,12 +202,13 @@ export async function cleanExecutePortableDocument(options: CleanExecutionOption
   const retainedAfter = parseRetainedOutputs(nextSource)
   const certification = tracker.certifyCleanRun(cleanRunId)
   const publishedCellCount = extracted.cells.filter((cell) => !isSetupCell(cell)).length
-  if (!certification || retainedAfter.outputs.length !== publishedCellCount) {
-    const message = 'The clean run completed but could not be certified with one portable output per cell.'
+  if (!certification || retainedAfter.outputs.length !== publishedCellCount || retainedAfter.diagnostics.some((item) => item.level === 'error')) {
+    const message = 'The cells ran, but their retained outputs could not be verified.'
     return {
       ...base,
       ok: false,
       report: { ...report, certified: false },
+      summary,
       results,
       states: tracker.snapshot(),
       diagnostics: [
@@ -192,6 +224,7 @@ export async function cleanExecutePortableDocument(options: CleanExecutionOption
 
   return {
     ok: true,
+    summary,
     source: nextSource,
     cleanRunId,
     report,

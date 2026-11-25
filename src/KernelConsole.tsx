@@ -273,7 +273,7 @@ export function KernelConsole({
           <span>Project</span><i className={projectActivity.status === 'running' ? 'busy' : projectActivity.status === 'succeeded' ? 'ready' : 'failed'} /> <small>{projectActivity.status === 'running' ? 'working' : projectActivity.status === 'succeeded' ? 'ready' : 'attention'}</small>
         </button>}
       </div>
-      <span className={`kernel-console-dirty ${dirty ? 'dirty' : ''}`}>{dirty ? 'Interactive · clean run will restart this kernel' : 'Reproducible session'}</span>
+      <span className={`kernel-console-dirty ${dirty ? 'dirty' : ''}`}>{dirty ? 'Interactive · Run all cells will restart this kernel' : 'Reproducible session'}</span>
       <button onClick={onClose} aria-label="Close kernel terminal">Close</button>
     </header>
     {activeView === 'project' && projectActivity ? <div className="kernel-project-activity" data-status={projectActivity.status}>

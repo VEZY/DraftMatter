@@ -5,14 +5,16 @@ import { isLegalDocumentId, legalConfiguration, type LegalDocumentId } from '../
 import { alphaAccessLink } from '../src/alphaAccess'
 import { HomeTrustGuide } from '../src/HomeLearningGuide'
 import { HomeHeroPreview, HomeShowcase } from '../src/HomeShowcase'
+import { DesktopDownloads } from './DesktopDownloads'
+import { repositoryUrl } from './githubReleases'
 
-const repositoryUrl = 'https://github.com/VEZY/DraftMatter'
 const applicationUrl = 'https://app.draftmatter.eu/'
 const exampleUrl = `${applicationUrl}demo`
 
-function legalDocumentFromHash(): LegalDocumentId | null {
+function pageFromHash(): LegalDocumentId | 'download' | 'home' {
+  if (window.location.hash === '#download') return 'download'
   const id = window.location.hash.slice('#legal/'.length)
-  return window.location.hash.startsWith('#legal/') && isLegalDocumentId(id) ? id : null
+  return window.location.hash.startsWith('#legal/') && isLegalDocumentId(id) ? id : 'home'
 }
 
 function scrollTo(id: string) {
@@ -33,13 +35,13 @@ function AlphaAction({ compact = false }: { compact?: boolean }) {
 }
 
 export function Website() {
-  const [legalDocument, setLegalDocument] = useState(legalDocumentFromHash)
+  const [page, setPage] = useState(pageFromHash)
   useEffect(() => {
-    const onHashChange = () => setLegalDocument(legalDocumentFromHash())
+    const onHashChange = () => setPage(pageFromHash())
     window.addEventListener('hashchange', onHashChange)
     return () => window.removeEventListener('hashchange', onHashChange)
   }, [])
-  if (legalDocument) return <LegalPage documentId={legalDocument} linkBase={`${import.meta.env.BASE_URL}#`} onBack={() => { window.location.hash = 'top' }} />
+  if (isLegalDocumentId(page)) return <LegalPage documentId={page} linkBase={`${import.meta.env.BASE_URL}#`} onBack={() => { window.location.hash = 'top' }} />
   return (
     <main id="top" className="home-welcome website">
       <header className="home-welcome-header">
@@ -48,14 +50,17 @@ export function Website() {
           <span>DraftMatter</span>
         </a>
         <nav className="website-nav" aria-label="DraftMatter website">
-          <a href="#home-showcase">Product tour</a>
-          <a href="#website-principles">Why DraftMatter</a>
-          <a href={repositoryUrl}>GitHub</a>
+          {page === 'download' ? <a href="#top">Home</a> : <>
+            <a href="#home-showcase">Product tour</a>
+            <a href="#website-principles">Why DraftMatter</a>
+          </>}
+          <a href="#download" aria-current={page === 'download' ? 'page' : undefined}>Downloads</a>
           <a className="website-app-link" href={applicationUrl}>Sign in</a>
           <AlphaAction compact />
         </nav>
       </header>
 
+      {page === 'download' ? <DesktopDownloads /> : <>
       <section className="home-hero website-hero" aria-labelledby="website-title">
         <div className="home-hero-layout">
           <div className="home-hero-copy">
@@ -70,9 +75,7 @@ export function Website() {
                 See how it works
                 <Icon name="arrowRight" size={17} />
               </button>
-              <a className="website-source-action" href={repositoryUrl}>
-                View the source
-              </a>
+              <a href="#download"><Icon name="download" size={16} />Download desktop app</a>
             </div>
             <p className="website-example-note">Try writing and citations without an account. Changes stay in this tab and reset when you reload. The hosted alpha is available by invitation.</p>
             <p className="home-hero-summary">DraftMatter brings writing, citations, reproducible results, review, and collaboration into one focused workspace. Everything is available when needed and quiet when it is not.</p>
@@ -123,7 +126,6 @@ export function Website() {
           <ul>
             <li><Icon name="check" size={14} />Clear pre-release expectations</li>
             <li><Icon name="check" size={14} />No DraftMatter account required for local papers</li>
-            <li><Icon name="check" size={14} />Download links only after supported builds are ready</li>
           </ul>
         </div>
         <aside>
@@ -131,9 +133,9 @@ export function Website() {
           <p>Read the alpha terms and privacy policy below before requesting access. Send a short request with your name and how you would like to use DraftMatter. We will get back to you about an invitation; requesting access does not create an account.</p>
           <AlphaAction />
           <a className="website-existing-account" href={applicationUrl}>Already invited? Sign in</a>
-          <small>No public download is advertised until a supported pre-release exists.</small>
         </aside>
       </section>
+      </>}
 
       <footer className="website-footer">
         <a className="home-brand" href="#top">
@@ -142,6 +144,7 @@ export function Website() {
         </a>
         <p>Write the paper. Keep it reproducible.</p>
         <nav aria-label="DraftMatter project links">
+          <a href="#download">Downloads</a>
           <a href={repositoryUrl}>Source</a>
           <a href={`${repositoryUrl}/blob/main/README.md`}>Documentation</a>
           <a href={`${repositoryUrl}/blob/main/LICENSE`}>MIT License</a>

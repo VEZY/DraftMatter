@@ -94,7 +94,7 @@ describe('KernelConsole', () => {
     expect(host.textContent).toContain('shared state')
     expect(host.textContent).toContain('{{mean_height}}')
     expect(host.textContent).toContain('12.3 cm')
-    expect(host.textContent).toContain('Interactive · clean run will restart this kernel')
+    expect(host.textContent).toContain('Interactive · Run all cells will restart this kernel')
     await act(async () => root.unmount())
   })
 

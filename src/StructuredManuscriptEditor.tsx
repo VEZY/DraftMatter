@@ -1,4 +1,5 @@
-import { forwardRef, startTransition, useEffect, useImperativeHandle, useLayoutEffect, useRef } from 'react'
+import { forwardRef, startTransition, useEffect, useImperativeHandle, useLayoutEffect, useRef, useState } from 'react'
+import { createPortal } from 'react-dom'
 import { defaultKeymap, history as codeHistory, historyKeymap, indentWithTab } from '@codemirror/commands'
 import { defaultHighlightStyle, StreamLanguage, syntaxHighlighting } from '@codemirror/language'
 import { Compartment, EditorState as CodeMirrorState } from '@codemirror/state'
@@ -21,6 +22,7 @@ import { serializeCitationCluster } from './citation'
 import { formatCrossReferenceTarget, isCrossReferenceTarget } from './crossReference'
 import { parseRetainedPublishedValues } from './publishedValues'
 import { inferPublishedValueLanguage } from './publishedValueHints'
+import { computedValueNodeView, type ComputedValueMenu, type SelectComputedValue } from './computedValueNodeView'
 import { renderEquation } from './equationRenderer'
 import { manuscriptSchema } from './manuscriptSchema'
 import { amendReviewProposal, parseReviewMarkup } from './reviewMarkup'
@@ -239,11 +241,12 @@ export interface StructuredManuscriptEditorHandle {
   flushReviewEdits: () => void
   undo: () => boolean
   redo: () => boolean
-  updateCodeCellSource: (cellId: string, source: string) => boolean
+  updateCodeCellSource: (cellId: string, source: string, expectedSource?: string) => boolean
   insertCodeCell: (language: 'python' | 'r' | 'julia', output?: 'figure' | 'table' | 'values') => boolean
   insertSetupCell: (language: 'python' | 'r' | 'julia', code?: string) => boolean
   consolidateSetupCells: () => boolean
   insertPublishedValue: (name: string) => boolean
+  countComputedValueOccurrences: (name: string) => number
   insertEquation: (tex: string, display?: boolean, label?: string, caption?: string) => boolean
   insertCrossReference: (target: string, targetNodeId?: string) => boolean
   insertFootnote: (label: string, content: string) => boolean
@@ -276,6 +279,7 @@ export interface StructuredManuscriptEditorProps {
   onOutlineChange?: (outline: StructuredOutlineItem[]) => void
   onInspectRaw?: (nodeId: string) => void
   onCitationSelect?: (id: string, items: CitationItem[], anchor: HTMLElement) => void
+  onComputedValueSelect?: SelectComputedValue
   onReviewSelectionChange?: (selection: StructuredReviewSelection | null) => void
   onReviewContextMenu?: (selection: StructuredReviewSelection, point: { x: number; y: number }) => void
   onReviewAnchorSelect?: (anchorId: string, reviewId?: string) => void
@@ -3642,6 +3646,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   onOutlineChange,
   onInspectRaw,
   onCitationSelect,
+  onComputedValueSelect,
   onReviewSelectionChange,
   onReviewContextMenu,
   onReviewAnchorSelect,
@@ -3676,6 +3681,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   className = '',
 }, forwardedRef) {
   const hostRef = useRef<HTMLDivElement>(null)
+  const [computedMenu, setComputedMenu] = useState<ComputedValueMenu | null>(null)
+  const computedMenuButton = useRef<HTMLButtonElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const metadataRef = useRef<StructuredManuscriptMetadata | undefined>(undefined)
   const sourceRef = useRef(source)
@@ -3690,6 +3697,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   const onOutlineRef = useRef(onOutlineChange)
   const onInspectRawRef = useRef(onInspectRaw)
   const onCitationSelectRef = useRef(onCitationSelect)
+  const onComputedValueSelectRef = useRef(onComputedValueSelect)
   const onReviewSelectionRef = useRef(onReviewSelectionChange)
   const onReviewContextMenuRef = useRef(onReviewContextMenu)
   const onReviewAnchorSelectRef = useRef(onReviewAnchorSelect)
@@ -3738,6 +3746,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   onOutlineRef.current = onOutlineChange
   onInspectRawRef.current = onInspectRaw
   onCitationSelectRef.current = onCitationSelect
+  onComputedValueSelectRef.current = onComputedValueSelect
   onReviewSelectionRef.current = onReviewSelectionChange
   onReviewContextMenuRef.current = onReviewContextMenu
   onReviewAnchorSelectRef.current = onReviewAnchorSelect
@@ -3977,10 +3986,16 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     const restored = caretMoved ? acceptedState.apply(acceptedState.tr.setSelection(
       view.state.selection.map(acceptedState.doc, pending.mapping.invert()),
     )) : acceptedState
+    // Replacing the typed text with its proposal widget can move the native selection
+    // during reconciliation. Keep the writer's viewport across that synchronous handoff.
+    const scroller = keepTyping ? view.dom.closest<HTMLElement>('.editor-area') : null
+    const scrollTop = scroller?.scrollTop
     view.updateState(restored)
-    if (draft.doc.eq(acceptedState.doc) || readOnlyRef.current) return
-    const draftSource = serializeEditorDocument(draft.doc, metadataRef.current!)
-    captureSuggestion(view, pending.acceptedSource, draftSource, 'text', keepTyping)
+    if (!draft.doc.eq(acceptedState.doc) && !readOnlyRef.current) {
+      const draftSource = serializeEditorDocument(draft.doc, metadataRef.current!)
+      captureSuggestion(view, pending.acceptedSource, draftSource, 'text', keepTyping)
+    }
+    if (scroller && scrollTop !== undefined) scroller.scrollTop = scrollTop
   }
 
   const queueSuggestion = (view: EditorView, acceptedState: EditorState, draft: EditorState, edit: Transaction) => {
@@ -4096,6 +4111,13 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         view.dispatch(view.state.tr.setSelection(new TextSelection($anchor, $head)))
       }
     },
+    countComputedValueOccurrences: (name) => {
+      let count = 0
+      viewRef.current?.state.doc.descendants((node) => {
+        if (node.type === manuscriptSchema.nodes.published_value && node.attrs.name === name) count++
+      })
+      return count
+    },
     setSearch: (query, settings) => {
       searchQueryRef.current = query
       if (settings) searchSettingsRef.current = settings
@@ -4168,15 +4190,21 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     },
     undo: () => performHistory(false),
     redo: () => performHistory(true),
-    updateCodeCellSource: (cellId, code) => {
+    updateCodeCellSource: (cellId, code, expectedSource) => {
       const view = viewRef.current
       if (!view || readOnlyRef.current) return false
-      const position = positionForNodeId(view.state.doc, manuscriptSchema.nodes.code_cell, cellId)
-      if (position === undefined) return false
+      finishPendingSuggestion(view)
+      const matches: number[] = []
+      view.state.doc.descendants((candidate, position) => {
+        if (candidate.type === manuscriptSchema.nodes.code_cell && candidate.attrs.id === cellId) matches.push(position)
+      })
+      if (matches.length !== 1) return false
+      const [position] = matches
       const node = view.state.doc.nodeAt(position)
-      if (!node || node.type !== manuscriptSchema.nodes.code_cell) return false
+      if (!node || (expectedSource !== undefined && node.attrs.code !== expectedSource)) return false
       if (String(node.attrs.code) === code) return true
-      view.dispatch(view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, code, status: 'stale' }))
+      view.dispatch(view.state.tr.setNodeMarkup(position, undefined, { ...node.attrs, code, status: 'stale' })
+        .setMeta('dm-save-code-source', true))
       return true
     },
     insertCodeCell: (language, output = 'figure') => {
@@ -4750,6 +4778,15 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
             return syncCollapsedCaret(editorView, native)
           }
         }
+        const selection = editorView.state.selection
+        if (event.key === 'Enter' && !event.isComposing && selection instanceof NodeSelection
+          && selection.node.type === manuscriptSchema.nodes.published_value && onComputedValueSelectRef.current) {
+          const anchor = editorView.nodeDOM(selection.from)
+          if (anchor instanceof HTMLElement) {
+            onComputedValueSelectRef.current(selection.node.attrs.name, anchor, event.metaKey || event.ctrlKey ? 'source' : 'inspect')
+            return true
+          }
+        }
         if (!shouldRequestStructuredCommands(editorView.state, event, readOnlyRef.current)) return false
         if (!onCommandRequestRef.current) return false
         onCommandRequestRef.current()
@@ -4781,6 +4818,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           ),
         raw_block: (node, editorView, getPos) => rawNodeView(node, editorView, getPos, () => !readOnlyRef.current, (nodeId) => onInspectRawRef.current?.(nodeId)),
         citation: (node, editorView, getPos) => citationNodeView(node, editorView, getPos, (id, items, anchor) => onCitationSelectRef.current?.(id, items, anchor)),
+        published_value: (node) => computedValueNodeView(node, () => codeCellStatusesRef.current, () => onComputedValueSelectRef.current, setComputedMenu),
         cross_reference: (node, editorView, getPos) => crossReferenceNodeView(node, editorView, getPos, () => !readOnlyRef.current),
         equation_inline: (node, editorView, getPos) => equationNodeView(node, editorView, getPos, false, () => !readOnlyRef.current),
         equation_block: (node, editorView, getPos) => equationNodeView(node, editorView, getPos, true, () => !readOnlyRef.current),
@@ -4808,6 +4846,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       },
     })
     const openReviewContextMenu = (event: MouseEvent) => {
+      if (onComputedValueSelectRef.current && event.target instanceof Element && event.target.closest('[data-dm-node="published-value"]')) return
       const target = semanticReviewTarget(view, event, sourceRef.current, metadataRef.current)
       if (!target || !onReviewContextMenuRef.current) return
       event.preventDefault()
@@ -4830,6 +4869,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           && suggestionModeRef.current
           && !collaborativeOrigin
           && !transaction.getMeta('dm-presentation-only')
+          && !transaction.getMeta('dm-save-code-source')
           ? requestedSuggestionIntent ?? (stepTypes.every((stepType) => stepType === 'replace')
             ? 'text'
             : stepTypes.every((stepType) => stepType === 'addMark' || stepType === 'removeMark')
@@ -5038,23 +5078,47 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   }, [codeCellActionsEnabled, codeCellBrowserViewOnly, codeCellRunAboveEnabled, codeCellUnavailableActionLabel, codeCellViewOnlyLabel, codeCellViewOnlySummary])
 
   useEffect(() => {
-    const view = viewRef.current
-    if (view && codeCellStatuses) {
-      let transaction = view.state.tr
-      view.state.doc.descendants((node, position) => {
-        if (node.type !== manuscriptSchema.nodes.published_value) return true
-        const cellId = typeof node.attrs.cellId === 'string' ? node.attrs.cellId : undefined
-        const producerStatus = cellId ? codeCellStatuses[cellId] : undefined
-        const status = !cellId ? 'missing' : producerStatus === 'current' ? 'current' : producerStatus ?? 'stale'
-        if (status !== node.attrs.status) transaction = transaction.setNodeMarkup(position, undefined, { ...node.attrs, status })
-        return true
-      })
-      if (transaction.docChanged) view.dispatch(transaction.setMeta('addToHistory', false).setMeta('dm-presentation-only', true))
-    }
+    // Freshness is local execution state. Updating its presentation must never
+    // write local status into a collaborator's document or replace an open anchor.
+    hostRef.current?.querySelectorAll<HTMLElement>('[data-dm-node="published-value"]').forEach((value) => {
+      value.dispatchEvent(new Event('dm-computed-value-presentation'))
+    })
     hostRef.current?.querySelectorAll<HTMLElement>('.structured-code-cell').forEach((cell) => {
       cell.dispatchEvent(new Event('dm-code-presentation-change'))
     })
-  }, [codeCellStatuses])
+  }, [codeCellStatuses, Boolean(onComputedValueSelect)])
 
-  return <div ref={hostRef} className={`structured-manuscript-editor ${className}`.trim()} data-collaborative={collaboration ? 'true' : 'false'} data-read-only={readOnly ? 'true' : 'false'} />
+  useEffect(() => {
+    if (!computedMenu) return
+    computedMenuButton.current?.focus({ preventScroll: true })
+    const dismiss = (event: Event) => {
+      if (event.target !== computedMenuButton.current) setComputedMenu(null)
+    }
+    window.addEventListener('pointerdown', dismiss, true)
+    window.addEventListener('scroll', dismiss, true)
+    window.addEventListener('resize', dismiss)
+    return () => {
+      window.removeEventListener('pointerdown', dismiss, true)
+      window.removeEventListener('scroll', dismiss, true)
+      window.removeEventListener('resize', dismiss)
+    }
+  }, [computedMenu])
+
+  return <>
+    <div ref={hostRef} className={`structured-manuscript-editor ${className}`.trim()} data-collaborative={collaboration ? 'true' : 'false'} data-read-only={readOnly ? 'true' : 'false'} />
+    {computedMenu && createPortal(<div className="editor-review-context-menu" role="menu" aria-label="Computed value actions"
+      style={{ left: Math.max(4, Math.min(computedMenu.x, window.innerWidth - 184)), top: Math.max(4, Math.min(computedMenu.y, window.innerHeight - 48)) }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape') return
+        event.preventDefault()
+        event.stopPropagation()
+        computedMenu.anchor.focus({ preventScroll: true })
+        setComputedMenu(null)
+      }}>
+      <button ref={computedMenuButton} type="button" role="menuitem" onBlur={() => setComputedMenu(null)} onClick={() => {
+        if (computedMenu.anchor.isConnected) onComputedValueSelect?.(computedMenu.name, computedMenu.anchor, 'source')
+        setComputedMenu(null)
+      }}>Go to source</button>
+    </div>, document.body)}
+  </>
 })

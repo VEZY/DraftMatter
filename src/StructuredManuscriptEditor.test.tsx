@@ -12,6 +12,7 @@ import * as Y from 'yjs'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { StructuredManuscriptEditor, moveStructuredBlock, shouldRequestStructuredCommands, type StructuredManuscriptEditorHandle, type StructuredReviewSelection } from './StructuredManuscriptEditor'
 import { manuscriptSchema } from './manuscriptSchema'
+import { extractExecutableCells } from './executionCells'
 import { createReviewAlternative, createReviewChange, createReviewThread } from './reviewOperations'
 import { parseStructuredManuscript } from './structuredManuscript'
 import * as structuredManuscriptModule from './structuredManuscript'
@@ -1173,18 +1174,101 @@ print("result")
       version: 1, name: 'mean_height', value: 12.4, unit: 'cm', formatting: { digits: 1 }, rendered: '12.4 cm',
       provenance: { cellId: 'summary', language: 'python', runHash: 'sha256:run', codeHash: 'sha256:code', environmentFingerprint: 'sha256:env', sessionGeneration: 1, executionSequence: 1, retainedOutputHashes: ['sha256:run'] },
     }))
-    const publishedSource = `Estimate: {{mean_height}}.\n\n\`\`\`python {#summary .execute output="values"}\npublish("mean_height", 12.4, unit="cm", digits=1)\n\`\`\`\n\n<!-- dm-output:start cell="summary" run="sha256:run" -->\n<!-- dm-published-value data="${retained}" -->\n<!-- dm-output:end -->\n`
+    const publishedSource = `Estimate: {{mean_height}}.\n\nAlso {{mean_height}}.\n\n\`\`\`python {#summary .execute output="values"}\npublish("mean_height", 12.4, unit="cm", digits=1)\n\`\`\`\n\n<!-- dm-output:start cell="summary" run="sha256:run" -->\n<!-- dm-published-value data="${retained}" -->\n<!-- dm-output:end -->\n`
     const changed = vi.fn()
     const editorRef = createRef<StructuredManuscriptEditorHandle>()
     await act(async () => root.render(<StructuredManuscriptEditor ref={editorRef} source={publishedSource} onChange={changed} codeCellStatuses={{ summary: 'current' }} />))
     expect(container.querySelector('[data-dm-node="published-value"]')?.getAttribute('data-status')).toBe('current')
+    const occurrences = Array.from(container.querySelectorAll<HTMLElement>('[data-dm-node="published-value"]'))
+    expect(occurrences).toHaveLength(2)
 
     await act(async () => root.render(<StructuredManuscriptEditor ref={editorRef} source={publishedSource} onChange={changed} codeCellStatuses={{ summary: 'stale' }} />))
     const published = container.querySelector<HTMLElement>('[data-dm-node="published-value"]')!
     expect(published.dataset.status).toBe('stale')
     expect(published.title).toContain('needs to be refreshed')
     expect(editorRef.current?.source()).toBe(publishedSource)
+    await act(async () => root.render(<StructuredManuscriptEditor ref={editorRef} source={publishedSource} onChange={changed} codeCellStatuses={{ summary: 'failed' }} />))
+    expect(occurrences.map((value) => [value.dataset.status, value.textContent])).toEqual([['failed', '12.4 cm'], ['failed', '12.4 cm']])
+    const updated = publishedSource.replaceAll('12.4', '13.6')
+    await act(async () => root.render(<StructuredManuscriptEditor ref={editorRef} source={updated} onChange={changed} codeCellStatuses={{ summary: 'current' }} />))
+    expect(occurrences.map((value) => [value.isConnected, value.dataset.status, value.textContent])).toEqual([[true, 'current', '13.6 cm'], [true, 'current', '13.6 cm']])
     expect(changed).not.toHaveBeenCalled()
+  })
+
+  it('opens exactly the activated computed value and supports mouse, keyboard and source-menu navigation for readers', async () => {
+    const manuscript = '# Estimates\n\n{{height}} in prose and **{{height}}** again. Literal `{{height}}`.\n'
+    const editor = createRef<StructuredManuscriptEditorHandle>(), select = vi.fn(), change = vi.fn(), review = vi.fn()
+    await act(async () => root.render(<StructuredManuscriptEditor ref={editor} source={manuscript} readOnly onChange={change} onComputedValueSelect={select} onReviewContextMenu={review} />))
+    const occurrences = Array.from(container.querySelectorAll<HTMLElement>('[data-dm-node="published-value"]'))
+    expect(occurrences).toHaveLength(2)
+    expect(editor.current?.countComputedValueOccurrences('height')).toBe(2)
+    expect(editor.current?.countComputedValueOccurrences('missing')).toBe(0)
+    const second = occurrences[1]
+    expect(second.getAttribute('role')).toBe('button')
+    expect(second.tabIndex).toBe(0)
+    for (const [event, action] of [
+      [new MouseEvent('click', { bubbles: true }), 'inspect'],
+      [new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }), 'inspect'],
+      ...['metaKey', 'ctrlKey'].flatMap((modifier) => [
+        [new MouseEvent('click', { bubbles: true, [modifier]: true }), 'source'],
+        [new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, [modifier]: true }), 'source'],
+      ]),
+    ] as [Event, string][]) {
+      await act(async () => { second.dispatchEvent(event) })
+      expect(select).toHaveBeenCalledExactlyOnceWith('height', second, action)
+      select.mockClear()
+    }
+    await act(async () => { second.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2 })) })
+    const menuItem = document.querySelector<HTMLButtonElement>('[role="menuitem"]')!
+    expect(menuItem.textContent).toBe('Go to source')
+    expect(document.activeElement).toBe(menuItem)
+    await act(async () => { menuItem.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape' })) })
+    expect(document.activeElement).toBe(second)
+    expect(document.querySelector('[role="menuitem"]')).toBeNull()
+    await act(async () => { second.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'F10', shiftKey: true })) })
+    await act(async () => { document.querySelector<HTMLButtonElement>('[role="menuitem"]')!.click() })
+    expect(select).toHaveBeenCalledExactlyOnceWith('height', second, 'source')
+    expect(review).not.toHaveBeenCalled()
+    expect(change).not.toHaveBeenCalled()
+    expect(editor.current?.source()).toBe(manuscript)
+  })
+
+  it('supports Enter when the occurrence is selected with the manuscript caret', async () => {
+    const manuscript = 'Measured {{height}} twice.\n'
+    const select = vi.fn(), change = vi.fn()
+    const setProps = vi.spyOn(EditorView.prototype, 'setProps')
+    await act(async () => root.render(<StructuredManuscriptEditor source={manuscript} onChange={change} onComputedValueSelect={select} />))
+    const view = setProps.mock.contexts[0] as EditorView
+    let position = -1
+    view.state.doc.descendants((node, pos) => { if (node.type === manuscriptSchema.nodes.published_value) position = pos })
+    await act(async () => { view.dispatch(view.state.tr.setSelection(NodeSelection.create(view.state.doc, position))) })
+    const event = new KeyboardEvent('keydown', { key: 'Enter', ctrlKey: true, bubbles: true, cancelable: true })
+    await act(async () => { view.dom.dispatchEvent(event) })
+    expect(select).toHaveBeenCalledExactlyOnceWith('height', view.nodeDOM(position), 'source')
+    expect(change).not.toHaveBeenCalled()
+  })
+
+  it('saves a shared calculation directly while tracking prose, pins generated IDs, and rejects obsolete or read-only writes', async () => {
+    const manuscript = 'Height: {{height}}.\n\n```python {.execute output="values"}\npublish("height", 3)\n```\n'
+    const [original] = extractExecutableCells(manuscript).cells
+    const shared = new Y.Doc(), awareness = new Awareness(shared)
+    collaborativeDocuments.push(shared); collaborativeAwareness.push(awareness)
+    const collaboration = { document: shared, awareness, publishPortableSource: vi.fn() }
+    createCollaborativeProseMirrorState({ ...collaboration, schema: manuscriptSchema, initialDocument: parseStructuredManuscript(manuscript).document })
+    const editor = createRef<StructuredManuscriptEditorHandle>(), change = vi.fn(), suggestion = vi.fn()
+    const options = { ref: editor, source: manuscript, collaboration, onChange: change, onSuggestionCapture: suggestion, suggestionMode: true }
+    await act(async () => root.render(<StructuredManuscriptEditor {...options} />))
+    const replacement = 'publish("height", 4)'
+    await act(async () => { expect(editor.current?.updateCodeCellSource(original.id, replacement, original.source)).toBe(true) })
+    expect(extractExecutableCells(editor.current!.source()).cells[0]).toMatchObject({ id: original.id, source: replacement })
+    expect(shared.getXmlFragment(COLLABORATIVE_PROSEMIRROR_ROOT).toJSON()).toContain(replacement)
+    expect(collaboration.publishPortableSource).toHaveBeenCalledOnce()
+    expect(suggestion).not.toHaveBeenCalled()
+    await act(async () => { expect(editor.current?.updateCodeCellSource(original.id, 'obsolete', original.source)).toBe(false) })
+    await act(async () => root.render(<StructuredManuscriptEditor {...options} source={editor.current!.source()} readOnly />))
+    await act(async () => { expect(editor.current?.updateCodeCellSource(original.id, 'read-only')).toBe(false) })
+    expect(extractExecutableCells(editor.current!.source()).cells[0]).toMatchObject({ id: original.id, source: replacement })
+    expect(change).toHaveBeenCalledOnce()
   })
 
   it('shows language-aware publication help on an unavailable inline value', async () => {

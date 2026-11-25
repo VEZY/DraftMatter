@@ -260,6 +260,134 @@ describe('shared Jupyter execution workspace', () => {
     expect(vi.mocked(desktopHost.saveDocument).mock.calls.map(([request]) => request.content).join('\n')).toContain('dm-published-value')
   })
 
+  async function openPythonValuePaper() {
+    await act(async () => appRoot.unmount())
+    localStorage.clear()
+    localStorage.setItem('draftmatter.last-project-root.v1', rootPath)
+    const cellSource = 'publish("measurement", 40)'
+    const paper = [
+      '# Measurements', '', 'First: {{measurement}}. Second: {{measurement}}.', '',
+      '```python {#py-measure .execute output="values"}', cellSource, '```', '',
+    ].join('\n')
+    vi.mocked(desktopHost.readDocument).mockResolvedValue({ path: 'paper.qmd', content: paper, hash: 'measurement-original', modifiedMs: 1 })
+    vi.mocked(desktopHost.formatCode).mockImplementation(async ({ code }) => ({ code: code.replace(/,\s*/g, ', '), changed: code.includes(',4') }))
+    vi.mocked(desktopHost.executeKernel).mockImplementation(async (request) => {
+      const value = request.code.match(/publish\("measurement", (\d+)\)/)?.[1]
+      return {
+        status: value ? 'ok' : 'error',
+        messages: value
+          ? [{ kind: 'display', sequence: 0, data: { 'application/vnd.draftmatter.published-value+json': { version: 1, name: 'measurement', value: Number(value), formatting: {} } } }]
+          : [{ kind: 'error', sequence: 0, name: 'NameError', message: 'unknown is not defined', traceback: [] }],
+        artifacts: [], environment: { identity: request.kernelName, version: 'fixture' },
+        kernelRunId: 'kernel-measurement', executionCount: ++executionSequence, sessionGeneration: 1, executionSequence,
+      }
+    })
+    appRoot = createRoot(container)
+    await act(async () => appRoot.render(<App />))
+    const occurrences = () => [...container.querySelectorAll<HTMLElement>('[data-dm-node="published-value"][data-name="measurement"]')]
+    await settleUntil(() => occurrences().length === 2)
+    return { occurrences, cellSource }
+  }
+
+  it('autosaves inline source across occurrences and keeps results until an explicit desktop run succeeds', async () => {
+    const { occurrences, cellSource } = await openPythonValuePaper()
+    const panel = () => container.querySelector<HTMLElement>('[aria-label="Computed value measurement"]')
+    const status = (expected: string) => occurrences().length === 2 && occurrences().every((element) => element.dataset.status === expected)
+    const values = () => occurrences().map((element) => element.textContent)
+    const code = () => CodeMirrorView.findFromDOM(panel()!.querySelector<HTMLElement>('.cm-editor')!)!
+    const open = async (index: number) => {
+      await act(async () => occurrences()[index].click())
+      await settleUntil(() => Boolean(panel()?.querySelector('.cm-editor')))
+    }
+    const run = async () => {
+      const button = [...panel()!.querySelectorAll('button')].find((element) =>
+        (element.getAttribute('aria-label') || element.textContent)?.trim() === 'Run')
+      expect(button).toBeDefined()
+      await act(async () => button!.click())
+    }
+    const replaceCode = (source: string) => {
+      const editor = code()
+      editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: source } })
+    }
+    const escape = () => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))
+
+    await open(1)
+    expect(panel()?.textContent).toContain('2 occurrences')
+    expect(code().state.doc.toString()).toBe(cellSource)
+    await run()
+    await settleUntil(() => status('current'))
+    expect(values()).toEqual(['40', '40'])
+
+    await open(0)
+    expect(panel()?.textContent).not.toMatch(/Saved result|Unsaved source changes|Save source|Revert/i)
+    const formatCallsBeforeTyping = vi.mocked(desktopHost.formatCode).mock.calls.length
+    const nextSource = 'publish("measurement",41)'
+    await act(async () => {
+      replaceCode('publish("measurement",4)')
+      const editor = code()
+      editor.dispatch({ changes: { from: editor.state.doc.length - 1, insert: '1' } })
+      escape()
+    })
+    expect(panel()).toBeNull()
+    expect(document.activeElement).toBe(occurrences()[0])
+    await settleUntil(() => status('stale'))
+    expect(values()).toEqual(['40', '40'])
+    await open(1)
+    expect(code().state.doc.toString()).toBe(nextSource)
+    await settleUntil(() => vi.mocked(desktopHost.saveDocument).mock.calls.some(([request]) =>
+      request.path === 'paper.qmd' && request.content.includes(nextSource)))
+    expect(vi.mocked(desktopHost.formatCode).mock.calls).toHaveLength(formatCallsBeforeTyping)
+    expect(desktopHost.executeKernel).toHaveBeenCalledTimes(1)
+
+    await run()
+    await settleUntil(() => status('current') && values().every((value) => value === '41'))
+    await open(0)
+    await act(async () => replaceCode('publish("measurement", unknown)'))
+    expect(desktopHost.executeKernel).toHaveBeenCalledTimes(2)
+    await run()
+    await settleUntil(() => status('failed'))
+    expect(values()).toEqual(['41', '41'])
+    await open(0)
+    expect(code().state.doc.toString()).toBe('publish("measurement", unknown)')
+    expect(vi.mocked(desktopHost.executeKernel).mock.calls.map(([request]) => request.code)).toEqual([
+      cellSource, 'publish("measurement", 41)', 'publish("measurement", unknown)',
+    ])
+  })
+
+  it.each(['cell', 'all'])('retains the previous outputs when code is edited during a pending %s run', async (command) => {
+    const { occurrences } = await openPythonValuePaper()
+    await openCodeWorkspace()
+    const row = container.querySelector<HTMLElement>('.execution-cell-row[data-cell-id="py-measure"]')!
+    await act(async () => row.querySelector<HTMLButtonElement>('.run-button')!.click())
+    await settleUntil(() => occurrences().every((element) => element.textContent === '40'))
+    expect(desktopHost.saveExecutionManifest).toHaveBeenCalledTimes(1)
+    const pending = pendingStep()
+    const execute = vi.mocked(desktopHost.executeKernel).getMockImplementation()!
+    vi.mocked(desktopHost.executeKernel).mockImplementationOnce(async (request) => {
+      await pending.promise
+      return execute({ ...request, code: 'publish("measurement", 99)' })
+    })
+    const button = command === 'cell' ? row.querySelector<HTMLButtonElement>('.run-button')!
+      : [...container.querySelectorAll<HTMLButtonElement>('.computation-project-actions button')].find((item) => item.textContent === 'Run all cells')!
+    await act(async () => button.click())
+    await settleUntil(() => vi.mocked(desktopHost.executeKernel).mock.calls.length === 2)
+    const details = row.querySelector<HTMLDetailsElement>('details')!
+    if (!details.open) await act(async () => details.querySelector('summary')!.click())
+    await settleUntil(() => Boolean(row.querySelector('.cm-editor')))
+    const editor = CodeMirrorView.findFromDOM(row.querySelector<HTMLElement>('.cm-editor')!)!
+    const edited = 'publish("measurement", 42)'
+    await act(async () => editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: edited } }))
+    const save = [...row.querySelectorAll('button')].find((item) => item.textContent === 'Save source')!
+    await act(async () => save.click())
+    await settleUntil(() => save.disabled)
+    await act(async () => pending.finish())
+    await settleUntil(() => container.querySelector('.code-workspace-drawer')?.textContent?.includes('The code changed during execution.') ?? false)
+    expect(occurrences().map((element) => element.textContent)).toEqual(['40', '40'])
+    expect(occurrences().every((element) => element.dataset.status !== 'current')).toBe(true)
+    expect(desktopHost.saveExecutionManifest).toHaveBeenCalledTimes(1)
+    expect(container.textContent).not.toContain('All results are up to date.')
+  })
+
   it('edits setup source in the code panel without exposing it in the manuscript', async () => {
     await openCodeWorkspace()
     const setupSelector = '.execution-cell-row[data-cell-id="py-setup"]'
@@ -495,16 +623,47 @@ describe('shared Jupyter execution workspace', () => {
   it('clean-runs setup first, restarts every language kernel, and never materializes setup output', async () => {
     await openCodeWorkspace()
     const findCleanRun = () => [...container.querySelectorAll<HTMLButtonElement>('.computation-project-actions button')]
-      .find((button) => button.textContent?.includes('Clean run'))
+      .find((button) => button.textContent?.includes('Run all cells'))
     await settleUntil(() => Boolean(findCleanRun()))
     const cleanRun = findCleanRun()!
+    expect(cleanRun.title).toBe('Start fresh sessions and run every code cell to update computed values, figures, and tables.')
+    expect(container.textContent).not.toContain('All results are up to date.')
     await act(async () => cleanRun.click())
-    await settle(220)
+    await settleUntil(() => container.querySelector('.run-all-feedback')?.textContent?.includes('All results are up to date.') ?? false)
+    expect(container.querySelector('.run-all-feedback')?.textContent).toContain('4 succeeded · 0 failed · 0 skipped')
 
     expect(vi.mocked(desktopHost.restartKernel).mock.calls.map(([language]) => language)).toEqual(['python', 'r', 'julia'])
     expect(vi.mocked(desktopHost.executeKernel).mock.calls.map(([request]) => request.cellId)).toEqual(['py-setup', 'py-value', 'r-model', 'jl-report'])
+    await settleUntil(() => vi.mocked(desktopHost.saveDocument).mock.calls.some(([request]) => request.content.includes('dm-output:start')))
     const savedSources = vi.mocked(desktopHost.saveDocument).mock.calls.map(([request]) => request.content)
     expect(savedSources.join('\n')).not.toContain('dm-output:start cell="py-setup"')
+
+    const setupRow = container.querySelector<HTMLElement>('.execution-cell-row[data-cell-id="py-setup"]')!
+    const editor = CodeMirrorView.findFromDOM(setupRow.querySelector<HTMLElement>('.cm-editor')!)!
+    await act(async () => editor.dispatch({ changes: { from: editor.state.doc.length, insert: '\nbaseline = 41' } }))
+    const save = [...setupRow.querySelectorAll('button')].find((button) => button.textContent?.includes('Save source'))!
+    await act(async () => save.click())
+    await settleUntil(() => !container.textContent?.includes('All results are up to date.'))
+  })
+
+  it('uses the same run from export and opens the cell that failed', async () => {
+    vi.mocked(desktopHost.executeKernel).mockRejectedValueOnce(new Error('Fixture computation failed'))
+    const exportButton = container.querySelector<HTMLButtonElement>('button[aria-label="Export"]')!
+    await act(async () => exportButton.click())
+    const run = [...container.querySelectorAll<HTMLButtonElement>('.export-menu button')].find((button) => button.textContent === 'Run all cells')!
+    expect(run.title).toBe('Start fresh sessions and run every code cell to update computed values, figures, and tables.')
+    await act(async () => run.click())
+    await settleUntil(() => Boolean(container.querySelector('.export-menu .run-all-feedback button')))
+    const feedback = container.querySelector('.export-menu .run-all-feedback')!
+    expect(feedback.textContent).toContain('0 succeeded · 1 failed · 3 skipped')
+    expect(feedback.textContent).not.toContain('up to date')
+    expect(desktopHost.executeKernel).toHaveBeenCalledTimes(1)
+    const goTo = feedback.querySelector('button')!
+    expect(goTo.textContent).toContain('py-setup')
+    await act(async () => goTo.click())
+    await settleUntil(() => Boolean(container.querySelector('.code-workspace-drawer .execution-cell-row[data-cell-id="py-setup"] details[open]')))
+    expect(container.querySelector('.export-menu')).toBeNull()
+    expect(container.querySelector('.code-workspace-drawer')?.textContent).toContain('Fixture computation failed')
   })
 
   async function checkLanguage(label: 'Python' | 'R' | 'Julia') {
@@ -642,13 +801,13 @@ describe('shared Jupyter execution workspace', () => {
     })
     await settle()
     expect(container.querySelector('[aria-label="Shared kernel terminal"] [role="tab"][aria-selected="true"]')?.textContent).toContain('ready')
-    expect(container.textContent).toContain('Interactive · clean run will restart this kernel')
+    expect(container.textContent).toContain('Interactive · Run all cells will restart this kernel')
 
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Close kernel terminal"]')!.click())
     const reopen = container.querySelector<HTMLButtonElement>('[aria-label*="interactive state present"]')!
     expect(reopen).toBeTruthy()
     await act(async () => reopen.click())
     expect(container.textContent).toContain('shared_value = 42')
-    expect(container.textContent).toContain('Interactive · clean run will restart this kernel')
+    expect(container.textContent).toContain('Interactive · Run all cells will restart this kernel')
   })
 })

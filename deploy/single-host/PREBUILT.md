@@ -10,7 +10,58 @@ manifest identifies the exact source commit and immutable collaboration, web
 and operator images. A GitHub release archive is public code and configuration
 templates, not manuscripts, data, passwords or a production `runtime.env`.
 
-## Download the release on the VPS
+## Update a running alpha from your Mac
+
+In the DraftMatter checkout, choose a published server version and run:
+
+```sh
+npm run deploy:server -- 0.1.0-alpha.7
+```
+
+On a new Mac, save the SSH destination and key path once for this checkout:
+
+```sh
+git config --local draftmatter.deployHost deploy@YOUR_VPS
+git config --local draftmatter.deployIdentity ~/.ssh/YOUR_VPS_KEY
+```
+
+Alternatively, configure the SSH alias `draftmatter-vps` or give the
+destination and key directly for a single run:
+
+```sh
+npm run deploy:server -- 0.1.0-alpha.7 --host deploy@YOUR_VPS --identity ~/.ssh/YOUR_VPS_KEY
+```
+
+Use a known host whose SSH fingerprint you have verified. SSH and sudo prompt
+in your terminal. The command sends the deployment tools from your checkout,
+so use a trusted copy. The selected application images come from the published
+server release. This also supports releases published before the command existed.
+
+Add `--check` to download and verify the release and images, compare the
+installed configuration and database migrations, and test the public endpoints
+while the app stays online. The full command runs these checks, takes an
+encrypted backup using the existing two-copy rotation, then updates the web
+and collaboration containers. The backup briefly pauses writers. The command
+checks the running image digests, app, identity discovery and sign-up settings
+before reporting success.
+
+If activation fails, the command restores the previous application configuration
+and images and checks them. If the connection drops during the application
+switch, rerun the same version. An unfinished switch is recovered first.
+After a host crash during the earlier backup phase, check the writer containers
+and backup lock as described in the [backup guide](../../docs/single-host-backups.md).
+Running the command
+on an already active version verifies it. Custom backup schedules are reported
+for review; the standard schedule follows the verified release.
+
+This procedure covers application updates on the existing Linux amd64 alpha.
+Changes to SQL migrations, persistent services, proxy routes or identity policy
+require a separate migration. Keycloak administrator operations such as enabling
+ORCID use the [account configuration guide](../../docs/alpha-registration.md).
+The checks verify publicly accessible endpoints. Signing into a specific
+account remains a separate check.
+
+## First installation on the VPS
 
 Run these commands **on the VPS, in the `deploy@draftmatter` window**. Set the
 version to the published release you intend to install; do not use `latest`.

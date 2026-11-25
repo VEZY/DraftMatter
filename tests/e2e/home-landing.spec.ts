@@ -176,7 +176,7 @@ test.describe('signed-out Home landing experience', () => {
     await expect(page.getByRole('heading', { level: 2, name: 'AI integration, on your terms' })).toBeVisible()
     await expect(page.getByRole('link', { name: /Request alpha access|Follow alpha progress/ }).first()).toBeVisible()
     await expect(page.getByRole('button', { name: 'See how it works' })).toBeVisible()
-    await expect(page.getByRole('link', { name: 'View the source' })).toBeVisible()
+    await expect(page.getByRole('link', { name: 'Download desktop app' })).toHaveAttribute('href', '#download')
 
     const assistantFeature = page.locator('.home-ai-connect')
     await expect(assistantFeature.getByRole('link', { name: 'Open the OpenAI Codex product page' })).toHaveAttribute('href', 'https://openai.com/codex/')

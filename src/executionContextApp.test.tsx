@@ -85,7 +85,7 @@ describe('context-specific execution boundaries', () => {
     expect(handoff.textContent).toBe('Open in desktop')
     expect(handoff.href).toContain('draftmatter://open?source=')
 
-    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open browser view-only code and desktop instructions"]')!.click())
+    await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Open shared code and desktop instructions"]')!.click())
     expect(container.querySelector('.execution-browser-boundary')?.textContent).toContain('A collaborator using a trusted desktop copy can run code and update retained outputs for everyone online')
 
     await act(async () => root.unmount())

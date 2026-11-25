@@ -21,7 +21,9 @@ failure prevents the combined version from becoming public.
 
 Open the draft from the Actions summary. Check the installers on the target
 systems as described in the [desktop release guide](release-compliance.md),
-then click **Publish release** once. The installers then become available on GitHub Releases.
+then click **Publish release** once. The download page discovers published
+installers on GitHub. Its existing links keep working while a new draft is
+under review or a newer release contains only the server.
 
 `SHA256SUMS-desktop` covers the desktop distribution. `SHA256SUMS` covers the
 two server downloads the VPS updater expects. Updating the running VPS is a
@@ -46,7 +48,9 @@ The workflow also refuses an existing version or a reused image tag.
 
 On success, the Actions summary links to the release and its source commit.
 The release notes link to the changes since the preceding server tag when one
-exists. Updating the VPS is a separate operator action.
+exists. To deploy a published version to the existing VPS, use
+`npm run deploy:server -- VERSION` from your Mac.
+[VPS update and recovery instructions](../deploy/single-host/PREBUILT.md#update-a-running-alpha-from-your-mac)
 
 Do not supply private environment files, application credentials or research
 data to the workflow. The repository's source code is its only build context.

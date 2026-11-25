@@ -180,7 +180,7 @@ export function retainedPublishedValueDirectives(result: NormalizedExecutionResu
 }
 
 export function parseRetainedPublishedValues(source: string): ParsedPublishedValues {
-  const values: Record<string, RetainedPublishedValue> = {}
+  const values: Record<string, RetainedPublishedValue> = Object.create(null)
   const diagnostics: PublishedValueDiagnostic[] = []
   const duplicateNames = new Set<string>()
   const blockPattern = /<!--\s*dm-output:start\b[^>]*-->([\s\S]*?)<!--\s*dm-output:end\s*-->/gi

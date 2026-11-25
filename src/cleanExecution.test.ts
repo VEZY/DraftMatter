@@ -106,6 +106,7 @@ describe('Phase 3 clean execution gate', () => {
     })
 
     expect(first.ok).toBe(true)
+    expect(first.summary).toEqual({ succeeded: 3, failed: 0, interrupted: 0, skipped: 0 })
     expect(first.report).toEqual({
       requested: ['phase3-python-figure', 'phase3-r-table', 'phase3-julia-bundle'],
       completed: ['phase3-python-figure', 'phase3-r-table', 'phase3-julia-bundle'],
@@ -144,6 +145,15 @@ describe('Phase 3 clean execution gate', () => {
     })
     expect(second.ok).toBe(true)
     expect(second.source).toBe(first.source)
+  })
+
+  it('reports skipped cells when a fresh session cannot start', async () => {
+    const harness = executionHarness()
+    vi.mocked(harness.execution.restart).mockRejectedValueOnce(new Error('Kernel unavailable'))
+    const run = await cleanExecutePortableDocument({ source: fixture, root: '/portable/phase3', execution: harness.execution })
+    expect(run.summary).toEqual({ succeeded: 0, failed: 0, interrupted: 0, skipped: 3 })
+    expect(run.error).toBe('Kernel unavailable')
+    expect(harness.execute).not.toHaveBeenCalled()
   })
 
   it('keeps every retained output readable after all three runtimes disappear', async () => {
@@ -203,6 +213,7 @@ describe('Phase 3 clean execution gate', () => {
     })
 
     expect(attempt.ok).toBe(false)
+    expect(attempt.summary).toEqual({ succeeded: 1, failed: 1, interrupted: 0, skipped: 1, problemCellId: 'phase3-r-table' })
     expect(attempt.source).toBe(baseline.source)
     expect(attempt.manifests).toEqual(baseline.manifests)
     expect(attempt.report).toEqual({

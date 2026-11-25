@@ -62,7 +62,7 @@ describe('DraftMatter website', () => {
     const alpha = container.querySelector<HTMLElement>('#alpha')!
     expect(alpha.textContent).toContain('Private alpha · pre-release')
     expect(alpha.textContent).toContain('No DraftMatter account required for local papers')
-    expect(alpha.textContent).toContain('No public download is advertised until a supported pre-release exists.')
+    expect(container.querySelector<HTMLAnchorElement>('.home-hero-actions a[href="#download"]')?.textContent).toBe('Download desktop app')
     expect(alpha.querySelector<HTMLAnchorElement>('a')?.href).toBe('mailto:website-editor@draftmatter.test?subject=DraftMatter%20alpha%20access')
     expect(alpha.textContent).toContain('requesting access does not create an account')
     expect(alpha.textContent).not.toContain('The alpha is being prepared.')
@@ -84,6 +84,72 @@ describe('DraftMatter website', () => {
     expect(request.target).toBe('_blank')
     expect(request.rel).toBe('noreferrer')
     expect(container.querySelector<HTMLAnchorElement>('.website-app-link')?.href).toBe('https://app.draftmatter.eu/')
+  })
+
+  function githubRelease(tag: string, filenames: string[]) {
+    return { tag_name: tag, draft: false, assets: filenames.map(name => ({
+      name, state: 'uploaded', size: 1000,
+      browser_download_url: `https://github.com/VEZY/DraftMatter/releases/download/${tag}/${name}`,
+    })) }
+  }
+
+  it('offers the uploaded installers from a public combined prerelease at the bookmarked website path', async () => {
+    const version = '0.1.0-alpha.8'
+    const tag = `server-v${version}`
+    const release = githubRelease(tag, [
+      'darwin_aarch64_dmg.dmg', 'darwin_x64_dmg.dmg', 'windows_x64_nsis.exe', 'windows_x64_msi.msi',
+      'windows_arm64_nsis.exe', 'linux_amd64_deb.deb', 'linux_amd64_appimage.AppImage',
+      'linux_arm64_deb.deb', 'linux_arm64_appimage.AppImage',
+    ].map(suffix => `DraftMatter_${version}_${suffix}`).concat(['SHA256SUMS', 'SHA256SUMS-desktop', 'server-release.json']))
+    const fetch = vi.fn().mockResolvedValue(Response.json([
+      githubRelease('server-v0.1.0-alpha.11', ['DraftMatter_0.1.0-alpha.11_windows_x64_nsis.exe', 'SHA256SUMS']),
+      githubRelease('server-v0.1.0-alpha.10', ['SHA256SUMS', 'server-release.json']),
+      { ...githubRelease('v0.1.0-alpha.9', ['DraftMatter_0.1.0-alpha.9_darwin_x64_dmg.dmg']), draft: true },
+      release,
+    ]))
+    vi.stubGlobal('fetch', fetch)
+    window.history.replaceState({}, '', '/DraftMatter/#download')
+    await act(async () => root.render(<Website />))
+    expect(container.querySelector('h1')?.textContent).toBe('Download DraftMatter Desktop')
+    expect(fetch).toHaveBeenCalledWith(expect.stringContaining('/repos/VEZY/DraftMatter/releases?'), expect.objectContaining({ credentials: 'omit' }))
+    const installers = [...container.querySelectorAll<HTMLAnchorElement>('.downloads-platforms a')]
+    expect(installers.map(link => link.href)).toEqual(release.assets.slice(0, 9).map(asset => asset.browser_download_url))
+    expect(container.querySelector('.downloads-resources a[href$="/SHA256SUMS-desktop"]')).not.toBeNull()
+    expect(container.querySelector<HTMLAnchorElement>('.downloads-resources a[href$="/installation.md"]')?.href)
+      .toBe(`https://github.com/VEZY/DraftMatter/blob/${tag}/docs/installation.md`)
+  })
+
+  it('finds a previous desktop-only release beyond a full page of server versions without guessing download links', async () => {
+    const release = githubRelease('v0.1.0', ['DraftMatter_0.1.0_windows_x64_nsis.exe', 'SHA256SUMS',
+      'DraftMatter_0.1.0_linux_amd64_deb.deb', 'DraftMatter_0.1.0_darwin_x64_dmg.dmg'])
+    release.assets[2].state = 'starter'
+    release.assets[3].browser_download_url = 'https://unrelated.example/installer'
+    const fetch = vi.fn()
+      .mockResolvedValueOnce(Response.json(Array(30).fill(githubRelease('server-v1.0.0', ['server-release.json']))))
+      .mockResolvedValueOnce(Response.json([release]))
+    vi.stubGlobal('fetch', fetch)
+    await act(async () => root.render(<Website />))
+    expect(fetch).not.toHaveBeenCalled()
+    await act(async () => {
+      window.history.pushState({}, '', '#download')
+      window.dispatchEvent(new HashChangeEvent('hashchange'))
+    })
+    expect(fetch).toHaveBeenCalledTimes(2)
+    expect(container.querySelectorAll('.downloads-platforms a')).toHaveLength(1)
+    expect(container.querySelector<HTMLAnchorElement>('.downloads-platforms a')?.href).toBe(release.assets[0].browser_download_url)
+    expect(container.querySelector('.downloads-resources a[href$="/SHA256SUMS"]')).not.toBeNull()
+  })
+
+  it.each([
+    [200, 'The first desktop installers'],
+    [403, 'temporarily unavailable'],
+  ] as const)('shows a useful GitHub fallback when the releases endpoint returns %s without installers', async (status, message) => {
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue(Response.json([], { status })))
+    window.history.replaceState({}, '', '/#download')
+    await act(async () => root.render(<Website />))
+    expect(container.querySelector('[role="status"]')?.textContent).toContain(message)
+    expect(container.querySelectorAll('.downloads-platforms a')).toHaveLength(0)
+    expect(container.querySelector('.downloads-resources a[href="https://github.com/VEZY/DraftMatter/releases"]')).not.toBeNull()
   })
 
   it('scrolls the product action to the guided preview', async () => {

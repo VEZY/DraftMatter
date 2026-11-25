@@ -1,10 +1,31 @@
-import { Schema, type MarkSpec, type NodeSpec } from 'prosemirror-model'
+import { Schema, type MarkSpec, type Node as ProseMirrorNode, type NodeSpec } from 'prosemirror-model'
 import { bulletList, listItem, orderedList } from 'prosemirror-schema-list'
 import { tableNodes } from 'prosemirror-tables'
 import { publishedValueUnavailableHint } from './publishedValueHints'
 import { isSafePortableLinkDestination } from './portableLink'
 
 const identified = { id: { default: null } }
+
+export function publishedValueDomAttributes(node: ProseMirrorNode, status: string = node.attrs.status): Record<string, string> {
+  const { name, language, cellId } = node.attrs
+  const attributes: Record<string, string> = {
+    'data-dm-node': 'published-value',
+    'data-dm-id': node.attrs.id ?? '',
+    'data-name': name,
+    'data-status': status,
+  }
+  if (language) attributes['data-language'] = language
+  if (status === 'missing') {
+    const hint = publishedValueUnavailableHint(name, language ?? undefined)
+    attributes['data-publish-hint'] = hint
+    attributes['aria-description'] = hint.replaceAll('\n', ' ')
+    attributes.tabindex = '0'
+  } else {
+    const freshness = status === 'current' ? '' : ' needs to be refreshed'
+    attributes.title = `Computed value ${name}${freshness}${cellId ? ` · ${cellId}` : ''}`
+  }
+  return attributes
+}
 
 function atomDOM(name: string, text: (node: Parameters<NonNullable<NodeSpec['toDOM']>>[0]) => string): NonNullable<NodeSpec['toDOM']> {
   return (node) => ['span', { 'data-dm-node': name, 'data-dm-id': node.attrs.id ?? '' }, text(node)]
@@ -204,27 +225,7 @@ const nodes: Record<string, NodeSpec> = {
     atom: true,
     selectable: true,
     parseDOM: [{ tag: 'span[data-dm-node="published-value"]' }],
-    toDOM: (node) => {
-      const missing = node.attrs.status === 'missing'
-      const hint = missing ? publishedValueUnavailableHint(node.attrs.name, node.attrs.language ?? undefined) : ''
-      return ['span', {
-        'data-dm-node': 'published-value',
-        'data-dm-id': node.attrs.id ?? '',
-        'data-name': node.attrs.name,
-        'data-status': node.attrs.status,
-        ...(node.attrs.language ? { 'data-language': node.attrs.language } : {}),
-        ...(missing ? {
-          'data-publish-hint': hint,
-          'aria-description': hint.replaceAll('\n', ' '),
-          tabindex: '0',
-        } : {}),
-        ...(!missing ? {
-          title: node.attrs.status === 'current'
-            ? `Published value ${node.attrs.name}${node.attrs.cellId ? ` · ${node.attrs.cellId}` : ''}`
-            : `Published value ${node.attrs.name} needs to be refreshed${node.attrs.cellId ? ` · ${node.attrs.cellId}` : ''}`,
-        } : {}),
-      }, node.attrs.rendered]
-    },
+    toDOM: (node) => ['span', publishedValueDomAttributes(node), node.attrs.rendered],
     leafText: (node) => node.attrs.rendered,
   },
   citation: {

@@ -1,5 +1,17 @@
 import { expect, test } from '@playwright/test'
 
+test('opens bookmarked downloads under the Pages prefix when GitHub is unavailable', async ({ page }) => {
+  await page.route('https://api.github.com/repos/VEZY/DraftMatter/releases?*', route =>
+    route.fulfill({ status: 403, headers: { 'access-control-allow-origin': '*' }, json: { message: 'API rate limit' } }))
+  await page.goto('/DraftMatter/#download')
+  await expect(page.getByRole('heading', { level: 1 })).toHaveText('Download DraftMatter Desktop')
+  await expect(page.getByRole('status')).toContainText('temporarily unavailable')
+  await expect(page.getByRole('link', { name: 'GitHub Releases' })).toHaveAttribute('href', 'https://github.com/VEZY/DraftMatter/releases')
+  await page.getByRole('link', { name: 'DraftMatter website home' }).click()
+  await expect(page).toHaveURL(/\/DraftMatter\/#top$/)
+  await expect(page.getByRole('heading', { level: 1 })).toContainText('Your paper should be')
+})
+
 test('keeps legal links on the website base path and supports bookmarks', async ({ page }) => {
   await page.goto('/')
   const footer = page.locator('footer')
