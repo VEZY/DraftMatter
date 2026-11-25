@@ -1601,9 +1601,8 @@ pub fn git_clone_impl(request: GitCloneRequest) -> Result<GitCloneResult, HostEr
         HostError::Conflict("That folder already exists. Choose a new folder name; existing files were preserved.".into())
     } else { HostError::Io(format!("Could not create the clone folder: {error}")) })?;
     let clone = (|| {
-        let target = destination.to_str().ok_or_else(|| {
-            HostError::InvalidPath("The clone folder path is not valid Unicode.".into())
-        })?;
+        // Git runs in the canonical parent. Passing just the reserved folder name
+        // keeps Windows verbatim paths (including UNC parents) out of Git's argv.
         require_success(
             run_git_with_timeout(
                 &parent,
@@ -1615,7 +1614,7 @@ pub fn git_clone_impl(request: GitCloneRequest) -> Result<GitCloneResult, HostEr
                     "--template=",
                     "--",
                     &request.url,
-                    target,
+                    name,
                 ],
                 GIT_CLONE_TIMEOUT,
             )?,
@@ -2041,6 +2040,10 @@ mod tests {
         })
         .unwrap();
         let root = Path::new(&result.root);
+        assert_eq!(
+            root,
+            fs::canonicalize(parent.path().join("Cloned paper")).unwrap()
+        );
         assert_eq!(
             fs::read_to_string(root.join("paper.md"))
                 .unwrap()

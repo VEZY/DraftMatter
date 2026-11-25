@@ -110,10 +110,37 @@ mod tests {
     fn huge_sparse_files_have_bounded_prefixes_and_no_full_file_hash() {
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("huge.csv");
-        fs::File::create(&path)
-            .unwrap()
-            .set_len(100_000_000_000)
-            .unwrap();
+        let file = fs::File::create(&path).unwrap();
+        #[cfg(windows)]
+        {
+            use std::{os::windows::io::AsRawHandle, ptr};
+            use windows_sys::Win32::System::{Ioctl::FSCTL_SET_SPARSE, IO::DeviceIoControl};
+
+            // NTFS needs an explicit sparse flag before extending a file without allocating it.
+            let mut returned = 0;
+            // SAFETY: the file stays open throughout this synchronous call. The null buffers
+            // request the default set-sparse operation and the byte-count pointer is writable.
+            let ok = unsafe {
+                DeviceIoControl(
+                    file.as_raw_handle(),
+                    FSCTL_SET_SPARSE,
+                    ptr::null(),
+                    0,
+                    ptr::null_mut(),
+                    0,
+                    &mut returned,
+                    ptr::null_mut(),
+                )
+            };
+            assert_ne!(
+                ok,
+                0,
+                "Could not mark sparse: {}",
+                std::io::Error::last_os_error()
+            );
+        }
+        file.set_len(100_000_000_000).unwrap();
+        drop(file);
         let result = read_preview(directory.path().to_str().unwrap(), "huge.csv", 128).unwrap();
         assert_eq!(result.size, 100_000_000_000);
         assert_eq!(result.bytes.len(), 128);
