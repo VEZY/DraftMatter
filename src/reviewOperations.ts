@@ -1,4 +1,5 @@
 import {
+  isReviewProposalTarget,
   parseReviewMarkup,
   reviewLiteralFence,
   updateReviewRecordStatus,
@@ -8,6 +9,7 @@ import {
   type ReviewChange,
   type ReviewDecision,
   type ReviewMarkupDocument,
+  type ReviewProposalTarget,
   type ReviewThread,
 } from './reviewMarkup'
 import { parseLosslessPortableSource } from './portableSource'
@@ -31,6 +33,7 @@ export interface CreateReviewThreadRequest {
   anchorId?: string
   startMarkerId?: string
   endMarkerId?: string
+  proposalTarget?: ReviewProposalTarget
 }
 
 export interface AppendReviewMessageRequest {
@@ -291,8 +294,9 @@ function anchorContextBlocks(context: ReviewAnchorContext, ending: string) {
   return `${literalBlock('dm-anchor-quote', context.quote, ending)}${literalBlock('dm-anchor-prefix', context.prefix, ending)}${literalBlock('dm-anchor-suffix', context.suffix, ending)}`
 }
 
-function threadRecord(threadId: string, anchorId: string, authorId: string, message: string, context: ReviewAnchorContext, timestamp: string, ending: string) {
-  return `:::: {#${threadId} .dm-thread data-anchor="${anchorId}" data-author="${authorId}" data-status="open" data-created="${timestamp}"}${ending}${anchorContextBlocks(context, ending)}${messageBlock(message, authorId, timestamp, 0, ending)}::::${ending}`
+function threadRecord(threadId: string, anchorId: string, authorId: string, message: string, context: ReviewAnchorContext, timestamp: string, ending: string, proposalTarget?: ReviewProposalTarget) {
+  const target = proposalTarget ? literalBlock('dm-proposal-target', JSON.stringify(proposalTarget), ending) : ''
+  return `:::: {#${threadId} .dm-thread data-anchor="${anchorId}" data-author="${authorId}" data-status="open" data-created="${timestamp}"}${ending}${anchorContextBlocks(context, ending)}${target}${messageBlock(message, authorId, timestamp, 0, ending)}::::${ending}`
 }
 
 function changeRecord(
@@ -392,10 +396,20 @@ export function createReviewThread(source: string, request: CreateReviewThreadRe
   const anchoredDocument = parseReviewMarkup(anchored)
   const ending = lineEnding(anchored)
   const context = anchorContext(source, request.start, request.end)
-  const additions = `${existingAuthor ? '' : authorRecord(request.author, timestamp, ending)}${threadRecord(threadId, anchorId, request.author.id, request.message, context, timestamp, ending)}`
+  const additions = `${existingAuthor ? '' : authorRecord(request.author, timestamp, ending)}${threadRecord(threadId, anchorId, request.author.id, request.message, context, timestamp, ending, request.proposalTarget)}`
   const updated = parseReviewMarkup(appendSectionRecords(anchoredDocument, additions))
   assertWritable(updated)
   return threadResult(updated, threadId)
+}
+
+export function createReviewThreadOnProposal(source: string, target: ReviewProposalTarget, author: ReviewAuthorIdentity, message: string) {
+  const document = parseReviewMarkup(source)
+  const change = document.changes.find((item) => item.id === target.changeId)
+  const anchor = change && document.ranges.find((item) => item.complete && item.anchorId === change.anchorId)
+  if (!isReviewProposalTarget(target) || change?.status !== 'open' || !anchor || change.proposal === undefined || target.to > change.proposal.length) {
+    throw new ReviewOperationError('review-proposal-selection-changed', 'The suggested text changed. Select it again before adding the comment.')
+  }
+  return createReviewThread(source, { start: anchor.start, end: anchor.end, proposalTarget: target, author, message })
 }
 
 function requireThread(document: ReviewMarkupDocument, threadId: string) {

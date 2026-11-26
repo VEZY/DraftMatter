@@ -52,6 +52,31 @@ export interface ReviewThreadMessage {
   index?: number
 }
 
+export interface ReviewProposalTarget {
+  changeId: string
+  from: number
+  to: number
+  quote: string
+}
+
+export function isReviewProposalTarget(value: unknown): value is ReviewProposalTarget {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const { changeId, from, to, quote } = value as Partial<ReviewProposalTarget>
+  return typeof changeId === 'string' && /^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/.test(changeId)
+    && typeof from === 'number' && Number.isSafeInteger(from) && from >= 0
+    && typeof to === 'number' && Number.isSafeInteger(to) && to > from && to <= 200_000
+    && typeof quote === 'string' && Boolean(quote.trim()) && quote.length <= 20_000
+    && Object.keys(value).every((key) => ['changeId', 'from', 'to', 'quote'].includes(key))
+}
+
+function readReviewProposalTarget(source?: string) {
+  if (!source || source.length > 130_000) return undefined
+  try {
+    const target: unknown = JSON.parse(source)
+    return isReviewProposalTarget(target) ? target : undefined
+  } catch { return undefined }
+}
+
 export interface ReviewThread extends ReviewRecordBase {
   kind: 'thread'
   anchorId: string
@@ -59,6 +84,7 @@ export interface ReviewThread extends ReviewRecordBase {
   status: string
   messages: string[]
   messageRecords: ReviewThreadMessage[]
+  proposalTarget?: ReviewProposalTarget
   anchorContext?: ReviewAnchorContext
 }
 
@@ -336,6 +362,7 @@ export function parseReviewMarkup(source: string): ReviewMarkupDocument {
           ...(block.attributes['data-at'] ? { timestamp: block.attributes['data-at'] } : {}),
           ...(/^\d+$/.test(block.attributes['data-index'] ?? '') ? { index: Number(block.attributes['data-index']) } : {}),
         }))
+        const proposalTarget = readReviewProposalTarget(literals.find((block) => block.className === 'dm-proposal-target')?.content)
         threads.push({
           ...base,
           kind: 'thread',
@@ -344,6 +371,7 @@ export function parseReviewMarkup(source: string): ReviewMarkupDocument {
           status: parsedAttributes.attributes['data-status'] ?? 'open',
           messages: messageRecords.map((message) => message.content),
           messageRecords,
+          ...(proposalTarget ? { proposalTarget } : {}),
           ...(quote && prefix && suffix ? { anchorContext: { quote: quote.content, prefix: prefix.content, suffix: suffix.content } } : {}),
         })
       } else if (parsedAttributes.classes.includes('dm-decision')) {

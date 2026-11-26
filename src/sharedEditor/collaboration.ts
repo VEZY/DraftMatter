@@ -5,7 +5,7 @@ import {
   encodeAwarenessUpdate,
   removeAwarenessStates,
 } from 'y-protocols/awareness'
-import { parseReviewMarkup, type ReviewAnchorContext, type ReviewMarkupDocument, type ReviewThreadMessage } from '../reviewMarkup'
+import { parseReviewMarkup, type ReviewAnchorContext, type ReviewMarkupDocument, type ReviewProposalTarget, type ReviewThreadMessage } from '../reviewMarkup'
 import { proposalDecisionState } from './reviewDecisions'
 import { ReviewText } from './reviewText'
 
@@ -52,6 +52,7 @@ export interface CollaborativeThread {
   authorId: string
   status: string
   messages: ReviewThreadMessage[]
+  proposalTarget?: ReviewProposalTarget
   context?: ReviewAnchorContext
 }
 
@@ -329,6 +330,7 @@ export class CollaborativeDocument {
         authorId: thread.authorId,
         status: thread.status,
         messages: [],
+        ...(thread.proposalTarget ? { proposalTarget: thread.proposalTarget } : {}),
         ...(this.threads.get(thread.id)?.context || thread.anchorContext ? { context: this.threads.get(thread.id)?.context ?? thread.anchorContext } : {}),
       }))
       const threadMessages = review.threads.flatMap((thread) => storedThreadMessages({

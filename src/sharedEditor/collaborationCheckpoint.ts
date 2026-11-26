@@ -65,7 +65,8 @@ function threadRecord(thread: CollaborativeThread, context?: ReviewAnchorContext
     ...(message.timestamp ? { 'data-at': message.timestamp } : {}),
     'data-index': String(index),
   })).join('')
-  return `:::: {#${thread.id} .dm-thread data-anchor="${thread.anchorId}" data-author="${thread.authorId}" data-status="${escapedAttribute(thread.status)}"}\n${contextBlocks(context)}${messages}::::\n`
+  const target = thread.proposalTarget ? literalBlock('dm-proposal-target', JSON.stringify(thread.proposalTarget)) : ''
+  return `:::: {#${thread.id} .dm-thread data-anchor="${thread.anchorId}" data-author="${thread.authorId}" data-status="${escapedAttribute(thread.status)}"}\n${contextBlocks(context)}${target}${messages}::::\n`
 }
 
 function decisionRecord(decision: CollaborativeDecision) {

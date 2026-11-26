@@ -1,3 +1,4 @@
+import { selectRenderedTextWithMouse } from './rendered-selection'
 import { showWritingTools } from './writing-tools'
 import { expect, test } from '@playwright/test'
 
@@ -59,4 +60,23 @@ test.describe('DM-P1-03 rendered block formatting', () => {
     await expect(manuscript.getByRole('listitem')).toHaveCount(2)
     await expect(manuscript.getByRole('blockquote')).toContainText('Quote this paragraph.')
   })
+})
+
+test('typing an ordered list marker numbers the next item immediately on Enter', async ({ page }) => {
+  await page.addInitScript(() => {
+    localStorage.setItem('draftmatter.structured-source.v1', '# Ordered list test\n\nTemporary line.\n')
+    localStorage.setItem('draftmatter.structured-mode.v1', 'true')
+  })
+  await page.goto('/draft')
+  const editor = page.getByRole('textbox', { name: 'Rendered manuscript editor' })
+  await selectRenderedTextWithMouse(page, editor.locator(':scope > p'), 'Temporary line.')
+  await page.keyboard.type('1. First')
+  const items = editor.locator('ol > li')
+  await expect(items).toHaveCount(1)
+  await expect(items.first()).toHaveText('First')
+  await page.keyboard.press('Enter')
+  await expect(items).toHaveCount(2)
+  await page.keyboard.type('Second')
+  await expect(items.last()).toHaveText('Second')
+  await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1'))).toContain('1. First\n2. Second')
 })

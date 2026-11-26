@@ -10,12 +10,12 @@ import { r } from '@codemirror/legacy-modes/mode/r'
 import { setBlockType, toggleMark, wrapIn } from 'prosemirror-commands'
 import { closeHistory, history, isHistoryTransaction, redo as historyRedo, undo as historyUndo } from 'prosemirror-history'
 import { keymap } from 'prosemirror-keymap'
-import { wrapInList } from 'prosemirror-schema-list'
+import { liftListItem, splitListItem, wrapInList } from 'prosemirror-schema-list'
 import { Fragment, Slice, type Mark as ProseMirrorMark, type Node as ProseMirrorNode } from 'prosemirror-model'
 import { EditorState, NodeSelection, TextSelection, type Command, type Transaction } from 'prosemirror-state'
 import { tableEditing } from 'prosemirror-tables'
 import { Decoration, DecorationSet, EditorView, type MarkView, type NodeView } from 'prosemirror-view'
-import { baseKeymap } from 'prosemirror-commands'
+import { baseKeymap, chainCommands } from 'prosemirror-commands'
 import { Mapping, ReplaceStep } from 'prosemirror-transform'
 import { redoCommand as collaborativeRedo, undoCommand as collaborativeUndo, ySyncPluginKey, yUndoPluginKey } from 'y-prosemirror'
 import { serializeCitationCluster } from './citation'
@@ -25,13 +25,14 @@ import { inferPublishedValueLanguage } from './publishedValueHints'
 import { computedValueNodeView, type ComputedValueMenu, type SelectComputedValue } from './computedValueNodeView'
 import { renderEquation } from './equationRenderer'
 import { manuscriptSchema } from './manuscriptSchema'
-import { amendReviewProposal, parseReviewMarkup } from './reviewMarkup'
+import { amendReviewProposal, parseReviewMarkup, type ReviewProposalTarget } from './reviewMarkup'
 import type { UndoManager } from 'yjs'
 import type { ReviewDecisionUndo } from './sharedEditor/collaborativeReview'
 import { ReviewSourceStep, reviewSourceTransaction } from './reviewHistory'
 import { reviewProposalText } from './reviewPresentation'
+import { mountReviewWordingEditor, proposalParagraphPrefix, renderInlineReviewWording, reviewWordingEditors, type ProposalCommentHighlight } from './reviewWordingEditor'
 import { manuscriptView, reanchorPortableReviews } from './reviewReanchor'
-import { createReviewChange } from './reviewOperations'
+import { createReviewAlternative, createReviewChange } from './reviewOperations'
 import { captureReviewSuggestion, reviewTransformationDiff, type ReviewSuggestionIntent } from './reviewSuggestionCapture'
 import { parseStructuredManuscript, serializeStructuredManuscript, type StructuredManuscript, type StructuredManuscriptMetadata } from './structuredManuscript'
 import type { ExecutionFreshnessStatus } from './executionFreshness'
@@ -80,6 +81,7 @@ export interface StructuredOutlineItem {
 export interface StructuredReviewSelection {
   quote: string
   occurrence: number
+  proposalTarget?: ReviewProposalTarget
 }
 
 export type StructuredBlockMovePlacement = 'before' | 'after'
@@ -482,28 +484,45 @@ function semanticReviewTarget(view: EditorView, event: MouseEvent, source?: stri
 
 interface ReviewDecorationRecord {
   id: string
+  anchorId: string
   kind: 'change' | 'thread'
   status: string
   authorId: string
   changeKind?: string
   proposal?: string
+  proposalTarget?: ReviewProposalTarget
 }
 
 interface ReviewDecorationIndex {
   records: Map<string, ReviewDecorationRecord[]>
   anchors: Map<string, { start?: number; end?: number; points: number[] }>
+  proposalThreads: Map<string, ReviewDecorationRecord[]>
+  openProposalIds: Set<string>
 }
 
 function reviewDecorationIndex(source: string, document?: ProseMirrorNode): ReviewDecorationIndex {
   const parsed = parseReviewMarkup(source)
   const records = new Map<string, ReviewDecorationRecord[]>()
-  for (const record of [
+  const proposalThreads = new Map<string, ReviewDecorationRecord[]>()
+  const openProposalIds = new Set(parsed.changes.filter((change) => change.status === 'open' && change.proposal !== undefined).map((change) => change.id))
+  const items: ReviewDecorationRecord[] = [
     ...parsed.changes.map((change) => ({ id: change.id, anchorId: change.anchorId, kind: 'change' as const, status: change.status, authorId: change.authorId, changeKind: change.changeKind, proposal: change.proposal })),
-    ...parsed.threads.map((thread) => ({ id: thread.id, anchorId: thread.anchorId, kind: 'thread' as const, status: thread.status, authorId: thread.authorId })),
-  ]) records.set(record.anchorId, [...(records.get(record.anchorId) ?? []), record])
+    ...parsed.threads.map((thread) => ({ id: thread.id, anchorId: thread.anchorId, kind: 'thread' as const, status: thread.status, authorId: thread.authorId, proposalTarget: thread.proposalTarget })),
+  ]
+  for (const record of items) {
+    const anchored = records.get(record.anchorId) ?? []
+    anchored.push(record)
+    records.set(record.anchorId, anchored)
+    if (record.proposalTarget && record.status !== 'deleted') {
+      const changeId = record.proposalTarget.changeId
+      const threads = proposalThreads.get(changeId) ?? []
+      threads.push(record)
+      proposalThreads.set(changeId, threads)
+    }
+  }
   const anchors = new Map<string, { start?: number; end?: number; points: number[] }>()
   let removed = 0
-  if (!records.size) return { records, anchors }
+  if (!records.size) return { records, anchors, proposalThreads, openProposalIds }
   const anchoredDocument = document ?? parseStructuredManuscript(source).document
   anchoredDocument.descendants((node, position) => {
     if (node.type !== manuscriptSchema.nodes.review_anchor) return true
@@ -517,7 +536,7 @@ function reviewDecorationIndex(source: string, document?: ProseMirrorNode): Revi
     removed += node.nodeSize
     return true
   })
-  return { records, anchors }
+  return { records, anchors, proposalThreads, openProposalIds }
 }
 
 function sharedTrackDiff(view: EditorView, transaction: Transaction, metadata: StructuredManuscriptMetadata, accepted: string, intent: ReviewSuggestionIntent) {
@@ -571,6 +590,11 @@ function pendingTextDecorations(accepted: ProseMirrorNode, draft: ProseMirrorNod
   return preview
 }
 
+function proposalCommentHighlight(index: ReviewDecorationIndex, changeId: string, activeId?: string): ProposalCommentHighlight | undefined {
+  const thread = index.proposalThreads.get(changeId)?.find((item) => item.id === activeId)
+  return thread?.proposalTarget ? { target: thread.proposalTarget, anchorId: thread.anchorId } : undefined
+}
+
 function reviewDecorations(
   document: ProseMirrorNode,
   index: ReviewDecorationIndex,
@@ -579,7 +603,7 @@ function reviewDecorations(
   activeReviewId?: string,
   activeAnchorId?: string,
   onAnchorSelect?: (anchorId: string, reviewId?: string) => void,
-  editing?: { authorId: string; onlyId?: string; history?: (redo: boolean) => boolean; amend: (id: string, value: string) => void; flush: () => void },
+  editing?: { history?: (redo: boolean) => boolean; onSelection: (selection: ReviewProposalTarget | null) => void; amend: (id: string, value: string, caret?: number) => void; flush: () => void },
 ) {
   if (!index.records.size || markupView === 'original' || markupView === 'final') return []
   const documentAnchors = new Map<string, { start?: number; end?: number; points: number[] }>()
@@ -595,13 +619,16 @@ function reviewDecorations(
   })
   const anchors = documentAnchors.size > 0 ? documentAnchors : index.anchors
   const decorations: Decoration[] = []
+  const activeThread = index.records.get(activeAnchorId ?? '')?.find((record) => record.id === activeReviewId && record.kind === 'thread')
+  const activeThreadRange = activeThread && anchors.get(activeThread.anchorId)
   for (const [anchorId, anchor] of anchors) {
     const visibleRecords = (index.records.get(anchorId) ?? []).filter((record) => record.status !== 'deleted' && (!authorId || record.authorId === authorId))
     if (!visibleRecords.length) continue
     const record = visibleRecords.find((candidate) => candidate.id === activeReviewId)
       ?? visibleRecords.find((candidate) => candidate.status === 'open' || candidate.status === 'needs-rebase')
       ?? visibleRecords[0]
-    const active = anchorId === activeAnchorId || visibleRecords.some((candidate) => candidate.id === activeReviewId)
+    const active = (!record.proposalTarget || !index.openProposalIds.has(record.proposalTarget.changeId))
+      && (anchorId === activeAnchorId || visibleRecords.some((candidate) => candidate.id === activeReviewId))
     const classes = [
       `dm-review-${record.kind}`,
       `dm-review-${record.status}`,
@@ -615,7 +642,7 @@ function reviewDecorations(
     }
     const isInsertion = record.kind === 'change' && record.changeKind === 'insert'
     // The inserted wording itself is the interactive anchor, even for a single letter.
-    const pointPositions = isInsertion && record.proposal ? [] : anchor.points
+    const pointPositions = (isInsertion && record.proposal) || record.proposalTarget ? [] : anchor.points
     for (const position of pointPositions) decorations.push(Decoration.widget(position, () => {
       const marker = globalThis.document.createElement('button')
       marker.type = 'button'
@@ -661,60 +688,54 @@ function reviewDecorations(
       }, { key: `dm-review-margin-${anchorId}-${marginPosition}-${visibleThreads.map((thread) => `${thread.id}:${thread.status}`).join(',')}-${active ? 'active' : 'idle'}`, side: -1 }))
     }
     const proposalPosition = anchor.end ?? anchor.points[0]
-    const ownWording = editing && (!editing.onlyId || record.id === editing.onlyId) && editing.authorId === record.authorId && record.status === 'open'
+    const highlight = proposalCommentHighlight(index, record.id, activeReviewId)
+    const spansActiveThread = !activeThread?.proposalTarget && proposalPosition !== undefined
+      && activeThreadRange?.start !== undefined && activeThreadRange.end !== undefined
+      && activeThreadRange.start <= proposalPosition && proposalPosition <= activeThreadRange.end
+    const commentClass = spansActiveThread ? ' dm-review-thread dm-review-active dm-review-proposal-comment' : ''
+    const editableWording = editing && record.status === 'open'
       && (record.changeKind === 'insert' || record.changeKind === 'replace') && record.proposal !== undefined
-    if (ownWording && proposalPosition !== undefined) {
+    const paragraphClass = isInsertion && record.proposal && proposalParagraphPrefix(record.proposal) ? ' dm-review-paragraph' : ''
+    if (editableWording && proposalPosition !== undefined) {
       decorations.push(Decoration.widget(proposalPosition, (view, getPos) => {
         const wrapper = globalThis.document.createElement('span')
-        wrapper.className = `dm-review-proposal dm-review-open${isInsertion ? ' dm-review-insertion' : ''}`
+        wrapper.className = `dm-review-proposal dm-review-open${isInsertion ? ' dm-review-insertion' : ''}${commentClass}${paragraphClass}`
         wrapper.contentEditable = 'false'
         wrapper.dataset.reviewAnchor = anchorId
-        const field = globalThis.document.createElement('textarea')
-        field.rows = 1
-        field.className = 'dm-review-wording'
-        field.dataset.proposalId = record.id
-        field.setAttribute('aria-label', 'Edit suggested wording')
-        field.maxLength = 200_000
-        field.value = record.proposal ?? ''
-        field.addEventListener('input', (event) => {
-          if (!(event as InputEvent).isComposing) editing.amend(record.id, field.value)
-        })
-        field.addEventListener('compositionend', () => editing.amend(record.id, field.value))
-        field.addEventListener('blur', editing.flush)
-        field.addEventListener('keydown', (event) => {
-          if (event.isComposing) return
-          const key = event.key.toLowerCase()
-          if (editing.history && (event.metaKey || event.ctrlKey) && !event.altKey && (key === 'z' || key === 'y')) {
-            event.preventDefault()
-            editing.history(key === 'y' || event.shiftKey)
-            return
-          }
-          if (field.selectionStart !== field.selectionEnd) return
-          if (event.key !== 'Escape' && !(event.key === 'ArrowRight' && field.selectionEnd === field.value.length)
-            && !(event.key === 'ArrowLeft' && field.selectionStart === 0)) return
-          const pos = getPos()
-          if (pos === undefined) return
-          event.preventDefault()
-          view.dispatch(view.state.tr.setSelection(TextSelection.near(view.state.doc.resolve(pos))))
-          view.focus()
-        })
-        wrapper.append(field)
+        mountReviewWordingEditor(wrapper, view, getPos, record.id, record.proposal ?? '', editing.amend, editing.flush, editing.history, editing.onSelection, highlight)
         return wrapper
-      }, { key: `dm-edit-wording-${record.id}`, side: 2, stopEvent: () => true, ignoreSelection: true }))
+      }, {
+        key: `dm-edit-wording-${record.id}-${commentClass}`,
+        side: 2,
+        stopEvent: () => true,
+        ignoreSelection: true,
+        destroy: (node: Node) => reviewWordingEditors.get(node)?.destroy(),
+      }))
     } else if ((markupView === 'all' || isInsertion || (record.status === 'open' && record.changeKind === 'replace')) && record.kind === 'change' && record.changeKind !== 'delete' && record.proposal && proposalPosition !== undefined) {
       const source = record.proposal
       const label = reviewProposalText(source)
       // A space before or after inserted wording also belongs to the manuscript.
       const proposal = isInsertion ? source.replace(source.trim(), () => label || source.trim()) : label
       decorations.push(Decoration.widget(proposalPosition, () => {
-        const marker = globalThis.document.createElement('button')
-        marker.type = 'button'
-        marker.className = `dm-review-proposal dm-review-${record.status}${isInsertion ? ' dm-review-insertion' : ''}${active ? ' dm-review-active' : ''}`
+        const marker = globalThis.document.createElement('span')
+        marker.setAttribute('role', 'button')
+        marker.tabIndex = 0
+        marker.addEventListener('keydown', (event) => {
+          if (event.key === 'Enter' || event.key === ' ') {
+            event.preventDefault()
+            event.stopPropagation()
+            marker.click()
+          }
+        })
+        marker.className = `dm-review-proposal dm-review-${record.status}${isInsertion ? ' dm-review-insertion' : ''}${active ? ' dm-review-active' : ''}${commentClass}${paragraphClass}`
         marker.dataset.reviewAnchor = anchorId
+        if (record.status === 'open' && (isInsertion || record.changeKind === 'replace')) marker.dataset.proposalId = record.id
         marker.setAttribute('aria-label', `Open ${record.changeKind ?? 'text'} suggestion: ${proposal}`)
-        marker.textContent = proposal
+        if ((isInsertion || record.changeKind === 'replace') && !/[\r\n]/.test(source)) {
+          marker.append(renderInlineReviewWording(source, record.id, marker.ownerDocument, highlight))
+        } else marker.textContent = proposal
         return marker
-      }, { key: `dm-review-proposal-${record.id}-${record.proposal}-${proposalPosition}-${record.status}-${active ? 'active' : 'idle'}`, side: 2 }))
+      }, { key: `dm-review-proposal-${record.id}-${record.proposal}-${proposalPosition}-${record.status}-${active ? 'active' : 'idle'}-${highlight?.anchorId ?? ''}-${commentClass}`, side: 2 }))
     }
   }
   return decorations
@@ -3671,6 +3692,7 @@ function editorState(document: ProseMirrorNode, collaboration?: CollaborativeEdi
         'Mod-b': toggleMark(manuscriptSchema.marks.strong),
         'Mod-i': toggleMark(manuscriptSchema.marks.emphasis),
       }),
+      keymap({ Enter: chainCommands(splitListItem(manuscriptSchema.nodes.list_item), liftListItem(manuscriptSchema.nodes.list_item)) }),
       keymap(baseKeymap),
       tableEditing(),
     ],
@@ -3750,8 +3772,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   // Ordinary shared text edits have Yjs inverses. Review decisions instead
   // append an attributed reversal, ordered between the same native undo groups.
   const sharedHistory = useRef<{ undo: { entry: ReviewDecisionUndo; depth: number }[]; redo: { entry: ReviewDecisionUndo; depth: number }[] }>({ undo: [], redo: [] })
-  const pendingWording = useRef<{ id: string; base: string; value: string; timer: number } | undefined>(undefined)
-  const localWordingId = useRef<string | undefined>(undefined)
+  const pendingWording = useRef<{ id: string; base: string; value: string; caret?: number; timer: number } | undefined>(undefined)
   const pendingSuggestionRef = useRef<{ acceptedState: EditorState; acceptedSource: string; draft: EditorState; mapping: Mapping; timeout: number } | undefined>(undefined)
   const reviewSelectionSignatureRef = useRef('')
   const draggedBlockIdRef = useRef<string | undefined>(undefined)
@@ -3850,12 +3871,36 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     onChangeRef.current(canonicalSource)
   }
 
-  const emitReviewSelection = (view: EditorView) => {
-    const selection = selectedReviewText(view, sourceRef.current, metadataRef.current)
-    const signature = selection ? `${selection.occurrence}:${selection.quote}` : ''
+  const emitSelection = (selection: StructuredReviewSelection | null) => {
+    const target = selection?.proposalTarget
+    const signature = target ? `${target.changeId}:${target.from}:${target.to}:${target.quote}`
+      : selection ? `${selection.occurrence}:${selection.quote}` : ''
     if (signature === reviewSelectionSignatureRef.current) return
     reviewSelectionSignatureRef.current = signature
     onReviewSelectionRef.current?.(selection)
+  }
+
+  const wordingSelection = (view: EditorView): StructuredReviewSelection | null => {
+    const native = view.dom.ownerDocument.getSelection()
+    const focus = native?.focusNode?.parentElement
+    const wrapper = focus?.closest<HTMLElement>('.dm-review-proposal')
+    if (!wrapper || !view.dom.contains(wrapper) || !native?.rangeCount || native.isCollapsed) return null
+    let target = reviewWordingEditors.get(wrapper)?.selection?.()
+    if (!target && wrapper.dataset.proposalId) {
+      const range = native.getRangeAt(0)
+      if (wrapper.contains(range.startContainer) && wrapper.contains(range.endContainer)) {
+        const prefix = wrapper.ownerDocument.createRange()
+        prefix.selectNodeContents(wrapper)
+        prefix.setEnd(range.startContainer, range.startOffset)
+        const from = prefix.toString().length
+        const quote = range.toString()
+        if (quote.trim()) target = { quote, from, to: from + quote.length, changeId: wrapper.dataset.proposalId }
+      }
+    }
+    return target ? { quote: target.quote, occurrence: 0, proposalTarget: target } : null
+  }
+  const emitReviewSelection = (view: EditorView) => {
+    emitSelection(wordingSelection(view) ?? selectedReviewText(view, sourceRef.current, metadataRef.current))
   }
 
   const replaceEditorSource = (view: EditorView, nextSource: string) => {
@@ -3885,11 +3930,19 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
   }
 
   const syncWordingFields = (view: EditorView) => {
-    for (const field of view.dom.querySelectorAll<HTMLTextAreaElement>('textarea[data-proposal-id]')) {
+    for (const field of view.dom.querySelectorAll<HTMLElement>('.dm-review-wording[data-proposal-id]')) {
       if (pendingWording.current?.id === field.dataset.proposalId) continue
-      const match = reviewDecorationRef.current!.records.get(field.parentElement!.dataset.reviewAnchor ?? '')?.find((record) => record.id === field.dataset.proposalId)
-      if (match?.proposal !== undefined && field.value !== match.proposal) field.value = match.proposal
+      const wrapper = field.parentElement!
+      const record = reviewDecorationRef.current!.records.get(wrapper.dataset.reviewAnchor ?? '')?.find((candidate) => candidate.id === field.dataset.proposalId)
+      if (record?.proposal !== undefined) reviewWordingEditors.get(wrapper)?.sync(
+        record.proposal, proposalCommentHighlight(reviewDecorationRef.current!, record.id, activeReviewIdRef.current),
+      )
     }
+  }
+
+  const focusWording = (view: EditorView, id: string, caret?: number) => {
+    const field = view.dom.querySelector<HTMLElement>(`.dm-review-wording[data-proposal-id="${semanticDomSelector(id)}"]`)
+    if (field?.parentElement) reviewWordingEditors.get(field.parentElement)?.focus('end', caret)
   }
 
   const publishSharedReview = (view: EditorView, source: string, historyOperation = false) => {
@@ -3914,11 +3967,23 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       const current = document.changes.find((change) => change.id === pending.id)
       if (current?.proposal === pending.value) return
       if (current?.proposal !== pending.base) throw Error('The suggestion changed in another session. Review its latest wording.')
-      const next = amendReviewProposal(document, pending.id, suggestionAuthorRef.current.id, pending.value)
+      const alternative = current.authorId === suggestionAuthorRef.current.id
+        ? undefined
+        : createReviewAlternative(document, { changeId: pending.id, author: suggestionAuthorRef.current, proposal: pending.value })
+      const next = alternative?.document.source ?? amendReviewProposal(document, pending.id, suggestionAuthorRef.current.id, pending.value)
+      const focused = view.dom.ownerDocument.activeElement?.getAttribute('data-proposal-id') === pending.id
+      const scroll = view.dom.closest<HTMLElement>('.editor-area')
+      const scrollTop = scroll?.scrollTop
+      if (alternative) activeReviewIdRef.current = alternative.change.id
       if (collaborationRef.current) publishSharedReview(view, next)
       else {
-        applyLocalReviewSource(view, sourceRef.current, next)
+        applyLocalReviewSource(view, document.source, next)
         publishSourceChange(next)
+      }
+      if (alternative) {
+        onReviewAnchorSelectRef.current?.(alternative.change.anchorId, alternative.change.id)
+        if (focused) focusWording(view, alternative.change.id, pending.caret)
+        if (scroll && scrollTop !== undefined) scroll.scrollTop = scrollTop
       }
     } catch (error) {
       syncWordingFields(view)
@@ -3926,14 +3991,14 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     }
   }
 
-  const amendWording = (id: string, value: string) => {
+  const amendWording = (id: string, value: string, caret?: number) => {
     if (readOnlyRef.current || !suggestionModeRef.current) return
     if (pendingWording.current && pendingWording.current.id !== id) flushWording()
     const previous = pendingWording.current
-    if (previous) window.clearTimeout(previous.timer)
     const base = previous?.base ?? parseReviewMarkup(sourceRef.current).changes.find((change) => change.id === id)?.proposal
     if (base === undefined) return
-    pendingWording.current = { id, base, value, timer: window.setTimeout(flushWording, 180) }
+    if (previous) window.clearTimeout(previous.timer)
+    pendingWording.current = { id, base, value, caret, timer: window.setTimeout(flushWording, 180) }
   }
 
   const captureSharedSuggestion = (view: EditorView, transaction: Transaction, intent: ReviewSuggestionIntent) => {
@@ -3965,12 +4030,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         publishSharedReview(view, captured.document.source)
         changeId = captured.change.id
       }
-      const field = [...view.dom.querySelectorAll<HTMLTextAreaElement>('textarea[data-proposal-id]')]
-        .find((item) => item.dataset.proposalId === changeId)
-      if (field) {
-        field.focus({ preventScroll: true })
-        field.setSelectionRange(field.value.length, field.value.length)
-      }
+      focusWording(view, changeId)
       onSuggestionCaptureRef.current?.('Change captured as one portable suggestion')
     } catch (error) {
       onSuggestionCaptureRef.current?.(error instanceof Error ? error.message : 'The suggestion could not be captured.', true)
@@ -3983,20 +4043,13 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     draftSource: string,
     intent: ReviewSuggestionIntent,
     continueTyping = false,
+    caret?: number,
   ) => {
     try {
       const captured = captureReviewSuggestion(acceptedSource, draftSource, suggestionAuthorRef.current, intent)
-      if (!captured) {
-        replaceEditorSource(view, acceptedSource)
-        return
-      }
-      if (continueTyping) localWordingId.current = captured.change.id
+      if (!captured) return
       applyLocalReviewSource(view, acceptedSource, captured.document.source)
-      if (continueTyping) {
-        const field = view.dom.querySelector<HTMLTextAreaElement>(`textarea[data-proposal-id="${semanticDomSelector(captured.change.id)}"]`)
-        field?.focus({ preventScroll: true })
-        field?.setSelectionRange(field.value.length, field.value.length)
-      }
+      if (continueTyping) focusWording(view, captured.change.id, caret)
       publishSourceChange(captured.document.source)
       const labels: Record<string, string> = {
         insert: 'Insertion captured as one portable suggestion',
@@ -4008,7 +4061,6 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       const label = labels[captured.change.changeKind] ?? 'Change captured as one portable suggestion'
       onSuggestionCaptureRef.current?.(label)
     } catch (error) {
-      replaceEditorSource(view, acceptedSource)
       onSuggestionCaptureRef.current?.(
         error instanceof Error ? `Suggestion was not captured: ${error.message}` : 'Suggestion was not captured.',
         true,
@@ -4037,16 +4089,18 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     view.updateState(restored)
     if (!draft.doc.eq(acceptedState.doc) && !readOnlyRef.current) {
       const draftSource = serializeEditorDocument(draft.doc, metadataRef.current!)
-      captureSuggestion(view, pending.acceptedSource, draftSource, 'text', keepTyping)
+      const start = keepTyping ? acceptedState.doc.content.findDiffStart(draft.doc.content) : null
+      const caret = keepTyping && start !== null ? Math.max(0, draft.selection.head - start) : undefined
+      captureSuggestion(view, pending.acceptedSource, draftSource, 'text', keepTyping, caret)
     }
     if (!scroller || scrollTop === undefined) return
     if (scroller.scrollTop !== scrollTop) scroller.scrollTop = scrollTop
 
     const owner = view.dom.ownerDocument
     const field = owner.activeElement
-    if (!keepTyping || !field?.matches('textarea.dm-review-wording')) return
+    if (!keepTyping || !field?.matches('.dm-review-wording')) return
 
-    // WebKit can reveal the native textarea selection after the proposal's
+    // WebKit can reveal the native selection after the proposal's
     // layout settles, even when focus used preventScroll.
     const input = new AbortController()
     for (const event of ['pointerdown', 'wheel', 'touchstart', 'keydown']) {
@@ -4082,6 +4136,14 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     const result = command(view.state, view.dispatch, view)
     if (result) view.focus()
     return result
+  }
+
+  const formatSelection = (name: 'strong' | 'emphasis') => {
+    const view = viewRef.current
+    if (!view || readOnlyRef.current) return false
+    const inside = view.dom.ownerDocument.activeElement?.closest('.dm-review-proposal')
+    const wording = inside && reviewWordingEditors.get(inside)
+    return wording ? wording.format?.(name) ?? false : run(toggleMark(manuscriptSchema.marks[name]))
   }
 
   const performHistory = (redo: boolean) => {
@@ -4193,8 +4255,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       return replaceManuscriptSearch(view, replacement, all)
     },
     findNext: (direction = 1) => viewRef.current ? navigateManuscriptSearch(viewRef.current, direction) : EMPTY_MANUSCRIPT_SEARCH,
-    toggleBold: () => run(toggleMark(manuscriptSchema.marks.strong)),
-    toggleItalic: () => run(toggleMark(manuscriptSchema.marks.emphasis)),
+    toggleBold: () => formatSelection('strong'),
+    toggleItalic: () => formatSelection('emphasis'),
     setLink: (href, title) => {
       const view = viewRef.current
       if (!view || view.state.selection.empty || !isSafePortableLinkDestination(href)) return false
@@ -4686,6 +4748,33 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         if (![...pendingFigureImportsRef.current].some((pending) => pending.view === editorView)) host.removeAttribute('aria-busy')
       }
     }
+    const proposeParagraph = (editor: EditorView) => {
+      const {$from, empty } = editor.state.selection
+      if (!empty || $from.depth !== 1 || $from.parent.type !== manuscriptSchema.nodes.paragraph
+        || $from.parentOffset !== $from.parent.content.size || !$from.parent.textContent.trim()) return false
+      finishPendingSuggestion(editor)
+      const source = sourceRef.current
+      const accepted = manuscriptView(source)
+      const marker = randomId('dmParagraphPosition').replace(/[^A-Za-z0-9]/g, '')
+      const probe = manuscriptView(serializeStructuredManuscript(editor.state.tr.insertText(marker).doc, metadataRef.current!)).source
+      const offset = probe.indexOf(marker)
+      if (offset < 0 || (probe.slice(0, offset) + probe.slice(offset + marker.length)).trimEnd() !== accepted.source.trimEnd()) return false
+      try {
+        const position = accepted.toOriginal(offset, 1)
+        const ending = metadataRef.current!.lineEnding
+        const change = createReviewChange(source, { start: position, end: position, kind: 'insert', proposal: ending + ending, author: suggestionAuthorRef.current })
+        if (collaborationRef.current) publishSharedReview(editor, change.document.source)
+        else {
+          applyLocalReviewSource(editor, source, change.document.source)
+          publishSourceChange(change.document.source)
+        }
+        focusWording(editor, change.change.id)
+        return true
+      } catch (error) {
+        onSuggestionCaptureRef.current?.(error instanceof Error ? error.message : 'The suggested paragraph could not be added.', true)
+        return true
+      }
+    }
     let decorationCache: { inputs: readonly unknown[]; set: DecorationSet } | undefined
     const view = new EditorView(host, {
       state: editorState(parsed.document, collaboration, searchOptions()),
@@ -4706,13 +4795,12 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         const activeReview = activeReviewIdRef.current
         const activeAnchor = activeReviewAnchorIdRef.current
         const shared = Boolean(collaborationRef.current)
-        const wordingId = localWordingId.current
         const tracking = suggestionModeRef.current
         const author = suggestionAuthorRef.current.id
         const readOnly = readOnlyRef.current
         // Moving the caret or changing focus leaves these decorations intact.
         const inputs = [state.doc, pending, byline, reviewIndex, markup, authorFilter, activeReview,
-          activeAnchor, shared, wordingId, tracking, author, readOnly]
+          activeAnchor, shared, tracking, author, readOnly]
         const cached = decorationCache
         if (cached && inputs.every((value, index) => value === cached.inputs[index])) return cached.set
         const set = DecorationSet.create(state.doc, [
@@ -4728,10 +4816,10 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
             activeReview,
             activeAnchor,
             (anchorId, reviewId) => onReviewAnchorSelectRef.current?.(anchorId, reviewId),
-            (shared || wordingId) && tracking && !readOnly
-              ? { authorId: author, amend: amendWording, flush: flushWording,
-                  onlyId: shared ? undefined : wordingId,
-                  history: shared ? undefined : performHistory }
+            tracking && !readOnly
+              ? { amend: amendWording, flush: flushWording,
+                  history: shared ? undefined : performHistory,
+                  onSelection: target => emitSelection(target ? { quote: target.quote, occurrence: 0, proposalTarget: target } : null) }
               : undefined,
           ),
           ...blockHandleDecorations(state.doc, readOnly, (sourceId, direction) => {
@@ -4781,7 +4869,8 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           })
           return false
         },
-        click: (_editorView, event) => {
+        click: (editorView, event) => {
+          if (wordingSelection(editorView)) return false
           if (event.target instanceof Element && event.target.closest('.structured-link-edit')) return true
           const target = event.target instanceof Element ? event.target.closest<HTMLElement>('[data-review-anchor]') : null
           if (target?.dataset.reviewAnchor) onReviewAnchorSelectRef.current?.(target.dataset.reviewAnchor)
@@ -4839,7 +4928,23 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
           return true
         },
       },
+      handleTextInput: (editor, from, to, input) => {
+        if (input !== ' ' || from !== to || readOnlyRef.current || suggestionModeRef.current || editor.composing) return false
+        const $from = editor.state.doc.resolve(from)
+        if ($from.depth !== 1 || $from.parent.type !== manuscriptSchema.nodes.paragraph
+          || $from.parentOffset !== $from.parent.content.size) return false
+        const prefix = /^(\d{1,9})\.$/.exec($from.parent.textContent)
+        if (!prefix) return false
+        const { ordered_list, list_item, paragraph } = manuscriptSchema.nodes
+        const list = ordered_list.createChecked({ order: Number(prefix[1]) }, list_item.createChecked(null, paragraph.createChecked($from.parent.attrs)))
+        const start = $from.before()
+        const transaction = editor.state.tr.replaceWith(start, $from.after(), list)
+        editor.dispatch(transaction.setSelection(TextSelection.near(transaction.doc.resolve(start + 3))).scrollIntoView())
+        return true
+      },
       handleKeyDown: (editorView, event) => {
+        if (event.key === 'Enter' && !event.shiftKey && !event.metaKey && !event.ctrlKey && !event.altKey
+          && !event.isComposing && suggestionModeRef.current && !readOnlyRef.current && proposeParagraph(editorView)) return true
         const key = event.key.toLowerCase()
         if ((event.metaKey || event.ctrlKey) && !event.altKey && (key === 'z' || key === 'y')) {
           // Handle shortcuts while a card is active using the same command as
@@ -4860,6 +4965,25 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
             && editorView.dom.contains(native.focusNode)) {
             native.modify('move', event.key === 'ArrowLeft' ? 'left' : 'right', 'character')
             return syncCollapsedCaret(editorView, native)
+          }
+          const { $head, empty } = editorView.state.selection
+          const block = $head.depth > 0 ? editorView.nodeDOM($head.before()) : null
+          if (empty && block instanceof HTMLElement) {
+            const forward = event.key === 'ArrowRight'
+            const widgets = [...block.querySelectorAll<HTMLElement>('.dm-review-proposal:has(.dm-review-wording)')]
+            if (!forward) widgets.reverse()
+            for (const wrapper of widgets) {
+              const wording = reviewWordingEditors.get(wrapper)
+              const position = wording?.position()
+              if (position === undefined || !wording) continue
+              const distance = position - $head.pos
+              const between = distance === (forward ? 1 : -1) && (forward ? $head.nodeAfter : $head.nodeBefore)
+              if ((distance === 0 || (between && between.type === manuscriptSchema.nodes.review_anchor))
+                && $head.sameParent(editorView.state.doc.resolve(position))) {
+                wording.focus(forward ? 'start' : 'end')
+                return true
+              }
+            }
           }
         }
         const selection = editorView.state.selection
@@ -4931,7 +5055,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     })
     const openReviewContextMenu = (event: MouseEvent) => {
       if (onComputedValueSelectRef.current && event.target instanceof Element && event.target.closest('[data-dm-node="published-value"]')) return
-      const target = semanticReviewTarget(view, event, sourceRef.current, metadataRef.current)
+      const target = wordingSelection(view) ?? semanticReviewTarget(view, event, sourceRef.current, metadataRef.current)
       if (!target || !onReviewContextMenuRef.current) return
       event.preventDefault()
       event.stopPropagation()
@@ -4939,6 +5063,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       onReviewContextMenuRef.current(target, { x: event.clientX, y: event.clientY })
     }
     host.addEventListener('contextmenu', openReviewContextMenu, true)
+    const readProposalSelection = () => {
+      const selection = wordingSelection(view)
+      if (selection) emitSelection(selection)
+    }
+    host.ownerDocument.addEventListener('selectionchange', readProposalSelection)
     view.setProps({
       dispatchTransaction(transaction) {
         if (view.isDestroyed) return
@@ -4981,7 +5110,17 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         const next = previous.apply(transaction)
         if (pendingSuggestionRef.current && transaction.selectionSet && !transaction.docChanged
           && !previous.selection.eq(next.selection) && !view.composing) {
-          // Changing passage finishes this group before a keystroke at the new location.
+          const pending = pendingSuggestionRef.current
+          const accepted = pending.acceptedState.doc.content
+          const start = accepted.findDiffStart(next.doc.content)
+          const end = accepted.findDiffEnd(next.doc.content)?.b
+          // Arrows within freshly typed words can stay in the ordinary
+          // editing selection until the suggestion is written.
+          if (next.selection.empty && start !== null && end !== undefined && start <= next.selection.head && next.selection.head <= end) {
+            pending.draft = next
+            view.updateState(next)
+            return
+          }
           view.updateState(next)
           finishPendingSuggestion(view)
           return
@@ -5055,6 +5194,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       pendingSuggestionRef.current = undefined
       document.querySelectorAll('.structured-heading-dialog-backdrop, .structured-link-dialog-backdrop').forEach((dialog) => dialog.remove())
       host.removeEventListener('contextmenu', openReviewContextMenu, true)
+      host.ownerDocument.removeEventListener('selectionchange', readProposalSelection)
       viewRef.current = null
       view.destroy()
       dropIndicator.remove()
@@ -5103,7 +5243,10 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     activeReviewIdRef.current = activeReviewId
     activeReviewAnchorIdRef.current = activeReviewAnchorId
     const view = viewRef.current
-    if (view) view.dispatch(view.state.tr.setMeta('dm-decoration-refresh', true))
+    if (view) {
+      view.dispatch(view.state.tr.setMeta('dm-decoration-refresh', true))
+      syncWordingFields(view)
+    }
   }, [activeReviewAnchorId, activeReviewId, markupView, reviewAuthorId, suggestionMode, suggestionAuthor.id, readOnly])
 
   useEffect(() => {

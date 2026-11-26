@@ -1,4 +1,4 @@
-import type { Mark, Node as ProseMirrorNode } from 'prosemirror-model'
+import { Fragment, type Mark, type Node as ProseMirrorNode } from 'prosemirror-model'
 import { parseCitationCluster, serializeCitationCluster } from './citation'
 import { formatCrossReferenceTarget } from './crossReference'
 import { parseDisplayEquation } from './displayEquation'
@@ -8,7 +8,7 @@ import { executionTableFromHtml } from './outputRenderer'
 import { inferPublishedValueLanguage } from './publishedValueHints'
 import { parseRetainedPublishedValues, publishedValueNamesInMarkup, type RetainedPublishedValue } from './publishedValues'
 import { manuscriptSchema } from './manuscriptSchema'
-import { parseReviewMarkup } from './reviewMarkup'
+import { parseReviewMarkup, type ReviewProposalTarget } from './reviewMarkup'
 import { isPipeTableSeparator, parseTableCaptionLine, pipeTableAlignments, pipeTableCells } from './tableSyntax'
 import type { CitationItem, DocumentDiagnostic } from './types'
 import { parseMarkdownImage, standaloneImagePattern } from './imageMarkdown'
@@ -60,7 +60,7 @@ function marked(nodes: ProseMirrorNode[], mark: Mark) {
 interface InlineCandidate {
   index: number
   raw: string
-  kind: 'escape' | 'hard-break' | 'anchor' | 'published-value' | 'citation' | 'link' | 'strong' | 'emphasis' | 'code' | 'math' | 'cross-reference' | 'footnote'
+  kind: 'escape' | 'hard-break' | 'anchor' | 'published-value' | 'citation' | 'link' | 'strong-emphasis' | 'strong' | 'emphasis' | 'code' | 'math' | 'cross-reference' | 'footnote'
   match: RegExpMatchArray
 }
 
@@ -71,6 +71,7 @@ const inlinePatterns: Array<[InlineCandidate['kind'], RegExp]> = [
   ['published-value', /\{\{([A-Za-z][A-Za-z0-9_.:-]{0,127})\}\}/],
   ['citation', /\[[^\]\r\n]*@[a-zA-Z0-9_:.+-]+[^\]\r\n]*\]/],
   ['link', /\[([^\]\r\n]+)\]\(([^)\s]+)(?:\s+["']([^"']*)["'])?\)/],
+  ['strong-emphasis', /\*\*\*([^*\r\n]+)\*\*\*/],
   ['strong', /\*\*([^*\r\n]+)\*\*|__([^_\r\n]+)__/],
   ['emphasis', /\*([^*\r\n]+)\*|_([^_\r\n]+)_/],
   ['code', /`([^`\r\n]+)`/],
@@ -145,6 +146,9 @@ function inlineNodes(
     } else if (candidate.kind === 'link') {
       const mark = manuscriptSchema.marks.link.create({ href: candidate.match[2], title: candidate.match[3] || null })
       nodes.push(...marked(inlineNodes(candidate.match[1], id, publishedValues, publishedValueLanguages), mark))
+    } else if (candidate.kind === 'strong-emphasis') {
+      const inner = inlineNodes(candidate.match[1], id, publishedValues, publishedValueLanguages)
+      nodes.push(...marked(marked(inner, manuscriptSchema.marks.strong.create()), manuscriptSchema.marks.emphasis.create()))
     } else if (candidate.kind === 'strong') {
       nodes.push(...marked(inlineNodes(candidate.match[1] ?? candidate.match[2], id, publishedValues, publishedValueLanguages), manuscriptSchema.marks.strong.create()))
     } else if (candidate.kind === 'emphasis') {
@@ -166,6 +170,28 @@ function inlineNodes(
 
 function paragraph(id: string, value: string, publishedValues: Record<string, RetainedPublishedValue>, publishedValueLanguages: Record<string, ExecutionLanguage | undefined>) {
   return manuscriptSchema.nodes.paragraph.createChecked({ id, section: null }, inlineNodes(value, id, publishedValues, publishedValueLanguages))
+}
+
+/** A proposal is inline Markdown and its surrounding spaces belong to the manuscript. */
+export function parseInlineReviewWording(source: string, id: string) {
+  return inlineNodes(source, id, {}, {})
+}
+
+export function inlineReviewTargetRange(content: Fragment, target: ReviewProposalTarget) {
+  if (target.to <= content.size && content.textBetween(target.from, target.to, '', '\uFFFC') === target.quote) {
+    return { from: target.from, to: target.to }
+  }
+  // Locate a uniquely identifiable quote after wording was added before it.
+  let position = 0
+  let rendered = ''
+  content.forEach((node) => {
+    rendered += node.isText ? node.text : '\uFFFC'
+    position += node.nodeSize
+  })
+  if (rendered.length !== position) return undefined
+  const from = rendered.indexOf(target.quote)
+  if (from < 0 || from !== rendered.lastIndexOf(target.quote)) return undefined
+  return { from, to: from + target.quote.length }
 }
 
 function closingFence(lines: SourceLine[], start: number, marker: string) {
@@ -582,7 +608,7 @@ function serializeInline(node: ProseMirrorNode) {
   return node.textContent
 }
 
-function serializeInlineContent(node: ProseMirrorNode, ending = '\n') {
+export function serializeInlineContent(node: ProseMirrorNode, ending = '\n') {
   let value = ''
   node.forEach((child) => { value += serializeInline(child) })
   return value.replace(/\r?\n/g, ending)

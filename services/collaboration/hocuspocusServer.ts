@@ -1,3 +1,4 @@
+import { isReviewProposalTarget } from '../../src/reviewMarkup'
 import { Server, type ServerConfiguration, type Connection, type Document } from '@hocuspocus/server'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { decodeJwt } from 'jose'
@@ -292,17 +293,18 @@ function validNewThread(value: unknown, key: string, userId: string) {
     && SAFE_ID.test(thread.anchorId)
     && thread.status === 'open'
     && validContext(thread.context)
+    && (thread.proposalTarget === undefined || isReviewProposalTarget(thread.proposalTarget))
     && Array.isArray(thread.messages)
     && thread.messages.length <= 500
     && thread.messages.every((message) => validMessage(message, userId))
-    && Object.keys(thread).every((field) => ['id', 'anchorId', 'authorId', 'status', 'messages', 'context'].includes(field))
+    && Object.keys(thread).every((field) => ['id', 'anchorId', 'authorId', 'status', 'messages', 'context', 'proposalTarget'].includes(field))
 }
 
 function validThreadReply(before: unknown, after: unknown, userId: string) {
   if (!before || !after || typeof before !== 'object' || typeof after !== 'object' || Array.isArray(before) || Array.isArray(after)) return false
   const oldThread = before as Record<string, unknown>
   const newThread = after as Record<string, unknown>
-  for (const field of ['id', 'anchorId', 'authorId', 'status', 'context']) {
+  for (const field of ['id', 'anchorId', 'authorId', 'status', 'context', 'proposalTarget']) {
     if (!same(oldThread[field], newThread[field])) return false
   }
   const oldMessages = oldThread.messages
@@ -415,14 +417,14 @@ function validExistingThread(before: unknown, after: unknown, userId: string) {
   if (!before || !after || typeof before !== 'object' || typeof after !== 'object' || Array.isArray(before) || Array.isArray(after)) return false
   const previous = before as Record<string, unknown>
   const next = after as Record<string, unknown>
-  for (const field of ['id', 'anchorId', 'authorId', 'context']) if (!same(previous[field], next[field])) return false
+  for (const field of ['id', 'anchorId', 'authorId', 'context', 'proposalTarget']) if (!same(previous[field], next[field])) return false
   if (typeof next.status !== 'string' || !THREAD_STATUSES.has(next.status) || !validContext(next.context)) return false
   if (!Array.isArray(previous.messages) || !Array.isArray(next.messages) || next.messages.length < previous.messages.length || next.messages.length > 500) return false
   const previousMessages = previous.messages
   const nextMessages = next.messages
   if (!previousMessages.every((message, index) => same(message, nextMessages[index]))) return false
   return nextMessages.slice(previousMessages.length).every((message) => validMessage(message, userId))
-    && Object.keys(next).every((field) => ['id', 'anchorId', 'authorId', 'status', 'messages', 'context'].includes(field))
+    && Object.keys(next).every((field) => ['id', 'anchorId', 'authorId', 'status', 'messages', 'context', 'proposalTarget'].includes(field))
 }
 
 function validThreadStatus(value: unknown, key: string) {

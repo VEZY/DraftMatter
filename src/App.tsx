@@ -4472,6 +4472,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     commentRangeRef.current = range ?? null
     const editor = editorAreaRef.current
     const rect = range?.getBoundingClientRect()
+    if (selection.proposalTarget) structuredEditorRef.current?.flushReviewEdits()
     setComposerAnchorTop(editor && rect ? Math.max(8, rect.top + editor.scrollTop - editor.getBoundingClientRect().top) : undefined)
     setStructuredReviewSelection(selection)
     setReviewContextMenu(undefined)
@@ -4498,17 +4499,10 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   const selectReviewAnchor = (anchorId: string, reviewId?: string) => {
     showReviewPanel()
     const candidates = reviewQueue.filter((item) => item.anchorId === anchorId)
-    const item = candidates.find((candidate) => candidate.id === reviewId)
-      ?? candidates.find((candidate) => candidate.id === activeReviewId)
-      ?? candidates[0]
-    if (!item && reviewId) {
-      setActiveReviewId(reviewId)
-      requestAnimationFrame(() => globalThis.document.getElementById(`review-item-${reviewId}`)?.scrollIntoView({ block: 'nearest' }))
-      return
-    }
-    if (!item) return
-    setActiveReviewId(item.id)
-    requestAnimationFrame(() => globalThis.document.getElementById(`review-item-${item.id}`)?.scrollIntoView({ block: 'nearest' }))
+    const id = reviewId ?? candidates.find((candidate) => candidate.id === activeReviewId)?.id ?? candidates[0]?.id
+    if (!id) return
+    setActiveReviewId(id)
+    requestAnimationFrame(() => globalThis.document.getElementById(`review-item-${id}`)?.scrollIntoView({ block: 'nearest' }))
   }
 
   const liveDocumentSwitchBlocked = () => {

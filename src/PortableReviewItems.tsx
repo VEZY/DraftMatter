@@ -1,10 +1,14 @@
+import { Fragment } from 'prosemirror-model'
+import { inlineReviewTargetRange, parseInlineReviewWording } from './structuredManuscript'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Icon } from './Icon'
+import type { StructuredReviewSelection } from './StructuredManuscriptEditor'
 import { parseReviewMarkup } from './reviewMarkup'
 import {
   appendReviewThreadMessage,
   createReviewChange,
   createReviewThread,
+  createReviewThreadOnProposal,
   ensureReviewAuthor,
   materializeResolvedSuggestions,
   rebaseReviewChange,
@@ -74,7 +78,7 @@ export function PortableReviewItems({
   localAuthor?: LocalAuthorIdentity
   onActiveIdChange?: (id: string | undefined) => void
   onNavigateToItem?: (item: ReviewQueueItem) => void
-  selectedTarget?: { quote: string; occurrence: number } | null
+  selectedTarget?: StructuredReviewSelection | null
   openCommentRequest?: number
   onComposeChange?: (open: boolean) => void
   composerAnchorTop?: number
@@ -116,7 +120,7 @@ export function PortableReviewItems({
   const [reply, setReply] = useState('')
   const [problem, setProblem] = useState('')
   const [compose, setCompose] = useState<'comment' | 'suggestion' | null>(null)
-  const [commentTarget, setCommentTarget] = useState<{ quote: string; occurrence: number } | null>(null)
+  const [commentTarget, setCommentTarget] = useState<StructuredReviewSelection | null>(null)
   const [collapsedThreadIds, setCollapsedThreadIds] = useState<string[]>([])
   const [expandedResolvedThreadIds, setExpandedResolvedThreadIds] = useState<string[]>([])
   const [replyingThreadId, setReplyingThreadId] = useState<string>()
@@ -288,28 +292,35 @@ export function PortableReviewItems({
       setProblem(compose === 'comment' ? 'Select manuscript text and write a comment.' : 'Enter an exact manuscript quote and a replacement.')
       return
     }
-    const matches = uniqueQuote(source, selected)
-    const occurrence = compose === 'comment' ? commentTarget?.occurrence : selectedTarget?.quote === selected ? selectedOccurrence : undefined
-    const selectedMatch = occurrence !== undefined ? matches[occurrence] : undefined
-    if (compose === 'comment' && selectedMatch === undefined) {
-      setProblem('The selected text has changed. Select it again before adding the comment.')
-      return
-    }
-    if (selectedMatch === undefined && matches.length !== 1) {
-      setProblem(matches.length === 0 ? 'That quote was not found in the manuscript.' : 'That quote occurs more than once; use a longer selection.')
-      return
-    }
-    const start = selectedMatch ?? matches[0]
-    const end = start + selected.length
     try {
-      const result = compose === 'comment'
-        ? createReviewThread(source, { start, end, author: localAuthor, message: body.trim() })
-        : createReviewChange(source, { start, end, author: localAuthor, kind: 'replace', proposal: body })
+      const target = compose === 'comment' ? commentTarget?.proposalTarget : undefined
+      let nextSource: string
+      if (target) {
+        const change = document.changes.find(candidate => candidate.id === target.changeId)
+        const content = change?.proposal === undefined ? undefined : Fragment.fromArray(parseInlineReviewWording(change.proposal, change.id))
+        if (!content || !inlineReviewTargetRange(content, target)) {
+          throw Error('The suggested text changed. Select it again before adding the comment.')
+        }
+        nextSource = createReviewThreadOnProposal(source, target, localAuthor, body.trim()).document.source
+      } else {
+        const matches = uniqueQuote(source, selected)
+        const occurrence = compose === 'comment' ? commentTarget?.occurrence : selectedTarget?.quote === selected ? selectedOccurrence : undefined
+        const selectedMatch = occurrence !== undefined ? matches[occurrence] : undefined
+        if (compose === 'comment' && selectedMatch === undefined) throw Error('The selected text has changed. Select it again before adding the comment.')
+        if (selectedMatch === undefined && matches.length !== 1) {
+          throw Error(matches.length === 0 ? 'That quote was not found in the manuscript.' : 'That quote occurs more than once; use a longer selection.')
+        }
+        const start = selectedMatch ?? matches[0]
+        const end = start + selected.length
+        nextSource = (compose === 'comment'
+          ? createReviewThread(source, { start, end, author: localAuthor, message: body.trim() })
+          : createReviewChange(source, { start, end, author: localAuthor, kind: 'replace', proposal: body })).document.source
+      }
       setCompose(null)
       setCommentTarget(null)
       setQuote('')
       setBody('')
-      apply(result.document.source, compose === 'comment' ? 'Portable comment created' : 'Portable suggestion created')
+      apply(nextSource, compose === 'comment' ? 'Portable comment created' : 'Portable suggestion created')
     } catch (error) {
       fail(error)
     }
@@ -357,13 +368,17 @@ export function PortableReviewItems({
           const change = document.changes.find((candidate) => candidate.id === item.id)!
           const locationDetail = item.kind === 'unplaced-change' ? 'Location needs attention'
             : change.changeKind === 'insert' ? undefined : item.excerpt
+          const hasAlternative = item.conflictId && document.changes.some((candidate) =>
+            candidate.id !== change.id && candidate.anchorId === change.anchorId && candidate.status === 'open')
+          let label = item.kind === 'unplaced-change' ? 'Unplaced suggestion' : 'Suggestion'
+          if (item.conflictId) label = hasAlternative ? 'Alternative suggestion' : 'Overlapping suggestion'
           const recovery = recoveryByAnchor.get(item.anchorId)
           const decisionConflict = decisionConflictByChange.get(item.id)
           const overlappingAcceptance = active && canDecide && change.status === 'decision-conflict' && !decisionConflict
             ? collaborativeReview?.overlappingAcceptance(item.id, localAuthor.id) : undefined
           return (
             <div className={`conflict-card portable-review-card ${active ? 'active' : ''}`} id={`review-item-${item.id}`} data-review-balloon={item.id} data-review-balloon-anchor={item.anchorId} key={item.id}>
-              <div className="conflict-heading"><Icon name="branch" size={16} /><span>{item.conflictId ? 'Overlapping suggestion' : item.kind === 'unplaced-change' ? 'Unplaced suggestion' : 'Suggestion'}</span></div>
+              <div className="conflict-heading"><Icon name="branch" size={16} /><span>{label}</span></div>
               <button className={`proposal-option ${active ? 'selected' : ''}`} onClick={() => activate(item.id)}>
                 <span className="avatar avatar-blue avatar-small">{initials(item.authorName)}</span>
                 <span className="proposal-author"><strong>{item.authorName}</strong><small><ReviewTimestamp value={change.updatedAt ?? change.createdAt} verb={change.updatedAt ? 'Updated' : 'Created'} fallback={locationDetail ?? ''} detail={locationDetail} /></small></span>

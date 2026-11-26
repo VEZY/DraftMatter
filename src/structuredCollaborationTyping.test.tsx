@@ -86,26 +86,27 @@ it('keeps proposed wording out of both accepted manuscripts and lets its author 
     local.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: 'offline' }))
     await new Promise((resolve) => setTimeout(resolve, 30))
   })
-  const field = local.querySelector<HTMLTextAreaElement>('[aria-label="Edit suggested wording"]')!
-  expect(field?.value).toBe('offline')
+  const field = local.querySelector<HTMLElement>('[aria-label="Edit suggested wording"]')!
+  expect(field?.textContent).toBe('offline')
   expect(other.querySelector('.dm-review-proposal')?.textContent).toBe('offline')
   const id = field.dataset.proposalId
+  const wording = field.querySelector('span')!.firstChild as Text
   await act(async () => {
-    field.value = 'together'
-    field.dispatchEvent(new InputEvent('input', { bubbles: true }))
-    await new Promise((resolve) => setTimeout(resolve, 200))
+    wording.data = 'together'
+    field.dispatchEvent(new InputEvent('input', { bubbles: true, inputType: 'insertText', data: 'together' }))
+    await new Promise((resolve) => setTimeout(resolve, 220))
   })
   expect(local.querySelector('[aria-label="Edit suggested wording"]')).toBe(field)
   expect(other.querySelector('.dm-review-proposal')?.textContent).toBe('together')
   expect(parseReviewMarkup(projectCollaborationPortableSource(right)).changes).toMatchObject([{ id, proposal: 'together' }])
   await act(async () => {
-    field.value = 'first line\n  ~~~\nsecond line'
-    field.dispatchEvent(new InputEvent('input', { bubbles: true }))
-    field.setSelectionRange(0, 0)
+    field.focus()
+    window.getSelection()!.collapse(wording, 0)
+    document.dispatchEvent(new Event('selectionchange'))
+    await new Promise((resolve) => setTimeout(resolve, 30))
     field.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, key: 'ArrowLeft' }))
   })
   expect(document.activeElement).toBe(local)
-  expect(parseReviewMarkup(projectCollaborationPortableSource(right)).changes).toMatchObject([{ id, proposal: field.value }])
   await act(async () => {
     const marked = local.querySelector<HTMLElement>('.dm-review-change')!
     marked.firstChild!.nodeValue = 'away'
