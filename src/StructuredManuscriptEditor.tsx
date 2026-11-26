@@ -16,7 +16,7 @@ import { EditorState, NodeSelection, TextSelection, type Command, type Transacti
 import { tableEditing } from 'prosemirror-tables'
 import { Decoration, DecorationSet, EditorView, type MarkView, type NodeView } from 'prosemirror-view'
 import { baseKeymap } from 'prosemirror-commands'
-import { Mapping } from 'prosemirror-transform'
+import { Mapping, ReplaceStep } from 'prosemirror-transform'
 import { redoCommand as collaborativeRedo, undoCommand as collaborativeUndo, ySyncPluginKey, yUndoPluginKey } from 'y-prosemirror'
 import { serializeCitationCluster } from './citation'
 import { formatCrossReferenceTarget, isCrossReferenceTarget } from './crossReference'
@@ -52,6 +52,7 @@ import {
   numberedCrossReferenceLabel,
   numberedObjectByNodeId,
   retainedOutputPresentation,
+  type RetainedOutputPresentation,
 } from './numberedObjects'
 import {
   friendlyObjectLabel,
@@ -580,7 +581,7 @@ function reviewDecorations(
   onAnchorSelect?: (anchorId: string, reviewId?: string) => void,
   editing?: { authorId: string; onlyId?: string; history?: (redo: boolean) => boolean; amend: (id: string, value: string) => void; flush: () => void },
 ) {
-  if (!index.records.size || markupView === 'original' || markupView === 'final') return DecorationSet.empty
+  if (!index.records.size || markupView === 'original' || markupView === 'final') return []
   const documentAnchors = new Map<string, { start?: number; end?: number; points: number[] }>()
   document.descendants((node, position) => {
     if (node.type !== manuscriptSchema.nodes.review_anchor) return true
@@ -606,6 +607,7 @@ function reviewDecorations(
       `dm-review-${record.status}`,
       record.changeKind ? `dm-review-kind-${record.changeKind}` : '',
       markupView === 'simple' ? 'dm-review-simple' : 'dm-review-all',
+      markupView === 'simple' && record.status === 'open' && record.changeKind === 'replace' && record.proposal ? 'dm-review-hidden-original' : '',
       active ? 'dm-review-active' : '',
     ].filter(Boolean).join(' ')
     if (anchor.start !== undefined && anchor.end !== undefined && anchor.start < anchor.end) {
@@ -699,7 +701,7 @@ function reviewDecorations(
         wrapper.append(field)
         return wrapper
       }, { key: `dm-edit-wording-${record.id}`, side: 2, stopEvent: () => true, ignoreSelection: true }))
-    } else if ((markupView === 'all' || isInsertion) && record.kind === 'change' && record.changeKind !== 'delete' && record.proposal && proposalPosition !== undefined) {
+    } else if ((markupView === 'all' || isInsertion || (record.status === 'open' && record.changeKind === 'replace')) && record.kind === 'change' && record.changeKind !== 'delete' && record.proposal && proposalPosition !== undefined) {
       const source = record.proposal
       const label = reviewProposalText(source)
       // A space before or after inserted wording also belongs to the manuscript.
@@ -715,7 +717,7 @@ function reviewDecorations(
       }, { key: `dm-review-proposal-${record.id}-${record.proposal}-${proposalPosition}-${record.status}-${active ? 'active' : 'idle'}`, side: 2 }))
     }
   }
-  return DecorationSet.create(document, decorations)
+  return decorations
 }
 
 function publicationBylineDecorations(document: ProseMirrorNode, byline?: PublicationByline) {
@@ -2468,6 +2470,73 @@ function outputNodeView(
     validation.hidden = validSyntax && validKind && unique
     save.disabled = !isEditable() || !validSyntax || !validKind || !unique
   }
+  let renderedOutput: { markdown: string; kind: RetainedOutputPresentation['kind'] } | undefined
+  let renderedImage: { element: HTMLImageElement; source: string } | undefined
+  const refreshImageSource = () => {
+    if (!renderedImage) return
+    const { element, source } = renderedImage
+    const url = safeEmbeddedImageDataUrl(source) ?? resolveAssetUrl(source)
+    if (element.getAttribute('src') === url) return
+    // Decode previews we already have before scrolling reaches them.
+    element.loading = url.startsWith('data:') || url.startsWith('blob:') ? 'eager' : 'lazy'
+    element.src = url
+  }
+  const updateContent = (markdown: string, kind: RetainedOutputPresentation['kind']) => {
+    if (renderedOutput?.markdown === markdown && renderedOutput.kind === kind) {
+      refreshImageSource()
+      return
+    }
+    renderedOutput = { markdown, kind }
+    renderedImage = undefined
+    content.replaceChildren()
+    const markdownImage = retainedMarkdownImage(markdown)
+    const htmlImage = markdownImage ? undefined : embeddedExecutionImageFromHtml(markdown)
+    if (kind === 'image' && (markdownImage || htmlImage)) {
+      const element = document.createElement('img')
+      element.alt = markdownImage?.alt ?? htmlImage?.alt ?? 'Generated image output'
+      element.decoding = 'async'
+      renderedImage = { element, source: markdownImage?.source ?? htmlImage!.source }
+      refreshImageSource()
+      content.append(element)
+    } else if (kind === 'table') {
+      const retainedTable = retainedMarkdownTable(markdown)
+      const retainedHtmlTable = retainedTable ? undefined : executionTableFromHtml(markdown)
+      const tableData = retainedTable ?? (retainedHtmlTable ? {
+        headers: retainedHtmlTable.columns,
+        alignments: retainedHtmlTable.columns.map(() => 'left'),
+        rows: retainedHtmlTable.rows.map((row) => row.map((value) => String(value ?? ''))),
+      } : undefined)
+      if (tableData) {
+        const table = document.createElement('table')
+        const head = document.createElement('thead')
+        const headRow = document.createElement('tr')
+        tableData.headers.forEach((value, index) => {
+          const cell = document.createElement('th')
+          cell.textContent = manuscriptInlinePreview(value)
+          cell.style.textAlign = tableData.alignments[index]
+          headRow.append(cell)
+        })
+        head.append(headRow)
+        const body = document.createElement('tbody')
+        tableData.rows.forEach((values) => {
+          const row = document.createElement('tr')
+          tableData.headers.forEach((_header, index) => {
+            const cell = document.createElement('td')
+            cell.textContent = manuscriptInlinePreview(values[index] ?? '')
+            cell.style.textAlign = tableData.alignments[index]
+            row.append(cell)
+          })
+          body.append(row)
+        })
+        table.append(head, body)
+        content.append(table)
+      }
+    } else {
+      const preview = document.createElement('pre')
+      preview.textContent = markdown
+      content.append(preview)
+    }
+  }
   const updateDom = () => {
     const markdown = retainedOutputBody(String(node.attrs.markdown))
     const presentation = retainedOutputPresentation(String(node.attrs.markdown), node.attrs.kind)
@@ -2508,55 +2577,7 @@ function outputNodeView(
     provenanceText.textContent = sourceCell
       ? `${String(sourceCell.attrs.language).toUpperCase()} source cell · ${provenanceKind}`
       : 'Linked reproducible source cell'
-    content.replaceChildren()
-
-    const markdownImage = retainedMarkdownImage(markdown)
-    const htmlImage = markdownImage ? undefined : embeddedExecutionImageFromHtml(markdown)
-    if (presentation.kind === 'image' && (markdownImage || htmlImage)) {
-      const element = document.createElement('img')
-      element.alt = markdownImage?.alt ?? htmlImage?.alt ?? 'Generated image output'
-      const source = markdownImage?.source ?? htmlImage!.source
-      element.src = safeEmbeddedImageDataUrl(source) ?? resolveAssetUrl(source)
-      element.loading = 'lazy'
-      content.append(element)
-    } else if (presentation.kind === 'table') {
-      const retainedTable = retainedMarkdownTable(markdown)
-      const retainedHtmlTable = retainedTable ? undefined : executionTableFromHtml(markdown)
-      const tableData = retainedTable ?? (retainedHtmlTable ? {
-        headers: retainedHtmlTable.columns,
-        alignments: retainedHtmlTable.columns.map(() => 'left'),
-        rows: retainedHtmlTable.rows.map((row) => row.map((value) => String(value ?? ''))),
-      } : undefined)
-      if (tableData) {
-        const table = document.createElement('table')
-        const head = document.createElement('thead')
-        const headRow = document.createElement('tr')
-        tableData.headers.forEach((value, index) => {
-          const cell = document.createElement('th')
-          cell.textContent = manuscriptInlinePreview(value)
-          cell.style.textAlign = tableData.alignments[index]
-          headRow.append(cell)
-        })
-        head.append(headRow)
-        const body = document.createElement('tbody')
-        tableData.rows.forEach((values) => {
-          const row = document.createElement('tr')
-          tableData.headers.forEach((_header, index) => {
-            const cell = document.createElement('td')
-            cell.textContent = manuscriptInlinePreview(values[index] ?? '')
-            cell.style.textAlign = tableData.alignments[index]
-            row.append(cell)
-          })
-          body.append(row)
-        })
-        table.append(head, body)
-        content.append(table)
-      }
-    } else {
-      const preview = document.createElement('pre')
-      preview.textContent = markdown
-      content.append(preview)
-    }
+    updateContent(markdown, presentation.kind)
     const caption = presentation.caption ? manuscriptInlinePreview(presentation.caption) : ''
     captionPreview.textContent = `${numbered?.number ? `${kindLabel} ${numbered.number}.` : ''}${caption ? `${numbered?.number ? ' ' : ''}${caption}` : ''}`
     captionPreview.hidden = editing || (!numbered?.number && !caption)
@@ -2721,6 +2742,21 @@ function registerSemanticRefresh(view: EditorView, callback: () => void) {
 
 function refreshSemanticPresentation(view: EditorView) {
   semanticRefreshCallbacks.get(view)?.forEach((callback) => callback())
+}
+
+function isPlainProseEdit(transaction: Transaction) {
+  return transaction.steps.every((step, index) => {
+    if (!(step instanceof ReplaceStep) || step.slice.openStart || step.slice.openEnd) return false
+    const before = transaction.docs[index]
+    const start = before.resolve(step.from)
+    if (start.parent.type !== manuscriptSchema.nodes.paragraph || !start.sameParent(before.resolve(step.to))) return false
+    for (const fragment of [before.slice(step.from, step.to).content, step.slice.content]) {
+      for (let child = 0; child < fragment.childCount; child++) {
+        if (!fragment.child(child).isText) return false
+      }
+    }
+    return true
+  })
 }
 
 function semanticDomSelector(value: string) {
@@ -2939,8 +2975,10 @@ function headingNodeView(
       delete dom.dataset.sectionKind
     }
     editorSubtitle.textContent = node.textContent || 'Untitled section'
-    if (sectionLabel) heading.id = sectionLabel
-    else heading.removeAttribute('id')
+    if (heading.id !== sectionLabel) {
+      if (sectionLabel) heading.id = sectionLabel
+      else heading.removeAttribute('id')
+    }
     edit.disabled = !isEditable()
     edit.setAttribute('aria-label', sectionLabel
       ? `Edit section ${sectionLabel} details`
@@ -3043,7 +3081,10 @@ function headingNodeView(
     dom,
     contentDOM: heading,
     stopEvent: (event) => !heading.contains(event.target as Node) && dom.contains(event.target as Node),
-    ignoreMutation: (mutation) => !heading.contains(mutation.target),
+    // The wrapper owns the reference ID. Only the heading's editable content
+    // participates in ProseMirror's DOM reconciliation.
+    ignoreMutation: (mutation) => !heading.contains(mutation.target)
+      || (mutation.type === 'attributes' && mutation.target === heading && mutation.attributeName === 'id'),
     update(next) {
       if (next.type !== node.type || next.attrs.level !== node.attrs.level) return false
       node = next
@@ -3982,20 +4023,41 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     pendingSuggestionRef.current = undefined
     const { acceptedState, draft } = pending
     const caretMoved = !view.state.selection.eq(draft.selection)
-    const keepTyping = continueTyping && view.hasFocus() && !caretMoved && draft.selection.empty
+    const scroller = view.dom.closest<HTMLElement>('.editor-area')
+    let keepTyping = continueTyping && view.hasFocus() && !caretMoved && draft.selection.empty
+    if (keepTyping && scroller?.clientHeight) {
+      const viewport = scroller.getBoundingClientRect()
+      const caret = view.coordsAtPos(draft.selection.head)
+      keepTyping = caret.bottom > viewport.top && caret.top < viewport.bottom
+    }
     const restored = caretMoved ? acceptedState.apply(acceptedState.tr.setSelection(
       view.state.selection.map(acceptedState.doc, pending.mapping.invert()),
     )) : acceptedState
-    // Replacing the typed text with its proposal widget can move the native selection
-    // during reconciliation. Keep the writer's viewport across that synchronous handoff.
-    const scroller = keepTyping ? view.dom.closest<HTMLElement>('.editor-area') : null
     const scrollTop = scroller?.scrollTop
     view.updateState(restored)
     if (!draft.doc.eq(acceptedState.doc) && !readOnlyRef.current) {
       const draftSource = serializeEditorDocument(draft.doc, metadataRef.current!)
       captureSuggestion(view, pending.acceptedSource, draftSource, 'text', keepTyping)
     }
-    if (scroller && scrollTop !== undefined) scroller.scrollTop = scrollTop
+    if (!scroller || scrollTop === undefined) return
+    if (scroller.scrollTop !== scrollTop) scroller.scrollTop = scrollTop
+
+    const owner = view.dom.ownerDocument
+    const field = owner.activeElement
+    if (!keepTyping || !field?.matches('textarea.dm-review-wording')) return
+
+    // WebKit can reveal the native textarea selection after the proposal's
+    // layout settles, even when focus used preventScroll.
+    const input = new AbortController()
+    for (const event of ['pointerdown', 'wheel', 'touchstart', 'keydown']) {
+      owner.addEventListener(event, () => input.abort(), { capture: true, signal: input.signal })
+    }
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      if (!input.signal.aborted && !view.isDestroyed && owner.activeElement === field && scroller.scrollTop !== scrollTop) {
+        scroller.scrollTop = scrollTop
+      }
+      input.abort()
+    }))
   }
 
   const queueSuggestion = (view: EditorView, acceptedState: EditorState, draft: EditorState, edit: Transaction) => {
@@ -4478,7 +4540,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     },
     scrollToReviewAnchor: (anchorId) => {
       const element = [...(hostRef.current?.querySelectorAll<HTMLElement>('[data-review-anchor]') ?? [])]
-        .find((candidate) => candidate.dataset.reviewAnchor === anchorId)
+        .find((candidate) => candidate.dataset.reviewAnchor === anchorId && !candidate.classList.contains('dm-review-hidden-original'))
       if (!element || typeof element.scrollIntoView !== 'function') return false
       element.scrollIntoView({ behavior: motionAwareScrollBehavior(), block: 'center' })
       return true
@@ -4624,6 +4686,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         if (![...pendingFigureImportsRef.current].some((pending) => pending.view === editorView)) host.removeAttribute('aria-busy')
       }
     }
+    let decorationCache: { inputs: readonly unknown[]; set: DecorationSet } | undefined
     const view = new EditorView(host, {
       state: editorState(parsed.document, collaboration, searchOptions()),
       editable: () => !readOnlyRef.current,
@@ -4634,42 +4697,63 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         spellcheck: 'true',
         class: 'structured-editor-content',
       },
-      decorations: (state) => DecorationSet.create(state.doc, [
-        ...(pendingSuggestionRef.current?.draft.doc === state.doc
-          && (!reviewAuthorIdRef.current || reviewAuthorIdRef.current === suggestionAuthorRef.current.id)
-          ? pendingTextDecorations(pendingSuggestionRef.current.acceptedState.doc, state.doc, markupViewRef.current) : []),
-        ...publicationBylineDecorations(state.doc, publicationBylineRef.current),
-        ...reviewDecorations(
-          state.doc,
-          reviewDecorationRef.current!,
-          markupViewRef.current,
-          reviewAuthorIdRef.current,
-          activeReviewIdRef.current,
-          activeReviewAnchorIdRef.current,
-          (anchorId, reviewId) => onReviewAnchorSelectRef.current?.(anchorId, reviewId),
-          (collaborationRef.current || localWordingId.current) && suggestionModeRef.current && !readOnlyRef.current
-            ? { authorId: suggestionAuthorRef.current.id, amend: amendWording, flush: flushWording,
-                onlyId: collaborationRef.current ? undefined : localWordingId.current,
-                history: collaborationRef.current ? undefined : performHistory }
-            : undefined,
-        ).find(),
-        ...blockHandleDecorations(state.doc, readOnlyRef.current, (sourceId, direction) => {
-          moveBlockByKeyboard(viewRef.current ?? view, sourceId, direction)
-        }, (sourceId) => {
-          draggedBlockIdRef.current = sourceId
-          host.dataset.pointerBlockDragging = 'true'
-        }, (sourceId, clientX, clientY, target) => {
-          showPointerTarget(viewRef.current ?? view, sourceId, clientX, clientY, target)
-        }, (sourceId, clientX, clientY, fallback) => {
-          const editorView = viewRef.current ?? view
-          const target = pointerTarget(editorView, sourceId, clientX, clientY, fallback)
-          if (target) moveBlock(editorView, sourceId, target.id, target.placement)
-        }, () => {
-          draggedBlockIdRef.current = undefined
-          hidePointerTarget()
-          delete host.dataset.pointerBlockDragging
-        }),
-      ]),
+      decorations: (state) => {
+        const pending = pendingSuggestionRef.current
+        const byline = publicationBylineRef.current
+        const reviewIndex = reviewDecorationRef.current!
+        const markup = markupViewRef.current
+        const authorFilter = reviewAuthorIdRef.current
+        const activeReview = activeReviewIdRef.current
+        const activeAnchor = activeReviewAnchorIdRef.current
+        const shared = Boolean(collaborationRef.current)
+        const wordingId = localWordingId.current
+        const tracking = suggestionModeRef.current
+        const author = suggestionAuthorRef.current.id
+        const readOnly = readOnlyRef.current
+        // Moving the caret or changing focus leaves these decorations intact.
+        const inputs = [state.doc, pending, byline, reviewIndex, markup, authorFilter, activeReview,
+          activeAnchor, shared, wordingId, tracking, author, readOnly]
+        const cached = decorationCache
+        if (cached && inputs.every((value, index) => value === cached.inputs[index])) return cached.set
+        const set = DecorationSet.create(state.doc, [
+          ...(pending?.draft.doc === state.doc
+            && (!authorFilter || authorFilter === author)
+            ? pendingTextDecorations(pending.acceptedState.doc, state.doc, markup) : []),
+          ...publicationBylineDecorations(state.doc, byline),
+          ...reviewDecorations(
+            state.doc,
+            reviewIndex,
+            markup,
+            authorFilter,
+            activeReview,
+            activeAnchor,
+            (anchorId, reviewId) => onReviewAnchorSelectRef.current?.(anchorId, reviewId),
+            (shared || wordingId) && tracking && !readOnly
+              ? { authorId: author, amend: amendWording, flush: flushWording,
+                  onlyId: shared ? undefined : wordingId,
+                  history: shared ? undefined : performHistory }
+              : undefined,
+          ),
+          ...blockHandleDecorations(state.doc, readOnly, (sourceId, direction) => {
+            moveBlockByKeyboard(viewRef.current ?? view, sourceId, direction)
+          }, (sourceId) => {
+            draggedBlockIdRef.current = sourceId
+            host.dataset.pointerBlockDragging = 'true'
+          }, (sourceId, clientX, clientY, target) => {
+            showPointerTarget(viewRef.current ?? view, sourceId, clientX, clientY, target)
+          }, (sourceId, clientX, clientY, fallback) => {
+            const editorView = viewRef.current ?? view
+            const target = pointerTarget(editorView, sourceId, clientX, clientY, fallback)
+            if (target) moveBlock(editorView, sourceId, target.id, target.placement)
+          }, () => {
+            draggedBlockIdRef.current = undefined
+            hidePointerTarget()
+            delete host.dataset.pointerBlockDragging
+          }),
+        ])
+        decorationCache = { inputs, set }
+        return set
+      },
       handleDOMEvents: {
         beforeinput: (editorView, event) => {
           if (event.inputType === 'historyUndo' || event.inputType === 'historyRedo') {
@@ -4920,8 +5004,11 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
         }
         view.updateState(next)
         if (transaction.getMeta(manuscriptSearchKey) && !transaction.docChanged) return
-        refreshSemanticPresentation(view)
-        refreshFootnotePresentation(view)
+        // A prose-only replacement cannot change numbering, reference targets, or figure bodies.
+        if (next.doc !== previous.doc && (next.doc !== transaction.doc || !isPlainProseEdit(transaction))) {
+          refreshSemanticPresentation(view)
+          refreshFootnotePresentation(view)
+        }
         emitReviewSelection(view)
         if (next.doc !== previous.doc) onOutlineRef.current?.(outlineFor(next.doc))
         if (reviewStep instanceof ReviewSourceStep) {
@@ -5010,7 +5097,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
     if (collaborationRef.current) syncWordingFields(view)
   }, [source])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     markupViewRef.current = markupView
     reviewAuthorIdRef.current = reviewAuthorId
     activeReviewIdRef.current = activeReviewId

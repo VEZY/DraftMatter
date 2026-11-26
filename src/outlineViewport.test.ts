@@ -36,7 +36,8 @@ describe('active manuscript outline section', () => {
     active.scrollIntoView = scrollIntoView
 
     expect(keepActiveOutlineItemVisible(tree)).toBe(true)
-    expect(scrollIntoView).toHaveBeenCalledWith({ behavior: 'auto', block: 'nearest', inline: 'nearest' })
+    expect(tree.scrollTop).toBe(64)
+    expect(scrollIntoView).not.toHaveBeenCalled()
     expect(tree.children).toHaveLength(1)
   })
 

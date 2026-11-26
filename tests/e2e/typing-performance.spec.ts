@@ -156,3 +156,53 @@ test('ordinary typing stays responsive with a large library without citation fli
   expect(await entries.allTextContents()).toEqual(initialBibliography)
   expect(await page.evaluate((key) => localStorage.getItem(key), CITATIONS_KEY)).toBe(libraryBeforeReload)
 })
+
+test('a click after fast scrolling puts the caret in the visible passage', async ({ page }) => {
+  const passages = Array.from({ length: 300 }, (_, index) =>
+    `Passage ${index + 1}. ` + 'The synthetic manuscript pairs its observations with the corresponding methods. '.repeat(4),
+  )
+  const source = '# Scroll and edit\n\n' + passages.map((passage, index) =>
+    index % 10 === 0 ? `## Section ${1 + index / 10}\n\n${passage}` : passage,
+  ).join('\n\n')
+  await page.addInitScript((source) => {
+    localStorage.setItem('draftmatter.structured-source.v1', source)
+    localStorage.setItem('draftmatter.structured-mode.v1', 'true')
+  }, source)
+  await page.goto('/draft')
+  const scroller = page.locator('.editor-area')
+  const editor = page.getByRole('textbox', { name: 'Rendered manuscript editor', exact: true })
+  await expect(editor.locator(':scope > p')).toHaveCount(passages.length)
+
+  for (const fraction of [0.7, 0.2, 0.85, 0.45]) {
+    const target = await scroller.evaluate((element, fraction) => {
+      element.scrollTop = (element.scrollHeight - element.clientHeight) * fraction
+      const bounds = element.getBoundingClientRect()
+      const paragraph = [...element.querySelectorAll('.ProseMirror > p')].find((p) => {
+        const rect = p.getBoundingClientRect()
+        return rect.top > bounds.top + 200 && rect.top < bounds.bottom - 80
+      })!
+      const range = document.createRange()
+      range.setStart(paragraph.firstChild!, 2)
+      range.setEnd(paragraph.firstChild!, 3)
+      const letter = range.getBoundingClientRect()
+      return {
+        x: letter.left + letter.width / 2, y: letter.top + letter.height / 2,
+        passage: paragraph.textContent!, scrollTop: element.scrollTop,
+      }
+    }, fraction)
+    await page.mouse.click(target.x, target.y)
+    const selection = await editor.evaluate((element) => {
+      const selection = window.getSelection()
+      const paragraph = selection?.focusNode?.parentElement?.closest('p')
+      return selection?.isCollapsed && paragraph && element.contains(paragraph) ? paragraph.textContent : null
+    })
+    expect(selection).toBe(target.passage)
+    expect(Math.abs(await scroller.evaluate((element) => element.scrollTop) - target.scrollTop)).toBeLessThan(12)
+  }
+
+  expect(await page.evaluate((key) => localStorage.getItem(key), SOURCE_KEY)).toBe(source)
+  await page.keyboard.type('XYZ')
+  await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), SOURCE_KEY)).toContain('XYZ')
+  await page.keyboard.press('ControlOrMeta+z')
+  await expect.poll(() => page.evaluate((key) => localStorage.getItem(key), SOURCE_KEY)).not.toContain('XYZ')
+})

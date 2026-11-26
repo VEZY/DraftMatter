@@ -20,13 +20,12 @@ export function readingMinutesForWords(words: number) {
 }
 
 /** Derive reader-facing metrics from semantic manuscript content, excluding code, outputs, raw syntax, and review records. */
-export function measurePortableManuscript(source: string): ManuscriptMetrics {
-  const parsed = parseStructuredManuscript(source)
+export function measurePortableManuscript(source: string, document = parseStructuredManuscript(source).document): ManuscriptMetrics {
   const prose: string[] = []
   let headings = 0
   let hasDocumentHeading = false
 
-  parsed.document.descendants((node) => {
+  document.descendants((node) => {
     const name = node.type.name
     if (name === 'heading') {
       headings += 1

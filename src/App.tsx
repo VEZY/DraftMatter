@@ -1609,10 +1609,11 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
 
   useEffect(() => { setValueSelection(undefined); setDrawerSourceId(undefined) }, [filename, desktopSession?.root, activeCollaborationLaunch, manuscriptFileActive])
 
+  const outlineVisible = leftPanelOpen && !projectFilesOpen && !(gitPanelOpen && desktopSession)
   useEffect(() => {
     const boundary = editorAreaRef.current
     const outline = structuredMode ? structuredOutline : legacyOutlineItems
-    if (!boundary || !outline.length) {
+    if (!boundary || !outline.length || !outlineVisible) {
       setActiveOutlineId(undefined)
       return
     }
@@ -1622,7 +1623,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       frame = undefined
       const boundaryRect = boundary.getBoundingClientRect()
       const structuredHeadings = new Map(
-        [...boundary.querySelectorAll<HTMLElement>('.structured-manuscript-editor [data-dm-id]')]
+        [...boundary.querySelectorAll<HTMLElement>('.structured-manuscript-editor .structured-heading-card[data-dm-id]')]
           .map((element) => [element.dataset.dmId, element] as const),
       )
       const positions = outline.flatMap((item) => {
@@ -1658,7 +1659,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
       resizeObserver?.disconnect()
       if (frame !== undefined) window.cancelAnimationFrame(frame)
     }
-  }, [structuredMode, structuredOutline])
+  }, [structuredMode, structuredOutline, outlineVisible])
 
   useEffect(() => {
     keepActiveOutlineItemVisible(outlineTreeRef.current)
@@ -2131,7 +2132,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     return () => window.clearTimeout(timeout)
   }, [toast])
 
-  const manuscriptMetrics = useMemo(() => measurePortableManuscript(manuscriptSource), [manuscriptSource])
+  const manuscriptMetrics = useMemo(() => measurePortableManuscript(manuscriptSource, workingDocument), [manuscriptSource, workingDocument])
   const words = manuscriptMetrics.words
 
   const cleanSourceResult = sourceTab === 'reviewed' ? null : projectCurrentManuscriptSource(manuscriptSource, draft, structuredMode, sourceTab)
@@ -2410,8 +2411,8 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
           checkedRun = { source: manuscriptSource, id: certification.cleanRunId, problem }
         }
         if (!disposed && executionTrackerRef.current === tracker) {
-          setExecutionCellStates(tracker.snapshot())
-          setCleanRunCertification(tracker.cleanRunCertification())
+          setExecutionCellStates(previous => JSON.stringify(previous) === JSON.stringify(states) ? previous : states)
+          setCleanRunCertification(previous => JSON.stringify(previous) === JSON.stringify(certification) ? previous : certification)
           setVerifiedRun(certification ? checkedRun : undefined)
         }
       } finally {
@@ -4426,7 +4427,26 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     setRightPanelOpen(true)
   }
 
+  const readingPosition = useRef<{ id: string; top: number } | undefined>(undefined)
+  useLayoutEffect(() => {
+    const position = readingPosition.current
+    readingPosition.current = undefined
+    const editor = editorAreaRef.current
+    if (!editor || !position) return
+    const block = editor.querySelector<HTMLElement>(`.ProseMirror > [data-dm-id="${CSS.escape(position.id)}"]`)
+    if (block) editor.scrollTop += block.getBoundingClientRect().top - position.top
+  }, [markupView])
+
   const setTrackedChangesDisplay = (display: MarkupView) => {
+    if (display === markupView) return
+    const editor = editorAreaRef.current
+    if (editor) {
+      const bounds = editor.getBoundingClientRect()
+      const line = bounds.top + bounds.height / 3
+      const block = [...editor.querySelectorAll<HTMLElement>('.ProseMirror > [data-dm-id]')]
+        .find(element => element.getBoundingClientRect().bottom >= line)
+      if (block?.dataset.dmId) readingPosition.current = { id: block.dataset.dmId, top: block.getBoundingClientRect().top }
+    }
     setMarkupView(display)
     if (display === 'simple') showReviewPanel()
   }

@@ -27,6 +27,40 @@ test('accepting a tracked edit in the example abstract leaves ordinary editable 
   await expect(abstract).toContainText('a complete, simulated drought-phenotyping study')
 })
 
+test('capturing a tracked edit near the end keeps the paper in place and lets the next click move the caret', async ({ page }) => {
+  await page.goto('/demo')
+  const editor = page.getByRole('textbox', { name: 'Rendered manuscript editor', exact: true })
+  const scroller = page.locator('.editor-area')
+  const finalParagraph = editor.locator('p').filter({ hasText: 'The complete source, review records' })
+  const earlierParagraph = editor.locator('p').filter({ hasText: 'This example uses aggregate synthetic data' })
+  const figures = editor.locator('.structured-output-content > img')
+  await expect(figures).toHaveCount(3)
+  await expect.poll(() => figures.evaluateAll(images => images.every(image =>
+    image instanceof HTMLImageElement && image.complete && image.naturalHeight > 0))).toBe(true)
+  const unchangedBlocks = await editor.locator('.structured-heading-card, .structured-output-content > img').elementHandles()
+
+  await page.getByRole('button', { name: 'Turn on track changes' }).click()
+  await finalParagraph.evaluate(element => element.scrollIntoView({ block: 'center' }))
+  await selectRenderedTextWithMouse(page, finalParagraph, 'review records')
+  const readScroll = () => scroller.evaluate(element => element.scrollTop)
+  await page.keyboard.type('documentary trail')
+  const typingScroll = await readScroll()
+  const wording = finalParagraph.locator('textarea[data-proposal-id]')
+  await expect(wording).toBeFocused()
+  await expect(wording).toHaveValue('documentary trail')
+  // Let the DOM observer and scroll event complete the suggestion handoff.
+  await page.evaluate(() => new Promise<void>(resolve => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))))
+  expect(Math.abs(await readScroll() - typingScroll)).toBeLessThan(30)
+
+  await earlierParagraph.evaluate(element => element.scrollIntoView({ block: 'center' }))
+  const earlierScroll = await readScroll()
+  await earlierParagraph.click()
+  const clickedHere = () => earlierParagraph.evaluate(paragraph => paragraph.contains(window.getSelection()?.focusNode ?? null))
+  await expect.poll(clickedHere).toBe(true)
+  expect(Math.abs(await readScroll() - earlierScroll)).toBeLessThan(12)
+  for (const element of unchangedBlocks) expect(await element.evaluate(node => node.isConnected)).toBe(true)
+})
+
 test('the anonymous example supports editing and citations without reading, replacing or uploading a private draft', async ({ page, baseURL }) => {
   test.setTimeout(90_000)
   const errors: string[] = []

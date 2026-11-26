@@ -57,7 +57,14 @@ test.describe('DM-P4-05 markup filtering and navigation', () => {
 
     await page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('button', { name: 'Margin notes', exact: true }).click()
     await expect(page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('button', { name: 'Margin notes', exact: true })).toHaveAttribute('aria-pressed', 'true')
-    await expect(manuscript.locator('.dm-review-proposal')).toHaveCount(0)
+    await expect(manuscript.locator('.dm-review-proposal')).toHaveText('revised alpha phrase')
+    const usesWebKitLayout = await page.evaluate(() => CSS.supports('-webkit-hyphens', 'none'))
+    if (usesWebKitLayout) {
+      await expect(marks.first()).toBeVisible()
+      await expect(marks.first()).toHaveCSS('text-decoration-line', 'line-through')
+    } else {
+      await expect(marks.first()).toBeHidden()
+    }
     await expect(marks).toHaveCount(1)
     await page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('button', { name: 'In text', exact: true }).click()
     await expect(page.getByRole('dialog', { name: 'Review options', exact: true }).getByRole('button', { name: 'In text', exact: true })).toHaveAttribute('aria-pressed', 'true')
@@ -103,4 +110,18 @@ test.describe('DM-P4-05 modeled review alternatives', () => {
     await review.getByRole('button', { name: 'Previous review item' }).click()
     await expect(reviewedSentence.locator('.dm-review-proposal')).toHaveText('reduced leaf area by 18%')
   })
+})
+
+test('changing markup keeps the Limitations section at its reading position in the complete example', async ({ page }) => {
+  await page.goto('/demo')
+  const heading = page.getByRole('heading', { name: 'Limitations', exact: true })
+  await heading.evaluate(element => element.scrollIntoView({ block: 'center' }))
+  const top = () => heading.evaluate(element => element.getBoundingClientRect().top)
+  const before = await top()
+  await page.getByRole('button', { name: 'Review options', exact: true }).click()
+  const options = page.getByRole('dialog', { name: 'Review options', exact: true })
+  for (const mode of ['In text', 'Margin notes']) {
+    await options.getByRole('button', { name: mode, exact: true }).click()
+    await expect.poll(async () => Math.abs(await top() - before)).toBeLessThan(30)
+  }
 })

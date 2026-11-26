@@ -5461,6 +5461,16 @@ img.ProseMirror-separator { border: 0 !important; display: inline !important; he
 .dm-review-needs-rebase { background: rgba(202, 143, 73, .16); border-bottom-color: rgba(168, 105, 42, .62); }
 .dm-review-resolved, .dm-review-accepted, .dm-review-rejected { opacity: .72; }
 .dm-review-simple { background: transparent; border-bottom-style: dotted; }
+.structured-editor-content .dm-review-hidden-original { display: none; }
+/* WebKit can hang computing AXVisibleCharacterRange around a hidden replacement
+   followed by an inline proposal. Keep the original in the line box there. */
+@supports (-webkit-hyphens: none) {
+  .structured-editor-content .dm-review-hidden-original {
+    display: inline;
+    text-decoration: line-through;
+  }
+}
+
 .dm-review-all.dm-review-kind-delete, .dm-review-all.dm-review-kind-replace, .dm-review-all.dm-review-kind-format, .dm-review-all.dm-review-kind-structural { text-decoration: line-through; text-decoration-color: rgba(159, 84, 69, .68); text-decoration-thickness: 1px; }
 .dm-review-active { background: rgba(91, 145, 112, .22); box-shadow: 0 2px 0 rgba(69, 119, 88, .28); }
 .dm-review-thread.dm-review-active { background: rgba(230, 194, 83, .28); box-shadow: 0 2px 0 rgba(178, 139, 34, .3); }
@@ -8266,11 +8276,9 @@ kbd {
   border: 1px solid rgba(36, 36, 36, .48);
   border-radius: inherit;
   content: "";
-  filter: url("#app-pencil-wobble-deep");
   inset: 0 -1px -1px 0;
   pointer-events: none;
   position: absolute;
-  transform: rotate(.025deg);
   z-index: 5;
 }
 

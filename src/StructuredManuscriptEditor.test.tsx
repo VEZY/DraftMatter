@@ -255,6 +255,28 @@ describe('full structured manuscript editor', () => {
     expect(changed).not.toHaveBeenCalled()
   })
 
+  it('reuses manuscript decorations for caret moves and refreshes them when the document changes', async () => {
+    const setProps = vi.spyOn(EditorView.prototype, 'setProps')
+    const onChange = vi.fn()
+    await act(async () => root.render(<StructuredManuscriptEditor source={shortSource} onChange={onChange} />))
+    const view = setProps.mock.contexts[0] as EditorView
+    const decorations = view.props.decorations!
+    const initial = decorations(view.state)
+    const text = view.dom.querySelector('p')!.firstChild!
+
+    for (const offset of [2, 8, 4]) {
+      await act(async () => view.dispatch(view.state.tr.setSelection(
+        TextSelection.create(view.state.doc, view.posAtDOM(text, offset)),
+      )))
+      expect(decorations(view.state)).toBe(initial)
+    }
+    expect(onChange).not.toHaveBeenCalled()
+
+    await act(async () => view.dispatch(view.state.tr.insertText('extra ')))
+    expect(decorations(view.state)).not.toBe(initial)
+    expect(onChange).toHaveBeenCalledTimes(1)
+  })
+
   it('finds prose without changing the editing selection, source or undo history and updates counts after edits', async () => {
     const manuscript = '# Evidence study\n\nBefore **evidence** after. Another evidence.\n'
     const onChange = vi.fn(), onSearch = vi.fn(), selected = vi.fn(), editor = createRef<StructuredManuscriptEditorHandle>()
@@ -951,7 +973,8 @@ print("result")
         markupView="simple"
       />,
     ))
-    expect(container.querySelectorAll('.dm-review-proposal')).toHaveLength(0)
+    expect(container.querySelector('.dm-review-proposal')?.textContent).toBe('Revised beta phrase')
+    expect(container.querySelector('.dm-review-hidden-original')?.textContent).toBe('Beta phrase')
 
   })
 

@@ -32,10 +32,10 @@ export function activeOutlineIdAtViewport(
 
 export function keepActiveOutlineItemVisible(tree: HTMLElement | null) {
   const active = tree?.querySelector<HTMLElement>('[aria-current="location"]')
-  if (!tree || !active || typeof active.scrollIntoView !== 'function') return false
+  if (!tree || !active) return false
   const treeRect = tree.getBoundingClientRect()
   const activeRect = active.getBoundingClientRect()
   if (activeRect.top >= treeRect.top && activeRect.bottom <= treeRect.bottom) return false
-  active.scrollIntoView({ behavior: 'auto', block: 'nearest', inline: 'nearest' })
+  tree.scrollTop += activeRect.top < treeRect.top ? activeRect.top - treeRect.top : activeRect.bottom - treeRect.bottom
   return true
 }

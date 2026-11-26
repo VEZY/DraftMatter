@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, type ReactNode, type RefObject } from 'react'
+import { useCallback, useEffect, useRef, type ReactNode, type RefObject } from 'react'
 import { alignReviewBalloons, type ReviewBalloonMeasurement } from './reviewBalloonAlignment'
 
 const BALLOON_SELECTOR = '[data-review-balloon][data-review-balloon-anchor], [data-review-balloon][data-review-balloon-target-top]'
@@ -32,6 +32,7 @@ export function AlignedReviewRail({
     const anchorOrder = new Map<string, number>()
     editor.querySelectorAll<HTMLElement>(ANCHOR_SELECTOR).forEach((anchor) => {
       const anchorId = anchor.dataset.reviewAnchor
+      if (anchor.classList.contains('dm-review-hidden-original')) return
       if (anchorId && !anchors.has(anchorId)) {
         anchorOrder.set(anchorId, anchors.size)
         anchors.set(anchorId, anchor)
@@ -100,16 +101,13 @@ export function AlignedReviewRail({
   }, [editorRef])
 
   const schedule = useCallback(() => {
-    if (frameRef.current !== undefined) cancelAnimationFrame(frameRef.current)
+    if (frameRef.current !== undefined) return
     frameRef.current = requestAnimationFrame(() => {
       frameRef.current = undefined
       align()
     })
   }, [align])
 
-  useLayoutEffect(() => {
-    schedule()
-  })
 
   useEffect(() => {
     const editor = editorRef.current
@@ -122,7 +120,7 @@ export function AlignedReviewRail({
     }
     const mutations = new MutationObserver(schedule)
     mutations.observe(editor, { childList: true, characterData: true, subtree: true })
-    mutations.observe(rail, { childList: true, characterData: true, subtree: true })
+    mutations.observe(rail, { childList: true, characterData: true, subtree: true, attributes: true, attributeFilter: ['data-review-balloon-target-top', 'data-review-balloon-anchor'] })
 
     const ResizeObserverConstructor = globalThis.ResizeObserver
     const resizeObserver = ResizeObserverConstructor ? new ResizeObserverConstructor(schedule) : undefined
@@ -139,6 +137,7 @@ export function AlignedReviewRail({
     return () => {
       active = false
       if (frameRef.current !== undefined) cancelAnimationFrame(frameRef.current)
+      frameRef.current = undefined
       mutations.disconnect()
       resizeObserver?.disconnect()
       resizeObserverRef.current = undefined
