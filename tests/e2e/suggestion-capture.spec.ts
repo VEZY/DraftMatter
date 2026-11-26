@@ -167,6 +167,9 @@ test.describe('DM-P4-02 rendered suggestion transactions', () => {
     await expect(wording).toHaveAttribute('data-proposal-id', id!)
     await waitForChangeCount(page, 1)
 
+    // Formatting leaves the entire word selected. Dragging from inside that
+    // selection may move the text instead of starting a new selection.
+    await wording.press('ArrowLeft')
     await selectRenderedTextWithMouse(page, wording, 'at')
     await page.getByRole('button', { name: 'Add comment to selection' }).click()
     const comment = page.getByRole('textbox', { name: 'Comment', exact: true })

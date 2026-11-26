@@ -47,7 +47,7 @@ test.describe('DM-P4-01 aligned review balloons', () => {
     const initial = await page.evaluate(() => {
       const changeBalloon = document.querySelector<HTMLElement>('[data-review-balloon="dm-change-line"]')!
       const threadBalloon = document.querySelector<HTMLElement>('[data-review-balloon="dm-thread-note"]')!
-      const anchor = document.querySelector<HTMLElement>('.editor-area [data-review-anchor="dm-line"]')!
+      const anchor = document.querySelector<HTMLElement>('.editor-area .dm-review-proposal[data-review-anchor="dm-line"]')!
       return {
         anchorTop: anchor.getBoundingClientRect().top,
         changeTop: changeBalloon.getBoundingClientRect().top,
@@ -64,7 +64,7 @@ test.describe('DM-P4-01 aligned review balloons', () => {
 
     const scrolled = await page.evaluate(() => {
       const balloon = document.querySelector<HTMLElement>('[data-review-balloon="dm-change-line"]')!
-      const anchor = document.querySelector<HTMLElement>('.editor-area [data-review-anchor="dm-line"]')!
+      const anchor = document.querySelector<HTMLElement>('.editor-area .dm-review-proposal[data-review-anchor="dm-line"]')!
       return balloon.getBoundingClientRect().top - anchor.getBoundingClientRect().top
     })
     expect(Math.abs(scrolled)).toBeLessThanOrEqual(1)
