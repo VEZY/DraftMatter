@@ -56,7 +56,8 @@ function proposalRecord(proposal: CollaborativeProposal, status: string, context
   const base = proposal.baseRevision ? ` data-base-revision="${escapedAttribute(proposal.baseRevision)}"` : ''
   const proposed = proposal.proposal === undefined ? '' : literalBlock('dm-proposal', proposal.proposal)
   const rationale = proposal.rationale?.trim() ? literalBlock('dm-rationale', proposal.rationale) : ''
-  return `:::: {#${proposal.id} .dm-change data-anchor="${proposal.anchorId}" data-author="${proposal.authorId}" data-kind="${escapedAttribute(proposal.kind)}" data-status="${escapedAttribute(status)}"${base}}\n${contextBlocks(context)}${proposed}${rationale}::::\n`
+  const nested = proposal.nestedTarget ? literalBlock('dm-nested-target', JSON.stringify(proposal.nestedTarget)) : ''
+  return `:::: {#${proposal.id} .dm-change data-anchor="${proposal.anchorId}" data-author="${proposal.authorId}" data-kind="${escapedAttribute(proposal.kind)}" data-status="${escapedAttribute(status)}"${base}}\n${contextBlocks(context)}${proposed}${rationale}${nested}::::\n`
 }
 
 function threadRecord(thread: CollaborativeThread, context?: ReviewAnchorContext) {

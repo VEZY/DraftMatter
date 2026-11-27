@@ -13,12 +13,22 @@ export interface ProposalCommentHighlight {
   anchorId: string
 }
 
+export interface NestedWordingPatch {
+  id: string
+  anchorId: string
+  from: number
+  to: number
+  proposal: string
+  children: NestedWordingPatch[]
+  highlight?: ProposalCommentHighlight
+}
+
 const commentClasses = 'dm-review-thread dm-review-active dm-review-proposal-comment'
 
 interface ReviewWordingEditor {
   position: () => number | undefined
   focus: (edge: 'start' | 'end', offset?: number) => void
-  sync: (source: string, highlight?: ProposalCommentHighlight) => void
+  sync: (source: string, highlight?: ProposalCommentHighlight, patches?: NestedWordingPatch[]) => void
   selection?: () => ReviewProposalTarget | null
   format?: (mark: 'strong' | 'emphasis') => boolean
   destroy: () => void
@@ -26,10 +36,49 @@ interface ReviewWordingEditor {
 
 export const reviewWordingEditors = new WeakMap<Node, ReviewWordingEditor>()
 
-export function renderInlineReviewWording(source: string, id: string, owner: Document, highlight?: ProposalCommentHighlight) {
-  const content = Fragment.fromArray(parseInlineReviewWording(source, id))
+function nestedWidget(owner: Document, patch: NestedWordingPatch) {
+  const widget = owner.createElement('span')
+  widget.className = 'dm-review-proposal dm-review-open dm-review-insertion dm-review-nested-insertion'
+  widget.dataset.reviewAnchor = patch.anchorId
+  return widget
+}
+
+export function renderInlineReviewWording(source: string, id: string, owner: Document, highlight?: ProposalCommentHighlight, patches: NestedWordingPatch[] = []) {
+  const content = Fragment.fromArray(parseInlineReviewWording(patches.length ? source.slice(proposalParagraphPrefix(source).length) : source, id))
   const serializer = DOMSerializer.fromSchema(schema)
   const render = (fragment: Fragment) => serializer.serializeFragment(fragment, { document: owner })
+  if (patches.length) {
+    const result = owner.createDocumentFragment()
+    const range = highlight && inlineReviewTargetRange(content, highlight.target)
+    const append = (from: number, to: number, deletion?: string) => {
+      if (from >= to) return
+      const boundaries = range ? [range.from, range.to].filter((position) => from < position && position < to) : []
+      for (const end of [...boundaries, to]) {
+        const fragment = render(content.cut(from, end))
+        const commented = range && from >= range.from && end <= range.to
+        if (commented || deletion) {
+          const span = owner.createElement('span')
+          span.className = [commented ? commentClasses : '', deletion ? 'dm-review-nested-deletion' : ''].join(' ').trim()
+          span.dataset.reviewAnchor = commented ? highlight!.anchorId : deletion!
+          span.append(fragment)
+          result.append(span)
+        } else result.append(fragment)
+        from = end
+      }
+    }
+    let position = 0
+    for (const patch of patches) {
+      append(position, patch.from)
+      append(patch.from, patch.to, patch.anchorId)
+      const widget = nestedWidget(owner, patch)
+      widget.dataset.proposalId = patch.id
+      widget.append(renderInlineReviewWording(patch.proposal, patch.id, owner, patch.highlight, patch.children))
+      result.append(widget)
+      position = patch.to
+    }
+    append(position, content.size)
+    return result
+  }
   if (!highlight) return render(content)
   const range = inlineReviewTargetRange(content, highlight.target)
   const marked = owner.createElement('span')
@@ -47,6 +96,23 @@ export function proposalParagraphPrefix(source: string) {
   return source.match(/^(?:\r\n|\r|\n){2}/)?.[0] ?? ''
 }
 
+/** Translate source boundaries, preserving inline Markdown marks and atoms. */
+export function nestedWordingPosition(source: string, id: string, offset: number) {
+  const prefix = proposalParagraphPrefix(source)
+  if (offset < prefix.length || offset > source.length) return undefined
+  const wording = source.slice(prefix.length)
+  const position = offset - prefix.length
+  let probe = 'DraftMatterWordingPosition'
+  while (wording.includes(probe)) probe += 'X'
+  const text = (value: string) => {
+    const fragment = Fragment.fromArray(parseInlineReviewWording(value, id))
+    return fragment.textBetween(0, fragment.size, '', '\uFFFC')
+  }
+  const marked = text(wording.slice(0, position) + probe + wording.slice(position))
+  const start = marked.indexOf(probe)
+  return start >= 0 && marked.replace(probe, '') === text(wording) ? start : undefined
+}
+
 export function mountReviewWordingEditor(
   wrapper: HTMLElement,
   outer: EditorView,
@@ -58,6 +124,7 @@ export function mountReviewWordingEditor(
   performHistory?: (redo: boolean) => boolean,
   onSelection?: (selection: ReviewProposalTarget | null) => void,
   initialHighlight?: ProposalCommentHighlight,
+  initialPatches: NestedWordingPatch[] = [],
 ) {
   const owner = wrapper.ownerDocument
   const leave = (direction: -1 | 1, escape = false) => {
@@ -117,6 +184,14 @@ export function mountReviewWordingEditor(
     : forward ? redo : undo
   const moveAcrossBoundary = (direction: -1 | 1): Command => (state, _dispatch, view) => {
     if (view?.composing || !state.selection.empty) return false
+    for (const child of field.querySelectorAll<HTMLElement>('.dm-review-nested-insertion')) {
+      if (child.parentElement?.closest('.dm-review-wording') !== field) continue
+      const editor = reviewWordingEditors.get(child)
+      if (editor && editor.position() === state.selection.head) {
+        editor.focus(direction === 1 ? 'start' : 'end')
+        return true
+      }
+    }
     const end = state.doc.content.size - 1
     if (state.selection.head !== (direction < 0 ? 1 : end)) return false
     leave(direction)
@@ -124,6 +199,7 @@ export function mountReviewWordingEditor(
   }
   const mark = (name: 'strong' | 'emphasis') => toggleMark(schema.marks[name])
   let highlight = initialHighlight
+  let patches = initialPatches
   const readSelection = (view: EditorView) => {
     const { from, to, empty } = view.state.selection
     if (empty) return null
@@ -153,12 +229,29 @@ export function mountReviewWordingEditor(
     }),
     attributes: { ...attributes, role: 'textbox' },
     decorations: (state) => {
-      if (!highlight) return DecorationSet.empty
+      if (!highlight && !patches.length) return DecorationSet.empty
       const content = state.doc.firstChild!.content
-      const range = inlineReviewTargetRange(content, highlight.target) ?? { from: 0, to: content.size }
-      return DecorationSet.create(state.doc, [Decoration.inline(1 + range.from, 1 + range.to, {
-        class: commentClasses, 'data-review-anchor': highlight.anchorId,
-      })])
+      const decorations: Decoration[] = []
+      if (highlight) {
+        const range = inlineReviewTargetRange(content, highlight.target) ?? { from: 0, to: content.size }
+        if (range.to > range.from) decorations.push(Decoration.inline(1 + range.from, 1 + range.to, {
+          class: commentClasses, 'data-review-anchor': highlight.anchorId,
+        }))
+      }
+      for (const patch of patches) {
+        if (patch.to > content.size) continue
+        if (patch.from < patch.to) decorations.push(Decoration.inline(1 + patch.from, 1 + patch.to, {
+          class: 'dm-review-nested-deletion', 'data-review-anchor': patch.anchorId,
+        }))
+        decorations.push(Decoration.widget(1 + patch.to, (parent, position) => {
+          const widget = nestedWidget(owner, patch)
+          widget.contentEditable = 'false'
+          mountReviewWordingEditor(widget, parent, position, patch.id, patch.proposal, amend, flush, performHistory, onSelection, patch.highlight, patch.children)
+          return widget
+        }, { key: `nested-${patch.id}`, side: 1, stopEvent: () => true, ignoreSelection: true,
+          destroy: (node: Node) => reviewWordingEditors.get(node)?.destroy() }))
+      }
+      return DecorationSet.create(state.doc, decorations)
     },
     nodeViews: {
       paragraph: () => {
@@ -199,13 +292,15 @@ export function mountReviewWordingEditor(
       view.focus()
     },
     selection: () => readSelection(view),
-    sync: (next, nextHighlight) => {
+    sync: (next, nextHighlight, nextPatches = []) => {
       const changedHighlight = highlight?.anchorId !== nextHighlight?.anchorId || highlight?.target !== nextHighlight?.target
+      const changedPatches = JSON.stringify(patches) !== JSON.stringify(nextPatches)
       highlight = nextHighlight
+      patches = nextPatches
       const { state } = view
       const content = paragraph(next).content
       if (content.eq(state.doc.firstChild!.content)) {
-        if (changedHighlight) view.updateState(state)
+        if (changedHighlight || changedPatches) view.updateState(state)
         return
       }
       const tr = state.tr.replaceWith(1, state.doc.content.size - 1, content)

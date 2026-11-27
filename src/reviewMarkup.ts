@@ -36,6 +36,7 @@ export interface ReviewChange extends ReviewRecordBase {
   status: string
   proposal?: string
   rationale?: string
+  nestedTarget?: NestedReviewTarget
   anchorContext?: ReviewAnchorContext
 }
 
@@ -43,6 +44,40 @@ export interface ReviewAnchorContext {
   quote: string
   prefix: string
   suffix: string
+}
+
+/** A source range in another proposal, while that proposal is still open. */
+export interface NestedReviewTarget extends ReviewAnchorContext {
+  parentId: string
+  offset: number
+}
+
+export function isNestedReviewTarget(value: unknown): value is NestedReviewTarget {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false
+  const target = value as Partial<NestedReviewTarget>
+  return typeof target.parentId === 'string' && /^[A-Za-z][A-Za-z0-9_.:-]{0,127}$/.test(target.parentId)
+    && typeof target.offset === 'number' && Number.isSafeInteger(target.offset) && target.offset >= 0
+    && typeof target.quote === 'string' && target.offset + target.quote.length <= 200_000
+    && typeof target.prefix === 'string' && target.prefix.length <= 48
+    && typeof target.suffix === 'string' && target.suffix.length <= 48
+    && Object.keys(value).every((key) => ['parentId', 'offset', 'quote', 'prefix', 'suffix'].includes(key))
+}
+
+export function nestedReviewRange(source: string, target: NestedReviewTarget) {
+  const { quote, prefix, suffix, offset } = target
+  const context = prefix + quote + suffix
+  const match = context ? source.indexOf(context) : source === '' ? 0 : -1
+  if (match >= 0 && (!context || match === source.lastIndexOf(context))) {
+    return { start: match + prefix.length, end: match + prefix.length + quote.length }
+  }
+  if (quote && source.indexOf(quote) === offset && source.lastIndexOf(quote) === offset) {
+    return { start: offset, end: offset + quote.length }
+  }
+  return undefined
+}
+
+export function nestedRangesOverlap(left: { start: number; end: number }, right: { start: number; end: number }) {
+  return left.start === right.start || (left.start < right.end && right.start < left.end)
 }
 
 export interface ReviewThreadMessage {
@@ -341,6 +376,14 @@ export function parseReviewMarkup(source: string): ReviewMarkupDocument {
         const quote = literals.find((block) => block.className === 'dm-anchor-quote')
         const prefix = literals.find((block) => block.className === 'dm-anchor-prefix')
         const suffix = literals.find((block) => block.className === 'dm-anchor-suffix')
+        const nested = literals.find((block) => block.className === 'dm-nested-target')
+        let nestedTarget: unknown
+        if (nested && nested.content.length <= 1_250_000) {
+          try { nestedTarget = JSON.parse(nested.content) } catch { /* Invalid metadata is diagnosed below. */ }
+        }
+        if (nested && (!isNestedReviewTarget(nestedTarget) || nestedTarget.parentId === id)) {
+          diagnostics.push({ code: 'review-nested-target-invalid', level: 'error', message: 'A nested suggestion has an invalid target.' })
+        }
         changes.push({
           ...base,
           kind: 'change',
@@ -350,6 +393,7 @@ export function parseReviewMarkup(source: string): ReviewMarkupDocument {
           status: parsedAttributes.attributes['data-status'] ?? 'open',
           proposal: literals.find((block) => block.className === 'dm-proposal')?.content,
           rationale: literals.find((block) => block.className === 'dm-rationale')?.content,
+          ...(isNestedReviewTarget(nestedTarget) ? { nestedTarget } : {}),
           ...(quote && prefix && suffix ? { anchorContext: { quote: quote.content, prefix: prefix.content, suffix: suffix.content } } : {}),
         })
       } else if (parsedAttributes.classes.includes('dm-thread')) {

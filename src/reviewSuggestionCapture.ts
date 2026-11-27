@@ -4,7 +4,7 @@ import {
   type ReviewChangeOperationResult,
   type ReviewChangeKind,
 } from './reviewOperations'
-import { parseReviewMarkup } from './reviewMarkup'
+import { parseReviewMarkup, type ReviewChange, type ReviewMarkupDocument } from './reviewMarkup'
 
 export interface ReviewSuggestionDiff {
   start: number
@@ -94,6 +94,24 @@ export function reviewSuggestionDiff(acceptedSource: string, draftSource: string
   if (!removed) return { start: normalizedStart, end: normalizedStart, kind: 'insert', proposal }
   if (!proposal) return { start: normalizedStart, end, kind: 'delete' }
   return { start, end, kind: 'replace', proposal }
+}
+
+export function captureNestedReviewSuggestion(document: ReviewMarkupDocument, parent: ReviewChange, draft: string, author: ReviewAuthorIdentity) {
+  const base = parent.proposal
+  if (base === undefined) return null
+  const diff = reviewSuggestionDiff(base, draft)
+  const range = document.ranges.find((candidate) => candidate.anchorId === parent.anchorId && candidate.complete)
+  if (!diff || !range) return null
+  const { start, end } = diff
+  return createReviewChange(document.source, {
+    start: range.start, end: range.start, author,
+    kind: diff.kind === 'insert' ? 'insert' : 'replace',
+    proposal: diff.proposal ?? '',
+    nestedTarget: {
+      parentId: parent.id, offset: start, quote: base.slice(start, end),
+      prefix: base.slice(Math.max(0, start - 48), start), suffix: base.slice(end, end + 48),
+    },
+  })
 }
 
 function lineStart(source: string, offset: number) {

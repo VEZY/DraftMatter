@@ -1,11 +1,14 @@
 import {
   isReviewProposalTarget,
+  isNestedReviewTarget,
+  nestedReviewRange,
   parseReviewMarkup,
   reviewLiteralFence,
   updateReviewRecordStatus,
   updateReviewRecordTimestamp,
   type ReviewAuthor,
   type ReviewAnchorContext,
+  type NestedReviewTarget,
   type ReviewChange,
   type ReviewDecision,
   type ReviewMarkupDocument,
@@ -67,6 +70,7 @@ export interface CreateReviewChangeRequest {
   startMarkerId?: string
   endMarkerId?: string
   rebasedFrom?: string
+  nestedTarget?: NestedReviewTarget
 }
 
 export interface RebaseReviewChangeRequest {
@@ -310,11 +314,13 @@ function changeRecord(
   timestamp: string,
   ending: string,
   rebasedFrom?: string,
+  nestedTarget?: NestedReviewTarget,
 ) {
   const proposalBlock = proposal === undefined ? '' : literalBlock('dm-proposal', proposal, ending)
   const rationaleBlock = rationale?.trim() ? literalBlock('dm-rationale', rationale, ending) : ''
   const rebaseAttribute = rebasedFrom ? ` data-rebased-from="${rebasedFrom}"` : ''
-  return `:::: {#${changeId} .dm-change data-anchor="${anchorId}" data-kind="${kind}" data-author="${authorId}" data-status="open" data-created="${timestamp}"${rebaseAttribute}}${ending}${anchorContextBlocks(context, ending)}${proposalBlock}${rationaleBlock}::::${ending}`
+  const nested = nestedTarget ? literalBlock('dm-nested-target', JSON.stringify(nestedTarget), ending) : ''
+  return `:::: {#${changeId} .dm-change data-anchor="${anchorId}" data-kind="${kind}" data-author="${authorId}" data-status="open" data-created="${timestamp}"${rebaseAttribute}}${ending}${anchorContextBlocks(context, ending)}${proposalBlock}${rationaleBlock}${nested}::::${ending}`
 }
 
 function decisionRecord(decisionId: string, changeId: string, authorId: string, action: 'accepted' | 'rejected' | 'rebased', timestamp: string, ending: string) {
@@ -466,7 +472,7 @@ export function createReviewChange(source: string, request: CreateReviewChangeRe
   if (request.kind === 'insert' && request.start !== request.end) {
     throw new ReviewOperationError('review-change-range-invalid', 'Insertions require a point selection.')
   }
-  if (request.kind !== 'insert' && request.start === request.end) {
+  if (request.kind !== 'insert' && request.start === request.end && !request.nestedTarget) {
     throw new ReviewOperationError('review-change-range-invalid', `${request.kind} suggestions require a non-empty range.`)
   }
   if (request.kind !== 'delete' && request.proposal === undefined) {
@@ -478,6 +484,12 @@ export function createReviewChange(source: string, request: CreateReviewChangeRe
 
   const original = parseReviewMarkup(source)
   assertWritable(original)
+  const target = request.nestedTarget
+  const parent = target && original.changes.find((candidate) => candidate.id === target.parentId)
+  if (target && (!isNestedReviewTarget(target) || !parent || parent.status !== 'open'
+      || parent.proposal === undefined || !nestedReviewRange(parent.proposal, target))) {
+    throw new ReviewOperationError('review-nested-target-invalid', 'The parent suggestion has changed.')
+  }
   if (original.sectionStart !== undefined && request.end > original.sectionStart) {
     throw new ReviewOperationError('review-range-reserved', 'Suggestions cannot be anchored inside the portable review data section.')
   }
@@ -510,6 +522,7 @@ export function createReviewChange(source: string, request: CreateReviewChangeRe
     timestamp,
     ending,
     request.rebasedFrom,
+    request.nestedTarget,
   )}`
   const updated = parseReviewMarkup(appendSectionRecords(anchoredDocument, additions))
   assertWritable(updated)
@@ -728,6 +741,9 @@ export function decideReviewChange(
 
   const conflicting = conflictingChangeIds(document, request.changeId)
   if (request.action === 'accepted') {
+    if (change.nestedTarget && document.changes.some((candidate) => candidate.id === change.nestedTarget!.parentId)) {
+      throw new ReviewOperationError('review-change-not-decidable', 'Accept the parent suggestion before accepting this edit.')
+    }
     const acceptedConflict = document.changes.find((candidate) => conflicting.includes(candidate.id) && candidate.status === 'accepted')
     if (acceptedConflict) throw new ReviewOperationError('review-decision-conflict', `Conflicting change ${acceptedConflict.id} is already accepted.`)
   }
@@ -737,6 +753,12 @@ export function decideReviewChange(
   const targetStatus = request.action === 'accepted' ? 'accepted' : 'rejected'
   if (change.status !== targetStatus) updated = updateReviewRecordStatus(updated, request.changeId, targetStatus, timestamp)
   const rebasedChangeIds: string[] = []
+  for (const child of document.changes) {
+    if (child.status !== 'open' || child.nestedTarget?.parentId !== change.id) continue
+    if (request.action === 'accepted' && change.proposal !== undefined && nestedReviewRange(change.proposal, child.nestedTarget)) continue
+    updated = updateReviewRecordStatus(updated, child.id, 'needs-rebase', timestamp)
+    rebasedChangeIds.push(child.id)
+  }
   if (request.action === 'accepted') {
     for (const conflictId of conflicting) {
       const candidate = updated.changes.find((item) => item.id === conflictId)

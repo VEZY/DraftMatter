@@ -366,12 +366,14 @@ export function PortableReviewItems({
         const active = item.id === activeId
         if (item.kind === 'change' || item.kind === 'unplaced-change') {
           const change = document.changes.find((candidate) => candidate.id === item.id)!
-          const locationDetail = item.kind === 'unplaced-change' ? 'Location needs attention'
+          const locationDetail = item.waitingForParent ? 'Awaiting the parent suggestion'
+            : item.kind === 'unplaced-change' ? 'Location needs attention'
             : change.changeKind === 'insert' ? undefined : item.excerpt
           const hasAlternative = item.conflictId && document.changes.some((candidate) =>
             candidate.id !== change.id && candidate.anchorId === change.anchorId && candidate.status === 'open')
           let label = item.kind === 'unplaced-change' ? 'Unplaced suggestion' : 'Suggestion'
           if (item.conflictId) label = hasAlternative ? 'Alternative suggestion' : 'Overlapping suggestion'
+          if (item.waitingForParent) label = 'Edit within a suggestion'
           const recovery = recoveryByAnchor.get(item.anchorId)
           const decisionConflict = decisionConflictByChange.get(item.id)
           const overlappingAcceptance = active && canDecide && change.status === 'decision-conflict' && !decisionConflict
@@ -383,11 +385,11 @@ export function PortableReviewItems({
                 <span className="avatar avatar-blue avatar-small">{initials(item.authorName)}</span>
                 <span className="proposal-author"><strong>{item.authorName}</strong><small><ReviewTimestamp value={change.updatedAt ?? change.createdAt} verb={change.updatedAt ? 'Updated' : 'Created'} fallback={locationDetail ?? ''} detail={locationDetail} /></small></span>
                 <span className={`status-pill status-${item.status}`}>{statusLabel(item.status)}</span>
-                <span className="proposal-copy">{change.changeKind !== 'insert' && <del>{change.anchorContext?.quote || item.excerpt}</del>}{change.proposal !== undefined && <ins>{reviewProposalText(change.proposal)}</ins>}</span>
+                <span className="proposal-copy">{change.changeKind !== 'insert' && <del>{change.nestedTarget?.quote ?? (change.anchorContext?.quote || item.excerpt)}</del>}{change.proposal && <ins>{reviewProposalText(change.proposal)}</ins>}</span>
               </button>
               {change.rationale && <div className="proposal-rationale">“{change.rationale}”</div>}
               {canDecide && active && change.status === 'open' && item.kind !== 'unplaced-change' && (
-                <div className="review-actions"><button className="accept" onClick={() => decide(item.id, 'accepted')}><Icon name="check" size={15} /> Accept</button><button className="reject" onClick={() => decide(item.id, 'rejected')}><Icon name="x" size={15} /> Reject</button></div>
+                <div className="review-actions">{!item.waitingForParent && <button className="accept" onClick={() => decide(item.id, 'accepted')}><Icon name="check" size={15} /> Accept</button>}<button className="reject" onClick={() => decide(item.id, 'rejected')}><Icon name="x" size={15} /> Reject</button></div>
               )}
               {canDecide && active && change.status === 'needs-rebase' && (
                 <>

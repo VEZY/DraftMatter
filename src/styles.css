@@ -8518,6 +8518,16 @@ kbd {
   background: linear-gradient(178deg, transparent 0 12%, var(--blue-highlighter) 14% 90%, transparent 92%);
 }
 
+.structured-editor-content .dm-review-nested-deletion {
+  color: var(--rust-pen);
+  text-decoration: line-through;
+}
+
+.structured-editor-content .dm-review-nested-insertion {
+  background: var(--blue-highlighter);
+  text-decoration-style: double;
+}
+
 .structured-editor-content .dm-review-insertion textarea.dm-review-wording {
   min-width: 0;
   vertical-align: top;

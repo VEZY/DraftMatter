@@ -25,15 +25,15 @@ import { inferPublishedValueLanguage } from './publishedValueHints'
 import { computedValueNodeView, type ComputedValueMenu, type SelectComputedValue } from './computedValueNodeView'
 import { renderEquation } from './equationRenderer'
 import { manuscriptSchema } from './manuscriptSchema'
-import { amendReviewProposal, parseReviewMarkup, type ReviewProposalTarget } from './reviewMarkup'
+import { amendReviewProposal, nestedRangesOverlap, nestedReviewRange, parseReviewMarkup, type NestedReviewTarget, type ReviewProposalTarget } from './reviewMarkup'
 import type { UndoManager } from 'yjs'
 import type { ReviewDecisionUndo } from './sharedEditor/collaborativeReview'
 import { ReviewSourceStep, reviewSourceTransaction } from './reviewHistory'
 import { reviewProposalText } from './reviewPresentation'
-import { mountReviewWordingEditor, proposalParagraphPrefix, renderInlineReviewWording, reviewWordingEditors, type ProposalCommentHighlight } from './reviewWordingEditor'
+import { mountReviewWordingEditor, nestedWordingPosition, proposalParagraphPrefix, renderInlineReviewWording, reviewWordingEditors, type NestedWordingPatch, type ProposalCommentHighlight } from './reviewWordingEditor'
 import { manuscriptView, reanchorPortableReviews } from './reviewReanchor'
-import { createReviewAlternative, createReviewChange } from './reviewOperations'
-import { captureReviewSuggestion, reviewTransformationDiff, type ReviewSuggestionIntent } from './reviewSuggestionCapture'
+import { createReviewChange } from './reviewOperations'
+import { captureNestedReviewSuggestion, captureReviewSuggestion, reviewTransformationDiff, type ReviewSuggestionIntent } from './reviewSuggestionCapture'
 import { parseStructuredManuscript, serializeStructuredManuscript, type StructuredManuscript, type StructuredManuscriptMetadata } from './structuredManuscript'
 import type { ExecutionFreshnessStatus } from './executionFreshness'
 import { extractExecutableCells, type ExecutionLanguage } from './executionCells'
@@ -491,6 +491,7 @@ interface ReviewDecorationRecord {
   changeKind?: string
   proposal?: string
   proposalTarget?: ReviewProposalTarget
+  nestedTarget?: NestedReviewTarget
 }
 
 interface ReviewDecorationIndex {
@@ -498,21 +499,31 @@ interface ReviewDecorationIndex {
   anchors: Map<string, { start?: number; end?: number; points: number[] }>
   proposalThreads: Map<string, ReviewDecorationRecord[]>
   openProposalIds: Set<string>
+  pendingNested: Map<string, ReviewDecorationRecord[]>
 }
 
 function reviewDecorationIndex(source: string, document?: ProseMirrorNode): ReviewDecorationIndex {
   const parsed = parseReviewMarkup(source)
   const records = new Map<string, ReviewDecorationRecord[]>()
   const proposalThreads = new Map<string, ReviewDecorationRecord[]>()
+  const pendingNested = new Map<string, ReviewDecorationRecord[]>()
+  const knownProposals = new Set(parsed.changes.map((change) => change.id))
   const openProposalIds = new Set(parsed.changes.filter((change) => change.status === 'open' && change.proposal !== undefined).map((change) => change.id))
   const items: ReviewDecorationRecord[] = [
-    ...parsed.changes.map((change) => ({ id: change.id, anchorId: change.anchorId, kind: 'change' as const, status: change.status, authorId: change.authorId, changeKind: change.changeKind, proposal: change.proposal })),
+    ...parsed.changes.map((change) => ({ id: change.id, anchorId: change.anchorId, kind: 'change' as const, status: change.status, authorId: change.authorId, changeKind: change.changeKind, proposal: change.proposal,
+      ...(change.nestedTarget && knownProposals.has(change.nestedTarget.parentId) ? { nestedTarget: change.nestedTarget } : {}) })),
     ...parsed.threads.map((thread) => ({ id: thread.id, anchorId: thread.anchorId, kind: 'thread' as const, status: thread.status, authorId: thread.authorId, proposalTarget: thread.proposalTarget })),
   ]
   for (const record of items) {
     const anchored = records.get(record.anchorId) ?? []
     anchored.push(record)
     records.set(record.anchorId, anchored)
+    if (record.nestedTarget && record.status === 'open') {
+      const parent = record.nestedTarget.parentId
+      const children = pendingNested.get(parent) ?? []
+      children.push(record)
+      pendingNested.set(parent, children)
+    }
     if (record.proposalTarget && record.status !== 'deleted') {
       const changeId = record.proposalTarget.changeId
       const threads = proposalThreads.get(changeId) ?? []
@@ -522,7 +533,7 @@ function reviewDecorationIndex(source: string, document?: ProseMirrorNode): Revi
   }
   const anchors = new Map<string, { start?: number; end?: number; points: number[] }>()
   let removed = 0
-  if (!records.size) return { records, anchors, proposalThreads, openProposalIds }
+  if (!records.size) return { records, anchors, proposalThreads, openProposalIds, pendingNested }
   const anchoredDocument = document ?? parseStructuredManuscript(source).document
   anchoredDocument.descendants((node, position) => {
     if (node.type !== manuscriptSchema.nodes.review_anchor) return true
@@ -536,7 +547,7 @@ function reviewDecorationIndex(source: string, document?: ProseMirrorNode): Revi
     removed += node.nodeSize
     return true
   })
-  return { records, anchors, proposalThreads, openProposalIds }
+  return { records, anchors, proposalThreads, openProposalIds, pendingNested }
 }
 
 function sharedTrackDiff(view: EditorView, transaction: Transaction, metadata: StructuredManuscriptMetadata, accepted: string, intent: ReviewSuggestionIntent) {
@@ -595,6 +606,28 @@ function proposalCommentHighlight(index: ReviewDecorationIndex, changeId: string
   return thread?.proposalTarget ? { target: thread.proposalTarget, anchorId: thread.anchorId } : undefined
 }
 
+function wordingPatches(index: ReviewDecorationIndex, parent: ReviewDecorationRecord, activeId?: string, authorId?: string, depth = 0): NestedWordingPatch[] {
+  const wording = parent.proposal
+  if (wording === undefined || depth >= 20) return []
+  const children = (index.pendingNested.get(parent.id) ?? []).flatMap((child) => {
+    if (child.proposal === undefined || (authorId && child.authorId !== authorId)) return []
+    const range = nestedReviewRange(wording, child.nestedTarget!)
+    if (!range) return []
+    const from = nestedWordingPosition(wording, parent.id, range.start)
+    const to = nestedWordingPosition(wording, parent.id, range.end)
+    return from === undefined || to === undefined ? [] : [{
+      id: child.id, anchorId: child.anchorId, from, to, proposal: child.proposal,
+      children: wordingPatches(index, child, activeId, authorId, depth + 1),
+      highlight: proposalCommentHighlight(index, child.id, activeId),
+    }]
+  })
+  const selected: NestedWordingPatch[] = []
+  for (const child of children.sort((left, right) => Number(right.id === activeId) - Number(left.id === activeId))) {
+    if (!selected.some((other) => nestedRangesOverlap({ start: other.from, end: other.to }, { start: child.from, end: child.to }))) selected.push(child)
+  }
+  return selected.sort((left, right) => left.from - right.from)
+}
+
 function reviewDecorations(
   document: ProseMirrorNode,
   index: ReviewDecorationIndex,
@@ -622,7 +655,8 @@ function reviewDecorations(
   const activeThread = index.records.get(activeAnchorId ?? '')?.find((record) => record.id === activeReviewId && record.kind === 'thread')
   const activeThreadRange = activeThread && anchors.get(activeThread.anchorId)
   for (const [anchorId, anchor] of anchors) {
-    const visibleRecords = (index.records.get(anchorId) ?? []).filter((record) => record.status !== 'deleted' && (!authorId || record.authorId === authorId))
+    const visibleRecords = (index.records.get(anchorId) ?? []).filter((record) => !record.nestedTarget && record.status !== 'deleted'
+      && (!authorId || record.authorId === authorId || index.pendingNested.get(record.id)?.some((child) => child.authorId === authorId)))
     if (!visibleRecords.length) continue
     const record = visibleRecords.find((candidate) => candidate.id === activeReviewId)
       ?? visibleRecords.find((candidate) => candidate.status === 'open' || candidate.status === 'needs-rebase')
@@ -689,6 +723,7 @@ function reviewDecorations(
     }
     const proposalPosition = anchor.end ?? anchor.points[0]
     const highlight = proposalCommentHighlight(index, record.id, activeReviewId)
+    const patches = wordingPatches(index, record, activeReviewId, authorId)
     const spansActiveThread = !activeThread?.proposalTarget && proposalPosition !== undefined
       && activeThreadRange?.start !== undefined && activeThreadRange.end !== undefined
       && activeThreadRange.start <= proposalPosition && proposalPosition <= activeThreadRange.end
@@ -702,7 +737,7 @@ function reviewDecorations(
         wrapper.className = `dm-review-proposal dm-review-open${isInsertion ? ' dm-review-insertion' : ''}${commentClass}${paragraphClass}`
         wrapper.contentEditable = 'false'
         wrapper.dataset.reviewAnchor = anchorId
-        mountReviewWordingEditor(wrapper, view, getPos, record.id, record.proposal ?? '', editing.amend, editing.flush, editing.history, editing.onSelection, highlight)
+        mountReviewWordingEditor(wrapper, view, getPos, record.id, record.proposal ?? '', editing.amend, editing.flush, editing.history, editing.onSelection, highlight, patches)
         return wrapper
       }, {
         key: `dm-edit-wording-${record.id}-${commentClass}`,
@@ -731,11 +766,11 @@ function reviewDecorations(
         marker.dataset.reviewAnchor = anchorId
         if (record.status === 'open' && (isInsertion || record.changeKind === 'replace')) marker.dataset.proposalId = record.id
         marker.setAttribute('aria-label', `Open ${record.changeKind ?? 'text'} suggestion: ${proposal}`)
-        if ((isInsertion || record.changeKind === 'replace') && !/[\r\n]/.test(source)) {
-          marker.append(renderInlineReviewWording(source, record.id, marker.ownerDocument, highlight))
+        if ((isInsertion || record.changeKind === 'replace') && !/[\r\n]/.test(patches.length ? source.slice(proposalParagraphPrefix(source).length) : source)) {
+          marker.append(renderInlineReviewWording(source, record.id, marker.ownerDocument, highlight, patches))
         } else marker.textContent = proposal
         return marker
-      }, { key: `dm-review-proposal-${record.id}-${record.proposal}-${proposalPosition}-${record.status}-${active ? 'active' : 'idle'}-${highlight?.anchorId ?? ''}-${commentClass}`, side: 2 }))
+      }, { key: `dm-review-proposal-${record.id}-${record.proposal}-${proposalPosition}-${record.status}-${active ? 'active' : 'idle'}-${highlight?.anchorId ?? ''}-${commentClass}-${JSON.stringify(patches)}`, side: 2 }))
     }
   }
   return decorations
@@ -3936,6 +3971,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       const record = reviewDecorationRef.current!.records.get(wrapper.dataset.reviewAnchor ?? '')?.find((candidate) => candidate.id === field.dataset.proposalId)
       if (record?.proposal !== undefined) reviewWordingEditors.get(wrapper)?.sync(
         record.proposal, proposalCommentHighlight(reviewDecorationRef.current!, record.id, activeReviewIdRef.current),
+        wordingPatches(reviewDecorationRef.current!, record, activeReviewIdRef.current, reviewAuthorIdRef.current),
       )
     }
   }
@@ -3967,22 +4003,23 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
       const current = document.changes.find((change) => change.id === pending.id)
       if (current?.proposal === pending.value) return
       if (current?.proposal !== pending.base) throw Error('The suggestion changed in another session. Review its latest wording.')
-      const alternative = current.authorId === suggestionAuthorRef.current.id
+      const nested = current.authorId === suggestionAuthorRef.current.id
         ? undefined
-        : createReviewAlternative(document, { changeId: pending.id, author: suggestionAuthorRef.current, proposal: pending.value })
-      const next = alternative?.document.source ?? amendReviewProposal(document, pending.id, suggestionAuthorRef.current.id, pending.value)
+        : captureNestedReviewSuggestion(document, current, pending.value, suggestionAuthorRef.current)
+      const next = nested?.document.source ?? amendReviewProposal(document, pending.id, suggestionAuthorRef.current.id, pending.value)
       const focused = view.dom.ownerDocument.activeElement?.getAttribute('data-proposal-id') === pending.id
       const scroll = view.dom.closest<HTMLElement>('.editor-area')
       const scrollTop = scroll?.scrollTop
-      if (alternative) activeReviewIdRef.current = alternative.change.id
+      if (nested) activeReviewIdRef.current = nested.change.id
       if (collaborationRef.current) publishSharedReview(view, next)
       else {
         applyLocalReviewSource(view, document.source, next)
         publishSourceChange(next)
       }
-      if (alternative) {
-        onReviewAnchorSelectRef.current?.(alternative.change.anchorId, alternative.change.id)
-        if (focused) focusWording(view, alternative.change.id, pending.caret)
+      if (nested) {
+        syncWordingFields(view)
+        onReviewAnchorSelectRef.current?.(nested.change.anchorId, nested.change.id)
+        if (focused) focusWording(view, nested.change.id)
         if (scroll && scrollTop !== undefined) scroll.scrollTop = scrollTop
       }
     } catch (error) {
@@ -4973,6 +5010,7 @@ export const StructuredManuscriptEditor = forwardRef<StructuredManuscriptEditorH
             const widgets = [...block.querySelectorAll<HTMLElement>('.dm-review-proposal:has(.dm-review-wording)')]
             if (!forward) widgets.reverse()
             for (const wrapper of widgets) {
+              if (wrapper.parentElement?.closest('.dm-review-wording')) continue
               const wording = reviewWordingEditors.get(wrapper)
               const position = wording?.position()
               if (position === undefined || !wording) continue

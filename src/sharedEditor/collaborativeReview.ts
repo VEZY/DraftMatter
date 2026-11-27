@@ -64,7 +64,9 @@ export function decidePortableSuggestion(
     rebasedChangeIds = result.rebasedChangeIds
   }
   const count = rebasedChangeIds.length
-  const overlap = count === 1 ? '1 overlapping alternative needs rebase' : `${count} overlapping alternatives need rebase`
+  const nested = document.changes.some((candidate) => candidate.nestedTarget && rebasedChangeIds.includes(candidate.id))
+  const affected = nested ? 'related suggestion' : 'overlapping alternative'
+  const overlap = count === 1 ? `1 ${affected} needs rebase` : `${count} ${affected}s need rebase`
   return { source, undo, message: `Suggestion ${action}${count ? ` · ${overlap}` : ''}` }
 }
 
@@ -195,8 +197,9 @@ export class CollaborativeReviewBinding {
     const source = this.transactDecision(() => {
       for (const decision of prepared) {
         if (decision.action === 'accepted') {
-          this.document.materializeAcceptance(decision.changeId, decision.id)
+          const start = this.document.materializeAcceptance(decision.changeId, decision.id)
           this.document.putDecision({ ...decision, materialized: true })
+          if (start !== undefined) this.document.placeNestedReviewAnchors(decision.changeId, start)
         } else this.document.putDecision(decision)
       }
       proposals.forEach((proposal) => this.document.putProposal(proposal))
@@ -214,6 +217,10 @@ export class CollaborativeReviewBinding {
   // would also discard another peer's evidence when disconnected edits converge.
   repeatOrUndoDecision(entry: ReviewDecisionUndo, author: LocalAuthorIdentity, redo: boolean) {
     const snapshot = this.document.snapshot()
+    if (!redo && entry.action === 'accepted' && snapshot.proposals.some((proposal) =>
+      proposal.nestedTarget?.parentId === entry.changeId && proposal.status === 'accepted')) {
+      throw new Error('Undo the edits accepted inside this suggestion first.')
+    }
     const active = activeDecisions(snapshot, entry.changeId)
     if (active.length !== 1 || active[0].id !== entry.decisionId || active[0].authorId !== author.id
       || active[0].action !== (redo ? 'reopened' : entry.action)
@@ -295,8 +302,9 @@ export class CollaborativeReviewBinding {
 
     const source = this.transactDecision(() => {
       if (decision.action === 'accepted') {
-        this.document.materializeAcceptance(decision.changeId, decision.id)
+        const start = this.document.materializeAcceptance(decision.changeId, decision.id)
         this.document.putDecision({ ...decision, materialized: true })
+        if (start !== undefined) this.document.placeNestedReviewAnchors(decision.changeId, start)
       } else this.document.putDecision(decision)
       proposals.forEach((proposal) => this.document.putProposal(proposal))
     })

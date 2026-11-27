@@ -14,6 +14,7 @@ export interface ReviewQueueItem {
   end?: number
   excerpt: string
   conflictId?: string
+  waitingForParent?: boolean
 }
 
 export interface ReviewQueueFilters {
@@ -34,6 +35,7 @@ function plainExcerpt(source: string, start: number, end: number) {
 export function buildReviewQueue(document: ReviewMarkupDocument, filters: ReviewQueueFilters = {}) {
   const authorNames = new Map(document.authors.map((author) => [author.id, author.name]))
   const ranges = new Map(document.ranges.filter((range) => range.complete).map((range) => [range.anchorId, range]))
+  const changeIds = new Set(document.changes.map((change) => change.id))
   const conflicts = buildReviewConflictGraph(document).components
   const conflictByChange = new Map(conflicts.flatMap((conflict) => conflict.changeIds.length > 1
     ? conflict.changeIds.map((changeId) => [changeId, conflict.id] as const)
@@ -65,6 +67,7 @@ export function buildReviewQueue(document: ReviewMarkupDocument, filters: Review
         ? record.proposal?.trim() || 'Insertion'
         : range ? plainExcerpt(document.source, range.start, range.end) : record.anchorContext?.quote ?? 'Review location unavailable',
       ...(record.queueKind === 'change' && conflictByChange.has(record.id) ? { conflictId: conflictByChange.get(record.id) } : {}),
+      ...(record.queueKind === 'change' && record.nestedTarget && changeIds.has(record.nestedTarget.parentId) ? { waitingForParent: true } : {}),
     }]
   }).sort((left, right) =>
     (left.start ?? Number.MAX_SAFE_INTEGER) - (right.start ?? Number.MAX_SAFE_INTEGER)
@@ -86,7 +89,7 @@ export function navigateReviewQueue(
 }
 
 export function isPendingReviewChange(item: ReviewQueueItem) {
-  return item.kind === 'change' && item.status === 'open'
+  return item.kind === 'change' && item.status === 'open' && !item.waitingForParent
 }
 
 /** Keep the selected open change, or continue from its position in manuscript order. */

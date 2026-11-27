@@ -1,9 +1,49 @@
 import { describe, expect, it } from 'vitest'
 import { parseReviewMarkup } from './reviewMarkup'
-import { projectPortableReviewSource } from './reviewProjector'
-import { captureReviewSuggestion, reviewSuggestionDiff, reviewTransformationDiff } from './reviewSuggestionCapture'
+import { materializeResolvedSuggestions, projectPortableReviewSource } from './reviewProjector'
+import { createReviewChange, decideReviewChange } from './reviewOperations'
+import { captureNestedReviewSuggestion, captureReviewSuggestion, reviewSuggestionDiff, reviewTransformationDiff } from './reviewSuggestionCapture'
 
 const author = { id: 'dm-author-local', name: 'Local Author' }
+
+describe('tracked edits inside proposed wording', () => {
+  const editor = { id: 'dm-other-author', name: 'Other Author' }
+  const wording = 'because each language serves a purpose'
+
+  function pending(kind: 'insert' | 'replace') {
+    const source = 'The results follow.\n'
+    const end = source.indexOf('.')
+    const parent = createReviewChange(source, { start: kind === 'insert' ? end : source.indexOf('follow'), end, author, kind,
+      proposal: kind === 'insert' ? ' ' + wording : wording })
+    const child = captureNestedReviewSuggestion(parent.document, parent.change,
+      parent.change.proposal!.replace('each language', 'each of these languages'), editor)!
+    return { parent, child }
+  }
+
+  it.each(['insert', 'replace'] as const)('promotes the nested words when the parent %s is accepted', (kind) => {
+    const { parent, child } = pending(kind)
+    expect(child.change).toMatchObject({ proposal: 'of these languages', nestedTarget: { parentId: parent.change.id, quote: 'language' } })
+    expect(projectPortableReviewSource(child.document.source, { view: 'final' }).source).toContain('each of these languages serves a purpose')
+    expect(() => decideReviewChange(child.document, { changeId: child.change.id, action: 'accepted', authorId: editor.id })).toThrow('Accept the parent')
+    const first = decideReviewChange(child.document, { changeId: parent.change.id, action: 'accepted', authorId: author.id })
+    const promoted = parseReviewMarkup(materializeResolvedSuggestions(first.document))
+    expect(promoted.changes).toHaveLength(1)
+    expect(promoted.changes[0]).toMatchObject({ id: child.change.id, status: 'open' })
+    const anchor = promoted.ranges.find((candidate) => candidate.anchorId === child.change.anchorId)!
+    expect(promoted.source.slice(anchor.start, anchor.end)).toBe('language')
+    expect(projectPortableReviewSource(promoted.source, { view: 'original' }).source).toContain(wording)
+    const accepted = decideReviewChange(promoted, { changeId: child.change.id, action: 'accepted', authorId: editor.id })
+    expect(materializeResolvedSuggestions(accepted.document)).toContain('each of these languages serves a purpose')
+  })
+
+  it('keeps the dependent edit for rebase when its parent is rejected', () => {
+    const { parent, child } = pending('replace')
+    const rejected = decideReviewChange(child.document, { changeId: parent.change.id, action: 'rejected', authorId: author.id })
+    const remaining = parseReviewMarkup(materializeResolvedSuggestions(rejected.document))
+    expect(remaining.changes).toMatchObject([{ id: child.change.id, status: 'needs-rebase' }])
+    expect(projectPortableReviewSource(remaining.source, { view: 'final' }).source?.trim()).toBe('The results follow.')
+  })
+})
 
 describe('grouped rendered suggestion capture', () => {
   it.each([

@@ -1,4 +1,4 @@
-import { parseReviewMarkup, updateReviewRecordAnchorContext, type ReviewChange, type ReviewMarkupDocument } from './reviewMarkup'
+import { nestedRangesOverlap, nestedReviewRange, parseReviewMarkup, updateReviewRecordAnchorContext, type ReviewChange, type ReviewMarkupDocument } from './reviewMarkup'
 import { buildReviewConflictGraph } from './reviewConflicts'
 import type { DocumentDiagnostic } from './types'
 
@@ -91,6 +91,25 @@ function applyPatches(source: string, patches: Patch[]) {
   return projected
 }
 
+function nestedPlacements(document: ReviewMarkupDocument, change: ReviewChange, replacement: string) {
+  return document.changes.flatMap((child) => {
+    if (child.status !== 'open' || child.nestedTarget?.parentId !== change.id) return []
+    const range = nestedReviewRange(replacement, child.nestedTarget)
+    return range ? [{ child, ...range }] : []
+  })
+}
+
+function placeNestedMarkers(document: ReviewMarkupDocument, change: ReviewChange, replacement: string, moved: Set<string>) {
+  const patches: Patch[] = []
+  for (const { child, start, end } of nestedPlacements(document, change, replacement)) {
+    moved.add(child.anchorId)
+    const marker = (edge: 'start' | 'end' | 'point') => `[]{#${child.anchorId}-${edge} .dm-anchor data-anchor="${child.anchorId}" data-edge="${edge}" data-affinity="${edge === 'end' ? 'before' : 'after'}"}`
+    if (start === end) patches.push({ start, end, replacement: marker('point') })
+    else patches.push({ start, end: start, replacement: marker('start') }, { start: end, end, replacement: marker('end') })
+  }
+  return applyPatches(replacement, patches)
+}
+
 /** Fold decided suggestions into editable Markdown, retaining all unrelated portable records. */
 export function materializeResolvedSuggestions(document: ReviewMarkupDocument): string {
   const decided = document.changes.filter((change) => change.status === 'accepted' || change.status === 'rejected' || change.status === 'applied')
@@ -104,24 +123,27 @@ export function materializeResolvedSuggestions(document: ReviewMarkupDocument): 
 
   const replacements: Patch[] = []
   const movedAnchors = new Set<string>()
+  const promoted = new Set<string>()
   for (const change of decided.filter((change) => change.status === 'accepted')) {
     const markers = byAnchor.get(change.anchorId) ?? []
     const patch = patchForChange(change, byAnchor)
     // Preserve malformed or conflicting legacy records for recovery rather than guessing a base.
     if ('code' in patch || (markers.length !== 1 && markers.length !== 2) || patch.end < patch.start ||
       replacements.some((other) => patch.start < other.end && other.start < patch.end)) return document.source
-    const retained = document.anchors.filter((anchor) => !retiredAnchors.has(anchor.anchorId) && anchor.start >= patch.start && anchor.end <= patch.end)
+    const wording = placeNestedMarkers(document, change, patch.replacement, promoted)
+    const retained = document.anchors.filter((anchor) => !retiredAnchors.has(anchor.anchorId) && !promoted.has(anchor.anchorId)
+      && anchor.start >= patch.start && anchor.end <= patch.end)
     for (const anchor of retained) movedAnchors.add(anchor.anchorId)
     // Comments and overlapping alternatives may share this range, or have an endpoint inside it.
     // Keep their markers attached to the new wording, even when the accepted edit deletes it.
     const before = retained.filter((anchor) => anchor.edge === 'start' || (anchor.edge === 'point' && anchor.affinity === 'before'))
     const after = retained.filter((anchor) => !before.includes(anchor))
-    replacements.push({ ...patch, replacement: before.map((anchor) => anchor.raw).join('') + patch.replacement + after.map((anchor) => anchor.raw).join('') })
+    replacements.push({ ...patch, replacement: before.map((anchor) => anchor.raw).join('') + wording + after.map((anchor) => anchor.raw).join('') })
   }
 
   const edits: Patch[] = [...replacements]
   for (const anchor of document.anchors) {
-    if (retiredAnchors.has(anchor.anchorId) && !replacements.some((patch) => anchor.start >= patch.start && anchor.end <= patch.end)) {
+    if ((retiredAnchors.has(anchor.anchorId) || promoted.has(anchor.anchorId)) && !replacements.some((patch) => anchor.start >= patch.start && anchor.end <= patch.end)) {
       edits.push({ start: anchor.start, end: anchor.end, replacement: '' })
     }
   }
@@ -139,21 +161,39 @@ export function materializeResolvedSuggestions(document: ReviewMarkupDocument): 
   } else edits.push(...retiredRecords.map(remove))
 
   const source = applyPatches(document.source, edits)
-  if (!replacements.length || !document.threads.length) return source
+  if (!replacements.length || (!document.threads.length && !promoted.size)) return source
   for (const range of document.ranges) {
     if (replacements.some((patch) => range.start <= patch.start && patch.end <= range.end)) movedAnchors.add(range.anchorId)
   }
   let updated = parseReviewMarkup(source)
   const stripMarkers = (value: string) => value.replace(/\[\]\{[^}\r\n]*\.dm-anchor\b[^}\r\n]*\}/g, '')
-  for (const thread of document.threads.filter((thread) => thread.anchorContext && movedAnchors.has(thread.anchorId))) {
-    const range = updated.ranges.find((range) => range.anchorId === thread.anchorId && range.complete)
-    if (range) updated = updateReviewRecordAnchorContext(updated, thread.id, {
+  const records = [...document.threads.filter((thread) => thread.anchorContext && movedAnchors.has(thread.anchorId)),
+    ...document.changes.filter((change) => promoted.has(change.anchorId))]
+  for (const record of records) {
+    const range = updated.ranges.find((range) => range.anchorId === record.anchorId && range.complete)
+    if (range) updated = updateReviewRecordAnchorContext(updated, record.id, {
       quote: stripMarkers(updated.source.slice(range.start, range.end)),
       prefix: stripMarkers(updated.source.slice(0, range.start)).slice(-64),
       suffix: stripMarkers(updated.source.slice(range.end, updated.sectionStart)).slice(0, 64),
     })
   }
   return updated.source
+}
+
+function nestedPreview(document: ReviewMarkupDocument, change: ReviewChange, wording: string, applied: string[], depth = 0): string {
+  if (depth >= 20) throw new Error('Too many nested suggestions. Review the open edits before exporting.')
+  const children = document.changes.filter((child) => child.status === 'open' && child.nestedTarget?.parentId === change.id)
+  const placements = nestedPlacements(document, change, wording)
+  if (placements.length !== children.length) throw new Error('A nested suggestion no longer matches the proposed wording.')
+  const patches: Patch[] = []
+  for (const { child, start, end } of placements) {
+    if (patches.some((patch) => nestedRangesOverlap(patch, { start, end }))) {
+      throw new Error('Review the overlapping edits inside this suggestion before exporting.')
+    }
+    patches.push({ start, end, replacement: nestedPreview(document, child, child.proposal ?? '', applied, depth + 1) })
+    applied.push(child.id)
+  }
+  return applyPatches(wording, patches)
 }
 
 export function projectPortableReviewSource(source: string, options: ReviewProjectionOptions): ReviewProjectionResult {
@@ -213,10 +253,18 @@ export function projectPortableReviewSource(source: string, options: ReviewProje
 
   const changePatches: Patch[] = []
   const projectionDiagnostics: DocumentDiagnostic[] = [...baseDiagnostics]
+  const appliedChangeIds: string[] = []
   for (const change of chosen) {
     const patch = patchForChange(change, markersByAnchor)
     if ('code' in patch) projectionDiagnostics.push(patch)
-    else changePatches.push(patch)
+    else {
+      try {
+        appliedChangeIds.push(change.id)
+        changePatches.push({ ...patch, replacement: nestedPreview(review, change, patch.replacement, appliedChangeIds) })
+      } catch (error) {
+        projectionDiagnostics.push({ code: 'final-projection-nested-suggestion', level: 'error', message: (error as Error).message })
+      }
+    }
   }
   if (projectionDiagnostics.some((diagnostic) => diagnostic.level === 'error')) {
     return { ok: false, source: null, diagnostics: projectionDiagnostics, appliedChangeIds: [], conflicts: [] }
@@ -239,7 +287,7 @@ export function projectPortableReviewSource(source: string, options: ReviewProje
       conflicts: [],
     }
   }
-  return { ok: true, source: projected, diagnostics: projectionDiagnostics, appliedChangeIds: chosen.map((change) => change.id), conflicts: [] }
+  return { ok: true, source: projected, diagnostics: projectionDiagnostics, appliedChangeIds, conflicts: [] }
 }
 
 /**

@@ -34,7 +34,9 @@ function relation(left: ReviewAnchorRange, right: ReviewAnchorRange): ReviewConf
 }
 
 function activeChanges(document: ReviewMarkupDocument) {
-  return document.changes.filter((change) => change.status === 'open' || change.status === 'accepted' || change.status === 'needs-rebase')
+  const ids = new Set(document.changes.map((change) => change.id))
+  return document.changes.filter((change) => (!change.nestedTarget || !ids.has(change.nestedTarget.parentId))
+    && (change.status === 'open' || change.status === 'accepted' || change.status === 'needs-rebase'))
 }
 
 function anchorFreeOffset(document: ReviewMarkupDocument, offset: number) {

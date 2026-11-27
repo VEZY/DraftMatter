@@ -104,11 +104,13 @@ export class ReviewText {
     this.edit(prefix, previous.length - suffix, next.slice(prefix, next.length - suffix))
   }
 
-  accept(changeId: string, token: string, start: number, end: number, replacement: string) {
+  accept(changeId: string, token: string, start: number, end: number, replacement: string, parentId?: string) {
     const ranges = this.ranges(start, end)
     for (const range of ranges) this.text.format(range.raw, range.count, { [original + changeId]: true })
     if (replacement) {
-      const attributes = { ...(ranges.length === 1 ? ranges[0].attributes : {}) }
+      const parentRun = parentId && this.runs.find((run) => run.shown && proposed + parentId in run.attributes
+        && start >= run.visible && start <= run.visible + run.value.length)
+      const attributes = { ...(ranges.length === 1 ? ranges[0].attributes : parentRun ? parentRun.attributes : {}) }
       delete attributes[original + changeId]
       this.text.insert(this.rawOffset(end), replacement, { ...attributes, [proposed + changeId]: token })
     }

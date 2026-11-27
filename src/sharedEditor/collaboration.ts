@@ -5,7 +5,7 @@ import {
   encodeAwarenessUpdate,
   removeAwarenessStates,
 } from 'y-protocols/awareness'
-import { parseReviewMarkup, type ReviewAnchorContext, type ReviewMarkupDocument, type ReviewProposalTarget, type ReviewThreadMessage } from '../reviewMarkup'
+import { nestedReviewRange, parseReviewMarkup, type NestedReviewTarget, type ReviewAnchorContext, type ReviewMarkupDocument, type ReviewProposalTarget, type ReviewThreadMessage } from '../reviewMarkup'
 import { proposalDecisionState } from './reviewDecisions'
 import { ReviewText } from './reviewText'
 
@@ -44,6 +44,7 @@ export interface CollaborativeProposal {
   proposal?: string
   rationale?: string
   baseRevision?: string
+  nestedTarget?: NestedReviewTarget
 }
 
 export interface CollaborativeThread {
@@ -322,6 +323,7 @@ export class CollaborativeDocument {
         status: change.status,
         ...(change.proposal === undefined ? {} : { proposal: change.proposal }),
         ...(change.rationale === undefined ? {} : { rationale: change.rationale }),
+        ...(change.nestedTarget === undefined ? {} : { nestedTarget: change.nestedTarget }),
         ...(change.attributes['data-base-revision'] ? { baseRevision: change.attributes['data-base-revision'] } : {}),
       }))
       const threads = review.threads.map<CollaborativeThread>((thread) => ({
@@ -374,8 +376,29 @@ export class CollaborativeDocument {
     const view = this.reviewText()
     const range = this.resolveAnchor(proposal.anchorId, view)
     if (!range) throw new Error('The suggestion no longer has a valid manuscript location.')
-    view.accept(id, token, range.start, range.end, proposal.kind === 'delete' ? '' : proposal.proposal ?? '')
+    view.accept(id, token, range.start, range.end, proposal.kind === 'delete' ? '' : proposal.proposal ?? '', proposal.nestedTarget?.parentId)
     if (legacy && range.start === range.end) view.markLegacyInsertion(id, range.start)
+    return range.start
+  }
+
+  placeNestedReviewAnchors(parentId: string, start: number) {
+    const parent = this.proposals.get(parentId)
+    const view = this.reviewText()
+    if (parent?.proposal === undefined || view.source.slice(start, start + parent.proposal.length) !== parent.proposal) return
+    for (const child of this.proposals.values()) {
+      const target = child.nestedTarget
+      if (child.status !== 'open' || target?.parentId !== parentId) continue
+      const range = nestedReviewRange(parent.proposal, target)
+      if (!range) continue
+      const from = start + range.start, to = start + range.end
+      this.putAnchor({
+        id: child.anchorId, start: this.relativePosition(from, view), end: this.relativePosition(to, view),
+        context: {
+          quote: view.source.slice(from, to), prefix: view.source.slice(Math.max(0, from - 48), from),
+          suffix: view.source.slice(to, to + 48),
+        },
+      })
+    }
   }
 
   get schemaVersion() {

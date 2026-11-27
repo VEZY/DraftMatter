@@ -1,4 +1,4 @@
-import { isReviewProposalTarget } from '../../src/reviewMarkup'
+import { isNestedReviewTarget, isReviewProposalTarget, nestedReviewRange } from '../../src/reviewMarkup'
 import { Server, type ServerConfiguration, type Connection, type Document } from '@hocuspocus/server'
 import type { IncomingMessage, ServerResponse } from 'node:http'
 import { decodeJwt } from 'jose'
@@ -370,7 +370,8 @@ function validProposal(value: unknown, key: string, userId: string) {
     && (proposal.proposal === undefined || (typeof proposal.proposal === 'string' && proposal.proposal.length <= 200_000))
     && (proposal.rationale === undefined || (typeof proposal.rationale === 'string' && proposal.rationale.length <= 20_000))
     && (proposal.baseRevision === undefined || (typeof proposal.baseRevision === 'string' && proposal.baseRevision.length <= 16_384))
-    && Object.keys(proposal).every((field) => ['id', 'anchorId', 'authorId', 'kind', 'status', 'proposal', 'rationale', 'baseRevision'].includes(field))
+    && (proposal.nestedTarget === undefined || isNestedReviewTarget(proposal.nestedTarget))
+    && Object.keys(proposal).every((field) => ['id', 'anchorId', 'authorId', 'kind', 'status', 'proposal', 'rationale', 'baseRevision', 'nestedTarget'].includes(field))
 }
 
 function validDecision(value: unknown, key: string, userId: string) {
@@ -404,13 +405,13 @@ function validExistingProposal(before: unknown, after: unknown, hasNewDecision: 
     || !['insert', 'replace'].includes(String(previous.kind))
     || typeof next.proposal !== 'string' || next.proposal.length > 200_000
   )) return false
-  for (const field of ['id', 'anchorId', 'authorId', 'kind', 'rationale', 'baseRevision']) {
+  for (const field of ['id', 'anchorId', 'authorId', 'kind', 'rationale', 'baseRevision', 'nestedTarget']) {
     if (!same(previous[field], next[field])) return false
   }
   return typeof next.status === 'string'
     && PROPOSAL_STATUSES.has(next.status)
     && (same(previous.status, next.status) || hasNewDecision)
-    && Object.keys(next).every((field) => ['id', 'anchorId', 'authorId', 'kind', 'status', 'proposal', 'rationale', 'baseRevision'].includes(field))
+    && Object.keys(next).every((field) => ['id', 'anchorId', 'authorId', 'kind', 'status', 'proposal', 'rationale', 'baseRevision', 'nestedTarget'].includes(field))
 }
 
 function validExistingThread(before: unknown, after: unknown, userId: string) {
@@ -647,6 +648,10 @@ function editorMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
     if (!newDecisionIds.has(decisionId)) continue
     if (!afterAuthors.has(userId)) return false
     const proposal = afterProposals.get(String(record.changeId)) as Record<string, unknown>
+    if (record.action === 'accepted' && isNestedReviewTarget(proposal.nestedTarget)) {
+      const parent = afterProposals.get(proposal.nestedTarget.parentId) as Record<string, unknown> | undefined
+      if (parent && !['accepted', 'applied'].includes(String(parent.status))) return false
+    }
     const expectedStatus = record.action === 'rebased' ? 'needs-rebase' : record.action === 'reopened' ? 'open' : record.action
     const activeStatuses = activeDecisionStatuses(afterDecisions, String(record.changeId))
     if (!supersededAfter.has(decisionId)) {
@@ -722,6 +727,15 @@ function editorMapsAllowed(before: Y.Doc, after: Y.Doc, userId: string) {
   for (const proposalId of newProposalIds) {
     const proposal = afterProposals.get(proposalId) as Record<string, unknown>
     if (!afterAuthors.has(userId) || !afterAnchors.has(String(proposal.anchorId))) return false
+    if (isNestedReviewTarget(proposal.nestedTarget)) {
+      const target = proposal.nestedTarget
+      const parent = afterProposals.get(target.parentId) as Record<string, unknown> | undefined
+      const childAnchor = anchorBounds(after, afterAnchors.get(String(proposal.anchorId)))
+      const parentAnchor = anchorBounds(after, afterAnchors.get(String(parent?.anchorId)))
+      if (target.parentId === proposalId || parent?.status !== 'open' || typeof parent.proposal !== 'string'
+        || !nestedReviewRange(parent.proposal, target) || beforeAnchors.has(String(proposal.anchorId))
+        || !parentAnchor || childAnchor?.start !== parentAnchor.start || childAnchor?.end !== parentAnchor.start) return false
+    }
   }
   for (const threadId of newThreadIds) {
     const thread = afterThreads.get(threadId) as Record<string, unknown>
