@@ -1,11 +1,11 @@
 import { expect, test } from '@playwright/test'
-import { showWritingTools } from './writing-tools'
+import { setTrackChanges, showWritingTools } from './writing-tools'
 import { selectRenderedTextWithMouse } from './rendered-selection'
 
 test('accepting a tracked edit in the example abstract leaves ordinary editable text and can be undone', async ({ page }) => {
   await page.goto('/demo')
   const abstract = page.locator('.ProseMirror p').filter({ hasText: 'We created a complete' })
-  await page.getByRole('button', { name: 'Turn on track changes' }).click()
+  await setTrackChanges(page)
   await selectRenderedTextWithMouse(page, abstract, 'synthetic')
   await page.keyboard.type('simulated')
   const scroller = page.locator('.editor-area')
@@ -39,7 +39,7 @@ test('capturing a tracked edit near the end keeps the paper in place and lets th
     image instanceof HTMLImageElement && image.complete && image.naturalHeight > 0))).toBe(true)
   const unchangedBlocks = await editor.locator('.structured-heading-card, .structured-output-content > img').elementHandles()
 
-  await page.getByRole('button', { name: 'Turn on track changes' }).click()
+  await setTrackChanges(page)
   await finalParagraph.evaluate(element => element.scrollIntoView({ block: 'center' }))
   await selectRenderedTextWithMouse(page, finalParagraph, 'review records')
   const readScroll = () => scroller.evaluate(element => element.scrollTop)
@@ -129,7 +129,7 @@ test('the anonymous example supports editing and citations without reading, repl
 test('Enter after the introduction’s first paragraph works when it ends in a citation', async ({ page }) => {
   await page.goto('/demo')
   const first = page.locator('.structured-editor-content > p').filter({ hasText: 'Research articles often separate' })
-  await page.getByRole('button', { name: 'Turn on track changes' }).click()
+  await setTrackChanges(page)
   await first.scrollIntoViewIfNeeded()
   await first.evaluate((paragraph) => {
     paragraph.closest<HTMLElement>('.structured-editor-content')!.focus({ preventScroll: true })
@@ -155,7 +155,7 @@ test('Enter at the end of the introduction starts an editable tracked paragraph'
   await page.goto('/demo')
   const first = page.locator('.structured-editor-content > p').filter({ hasText: 'Drought phenotyping is a useful demonstration' })
   const second = page.locator('.structured-editor-content > p').filter({ hasText: 'We asked whether a synthetic' })
-  await page.getByRole('button', { name: 'Turn on track changes' }).click()
+  await setTrackChanges(page)
   await selectRenderedTextWithMouse(page, first, 'a single runtime.')
   await page.keyboard.press('ArrowRight')
   await page.keyboard.press('Enter')

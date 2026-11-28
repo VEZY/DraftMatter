@@ -102,7 +102,8 @@ describe('fresh browser collaboration entry', () => {
     expect(editor?.dataset.collaborative).toBe('true')
     expect(editor?.dataset.readOnly).toBe('true')
     expect(container.textContent).toContain('Browser workspace manuscript')
-    expect(container.querySelector<HTMLButtonElement>('.topbar-track-changes')?.disabled).toBe(true)
+    await act(async () => container.querySelector<HTMLButtonElement>('.review-options-trigger')!.click())
+    expect(container.querySelector<HTMLButtonElement>('[role="switch"].review-track-toggle')?.disabled).toBe(true)
     expect(container.querySelector<HTMLButtonElement>('.format-toolbar [aria-label="Bold"]')?.disabled).toBe(true)
 
     await act(async () => { await new Promise((resolve) => window.setTimeout(resolve, 400)) })

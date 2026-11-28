@@ -1,3 +1,4 @@
+import { setTrackChanges } from './writing-tools'
 import { expect, test } from '@playwright/test'
 
 const source = `# Review identity
@@ -63,7 +64,7 @@ test.describe('local review identity settings', () => {
     await composer.getByLabel('Comment').fill('Please retain the confidence interval.')
     await composer.getByRole('button', { name: 'Add comment', exact: true }).click()
 
-    await page.getByRole('button', { name: 'Turn on track changes' }).click()
+    await setTrackChanges(page)
     await selectRenderedText(manuscript.getByText('Suggest on this sentence.', { exact: true }), 'Suggest on this sentence.')
     await page.keyboard.type('Use this revised sentence.')
 

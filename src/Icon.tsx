@@ -5,10 +5,11 @@ type IconName =
   | 'play' | 'check' | 'x' | 'more' | 'plus' | 'download' | 'code' | 'quote'
   | 'link' | 'image' | 'table' | 'undo' | 'redo' | 'eye' | 'clock' | 'branch'
   | 'panelLeft' | 'panelRight' | 'spark' | 'close' | 'arrowRight' | 'command'
-  | 'folder' | 'users' | 'focus' | 'info'
+  | 'folder' | 'users' | 'focus' | 'info' | 'review'
 
 const paths: Record<IconName, React.ReactNode> = {
   document: <><path d="M6 2.75h8l4 4v14.5H6z"/><path d="M14 2.75v4h4M9 11h6M9 15h6"/></>,
+  review: <><path d="M18 8V7l-4-4H5v18h6M14 3v4h4M8.5 10.5h5M8.5 14h2"/><path d="m13 19.5 1-4 5.5-5.5 3 3-5.5 5.5z"/></>,
   message: <><path d="M4 5.5h16v11H9l-5 4z"/><path d="M8 9h8M8 13h5"/></>,
   book: <><path d="M4 4.5h6.5A3.5 3.5 0 0 1 14 8v12a3.5 3.5 0 0 0-3.5-3.5H4z"/><path d="M20 4.5h-6A3.5 3.5 0 0 0 10.5 8v8.5H20z"/></>,
   history: <><path d="M4 6v5h5"/><path d="M5.3 16.4A8 8 0 1 0 6 6.2L4 11"/><path d="M12 8v4l3 2"/></>,

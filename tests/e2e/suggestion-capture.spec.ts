@@ -1,4 +1,4 @@
-import { showWritingTools } from './writing-tools'
+import { setTrackChanges, showWritingTools } from './writing-tools'
 import { selectRenderedTextWithMouse } from './rendered-selection'
 import { expect, test } from '@playwright/test'
 
@@ -34,8 +34,7 @@ test.describe('DM-P4-02 rendered suggestion transactions', () => {
       localStorage.setItem('draftmatter.structured-mode.v1', 'true')
     }, source)
     await page.goto('/draft')
-    await page.getByRole('button', { name: 'Turn on track changes' }).click()
-    await expect(page.getByRole('button', { name: 'Turn off track changes' })).toHaveAttribute('aria-pressed', 'true')
+    await setTrackChanges(page)
   })
 
   test('groups typing, paste, deletion, and insertion without changing accepted prose', async ({ page, context }) => {

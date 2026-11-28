@@ -79,7 +79,7 @@ test.describe('DM-P4-01 review thread actions', () => {
     await page.goto('/draft')
     const review = page.getByRole('complementary', { name: 'Manuscript comments' })
     const topbar = page.locator('.topbar')
-    await expect(topbar.getByRole('button', { name: 'Turn on track changes', exact: true })).toBeVisible()
+    await expect(topbar.getByRole('button', { name: 'Review options', exact: true })).toBeVisible()
     await expect(review.locator('[id^="review-item-"]')).toHaveCount(3)
     await expect(review).not.toContainText('REVIEW 1 OF 3')
     await expect(review.getByText('Can we quantify this increase in the main text?')).toBeVisible()

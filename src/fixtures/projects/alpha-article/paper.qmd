@@ -240,14 +240,16 @@ write("figures/julia-model.svg", svg)
 : Observed and predicted canopy response generated in Julia. Points show synthetic observations and the line shows fitted values.
 <!-- dm-output:end -->
 
-```julia {#cell-julia-table .execute output="table" reference="tbl-julia-predictions" inputs="data/model-predictions.csv"}
-lines = readlines("data/model-predictions.csv")[2:end]
-fields = split.(lines, ',')
-println("| Week | Observed (cm²) | Predicted (cm²) | Residual (cm²) |")
-println("| ---: | ---: | ---: | ---: |")
-for row in fields
-    week, observed, predicted, residual = row
-    println("| $week | $observed | $predicted | $residual |")
+```julia {#cell-julia-table .execute inputs="data/model-predictions.csv" output="table" reference="tbl-julia-predictions" role="table"}
+let
+    lines = readlines("data/model-predictions.csv")[2:end]
+    fields = split.(lines, ',')
+    println("| Week | Observed (cm²) | Predicted (cm²) | Residual (cm²) |")
+    println("| ---: | ---: | ---: | ---: |")
+    for row in fields
+        week, observed, predicted, residual = row
+        println("| $week | $observed | $predicted | $residual |")
+    end
 end
 ```
 
@@ -285,11 +287,13 @@ publish("allocation_p", allocation_p, digits = 3)
 <!-- dm-published-value data="%7B%22version%22%3A1%2C%22name%22%3A%22allocation_p%22%2C%22value%22%3A0.032%2C%22formatting%22%3A%7B%22digits%22%3A3%7D%2C%22rendered%22%3A%22%22%2C%22provenance%22%3A%7B%22cellId%22%3A%22cell-r-values%22%2C%22language%22%3A%22r%22%2C%22runHash%22%3A%22sha256%3Acell-r-values%22%2C%22codeHash%22%3A%22sha256%3Acode-cell-r-values%22%2C%22environmentFingerprint%22%3A%22sha256%3Aalpha-r%22%2C%22sessionGeneration%22%3A1%2C%22executionSequence%22%3A3%2C%22retainedOutputHashes%22%3A%5B%22sha256%3Acell-r-values%22%5D%7D%7D" -->
 <!-- dm-output:end -->
 
-```julia {#cell-julia-values .execute output="values"}
-observed = [4.2, 24.8, 48.7, 71.4]
-predicted = [5.0, 22.9, 51.4, 69.6]
-prediction_r2 = 1 - sum((observed .- predicted) .^ 2) / sum((observed .- sum(observed) / length(observed)) .^ 2)
-@publish prediction_r2 digits=2
+```julia {#cell-julia-values .execute output="values" role="values"}
+let
+    observed = [4.2, 24.8, 48.7, 71.4]
+    predicted = [5.0, 22.9, 51.4, 69.6]
+    prediction_r2 = 1 - sum((observed .- predicted) .^ 2) / sum((observed .- sum(observed) / length(observed)) .^ 2)
+    @publish prediction_r2 digits=2
+end
 ```
 
 <!-- dm-output:start cell="cell-julia-values" run="sha256:cell-julia-values" -->

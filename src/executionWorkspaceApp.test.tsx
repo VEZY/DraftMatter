@@ -666,6 +666,34 @@ describe('shared Jupyter execution workspace', () => {
     expect(container.querySelector('.code-workspace-drawer')?.textContent).toContain('Fixture computation failed')
   })
 
+  it('runs the selected toolbar scope and defaults to the clean run of all cells', async () => {
+    const controls = container.querySelector('.topbar-run-cells')!
+    const play = controls.querySelector<HTMLButtonElement>('.run-cells-play')!
+    const scope = controls.querySelector<HTMLButtonElement>('.run-cells-scope')!
+    const executed = () => vi.mocked(desktopHost.executeKernel).mock.calls.map(([request]) => request.cellId)
+
+    expect(play.getAttribute('aria-label')).toBe('Run all cells')
+    await act(async () => scope.click())
+    const options = controls.querySelector('[aria-label="Cells to run"]')!
+    expect([...options.querySelectorAll('button')].map((button) => button.textContent)).toEqual(['All cells', 'Python', 'R', 'Julia'])
+    expect(options.querySelector('[aria-pressed="true"]')?.textContent).toBe('All cells')
+    await act(async () => [...options.querySelectorAll('button')].find((button) => button.textContent === 'Julia')!.click())
+    expect(controls.querySelector('.run-cells-options')).toBeNull()
+    expect(play.getAttribute('aria-label')).toBe('Run all Julia cells')
+    expect(executed()).toEqual([])
+    await act(async () => play.click())
+    await settleUntil(() => executed().length === 1 && !play.disabled)
+    expect(executed()).toEqual(['jl-report'])
+    expect(desktopHost.restartKernel).not.toHaveBeenCalled()
+
+    await act(async () => scope.click())
+    await act(async () => controls.querySelector<HTMLButtonElement>('.run-cells-options button')!.click())
+    await act(async () => play.click())
+    await settleUntil(() => executed().length === 5 && !play.disabled)
+    expect(executed().slice(1)).toEqual(['py-setup', 'py-value', 'r-model', 'jl-report'])
+    expect(vi.mocked(desktopHost.restartKernel).mock.calls.map(([language]) => language)).toEqual(['python', 'r', 'julia'])
+  })
+
   async function checkLanguage(label: 'Python' | 'R' | 'Julia') {
     await openCodeWorkspace()
     await settleUntil(() => !container.querySelector<HTMLButtonElement>(`[aria-label="Check ${label}"]`)!.disabled)

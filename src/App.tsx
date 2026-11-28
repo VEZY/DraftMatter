@@ -9,7 +9,7 @@ import { readBrowserPublicationAssets } from './browserPublicationAssets'
 import { preparePublicationCitations } from './publicationCitations'
 import { publicationAssetPaths, preparePublicationAssetsForDocx, type PublicationAsset } from './publicationAssets'
 import { base64ToBytes, sharedImage, publishProjectResources, readProjectResources, PROJECT_RESOURCES_ROOT, MAX_SHARED_IMAGE_BYTES, type ProjectResources, type SharedProjectImage } from './sharedEditor/projectResources'
-import { useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
+import { useEffect, useId, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type ReactNode, type RefObject } from 'react'
 import { convertFileSrc, invoke, isTauri } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { formatCitationCluster, loadProjectBibliographies, mergeCitationRecords, parseBibliographyFile, searchCitations } from './bibliography'
@@ -20,6 +20,7 @@ import { parsePortableDocument, parseReviewMarkup, workingReviewSource } from '.
 import { sourceHash } from './document'
 import { useDraftHistory } from './draftHistory'
 import { Icon } from './Icon'
+import { RunCellsControl, RUN_ALL_CELLS_DESCRIPTION } from './RunCellsControl'
 import { ManuscriptOutlineTree, type ManuscriptOutlineItem } from './ManuscriptOutlineTree'
 import './writingWorkspace.css'
 import { FloatingWritingToolbar } from './FloatingWritingToolbar'
@@ -697,6 +698,10 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
   const [activeReviewId, setActiveReviewId] = useState<string>()
   const [rightPanelOpen, setRightPanelOpen] = useState(true)
   const [reviewOptionsOpen, setReviewOptionsOpen] = useState(false)
+  const reviewOptionsId = useId()
+  const reviewTrackingStatusId = useId()
+  const reviewOptionsTriggerRef = useRef<HTMLButtonElement>(null)
+  const reviewOptionsRef = useRef<HTMLDivElement>(null)
   const [commentComposerOpen, setCommentComposerOpen] = useState(false)
   const [composerAnchorTop, setComposerAnchorTop] = useState<number>()
   const [leftPanelOpen, setLeftPanelOpen] = useState(() => typeof window.matchMedia !== 'function' || window.matchMedia('(min-width: 1121px)').matches)
@@ -2157,8 +2162,6 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     : allReviewQueue.filter((item) => item.authorId === reviewAuthorFilter), [allReviewQueue, reviewAuthorFilter])
   const hasReviewChanges = reviewQueue.some((item) => item.kind === 'change' || item.kind === 'unplaced-change')
   const toolbarChange = useMemo(() => currentReviewChange(reviewQueue, activeReviewId), [reviewQueue, activeReviewId])
-  const toolbarChangeHint = toolbarChange &&
-    `${toolbarChange.authorName} · ${toolbarChange.excerpt.length > 100 ? toolbarChange.excerpt.slice(0, 99) + '…' : toolbarChange.excerpt}`
   const activeReviewAnchorId = allReviewQueue.find((item) => item.id === activeReviewId)?.anchorId
     ?? reviewDocument.changes.find((change) => change.id === activeReviewId)?.anchorId
     ?? reviewDocument.threads.find((thread) => thread.id === activeReviewId)?.anchorId
@@ -2318,16 +2321,36 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
     }
   }, [commentComposerOpen, rightPanelOpen])
 
+  const closeReviewOptions = () => {
+    setReviewOptionsOpen(false)
+    reviewOptionsTriggerRef.current?.focus({ preventScroll: true })
+  }
+
   useEffect(() => {
     if (!reviewOptionsOpen) return
-    const close = (event: MouseEvent | KeyboardEvent) => {
-      if (event instanceof KeyboardEvent && event.key !== 'Escape') return
-      if (event instanceof MouseEvent && event.target instanceof Element && event.target.closest('.review-display-options-wrap')) return
+    const panel = reviewOptionsRef.current
+    const trigger = reviewOptionsTriggerRef.current
+    panel?.querySelector<HTMLButtonElement>('button:not(:disabled)')?.focus({ preventScroll: true })
+    const dismissOutside = (event: PointerEvent) => {
+      if (event.target instanceof Node && (panel?.contains(event.target) || trigger?.contains(event.target))) return
       setReviewOptionsOpen(false)
     }
-    document.addEventListener('mousedown', close)
-    document.addEventListener('keydown', close)
-    return () => { document.removeEventListener('mousedown', close); document.removeEventListener('keydown', close) }
+    const dismissOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented) return
+      const focused = document.activeElement
+      if (panel?.contains(focused) || focused === trigger || focused === document.body) {
+        event.preventDefault()
+        event.stopPropagation()
+        trigger?.focus({ preventScroll: true })
+      }
+      setReviewOptionsOpen(false)
+    }
+    document.addEventListener('pointerdown', dismissOutside)
+    document.addEventListener('keydown', dismissOnEscape)
+    return () => {
+      document.removeEventListener('pointerdown', dismissOutside)
+      document.removeEventListener('keydown', dismissOnEscape)
+    }
   }, [reviewOptionsOpen])
 
   useEffect(() => {
@@ -4138,6 +4161,9 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
           }
         })
       } else {
+        if (globalThis.document.activeElement?.closest('.sequential-review-actions')) {
+          reviewOptionsTriggerRef.current?.focus({ preventScroll: true })
+        }
         setToast(`${result.message} · No further changes ready for review`)
       }
     } catch (error) {
@@ -6223,7 +6249,7 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
           ? 'Save paused'
           : desktopSession ? 'Saved to project' : collaborationSessionActive ? 'Online collaboration connected' : 'Saved locally in this browser'
   const runAllButton = desktopSession && executableCells.length > 0 && (
-    <button type="button" title="Start fresh sessions and run every code cell to update computed values, figures, and tables."
+    <button type="button" title={RUN_ALL_CELLS_DESCRIPTION}
       disabled={executionPlanBusy || !canEditManuscript} onClick={() => void requestExecution({ kind: 'clean-all' })}>
       <Icon name="play" size={13} />Run all cells
     </button>
@@ -6427,6 +6453,11 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
               <Icon name="code" size={15} />
               <span className="visually-hidden">Code &amp; computation · {codeWorkspaceState}</span>
             </button>}
+            {structuredMode && desktopSession && manuscriptFileActive && executableCells.length > 0 && (
+              <RunCellsControl languages={new Set(executableCells.map((cell) => cell.language))}
+                disabled={executionPlanBusy || projectSetupRunningRef.current || !canEditManuscript}
+                onRun={(scope) => void requestExecution(scope === 'all' ? { kind: 'clean-all' } : { kind: 'language', language: scope })} />
+            )}
 
             <button disabled={demoMode} data-tooltip={demoMode ? 'Sign in from your papers to collaborate' : collaborationStatus === 'connected' ? 'Online collaboration · connected' : 'Share and collaborate'} className={`collaboration-toggle compact-tool ${collaborationStatus}`} onClick={() => desktopProject && collaborationSession && !desktopProject.config.collaboration ? setStartCollaborationOpen(true) : setCollaborationOpen(true)} aria-label={desktopProject && collaborationSession && !desktopProject.config.collaboration ? 'Start collaboration' : 'Open online collaboration'}>
               <Icon name="users" size={16} />
@@ -6434,33 +6465,28 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
             </button>
           </div>
           <div className="topbar-completion-actions">
-            {manuscriptFileActive && canDecideReview && !sourceEditing && toolbarChange && (
-              <div className="sequential-review-actions" role="group" aria-label="Review tracked changes">
-                <button type="button" className="accept-change" aria-label="Accept and go to next change"
-                  title={`Accept and go to next change · ${toolbarChangeHint}`}
-                  onClick={() => decideSuggestion(toolbarChange.id, 'accepted', true)}>
-                  <Icon name="check" size={15} /><span>Accept</span>
-                </button>
-                <button type="button" className="reject-change" aria-label="Reject and go to next change"
-                  title={`Reject and go to next change · ${toolbarChangeHint}`}
-                  onClick={() => decideSuggestion(toolbarChange.id, 'rejected', true)}>
-                  <Icon name="x" size={15} /><span>Reject</span>
-                </button>
-              </div>
-            )}
-            <div className="tracking-controls">
-            <button
-              className={`topbar-track-changes ${suggestionMode ? 'active' : ''}`}
-              aria-label={suggestionMode ? 'Turn off track changes' : 'Turn on track changes'}
-              aria-pressed={suggestionMode}
-              onClick={toggleTrackChanges}
-              disabled={!canSuggestReview || !structuredMode}
-              title="Record additions, deletions, formatting, and moved blocks as reviewable changes"
-            ><Icon name="spark" size={15} /><span>Track changes</span></button>
-            <div className="review-display-options-wrap">
-              <button aria-label="Review options" aria-haspopup="dialog" aria-expanded={reviewOptionsOpen} onClick={() => setReviewOptionsOpen((open) => !open)}><Icon name="chevronDown" size={13} /></button>
-              {reviewOptionsOpen && <div className="review-display-options review-display-options-popover popover" role="dialog" aria-label="Review options">
-                <div className="review-display-options-heading"><strong>Manuscript view</strong><button className="icon-button" aria-label="Close review options" onClick={() => setReviewOptionsOpen(false)}><Icon name="close" size={14} /></button></div>
+            <div className="review-controls" role="group" aria-label="Review">
+              {/* Editor blur can add decision buttons, so let the click land before moving focus. */}
+              <button type="button" className={`review-options-trigger ${suggestionMode ? 'is-tracking' : ''}`}
+                ref={reviewOptionsTriggerRef} aria-label="Review options" aria-haspopup="dialog" aria-expanded={reviewOptionsOpen}
+                aria-controls={reviewOptionsOpen ? reviewOptionsId : undefined} aria-describedby={reviewTrackingStatusId}
+                data-tooltip={reviewOptionsOpen ? undefined : `Review options · Track changes ${suggestionMode ? 'on' : 'off'}`}
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => reviewOptionsOpen ? closeReviewOptions() : setReviewOptionsOpen(true)}>
+                <Icon name="review" size={16} /><span className="review-trigger-label">Review</span><Icon name="chevronDown" size={12} />
+                <span className="review-tracking-indicator" aria-hidden="true" />
+              </button>
+              <span id={reviewTrackingStatusId} className="visually-hidden">Track changes {suggestionMode ? 'on' : 'off'}</span>
+              {reviewOptionsOpen && <div id={reviewOptionsId} ref={reviewOptionsRef}
+                className="review-display-options-popover popover" role="dialog" aria-label="Review options">
+                <div className="review-display-options-heading">
+                  <button type="button" className="review-track-toggle" role="switch" aria-checked={suggestionMode}
+                    disabled={!canSuggestReview || !structuredMode} onClick={toggleTrackChanges}>
+                    <span>Track changes</span><span className="review-toggle-track" aria-hidden="true" />
+                  </button>
+                  <button type="button" className="icon-button" aria-label="Close review options" onClick={closeReviewOptions}><Icon name="close" size={14} /></button>
+                </div>
+                <strong className="review-display-view-heading">Manuscript view</strong>
                 <div className="tracked-changes-display-options" role="group" aria-label="Manuscript view">
                   {MANUSCRIPT_VIEWS.map(({ mode, label, icon, title }) => (
                     <button key={mode} type="button" title={title} aria-pressed={markupView === mode} onClick={() => setTrackedChangesDisplay(mode)}>
@@ -6479,7 +6505,18 @@ function App({ active = true, demoMode = false, saveBeforeLeaveRef, collaboratio
                   </select>
                 </label>
               </div>}
-            </div>
+              {manuscriptFileActive && canDecideReview && !sourceEditing && toolbarChange && (
+                <div className="sequential-review-actions" role="group" aria-label="Review tracked changes">
+                  <button type="button" className="accept-change" aria-label="Accept and go to next change"
+                    data-tooltip="Accept and go to next change" onClick={() => decideSuggestion(toolbarChange.id, 'accepted', true)}>
+                    <Icon name="check" size={16} />
+                  </button>
+                  <button type="button" className="reject-change" aria-label="Reject and go to next change"
+                    data-tooltip="Reject and go to next change" onClick={() => decideSuggestion(toolbarChange.id, 'rejected', true)}>
+                    <Icon name="x" size={16} />
+                  </button>
+                </div>
+              )}
             </div>
             <div className="export-wrap">
             <button className="icon-button compact-tool export-trigger" aria-label="Export" aria-expanded={exportOpen} data-tooltip="Export manuscript" onClick={() => setExportOpen((open) => !open)}>

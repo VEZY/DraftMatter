@@ -19,6 +19,42 @@
 .app-shell .topbar [data-tooltip]::after { background: #35423a; border-radius: 5px; bottom: auto; box-shadow: 0 4px 14px #25352b1c; color: #fff; content: attr(data-tooltip); display: block; font-family: inherit; font-size: 10px; font-weight: 400; left: 50%; letter-spacing: 0; line-height: 1.4; opacity: 0; padding: 7px 9px; pointer-events: none; position: absolute; text-align: center; text-transform: none; top: calc(100% + 10px); transform: translateX(-50%); transition: opacity 100ms ease; white-space: nowrap; width: max-content; z-index: 150; }
 .app-shell .topbar [data-tooltip]:hover::after, .app-shell .topbar [data-tooltip]:focus-visible::after { opacity: 1; transition-delay: 200ms; }
 .app-shell .topbar .export-trigger::after { left: auto; right: 0; transform: none; }
+.topbar-run-cells {
+  align-items: stretch;
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  display: inline-flex;
+  flex: none;
+  position: relative;
+}
+.app-shell .topbar .topbar-run-cells .compact-tool { height: 31px; }
+.app-shell .topbar .run-cells-play { color: #436951; border-radius: 6px 0 0 6px; }
+.app-shell .topbar .run-cells-scope {
+  border-left: 1px solid var(--line);
+  border-radius: 0 6px 6px 0;
+  min-width: 23px;
+  width: 23px;
+}
+.app-shell .topbar .run-cells-scope[aria-expanded="true"] { background: #edf2ec; color: #425d48; }
+.run-cells-options { display: grid; gap: 2px; min-width: 136px; padding: 5px; right: 0; top: calc(100% + 6px); }
+.run-cells-options > span { color: #66766c; font-size: 11px; font-weight: 600; padding: 5px 7px; }
+.run-cells-options > button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  border-radius: 4px;
+  box-shadow: none;
+  color: #3d5445;
+  display: flex;
+  font-size: 12px;
+  justify-content: space-between;
+  padding: 6px 7px;
+}
+.run-cells-options > button:hover:not(:disabled),
+.run-cells-options > button[aria-pressed="true"] { background: #edf2ec; }
+@media (min-width: 1201px) {
+  .app-shell .topbar:has(.topbar-run-cells) { grid-template-columns: minmax(240px, 1fr) minmax(210px, 320px) minmax(max-content, 1fr); }
+}
 .figure-file-picker { align-items: center; background: #f7f9f6; border: 1px dashed #bdccba; border-radius: 8px; display: flex !important; gap: 8px; padding: 20px; text-align: center; }
 .figure-file-picker > svg { color: #7b9475; }
 .figure-file-picker > strong { color: #4b6544; font-size: 13px; max-width: 100%; overflow-wrap: anywhere; }
@@ -56,6 +92,8 @@
   .app-shell .topbar .brand-block { gap: 5px; }
   .app-shell .topbar .project-switcher { max-width: 130px; padding-inline: 5px; }
   .app-shell .topbar .compact-tool { height: 30px; min-width: 30px; width: 30px; }
+  .app-shell .topbar .topbar-run-cells .compact-tool { height: 28px; }
+  .app-shell .topbar .run-cells-scope { min-width: 21px; width: 21px; }
   .app-shell .topbar .topbar-primary-workspaces { gap: 2px; }
   .app-shell .topbar .topbar-completion-actions { gap: 3px; }
   .app-shell .topbar .review-toggle { gap: 3px; padding-inline: 5px; }
@@ -67,78 +105,75 @@
 }
 .toolbar-cite-button > span { font-size: 11px; font-weight: 650; }
 
-.sequential-review-actions {
-  display: inline-flex;
-  flex: 0 0 auto;
+.app-shell .topbar .review-controls {
   align-items: stretch;
-  height: 32px;
-  border: 1px solid var(--line);
-  border-radius: 7px;
   background: white;
-}
-.sequential-review-actions > button {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 0 8px;
-  font-size: 11px;
-  font-weight: 600;
-  background: transparent;
-  box-shadow: none;
-  border: 0;
-}
-.sequential-review-actions .accept-change { color: #325c43; border-radius: 6px 0 0 6px; }
-.sequential-review-actions .reject-change { color: #874b42; border-left: 1px solid var(--line); border-radius: 0 6px 6px 0; }
-.sequential-review-actions .accept-change:hover { background: #edf4ef; }
-.sequential-review-actions .reject-change:hover { background: #faf1ee; }
-@media (max-width: 1100px) {
-  .sequential-review-actions > button { min-width: 30px; padding: 0 5px; }
-  .sequential-review-actions > button span { display: none; }
-}
-@media (max-width: 560px) {
-  .app-shell .topbar .sequential-review-actions { height: 30px; }
-  .app-shell .topbar .sequential-review-actions + .tracking-controls .topbar-track-changes > svg { display: block; }
-  .app-shell .topbar .sequential-review-actions + .tracking-controls .topbar-track-changes > span { display: none; }
-}
-
-.tracking-controls {
-  align-items: stretch;
   border: 1px solid var(--line);
   border-radius: 7px;
   display: inline-flex;
-  flex: 0 0 auto;
-  height: 32px;
+  flex: none;
+  height: 34px;
+  position: relative;
 }
-.tracking-controls > .topbar-track-changes {
+.review-controls > .review-options-trigger,
+.review-controls .sequential-review-actions > button {
   align-items: center;
-  border-radius: 6px 0 0 6px;
-  color: #536258;
+  background: transparent;
+  border: 0;
+  box-shadow: none;
   display: inline-flex;
+  justify-content: center;
+  position: relative;
+}
+.review-controls > .review-options-trigger {
+  border-radius: 6px;
+  color: #43584a;
   font-size: 11px;
-  font-weight: 600;
-  gap: 6px;
-  padding: 0 9px;
+  font-weight: 650;
+  gap: 5px;
+  padding: 0 7px;
   white-space: nowrap;
 }
-.tracking-controls > .topbar-track-changes:hover { background: #eff3ef; }
-.tracking-controls > .topbar-track-changes.active {
+.review-controls:has(.sequential-review-actions) > .review-options-trigger { border-radius: 6px 0 0 6px; }
+.review-controls > .review-options-trigger:hover,
+.review-controls > .review-options-trigger[aria-expanded="true"],
+.review-controls > .review-options-trigger.is-tracking {
   background: #e7f0e9;
   color: #325c43;
 }
-.tracking-controls > .topbar-track-changes:disabled { opacity: .45; }
-.tracking-controls > .review-display-options-wrap > button {
-  align-items: center;
-  border-left: 1px solid var(--line);
-  border-radius: 0 6px 6px 0;
-  color: #69776e;
-  display: inline-flex;
-  justify-content: center;
-  min-width: 25px;
+.review-tracking-indicator {
+  background: currentColor;
+  border-radius: 50%;
+  height: 5px;
+  visibility: hidden;
+  width: 5px;
 }
-.tracking-controls > .review-display-options-wrap > button:hover,
-.tracking-controls > .review-display-options-wrap > button[aria-expanded="true"] { background: #eff3ef; }
-.tracking-controls .review-display-options-popover { text-align: left; }
+.is-tracking .review-tracking-indicator { visibility: visible; }
+.sequential-review-actions { display: flex; }
+.review-controls .sequential-review-actions > button {
+  border-inline-start: 1px solid var(--line);
+  border-radius: 0;
+  padding: 0;
+  width: 34px;
+}
+.review-controls .sequential-review-actions .accept-change { color: #325c43; }
+.review-controls .sequential-review-actions .reject-change {
+  border-radius: 0 6px 6px 0;
+  color: #874b42;
+}
+.review-controls .accept-change:is(:hover, :focus-visible) { background: #edf4ef; }
+.review-controls .reject-change:is(:hover, :focus-visible) { background: #faf1ee; }
+.review-controls button:focus-visible { outline: 2px solid var(--focus); outline-offset: -2px; }
+.review-controls .review-track-toggle:focus-visible { outline: none; }
+.review-track-toggle:focus-visible .review-toggle-track { outline: 2px solid #41644d; outline-offset: 2px; }
+.app-shell .topbar .review-controls [data-tooltip]::after { left: auto; right: 0; transform: none; }
+
+@media (max-width: 700px) {
+  .app-shell .topbar .review-controls { height: 32px; }
+  .review-controls .review-trigger-label { display: none; }
+  .review-controls .sequential-review-actions > button { width: 30px; }
+  .review-controls .review-display-options-popover { max-width: calc(100vw - 85px); }
+}
 
 .app-shell .workspace { position: relative; }
 .app-shell .left-panel { min-height: 0; }
@@ -168,9 +203,6 @@
   .app-shell .app-rail { display: flex; flex-basis: 44px; }
   .app-shell .left-panel { left: 44px; width: min(300px, calc(100vw - 64px)); }
   .app-shell .format-toolbar > .toolbar-cite-button { display: flex; }
-  .app-shell .tracking-controls { height: 30px; }
-  .app-shell .topbar-track-changes { font-size: 10px; gap: 4px; padding: 0 6px; }
-  .app-shell .topbar-track-changes > svg { display: none; }
 }
 @media (prefers-reduced-motion: reduce) {
   .app-shell .format-toolbar { transition: none; }

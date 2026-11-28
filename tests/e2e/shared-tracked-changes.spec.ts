@@ -1,3 +1,4 @@
+import { setTrackChanges } from './writing-tools'
 import { expect, test, type Locator, type Page } from '@playwright/test'
 import { createDecoder, readVarString, readVarUint } from 'lib0/decoding'
 import { startSharedManuscript } from './shared-manuscript'
@@ -25,7 +26,7 @@ test('two collaborators see one amended replacement and stay at the passage unde
     const reader = await shared.open('editor')
     const readerActions = reader.getByRole('group', { name: 'Review tracked changes' })
     await expect(readerActions).toBeHidden()
-    await author.getByRole('button', { name: 'Turn on track changes' }).click()
+    await setTrackChanges(author)
     await reader.getByRole('button', { name: 'Review options', exact: true }).click()
     await reader.getByRole('button', { name: 'In text', exact: true }).click()
     await reader.getByRole('button', { name: 'Close review options' }).click()
@@ -111,7 +112,7 @@ test('two collaborators see one amended replacement and stay at the passage unde
       await expect(passage(page).locator('.dm-review-wording, .dm-review-proposal[role="button"]')).toHaveCount(0)
       await expect(interpretation(page)).toHaveText('The measurements reflect the balance between interception and evaporation.')
     }
-    await author.getByRole('button', { name: 'Turn off track changes' }).click()
+    await setTrackChanges(author, false)
     const firstIntro = author.locator('.ProseMirror p').first()
     await selectRenderedTextWithMouse(author, firstIntro, 'leaves')
     await author.keyboard.type('stems')
@@ -154,7 +155,7 @@ test('accepting immediately after typing includes the latest shared wording', as
       })
     }))
     await owner.bringToFront()
-    await owner.getByRole('button', { name: 'Turn on track changes' }).click()
+    await setTrackChanges(owner)
     const passage = (page: Page) => page.locator('.ProseMirror p').filter({ hasText: 'We recorded one mark' })
     await selectRenderedTextWithMouse(owner, passage(owner), 'mark')
     await owner.keyboard.press('ArrowRight')
@@ -191,7 +192,7 @@ test('editing another author’s suggestion tracks only the nested words through
     const passage = (page: Page) => page.locator('.structured-editor-content > p').filter({ hasText: 'We reported' })
     const parentText = 'that each language addresses a different task'
     await owner.bringToFront()
-    await owner.getByRole('button', { name: 'Turn on track changes' }).click()
+    await setTrackChanges(owner)
     await selectRenderedTextWithMouse(owner, passage(owner), 'some findings')
     await owner.keyboard.type(parentText)
     const parent = owner.getByRole('textbox', { name: 'Edit suggested wording' })
@@ -199,7 +200,7 @@ test('editing another author’s suggestion tracks only the nested words through
     const parentId = await parent.getAttribute('data-proposal-id')
 
     await editor.bringToFront()
-    await editor.getByRole('button', { name: 'Turn on track changes' }).click()
+    await setTrackChanges(editor)
     const original = editor.locator(`[data-proposal-id="${parentId}"]`)
     await expect(original).toHaveText(parentText)
     await selectRenderedTextWithMouse(editor, original, 'each language')
@@ -247,7 +248,7 @@ test('shares a comment on the exact wording of another author’s pending sugges
     const owner = await shared.open('owner')
     const editor = await shared.open('editor')
     await owner.bringToFront()
-    await owner.getByRole('button', { name: 'Turn on track changes' }).click()
+    await setTrackChanges(owner)
     await selectRenderedTextWithMouse(owner, owner.locator('.structured-editor-content > p'), 'mark')
     await owner.keyboard.type('date')
     await editor.bringToFront()

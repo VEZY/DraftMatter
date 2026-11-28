@@ -23,7 +23,7 @@ test.describe('built-in complete example', () => {
       await expect(code).toBeVisible()
       await expect(code).toHaveAttribute('data-tooltip', /^Code & computation/)
       await expect(finder).toContainText('Find a tool or action')
-      await expect(page.locator('.topbar').getByRole('button', { name: 'Turn on track changes', exact: true })).toBeVisible()
+      await expect(page.locator('.topbar').getByRole('button', { name: 'Review options', exact: true })).toBeVisible()
       await expect(page.getByRole('button', { name: 'Export', exact: true })).toBeVisible()
       const layout = await page.locator('.topbar').evaluate((header) => {
         const brand = header.querySelector('.brand-block')!.getBoundingClientRect()

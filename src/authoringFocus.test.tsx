@@ -57,7 +57,7 @@ describe('focused authoring workspace', () => {
     await act(async () => root.render(<App />))
     expect(container.querySelector<HTMLElement>('.review-margin')?.hidden).toBe(true)
     await act(async () => container.querySelector<HTMLButtonElement>('[aria-label="Review options"]')!.click())
-    expect(container.querySelector('.topbar .tracking-controls [role="dialog"][aria-label="Review options"]')).not.toBeNull()
+    expect(container.querySelector('.topbar .review-controls [role="dialog"][aria-label="Review options"] [role="switch"]')).not.toBeNull()
     expect(container.querySelector('.format-toolbar [aria-label="Review options"]')).toBeNull()
     expect(container.querySelector('.review-display-options-popover label')?.textContent).toContain('Filter changes and comments by author')
   })

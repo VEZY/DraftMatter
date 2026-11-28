@@ -1,4 +1,4 @@
-import { showWritingTools } from './writing-tools'
+import { setTrackChanges, showWritingTools } from './writing-tools'
 import { expect, test } from '@playwright/test'
 import { reloadWithPortableSource } from './portable-source'
 import { selectRenderedTextWithMouse } from './rendered-selection'
@@ -297,11 +297,11 @@ test.describe('DM-P1-03 generic portable manuscript', () => {
     await expect(page.getByRole('textbox', { name: 'Rendered manuscript editor' })).toHaveAttribute('contenteditable', 'true')
     await expect(manuscript.locator('.dm-review-thread')).toContainText('A uniquely selected review sentence.')
 
-    await page.getByRole('button', { name: 'Turn on track changes' }).click()
+    await setTrackChanges(page)
     await renderedEditor.focus()
     await selectRenderedTextWithMouse(page, manuscript.getByText('A uniquely selected suggestion sentence.', { exact: true }), 'A uniquely selected suggestion sentence.')
     await page.keyboard.type('A carefully revised suggestion sentence.')
-    await page.getByRole('button', { name: 'Turn off track changes' }).click()
+    await setTrackChanges(page, false)
     await expect.poll(() => page.evaluate(() => localStorage.getItem('draftmatter.structured-source.v1') ?? '')).toMatch(/\.dm-change\b[^}]*data-status="open"/)
     const suggestion = reviewPanel.locator('.conflict-card .proposal-option')
     await expect(suggestion).toHaveCount(1)

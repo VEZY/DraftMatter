@@ -9135,11 +9135,6 @@ textarea:focus,
   z-index: 45;
 }
 
-.review-display-options-wrap {
-  display: inline-flex;
-  position: relative;
-}
-
 .review-display-options-popover {
   background: #fff;
   border: 1px solid #e1e4e9;
@@ -9164,15 +9159,58 @@ textarea:focus,
 
 .review-display-options-popover .review-display-options-heading {
   align-items: center;
+  border-bottom: 1px solid #e1e4e9;
   display: flex;
-  gap: 12px;
-  justify-content: space-between;
+  gap: 6px;
   margin-bottom: 12px;
+  padding-bottom: 8px;
 }
 
-.review-display-options-popover .review-display-options-heading strong {
+.review-display-view-heading {
+  display: block;
   font-size: 12px;
   font-weight: 600;
+  margin-bottom: 6px;
+}
+
+.review-display-options-heading .review-track-toggle {
+  align-items: center;
+  display: flex;
+  flex: 1;
+  font-weight: 650;
+  gap: 8px;
+  justify-content: space-between;
+  padding: 2px 5px;
+  text-align: left;
+}
+
+.review-toggle-track {
+  background: #79867c;
+  border: 1px solid transparent;
+  border-radius: 9px;
+  display: inline-flex;
+  flex: none;
+  height: 17px;
+  padding: 1px;
+  width: 30px;
+}
+
+.review-toggle-track::after {
+  background: white;
+  border-radius: 50%;
+  content: '';
+  height: 13px;
+  width: 13px;
+}
+
+.review-track-toggle[aria-checked="true"] .review-toggle-track {
+  background: #48795a;
+  justify-content: flex-end;
+}
+
+@media (forced-colors: active) {
+  .review-toggle-track { border-color: ButtonText; }
+  .review-toggle-track::after, .is-tracking .review-tracking-indicator { background: ButtonText; }
 }
 
 .review-display-options-popover :is(.tracked-changes-display, .markup-view-control, .suggestion-mode-control) {
